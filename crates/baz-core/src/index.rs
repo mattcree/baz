@@ -1525,6 +1525,64 @@ impl Library {
             .collect()
     }
 
+    /// Search the library at **song** granularity, returning only the
+    /// best-owned copy of each matching song.
+    ///
+    /// [`Self::search`] deliberately exposes files: it is the primitive the
+    /// index and its ranking tests are built on. A listener-facing song list
+    /// wants a different projection. If the same record is owned in FLAC and
+    /// MP3, two matching files are one song, and the result should name the
+    /// first (best-ranked) edition that contains it. Edition ranking is the
+    /// same lossless/completeness/bitrate ordering used by
+    /// [`Album::default_edition`].
+    ///
+    /// Ranking still comes from the best query match among all copies. This
+    /// matters when the lower-quality file has better tags: it can make the
+    /// song findable without forcing playback of that copy. The `limit` is
+    /// applied only after copies have been collapsed, so eight requested songs
+    /// do not become four merely because all four exist in two formats.
+    #[must_use]
+    pub fn search_preferred(&self, query: &str, limit: usize) -> Vec<&TrackMeta> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        let ranked = self.ranked(query);
+        let mut found = Vec::with_capacity(limit.min(ranked.hits.len()));
+        let mut seen = HashSet::with_capacity(limit.min(ranked.hits.len()));
+
+        // Walk album groups directly so each album snapshot (and therefore
+        // its edition ordering) is built once, however many of its files
+        // matched the query.
+        for &ordered in &ranked.order {
+            let Some(group) = ranked.albums.get(ordered) else {
+                continue;
+            };
+            let Some(album) = self.album_at(group.album) else {
+                continue;
+            };
+            let hits = ranked
+                .hits
+                .get(group.first..group.first + group.len)
+                .unwrap_or_default();
+            for hit in hits {
+                let Some(matched) = self.index.tracks.get(hit.track).map(|track| &track.meta)
+                else {
+                    continue;
+                };
+                let Some(preferred) = preferred_copy(&album, matched) else {
+                    continue;
+                };
+                if seen.insert(preferred.path.as_path()) {
+                    found.push(preferred);
+                    if found.len() == limit {
+                        return found;
+                    }
+                }
+            }
+        }
+        found
+    }
+
     /// The same search and the same ranking as [`Library::search`], projected
     /// onto **albums** — the unit the wall actually draws — capped at `limit`
     /// albums.
@@ -2601,6 +2659,47 @@ fn rank_editions(a: &Edition<'_>, b: &Edition<'_>) -> Ordering {
                 .map(AudioFormat::code)
                 .cmp(&b.format.map(AudioFormat::code))
         })
+}
+
+/// Resolve one file onto the highest-ranked edition that carries the same
+/// song. A numbered track is unambiguous within its disc; otherwise a title
+/// is used only when it occurs once in that edition. The latter guard keeps
+/// two genuinely distinct, identically titled tracks from being collapsed.
+fn preferred_copy<'a>(album: &Album<'a>, matched: &TrackMeta) -> Option<&'a TrackMeta> {
+    let matched_title = matched.title.as_deref().map(str::to_lowercase);
+    for edition in &album.editions {
+        if let Some(exact) = edition
+            .tracks
+            .iter()
+            .copied()
+            .find(|track| track.path == matched.path)
+        {
+            return Some(exact);
+        }
+        if let Some(number) = matched.track
+            && let Some(numbered) = edition
+                .tracks
+                .iter()
+                .copied()
+                .find(|track| track.track == Some(number) && disc_of(track) == disc_of(matched))
+        {
+            return Some(numbered);
+        }
+        if let Some(title) = matched_title.as_deref() {
+            let mut same_title = edition.tracks.iter().copied().filter(|track| {
+                track
+                    .title
+                    .as_deref()
+                    .is_some_and(|other| other.to_lowercase() == title)
+            });
+            if let Some(candidate) = same_title.next()
+                && same_title.next().is_none()
+            {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// The single value every item declares, or `None` if any is missing or they

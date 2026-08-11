@@ -11,10 +11,11 @@
 //!   `Library::add_tracks` call, and rebuilds the view model once — the
 //!   shelf populates live during the scan with per-tick, not per-track,
 //!   redraws.
-//! - **Art workers**: visible tiles request thumbnails via
-//!   `tokio::task::spawn_blocking` ([`crate::art`]); decoded RGBA lands in a
-//!   600-entry LRU (budget derivation in `art.rs`). Tiles without art render
-//!   a deterministic gradient placeholder.
+//! - **Art workers**: visible tiles request thumbnails through a two-job,
+//!   visibility-first scheduler; each job uses `tokio::task::spawn_blocking`
+//!   ([`crate::art`]). Decoded RGBA lands in the bounded LRU whose budget is
+//!   derived in `art.rs`. Tiles without art render a deterministic gradient
+//!   placeholder.
 //! - **Playback** ([`crate::playback`], [`crate::player`]): the device
 //!   engine is spawned once at app start (feature `device-output`; without
 //!   it playback UI is hidden). Commands go straight to the
@@ -31,7 +32,7 @@
 //! [`crate::views`], one module per surface (ADR-0006's mandated split). A
 //! layout or visual redesign touches `views/` and nothing in here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -81,6 +82,9 @@ const WINDOW: Size = Size::new(1280.0, 860.0);
 /// interval costs nothing measurable and keeps the refresh from drifting by up
 /// to a whole period.
 const REFRESH_TICK: Duration = Duration::from_secs(60);
+/// Do not launch the comparatively expensive filesystem walk while the
+/// listener is actively scrolling, resizing or choosing music.
+const REFRESH_IDLE: Duration = Duration::from_secs(30);
 
 /// The shelf scrollable's id — the update loop scrolls it back to the top
 /// when the query changes, and [`crate::views::shelf`] attaches it.
@@ -440,9 +444,15 @@ pub(crate) enum Message {
     /// against, held so `Play all`'s five-figure run costs the frame what a
     /// record does (doc 09 §7.1's gate).
     QueueScrolled(Viewport),
+    /// The returns lane scrolled; used to request collage art only for the
+    /// playlist rows around its viewport.
+    LaneScrolled(Viewport),
     /// A saved playlist's track table scrolled; retained so the page builds
     /// only the visible row window and requests artwork for that window.
     PlaylistScrolled(Viewport),
+    /// The saved-playlist collection scrolled; retained for tile
+    /// virtualisation and viewport-scoped collage requests.
+    PlaylistsScrolled(Viewport),
     /// The pointer entered a queue row, so the row can offer its ✕.
     ///
     /// Pure view state and the only hover baz tracks itself: iced 0.13 gives a
@@ -916,7 +926,7 @@ pub(crate) enum Message {
     /// keeps *no artwork is ever drawn larger than its source* true on the Now
     /// playing place before that record's hero has landed (see
     /// [`Shelf::thumb_px`]).
-    ThumbLoaded(u64, Option<(f32, iced_image::Handle)>),
+    ThumbLoaded(u64, u32, Duration, Option<(f32, iced_image::Handle)>),
     /// An off-thread **hero** decode finished — the Now playing place's own
     /// tier ([`art::load_hero`], doc 12 §5.2). `None` = no usable art, which
     /// is the same answer [`Self::ThumbLoaded`] gives and is recorded in the
@@ -1003,6 +1013,10 @@ pub(crate) enum Message {
 )]
 struct App {
     started: Instant,
+    /// Most recent foreground message. Periodic library maintenance waits for
+    /// this to go quiet so its I/O and metadata churn never competes with the
+    /// interaction the listener can feel.
+    last_interaction: Instant,
     first_frame_logged: bool,
     screen: Screen,
     /// Which place the window is showing — and, since ADR-0022, the whole of
@@ -1039,8 +1053,12 @@ struct App {
     /// coming back re-creates it at zero — a remembered offset would window
     /// rows the widget is not showing.
     queue_scroll: f32,
+    /// Absolute offset of the returns lane's single list scroller.
+    lane_scroll: f32,
     /// Absolute offset of the saved-playlist page's row scroller.
     playlist_scroll: f32,
+    /// Absolute offset of the saved-playlist collection grid.
+    playlists_scroll: f32,
     /// Which row of a **playlist's page** the pointer is on — the same
     /// mechanism as [`Self::hovered_queue_row`], for the page's ✕ and ▲▼
     /// slots.
@@ -1176,10 +1194,10 @@ struct App {
     /// The two stamps [`Self::lane`] was built from: the shelf's and the
     /// playlists'.
     lane_mark: (u64, u64),
-    /// What [`Self::request_offscreen_art`] last asked for: the lane's stamps
-    /// and the place, which between them change exactly when one of the
-    /// surfaces beside the wall changes what it draws.
-    art_mark: ((u64, u64), Place),
+    /// What [`Self::request_offscreen_art`] last asked for: the lane's stamps,
+    /// the place, and the lane's first visible row, which together change
+    /// exactly when one of the surfaces beside the wall changes what it draws.
+    art_mark: ((u64, u64), Place, usize),
     /// Whether a scan was running when the last message was answered — the
     /// falling edge is when the lists are re-read (see
     /// [`Self::sync_lists_with_the_library`]).
@@ -1534,18 +1552,21 @@ impl App {
             lane_open,
             lane: crate::lane::Lane::default(),
             lane_mark: (u64::MAX, u64::MAX),
-            art_mark: ((u64::MAX, u64::MAX), Place::Settings),
+            art_mark: ((u64::MAX, u64::MAX), Place::Settings, usize::MAX),
             was_scanning: true,
             resume: resume.clone(),
             written: (0, None, 0),
             modifiers: keyboard::Modifiers::empty(),
             started,
+            last_interaction: Instant::now(),
             first_frame_logged: false,
             screen,
             place: Place::default(),
             hovered_queue_row: None,
             queue_scroll: 0.0,
+            lane_scroll: 0.0,
             playlist_scroll: 0.0,
+            playlists_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
             drag: None,
@@ -1599,6 +1620,25 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let now = Instant::now();
+        if matches!(message, Message::RefreshTick)
+            && now.duration_since(self.last_interaction) < REFRESH_IDLE
+        {
+            return Task::none();
+        }
+        if !matches!(
+            message,
+            Message::RefreshTick
+                | Message::Playback(_)
+                | Message::ThumbLoaded(..)
+                | Message::HeroLoaded(..)
+                | Message::ScanTick
+                | Message::FirstFrame
+                | Message::MotionTick(_)
+                | Message::WindowMaximizedChanged(_)
+        ) {
+            self.last_interaction = now;
+        }
         let task = self.route(message);
         self.sync_lists_with_the_library();
         self.sync_snapshot();
@@ -1730,6 +1770,7 @@ impl App {
                     )
                 });
                 self.window = size;
+                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX);
                 let laid_out = match &mut self.screen {
                     Screen::Shelf(state) => state.update(Message::WindowResized(size)),
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
@@ -1766,13 +1807,13 @@ impl App {
             }
             Message::PlayAlbum(id) => {
                 self.play_album(id);
-                Task::none()
+                self.finish_search_launch()
             }
             // **Enter plays the top-ranked match** (ADR-0017 §1.2).
             Message::PlayFirstMatch => self.play_first_match(),
             Message::PlayTrack(id, row) => {
                 self.play_track(id, row);
-                Task::none()
+                self.finish_search_launch()
             }
             Message::ShowAllSongs => {
                 // The panel closes with the press, exactly as picking a
@@ -1853,6 +1894,17 @@ impl App {
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
             Message::Undo => self.undo_edit(),
+            message @ Message::Scrolled(_) => {
+                // The page is about to admit a new row of thumbnails. Ask the
+                // lane for its visible rows again first so their cache entries
+                // become recent and page scrolling evicts offscreen page art,
+                // not persistent chrome.
+                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX);
+                match &mut self.screen {
+                    Screen::Shelf(state) => state.update(message),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                }
+            }
             message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
             message if matches!(self.screen, Screen::Blocked(_)) => self.update_blocked(&message),
             message => match &mut self.screen {
@@ -2055,14 +2107,43 @@ impl App {
     /// exactly a press on the Songs section's first row, not a third play
     /// grammar.
     fn play_first_match(&mut self) -> Task<Message> {
-        if let Screen::Shelf(state) = &self.screen {
-            if let Some((id, row)) = state.enter_drops_needle() {
-                self.play_track(id, row);
-            } else if let Some(id) = state.enter_plays() {
-                self.play_album(id);
-            }
+        let needle = match &self.screen {
+            Screen::Shelf(state) => state.enter_drops_needle(),
+            Screen::Setup(_) | Screen::Blocked(_) => None,
+        };
+        if let Some((id, row)) = needle {
+            self.play_track(id, row);
+            return self.finish_search_launch();
+        }
+        let album = match &self.screen {
+            Screen::Shelf(state) => state.enter_plays(),
+            Screen::Setup(_) | Screen::Blocked(_) => None,
+        };
+        if let Some(id) = album {
+            self.play_album(id);
+            return self.finish_search_launch();
         }
         Task::none()
+    }
+
+    /// Complete a play gesture made on the Library's live search results.
+    ///
+    /// Search is a way to reach music, not a mode the listener should have to
+    /// dismiss after the music starts. A result press therefore clears and
+    /// blurs the query, restores the unfiltered wall, and lands on the music
+    /// it just started. The place guard is important: `PlayTrack` and
+    /// `PlayAlbum` are shared with record pages and other surfaces, where a
+    /// retained Library query is background state and must stay untouched.
+    fn finish_search_launch(&mut self) -> Task<Message> {
+        if self.place != Place::Library {
+            return Task::none();
+        }
+        let clear = match &mut self.screen {
+            Screen::Shelf(state) if !state.query.trim().is_empty() => state.clear_query(),
+            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => return Task::none(),
+        };
+        let now = self.go(|place| place.go(crate::lane::Destination::NowPlaying));
+        Task::batch([clear, now])
     }
 
     /// Everything that depends on **which modifiers are down**: the zoom, and
@@ -2619,6 +2700,10 @@ impl App {
                 self.playlist_scroll = viewport.absolute_offset().y;
                 return Some(self.request_playlist_art());
             }
+            Message::PlaylistsScrolled(viewport) => {
+                self.playlists_scroll = viewport.absolute_offset().y;
+                return Some(self.request_playlist_art());
+            }
             Message::AlbumRowEntered(row) => {
                 self.hovered_album_row = Some(*row);
                 return Some(Task::none());
@@ -2637,26 +2722,44 @@ impl App {
         Some(self.request_playlist_art())
     }
 
-    /// Kick off decodes for every record the playlist sleeves quote that the
-    /// thumbnail cache does not hold — the collage's whole supply line, and
-    /// it is [`Shelf::request_thumbs`]'s, which is the wall's.
+    /// Ask for the playlist artwork belonging to the current place only.
+    /// An open playlist needs its header and visible track rows; the collection
+    /// root needs its tiles. Other places leave playlist collages to the lane's
+    /// viewport-aware background request.
     fn request_playlist_art(&mut self) -> Task<Message> {
         let mut wanted: Vec<u64> = Vec::new();
-        for row in &self.playlists.rows {
-            wanted.extend(&row.art);
-        }
-        if let Some(open) = &self.playlists.open {
-            wanted.extend(&open.art);
-            let window = views::playlist::row_window(
-                open.rows.len(),
-                self.playlist_scroll,
-                self.body_height(),
-            );
-            wanted.extend(
-                open.rows[window.first..window.end]
-                    .iter()
-                    .filter_map(|row| row.album_id),
-            );
+        match self.place {
+            Place::Playlists => {
+                let hang = match &self.screen {
+                    Screen::Shelf(state) => state.grid(),
+                    Screen::Setup(_) | Screen::Blocked(_) => return Task::none(),
+                };
+                let ordered = self.playlists.ordered_rows();
+                let total_rows = hang.rows(ordered.len());
+                let (first, end) =
+                    hang.visible_rows(self.playlists_scroll, self.body_height(), total_rows);
+                let first_item = first.saturating_mul(hang.columns).min(ordered.len());
+                let end_item = end.saturating_mul(hang.columns).min(ordered.len());
+                for row in &ordered[first_item..end_item] {
+                    wanted.extend(&row.art);
+                }
+            }
+            Place::Playlist(_) => {
+                if let Some(open) = &self.playlists.open {
+                    wanted.extend(&open.art);
+                    let window = views::playlist::row_window(
+                        open.rows.len(),
+                        self.playlist_scroll,
+                        self.body_height(),
+                    );
+                    wanted.extend(
+                        open.rows[window.first..window.end]
+                            .iter()
+                            .filter_map(|row| row.album_id),
+                    );
+                }
+            }
+            _ => {}
         }
         wanted.sort_unstable();
         wanted.dedup();
@@ -2951,8 +3054,28 @@ impl App {
         match *message {
             // **A destination, not a door** — `go` takes a transition, and
             // this one ignores where you were (see [`Place::go`]).
-            Message::GoTo(to) => Some(self.go(move |place| place.go(to))),
+            Message::GoTo(to) => {
+                let task = self.go(move |place| place.go(to));
+                let art = match to {
+                    crate::lane::Destination::Library => match &mut self.screen {
+                        Screen::Shelf(state) => {
+                            state.forget_requested();
+                            state.request_visible_thumbs()
+                        }
+                        Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                    },
+                    crate::lane::Destination::Playlists => self.request_playlist_art(),
+                    crate::lane::Destination::Home | crate::lane::Destination::NowPlaying => {
+                        Task::none()
+                    }
+                };
+                Some(Task::batch([task, art]))
+            }
             Message::ToggleLane => Some(self.toggle_lane()),
+            Message::LaneScrolled(viewport) => {
+                self.lane_scroll = viewport.absolute_offset().y;
+                Some(Task::none())
+            }
             Message::ResumeRun => Some(self.resume_the_run()),
             _ => None,
         }
@@ -3166,18 +3289,45 @@ impl App {
     /// happened to scroll onto the wall — real artwork by luck, which is not
     /// what ADR-0030 §2 claims. Four ids per list, on the same guard, through
     /// the same cache: a sleeve is one decode however many surfaces draw it.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "finite non-negative pixel counts are clamped before becoming row indices"
+    )]
     fn request_offscreen_art(&mut self) -> Task<Message> {
-        let mark = (self.lane_mark, self.place);
+        let lane_first = (self.lane_scroll.max(0.0) / theme::SIDEBAR_ROW_H).floor() as usize;
+        let mark = (self.lane_mark, self.place, lane_first);
         if mark == self.art_mark {
             return Task::none();
         }
         self.art_mark = mark;
-        let quoted: Vec<u64> = self
-            .playlists
-            .rows
-            .iter()
-            .flat_map(|row| row.art.iter().copied())
-            .collect();
+        // The mixed lane can hold every playlist and the recent records, but
+        // only a small window can be seen. Keep a generous two-row overscan
+        // either side (the heading is intentionally absorbed by that slack)
+        // and ask for exactly those rows' covers or collages.
+        let first = lane_first.saturating_sub(2).min(self.lane.rows.len());
+        let visible = (self.body_height().max(0.0) / theme::SIDEBAR_ROW_H).ceil() as usize + 5;
+        let end = (first + visible).min(self.lane.rows.len());
+        let mut quoted: Vec<u64> = Vec::new();
+        let mut lane_records = Vec::new();
+        for touched in &self.lane.rows[first..end] {
+            match touched.subject {
+                crate::lane::Subject::Record(id) => lane_records.push(id),
+                crate::lane::Subject::Playlist(id) => {
+                    if let Some(row) = self.playlists.row(id) {
+                        quoted.extend_from_slice(&row.art);
+                    }
+                }
+            }
+        }
+        if std::env::var_os("BAZ_PERF_LOG").is_some() {
+            println!(
+                "[art] lane rows={} window={first}..{end} records={} collage-records={}",
+                self.lane.rows.len(),
+                lane_records.len(),
+                quoted.len(),
+            );
+        }
         // An open artist's records are the shelf's own, but *which* artist is
         // the shell's — so the id is read here and the records named below,
         // where both halves are in hand.
@@ -3189,7 +3339,10 @@ impl App {
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let mut ids = state.offscreen_art();
+        let mut ids = lane_records;
+        if self.place == Place::Home {
+            ids.extend(state.home_art());
+        }
         if let Some(id) = open_artist {
             let theirs: Vec<u64> = crate::views::artist::records(state, id)
                 .iter()
@@ -3222,7 +3375,13 @@ impl App {
     /// wants to leave running grows its artwork into place every time it is
     /// opened. The budget for that trade is [`art::HERO_CACHE_ENTRIES`]'s.
     fn request_hero(&mut self) -> Task<Message> {
-        let sounding = self.player.playing_album();
+        // A record page needs a detail-sized sleeve just as Now playing does.
+        // Prefer the thing visibly occupying the page; the sounding record is
+        // requested again as soon as that page is left.
+        let sounding = match self.place {
+            Place::Album(id) => Some(id),
+            _ => self.player.playing_album(),
+        };
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
@@ -3448,6 +3607,9 @@ impl App {
             state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
+            if self.place == Place::Playlists && from != Place::Playlists {
+                self.playlists_scroll = 0.0;
+            }
             return self.note_place_left(from);
         }
         Task::none()
@@ -4622,9 +4784,13 @@ impl App {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
             (Screen::Blocked(blocked), _) => return views::blocked::view(blocked),
             (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
-            (Screen::Shelf(state), Place::Playlists) => {
-                views::playlists::view(state, &self.playlists, &self.player, state.grid())
-            }
+            (Screen::Shelf(state), Place::Playlists) => views::playlists::view(
+                state,
+                &self.playlists,
+                &self.player,
+                state.grid(),
+                self.playlists_scroll,
+            ),
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,
@@ -4679,7 +4845,13 @@ impl App {
                 ),
                 // The playlist vanished under its page — its collection root
                 // is the honest fallback, not the record library.
-                None => views::playlists::view(state, &self.playlists, &self.player, state.grid()),
+                None => views::playlists::view(
+                    state,
+                    &self.playlists,
+                    &self.player,
+                    state.grid(),
+                    self.playlists_scroll,
+                ),
             },
             // **Home** and **Now playing** — the two places the owner added
             // to ADR-0030 (`place.rs` records the overrule). Their bodies land
@@ -5157,6 +5329,84 @@ fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, iced_image::Handle) {
     )
 }
 
+/// The bounded thumbnail work list.
+///
+/// Foreground requests replace one another: after a fast scroll, covers from
+/// the old viewport must not stand ahead of the viewport now on screen.
+/// The visible lane has its own queue behind the page, so its album covers and
+/// playlist collages are not crowded out by a fast page scroll. The two
+/// in-flight jobs are never
+/// cancelled because image decoders are blocking; bounding their count makes
+/// letting them finish cheaper and safer than pretending cancellation could
+/// stop the underlying work.
+#[derive(Debug, Default)]
+struct ThumbJobs {
+    foreground: VecDeque<u64>,
+    chrome: VecDeque<u64>,
+    queued: HashSet<u64>,
+    in_flight: HashSet<u64>,
+    started: u64,
+    completed: u64,
+    peak: usize,
+}
+
+impl ThumbJobs {
+    fn focus(&mut self, ids: impl IntoIterator<Item = u64>) {
+        for id in self.foreground.drain(..) {
+            self.queued.remove(&id);
+        }
+        for id in ids {
+            if self.in_flight.contains(&id) {
+                continue;
+            }
+            if self.queued.remove(&id) {
+                self.chrome.retain(|queued| *queued != id);
+            }
+            if self.queued.insert(id) {
+                self.foreground.push_back(id);
+            }
+        }
+    }
+
+    fn focus_chrome(&mut self, ids: impl IntoIterator<Item = u64>) {
+        for id in self.chrome.drain(..) {
+            self.queued.remove(&id);
+        }
+        for id in ids {
+            if self.in_flight.contains(&id) || self.foreground.contains(&id) {
+                continue;
+            }
+            if self.queued.insert(id) {
+                self.chrome.push_back(id);
+            }
+        }
+    }
+
+    fn pop(&mut self) -> Option<u64> {
+        let id = self
+            .foreground
+            .pop_front()
+            .or_else(|| self.chrome.pop_front())?;
+        self.queued.remove(&id);
+        Some(id)
+    }
+
+    fn started(&mut self, id: u64) {
+        self.in_flight.insert(id);
+        self.started += 1;
+        self.peak = self.peak.max(self.in_flight.len());
+    }
+
+    fn finished(&mut self, id: u64) {
+        self.in_flight.remove(&id);
+        self.completed += 1;
+    }
+
+    fn contains(&self, id: u64) -> bool {
+        self.queued.contains(&id) || self.in_flight.contains(&id)
+    }
+}
+
 /// The shelf screen: library, scan state, and grid/panel view state.
 ///
 /// Fields the view layer reads are `pub(crate)`; the ones the update loop
@@ -5261,8 +5511,8 @@ pub(crate) struct Shelf {
     /// ask, and reset by anything that changes *which* albums the range names
     /// rather than where it sits — see [`Shelf::forget_requested`].
     last_requested: Option<(usize, usize)>,
-    /// Albums with a decode in flight (dedupes requests while scrolling).
-    pending: HashSet<u64>,
+    /// Visibility-first, bounded thumbnail scheduler.
+    thumb_jobs: ThumbJobs,
     /// Albums known to have no (decodable) art — render the gradient and
     /// stop asking. Cleared once when the scan finishes, since late tracks
     /// or cover files may have arrived for early albums.
@@ -5484,7 +5734,7 @@ impl Shelf {
             ),
             hero_pending: None,
             last_requested: None,
-            pending: HashSet::new(),
+            thumb_jobs: ThumbJobs::default(),
             no_art: HashSet::new(),
             scan_rx: Some(scan_rx),
             roots,
@@ -5651,18 +5901,8 @@ impl Shelf {
                 }
                 Task::none()
             }
-            Message::ThumbLoaded(id, decoded) => {
-                self.pending.remove(&id);
-                match decoded {
-                    Some((px, handle)) => {
-                        self.thumb_px.insert(id, px);
-                        self.thumbs.put(id, handle);
-                    }
-                    None => {
-                        self.no_art.insert(id);
-                    }
-                }
-                Task::none()
+            Message::ThumbLoaded(id, edge, elapsed, decoded) => {
+                self.finish_thumb(id, edge, elapsed, decoded)
             }
             // The hero tier's answer, in the thumbnail tier's own shape: a
             // decode that found nothing is recorded in the **same**
@@ -5822,7 +6062,16 @@ impl Shelf {
             return Task::none();
         }
         let was = self.shelves().height();
+        let needs_larger_art = density.art_max() > self.density.art_max();
         self.density = density;
+        if needs_larger_art {
+            // A tighter density deliberately decodes fewer pixels. Moving
+            // back to a looser one must not stretch those smaller handles;
+            // the prepared disk cache makes refilling this bounded LRU cheap.
+            self.thumbs.clear();
+            self.thumb_px.clear();
+            self.last_requested = None;
+        }
         let now = self.shelves().height();
         let anchored = if was > 0.0 {
             (self.scroll_offset * now / was).max(0.0)
@@ -6795,7 +7044,7 @@ impl Shelf {
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
-                    art::load_hero(&path).map(|(w, h, rgba)| Hero {
+                    art::load_hero_cached(&path).map(|(w, h, rgba)| Hero {
                         field: crate::field::Field::derive(w, h, &rgba),
                         px: shortest_edge(w, h),
                         handle: iced_image::Handle::from_rgba(w, h, rgba),
@@ -6825,63 +7074,27 @@ impl Shelf {
     }
 
     fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
-        let mut tasks = Vec::new();
+        let mut wanted = Vec::new();
         for &id in ids {
-            if self.thumbs.peek(&id).is_some()
-                || self.pending.contains(&id)
+            if self.thumbs.get(&id).is_some()
+                || self.thumb_jobs.contains(id)
                 || self.no_art.contains(&id)
             {
                 continue;
             }
-            let Some(album) = self.albums.iter().find(|album| album.id == id) else {
-                continue;
-            };
-            self.pending.insert(id);
-            let path = album.first_track.clone();
-            tasks.push(Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
-                        .await
-                        .ok()
-                        .flatten()
-                },
-                move |handle| Message::ThumbLoaded(id, handle),
-            ));
+            wanted.push(id);
         }
-        Task::batch(tasks)
+        self.thumb_jobs.focus_chrome(wanted);
+        self.start_queued_thumbs()
     }
 
-    /// The ids the surfaces beside the wall are drawing **that the shelf can
-    /// name**: the lane's recent records and the Home place's newest row. An
-    /// open artist's records join them in [`App::request_offscreen_art`],
-    /// which is where *which* artist is known.
-    ///
-    /// A lane row that is a *list* names no record here on purpose — the
-    /// records it quotes are `Playlists`' to know, and the shell adds them in
-    /// [`App::request_offscreen_art`] rather than this function reaching into
-    /// a collection the shelf does not hold.
-    ///
-    /// **The artist's page is here because its tiles are outside the wall's
-    /// visible range**, and the wall's thumbnail guard is exactly that range.
-    /// Without this, an artist's records drew the deterministic gradient until
-    /// one of them happened to scroll past on the wall — real artwork *by
-    /// luck*, which is verbatim the defect the playlist collages had before
-    /// their quotations were named here.
-    fn offscreen_art(&self) -> Vec<u64> {
-        let mut ids: Vec<u64> = self
-            .lane_recent
+    /// The Home place's visible newest-record row. Lane rows are resolved by
+    /// the shell from the lane's exact mixed viewport.
+    fn home_art(&self) -> Vec<u64> {
+        crate::views::home::newest(self, self.grid())
             .iter()
-            .filter_map(|row| match row.subject {
-                crate::lane::Subject::Record(id) => Some(id),
-                crate::lane::Subject::Playlist(_) => None,
-            })
-            .collect();
-        ids.extend(
-            crate::views::home::newest(self, self.grid())
-                .iter()
-                .map(|album| album.id),
-        );
-        ids
+            .map(|album| album.id)
+            .collect()
     }
 
     fn request_visible_thumbs(&mut self) -> Task<Message> {
@@ -6908,31 +7121,22 @@ impl Shelf {
             return Task::none();
         }
         self.last_requested = Some((start, end));
-        let mut tasks = Vec::new();
+        let mut wanted = Vec::new();
         for &album_index in &self.visible[start..end] {
             let Some(album) = self.albums.get(album_index) else {
                 continue;
             };
             let id = album.id;
             if self.thumbs.get(&id).is_some()
-                || self.pending.contains(&id)
+                || self.thumb_jobs.in_flight.contains(&id)
                 || self.no_art.contains(&id)
             {
                 continue;
             }
-            self.pending.insert(id);
-            let path = album.first_track.clone();
-            tasks.push(Task::perform(
-                async move {
-                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
-                        .await
-                        .ok()
-                        .flatten()
-                },
-                move |handle| Message::ThumbLoaded(id, handle),
-            ));
+            wanted.push(id);
         }
-        Task::batch(tasks)
+        self.thumb_jobs.focus(wanted);
+        self.start_queued_thumbs()
     }
 
     /// Kick off off-thread decodes for the albums in `ids` whose thumbnail is
@@ -6943,27 +7147,94 @@ impl Shelf {
     /// is skipped; the collage cell keeps its gradient, which is the same
     /// honest reading a tile gives art that cannot be decoded.
     fn request_thumbs(&mut self, ids: &[u64]) -> Task<Message> {
-        let mut tasks = Vec::new();
+        let mut wanted = Vec::new();
         for &id in ids {
             if self.thumbs.get(&id).is_some()
-                || self.pending.contains(&id)
+                || self.thumb_jobs.in_flight.contains(&id)
                 || self.no_art.contains(&id)
             {
                 continue;
             }
-            let Some(album) = self.albums.iter().find(|album| album.id == id) else {
+            wanted.push(id);
+        }
+        self.thumb_jobs.focus(wanted);
+        self.start_queued_thumbs()
+    }
+
+    fn finish_thumb(
+        &mut self,
+        id: u64,
+        requested_edge: u32,
+        elapsed: Duration,
+        decoded: Option<(f32, iced_image::Handle)>,
+    ) -> Task<Message> {
+        self.thumb_jobs.finished(id);
+        match decoded {
+            Some((px, handle)) if requested_edge >= self.density.art_max_px() => {
+                self.thumb_px.insert(id, px);
+                self.thumbs.put(id, handle);
+            }
+            Some(_) => {
+                // Density grew while this blocking decode was in flight. The
+                // smaller result is correct data but no longer enough pixels
+                // for the active layout, so immediately replace the one job.
+                self.thumb_jobs.focus([id]);
+            }
+            None => {
+                self.no_art.insert(id);
+            }
+        }
+        let task = self.start_queued_thumbs();
+        if std::env::var_os("BAZ_PERF_LOG").is_some() {
+            println!(
+                "[art] thumb {id} in {:.1} ms; cache={} queued={} in-flight={} completed={} peak={}",
+                elapsed.as_secs_f64() * 1e3,
+                self.thumbs.len(),
+                self.thumb_jobs.queued.len(),
+                self.thumb_jobs.in_flight.len(),
+                self.thumb_jobs.completed,
+                self.thumb_jobs.peak,
+            );
+        }
+        task
+    }
+
+    /// Fill the two decoder slots from the current page first, then from the
+    /// visible returns lane. Importantly, blocking
+    /// jobs are spawned only after a slot is acquired; putting a semaphore
+    /// *inside* hundreds of already-spawned jobs would still grow Tokio's
+    /// blocking pool and retain every queued task allocation.
+    fn start_queued_thumbs(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let thumb_edge = self.density.art_max_px().min(art::THUMB_PX);
+        while self.thumb_jobs.in_flight.len() < art::THUMB_DECODE_CONCURRENCY {
+            let Some(id) = self.thumb_jobs.pop() else {
+                break;
+            };
+            if self.thumbs.peek(&id).is_some() || self.no_art.contains(&id) {
+                continue;
+            }
+            let Some(path) = self
+                .albums
+                .iter()
+                .find(|album| album.id == id)
+                .map(|album| album.first_track.clone())
+            else {
                 continue;
             };
-            self.pending.insert(id);
-            let path = album.first_track.clone();
+            self.thumb_jobs.started(id);
             tasks.push(Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
-                        .await
-                        .ok()
-                        .flatten()
+                    let started = Instant::now();
+                    let decoded = tokio::task::spawn_blocking(move || {
+                        art::load_thumb_cached(&path, thumb_edge).map(decoded)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    (started.elapsed(), decoded)
                 },
-                move |handle| Message::ThumbLoaded(id, handle),
+                move |(elapsed, handle)| Message::ThumbLoaded(id, thumb_edge, elapsed, handle),
             ));
         }
         Task::batch(tasks)
@@ -7457,6 +7728,49 @@ fn expand_tilde(input: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_art_replaces_stale_work() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([1, 2, 3]);
+        jobs.focus([3, 4]);
+
+        assert_eq!(jobs.foreground, VecDeque::from([3, 4]));
+        assert_eq!(jobs.pop(), Some(3));
+
+        jobs.focus([5]);
+        assert_eq!(jobs.foreground, VecDeque::from([5]));
+        assert!(!jobs.queued.contains(&4), "the old viewport was discarded");
+    }
+
+    #[test]
+    fn in_flight_art_is_deduplicated_but_never_cancelled_by_a_new_viewport() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([7, 8]);
+        assert_eq!(jobs.pop(), Some(7));
+        jobs.started(7);
+
+        jobs.focus([7, 9]);
+        assert_eq!(jobs.foreground, VecDeque::from([9]));
+        assert!(jobs.in_flight.contains(&7));
+        assert_eq!(jobs.peak, 1);
+
+        jobs.finished(7);
+        assert_eq!(jobs.completed, 1);
+        assert!(!jobs.in_flight.contains(&7));
+    }
+
+    #[test]
+    fn visible_lane_art_follows_the_page_without_displacing_it() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus_chrome([20, 21]);
+        jobs.focus([10, 11]);
+
+        assert_eq!(jobs.pop(), Some(10));
+        assert_eq!(jobs.pop(), Some(11));
+        assert_eq!(jobs.pop(), Some(20));
+        assert_eq!(jobs.pop(), Some(21));
+    }
 
     /// The one non-effect decision on the add-a-folder path (ADR-0025): a
     /// folder already held is refused with its words, anything else may join.
@@ -8425,6 +8739,58 @@ mod tests {
         assert!(
             filter.contains("vm::song_hits"),
             "the songs section and the wall answer one query"
+        );
+    }
+
+    /// A play gesture made on a search answer completes the search and shows
+    /// the thing that just began sounding. The shared messages also occur on
+    /// record and artist pages, so the transition itself must retain its
+    /// Library-place guard.
+    #[test]
+    fn playing_a_search_answer_clears_it_and_opens_now_playing() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let transition = source
+            .split_once("fn finish_search_launch(&mut self)")
+            .expect("the search launch transition exists")
+            .1;
+        let transition = &transition[..transition.find("\n    }\n").expect("the transition ends")];
+        assert!(
+            transition.contains("self.place != Place::Library"),
+            "a play on another page must not consume the Library's retained query"
+        );
+        assert!(
+            transition.contains("state.clear_query()"),
+            "starting a search answer clears and blurs the query"
+        );
+        assert!(
+            transition.contains("Destination::NowPlaying"),
+            "the completed search lands on Now playing"
+        );
+
+        for arm in [
+            "Message::PlayAlbum(id) => {",
+            "Message::PlayTrack(id, row) => {",
+        ] {
+            let routed = source.split_once(arm).expect("the play arm exists").1;
+            let routed = &routed[..routed.find("\n            }").expect("the arm ends")];
+            assert!(
+                routed.contains("self.finish_search_launch()"),
+                "{arm} bypasses the search launch transition"
+            );
+        }
+        let enter = source
+            .split_once("fn play_first_match(&mut self)")
+            .expect("Enter's play route exists")
+            .1;
+        let enter = &enter[..enter.find("\n    }\n").expect("Enter's route ends")];
+        assert_eq!(
+            enter.matches("self.finish_search_launch()").count(),
+            2,
+            "both Enter outcomes complete the search"
         );
     }
 

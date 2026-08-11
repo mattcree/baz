@@ -396,7 +396,7 @@ pub fn song_hits(library: &Library, query: &str, cap: usize) -> Vec<SongVm> {
         return Vec::new();
     }
     library
-        .search(query, cap)
+        .search_preferred(query, cap)
         .into_iter()
         .map(|track| {
             let filed_under = AlbumArtistVm::from_core(AlbumArtist::of(track));
@@ -2500,11 +2500,11 @@ mod tests {
             .collect()
     }
 
-    /// A song found in one rip resolves into the rip the page would play:
-    /// the search matched a *file*, the press queues the **selected
-    /// edition** (ADR-0023 §2's "selected edition, whole, in order"), and
-    /// the same song is found in it by number and title when the paths
-    /// differ.
+    /// Search exposes one preferred copy, then resolves it into whichever rip
+    /// the page would play: the result is the best-owned file, the press
+    /// queues the **selected edition** (ADR-0023 §2's "selected edition,
+    /// whole, in order"), and the same song is found in it by number and
+    /// title when the paths differ.
     #[test]
     fn a_song_resolves_into_the_edition_the_page_would_play() {
         let library = library_with(vec![
@@ -2517,20 +2517,22 @@ mod tests {
         let album = &albums[0];
 
         let songs = song_hits(&library, "lies", SONGS);
-        // Both rips' files matched; take one whose file is the MP3.
-        let song = songs
-            .iter()
-            .find(|song| song.path.to_string_lossy().contains("/mp3/"))
-            .expect("the MP3 rip's file is among the answers");
+        assert_eq!(songs.len(), 1, "one recording, not one row per format");
+        let song = songs.first().expect("Lies is among the answers");
+        assert!(
+            song.path.to_string_lossy().contains("/flac/"),
+            "the result names the highest-quality owned copy"
+        );
 
-        // With the FLAC edition selected, the press still lands on *Lies* —
-        // resolved by number and title into the edition on screen.
-        let chosen = Some(EditionKey(Some(AudioFormat::Flac)));
+        // With the MP3 edition selected, the press still lands on *Lies* —
+        // resolved by number and title into the edition on screen even though
+        // search quite correctly displayed the FLAC copy.
+        let chosen = Some(EditionKey(Some(AudioFormat::Mp3)));
         let row = song_row(album, chosen, song).expect("the song is on this record");
-        let flac = selected_edition(album, chosen).expect("the FLAC edition");
-        assert_eq!(flac.tracks[row].title, "Lies");
+        let mp3 = selected_edition(album, chosen).expect("the MP3 edition");
+        assert_eq!(mp3.tracks[row].title, "Lies");
         assert_ne!(
-            flac.tracks[row].path, song.path,
+            mp3.tracks[row].path, song.path,
             "a different rip of the same song — the path key alone could not \
              have resolved this row"
         );

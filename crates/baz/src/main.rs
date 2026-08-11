@@ -135,8 +135,27 @@ fn prefer_no_vsync() {
     }
 }
 
+/// Keep the async executor proportionate to baz's workload.
+///
+/// Iced otherwise creates one worker per logical CPU. Baz's asynchronous work
+/// is orchestration around dedicated audio, scan and blocking-image workers;
+/// sixteen permanently resident Tokio workers were therefore idle overhead on
+/// the measured machine. Two retain overlap without charging low-end systems
+/// for a workstation-sized pool. An explicit environment choice still wins.
+#[expect(
+    unsafe_code,
+    reason = "single-threaded at startup, before iced creates its runtime"
+)]
+fn prefer_small_runtime() {
+    if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
+        // SAFETY: single-threaded, before iced or Tokio creates any thread.
+        unsafe { std::env::set_var("TOKIO_WORKER_THREADS", "2") };
+    }
+}
+
 fn main() -> iced::Result {
     prefer_no_vsync();
+    prefer_small_runtime();
     let started = Instant::now();
     let arg = std::env::args_os().nth(1);
     if let Some(text) = arg.as_ref().and_then(|a| a.to_str())

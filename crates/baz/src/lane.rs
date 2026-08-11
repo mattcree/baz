@@ -8,25 +8,11 @@
 //! > played, and lists you have made or edited. Its order is when you last
 //! > touched them. Nothing else is admitted, ever.**
 //!
-//! # The subject is one; the sections are two
+//! # One subject, one order
 //!
-//! The owner, 2026-08-10: *"I guess we need to add playlists into their own
-//! section under library"* — which **reverses his own brief for this surface**
-//! (*"the side bar will have recent albums and playlists mixed based on some
-//! order"*, ADR-0030's own epigraph). He is the authority and the reversal is
-//! recorded rather than smoothed over: ADR-0030's sixth amendment.
-//!
-//! So [`resolve`] returns a [`Lane`] of **two sections** — `PLAYLISTS`, every
-//! list, and `RECENT`, the records — and **no row is in both**, because a list
-//! drawn in both sections is one door drawn twice, which is the L8.6 test the
-//! whole product is held to.
-//!
-//! **What did *not* change is the key.** Both sections are ordered by
-//! `(last touched, name)`, the one total key this module has always had, for
-//! the reason directly below: a surface with two orderings has to arbitrate,
-//! and the split is a split of *membership*, not of order. A list you played
-//! this morning is still at the top of the lane's list half — it has moved
-//! section, not rank.
+//! [`resolve`] mixes playlists and records in the same `RECENT` body. Their
+//! sleeve and second line identify the kind; `(last touched, name)` decides
+//! the position. No second area or kind-specific ordering needs arbitration.
 //!
 //! # Why the ordering is a function and not a score
 //!
@@ -248,45 +234,36 @@ pub(crate) struct Touched {
     pub(crate) at: Option<u64>,
 }
 
-/// **The lane's body: two sections, one order, no row in both.**
+/// **The lane's body: playlists and records in one recency order.**
 ///
-/// The owner asked for the lists to have a section of their own (ADR-0030's
-/// sixth amendment), so the membership rule that was one list is two — and
-/// this type is what makes *no row is in both* a fact of the model rather than
-/// a discipline in the view. `PLAYLISTS` holds every list; `RECENT` holds
-/// records and nothing else.
+/// The owner returned the lane to one mixed list: a playlist and a record are
+/// both things you can return to, and their last-touched moment is enough to
+/// order them without a permanent kind-based partition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Lane {
-    /// **`PLAYLISTS`** — every list, always, and never trimmed.
-    pub(crate) lists: Vec<Touched>,
-    /// **`RECENT`** — the last [`RECENT_ALBUMS`] records played, and nothing
-    /// else. A list that was played this morning is at the head of
-    /// [`Self::lists`]; it is not here as well.
-    pub(crate) records: Vec<Touched>,
+    /// Every saved playlist and the last [`RECENT_ALBUMS`] records, sorted
+    /// together by most recent touch.
+    pub(crate) rows: Vec<Touched>,
 }
 
-/// The lane, resolved: the two sections, each in the order it is drawn.
+/// Resolve the lane's single recency-ordered body.
 ///
 /// **Membership** (ADR-0030 §1, as its sixth amendment splits it): every
 /// playlist, always — which is what lets the panel stop being the index
 /// without any list becoming unreachable — and the last [`RECENT_ALBUMS`]
-/// records played. **Order**: last touched, newest first, *within each
-/// section*; ties break by name ascending, then by subject, so the key is
+/// records played. **Order**: last touched, newest first across both kinds;
+/// ties break by name ascending, then by subject, so the key is
 /// total and the lane is a function of the data rather than of the iteration
 /// order of whatever collection the shell happened to build it from.
 ///
 /// The playlists are *not* trimmed and the records are, which is the one
-/// asymmetry in here and it is deliberate: a list you made is a thing you own
-/// and the lane is its index, while a record you played is a thing you can
-/// always find on the wall. It is also why the sections are drawn inside
-/// **one** scroller and not two — see [`crate::views::lane`].
+/// asymmetry in here and it is deliberate: a list you made remains reachable,
+/// while a record you played can always be found on the wall.
 pub(crate) fn resolve(playlists: Vec<Touched>, records: Vec<Touched>) -> Lane {
-    let mut lists = playlists;
-    sort(&mut lists);
-    Lane {
-        lists,
-        records: recent(records),
-    }
+    let mut rows = recent(records);
+    rows.extend(playlists);
+    sort(&mut rows);
+    Lane { rows }
 }
 
 /// `RECENT`'s half on its own: sorted, and cut to [`RECENT_ALBUMS`].
@@ -361,7 +338,7 @@ mod tests {
     /// Everything else asserts on a named section, because that is what the
     /// split made the honest question.
     fn drawn(lane: &Lane) -> Vec<&Touched> {
-        lane.lists.iter().chain(lane.records.iter()).collect()
+        lane.rows.iter().collect()
     }
 
     /// **Newest first, in each section, and no row is in both** — the whole of
@@ -374,7 +351,7 @@ mod tests {
     /// change — `Road Trip` still outranks `Sunday`, and `Ochre` still
     /// outranks `Violet Ledger`.
     #[test]
-    fn the_two_kinds_are_two_sections_each_last_touched_first() {
+    fn the_two_kinds_share_one_last_touched_order() {
         let lane = resolve(
             vec![
                 touched(Subject::Playlist(1), "Road Trip", Some(300)),
@@ -385,34 +362,21 @@ mod tests {
                 touched(Subject::Record(11), "Violet Ledger", Some(200)),
             ],
         );
-        assert_eq!(names(&lane.lists), ["Road Trip", "Sunday"]);
-        assert_eq!(names(&lane.records), ["Ochre", "Violet Ledger"]);
+        assert_eq!(
+            names(&lane.rows),
+            ["Ochre", "Road Trip", "Violet Ledger", "Sunday"]
+        );
     }
 
-    /// **One door, drawn once.** `RECENT` is records and `PLAYLISTS` is lists,
-    /// so a list that was played a minute ago — the row most at risk of being
-    /// admitted to both, since it is the newest thing the lane knows — appears
-    /// exactly once.
+    /// One identity is still drawn once when both input collections are merged.
     #[test]
-    fn no_row_stands_in_both_sections() {
+    fn no_row_is_duplicated_in_the_mixed_lane() {
         let lane = resolve(
             vec![touched(Subject::Playlist(1), "Road Trip", Some(9_000))],
             vec![
                 touched(Subject::Record(10), "Ochre", Some(400)),
                 touched(Subject::Record(11), "Violet Ledger", Some(200)),
             ],
-        );
-        assert!(
-            lane.lists
-                .iter()
-                .all(|row| matches!(row.subject, Subject::Playlist(_))),
-            "a record reached the lists section"
-        );
-        assert!(
-            lane.records
-                .iter()
-                .all(|row| matches!(row.subject, Subject::Record(_))),
-            "a list reached the records section"
         );
         let mut seen: Vec<Subject> = drawn(&lane).iter().map(|row| row.subject).collect();
         let drawn = seen.len();
@@ -454,8 +418,10 @@ mod tests {
         }
         // …and the tie at 500 broke by name, with the unknown moments last —
         // in each section, which is where the key now applies.
-        assert_eq!(names(&first.lists), ["Alpha", "Beta", "Gamma"]);
-        assert_eq!(names(&first.records), ["Delta", "Beta", "Epsilon"]);
+        assert_eq!(
+            names(&first.rows),
+            ["Delta", "Alpha", "Beta", "Beta", "Epsilon", "Gamma"]
+        );
     }
 
     /// **Every playlist, always; the last 24 records** — the asymmetry stated
@@ -475,12 +441,11 @@ mod tests {
             })
             .collect();
         let lane = resolve(playlists, records);
-        assert_eq!(lane.lists.len(), 40);
-        assert_eq!(lane.records.len(), RECENT_ALBUMS);
+        assert_eq!(lane.rows.len(), 40 + RECENT_ALBUMS);
         // The 24 kept are the 24 newest, not the first 24 seen.
-        assert_eq!(lane.records[0].name, "record 39");
-        assert!(!lane.records.iter().any(|row| row.name == "record 15"));
-        assert!(lane.records.iter().any(|row| row.name == "record 16"));
+        assert_eq!(lane.rows[0].name, "record 39");
+        assert!(!lane.rows.iter().any(|row| row.name == "record 15"));
+        assert!(lane.rows.iter().any(|row| row.name == "record 16"));
         // **The section that has no cap is the one the scroller has to
         // cope with**, and 40 lists over a 24-record section is the shape the
         // frames in `docs/design/impl/playlists-section/` prove: one scroller
@@ -566,8 +531,7 @@ mod tests {
             Some(played_at),
         )];
         let lane = resolve(lists, records);
-        assert_eq!(names(&lane.lists), ["Road Trip"]);
-        assert_eq!(names(&lane.records), ["Violet Ledger", "Ochre"]);
+        assert_eq!(names(&lane.rows), ["Road Trip", "Violet Ledger", "Ochre"]);
         assert!(
             matches!(drawn(&lane)[0].subject, Subject::Playlist(_)),
             "the thing that was played is at the head of the lane"
@@ -721,8 +685,7 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(names(&lane.lists), ["Road Trip"]);
-        assert_eq!(names(&lane.records), ["Violet Ledger", "Ochre"]);
+        assert_eq!(names(&lane.rows), ["Road Trip", "Violet Ledger", "Ochre"]);
         assert!(
             matches!(drawn(&lane)[0].subject, Subject::Playlist(_)),
             "the thing that was played is not at the head of the lane"

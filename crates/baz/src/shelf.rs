@@ -390,6 +390,19 @@ impl Density {
         }
     }
 
+    /// [`Self::art_max`] in physical decode pixels. The density endpoints are
+    /// whole logical pixels, so exposing that fact here keeps the artwork
+    /// worker's size request exact without lossy casts in the UI shell.
+    #[must_use]
+    pub const fn art_max_px(self) -> u32 {
+        match self {
+            Self::Spacious => 320,
+            Self::Balanced => 288,
+            Self::Compact => 240,
+            Self::Dense => 200,
+        }
+    }
+
     /// One press of the zoom: `+1` loosens the hang, `-1` tightens it.
     ///
     /// **Saturating, never wrapping.** A zoom that has run out does nothing,
@@ -1216,8 +1229,21 @@ mod tests {
     /// 280, 240 against floors of 288, 240, 208, 176 — which overlap three
     /// times over, and every width where two steps tied on columns paid for
     /// one of them.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::float_cmp,
+        reason = "all four integer tiers are <= 320 and exactly representable as f32"
+    )]
     #[test]
     fn the_steps_partition_the_art_range() {
+        for density in Density::ALL {
+            assert_eq!(
+                density.art_max(),
+                density.art_max_px() as f32,
+                "{}'s decoder tier drifted from its layout endpoint",
+                density.label()
+            );
+        }
         for pair in Density::ALL.windows(2) {
             let (looser, tighter) = (pair[0], pair[1]);
             assert!(

@@ -203,13 +203,8 @@ fn breadcrumb(album: &vm::AlbumVm) -> Element<'static, Message> {
     .into()
 }
 
-/// **The work**, at [`theme::ALBUM_SLEEVE`] — the one image of the record on
-/// screen, warmed while it is the record that is sounding.
-///
-/// **`ALBUM_SLEEVE == ART_MAX == THUMB_PX`**, which is the refusal *no artwork
-/// is ever drawn larger than its source* satisfied exactly rather than
-/// approached: the decoded thumbnail is 320 px on its long edge, and this draws
-/// it at 320.
+/// **The work**, at [`theme::ALBUM_SLEEVE`] — the one detail-sized image of
+/// the record on screen, warmed while it is the record that is sounding.
 fn sleeve<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
@@ -222,7 +217,11 @@ fn sleeve<'a>(
     // tween — the page and the tile are two views of one lamp (ADR-0020 §2.5).
     let warmth = if playing { lamp } else { 0.0 };
     let edge = theme::ALBUM_SLEEVE;
-    let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
+    let handle = shelf
+        .hero(album.id)
+        .map(|hero| &hero.handle)
+        .or_else(|| shelf.thumbs.peek(&album.id));
+    let art: Element<'_, Message> = match handle {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(edge))
             .height(Length::Fixed(edge))

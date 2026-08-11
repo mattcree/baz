@@ -4,7 +4,7 @@
 //! summoned picker panel: the panel answers “where should this track go?”,
 //! while this place answers “which playlist do I want to open?”.
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text};
+use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -20,6 +20,7 @@ pub(crate) fn view<'a>(
     playlists: &'a Playlists,
     player: &PlayerState,
     hang: Grid,
+    scroll_offset: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let count = playlists.rows.len();
@@ -50,27 +51,32 @@ pub(crate) fn view<'a>(
         .into();
     }
 
-    let mut tiles = column![].spacing(hang.gutter);
-    let mut current = row![].spacing(hang.gutter);
-    let mut in_row = 0usize;
-    for playlist in playlists.ordered_rows() {
-        current = current.push(tile(
-            shelf,
-            playlist,
-            hang,
-            playlists.hovered == Some(playlist.id),
-            player.engine_ready(),
-        ));
-        in_row += 1;
-        if in_row == hang.columns {
-            tiles = tiles.push(current);
-            current = row![].spacing(hang.gutter);
-            in_row = 0;
+    let ordered = playlists.ordered_rows();
+    let total_rows = hang.rows(ordered.len());
+    let (first, end) = hang.visible_rows(scroll_offset, shelf.grid_size.height, total_rows);
+    let mut tiles = column![Space::with_height(Length::Fixed(hang.spacer_height(first)))];
+    for row_index in first..end {
+        let item_first = row_index * hang.columns;
+        let item_end = (item_first + hang.columns).min(ordered.len());
+        let mut current = row![].spacing(hang.gutter);
+        for playlist in &ordered[item_first..item_end] {
+            current = current.push(tile(
+                shelf,
+                playlist,
+                hang,
+                playlists.hovered == Some(playlist.id),
+                player.engine_ready(),
+            ));
         }
+        tiles = tiles.push(
+            container(current)
+                .height(Length::Fixed(hang.row_h))
+                .align_y(alignment::Vertical::Top),
+        );
     }
-    if in_row > 0 {
-        tiles = tiles.push(current);
-    }
+    tiles = tiles.push(Space::with_height(Length::Fixed(
+        hang.spacer_height(total_rows - end),
+    )));
 
     let body = tiles.width(Length::Fixed(hang.block_width()));
     column![
@@ -81,6 +87,7 @@ pub(crate) fn view<'a>(
                 .padding(place_pad())
                 .align_x(alignment::Horizontal::Center)
         )
+        .on_scroll(Message::PlaylistsScrolled)
         .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
         .width(Length::Fill)

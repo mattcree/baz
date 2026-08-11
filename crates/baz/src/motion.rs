@@ -182,7 +182,7 @@ struct Flight {
 ///
 /// Small on purpose. `size_of::<Tween>()` is **48 bytes**
 /// (`a_tween_is_forty_eight_bytes`), so twenty animated scalars are under a
-/// kilobyte against a 150 MiB thumbnail budget — the memory promise ADR-0020
+/// kilobyte against a 50 MiB thumbnail budget — the memory promise ADR-0020
 /// had to keep is kept by construction rather than by restraint.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tween {
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn a_tween_is_forty_eight_bytes() {
         assert_eq!(std::mem::size_of::<Tween>(), 48);
-        // Twenty animated scalars against a 150 MiB thumbnail budget.
+        // Twenty animated scalars against a 50 MiB thumbnail budget.
         assert!(20 * std::mem::size_of::<Tween>() < 1024);
     }
 

@@ -17,22 +17,17 @@
 //!
 //! # Memory budget
 //!
-//! Thumbnails are decoded to at most [`THUMB_PX`]² RGBA and cached in an LRU
-//! keyed by album id. The spike's 800-entry cache reached 400–500 MiB RSS;
-//! baz budgets **~150 MiB** for decoded thumbnails, and the entry count is
-//! derived from the real worst-case entry size rather than guessed:
-//! 320 × 320 × 4 B = 400 KiB per thumbnail, so 150 MiB / 400 KiB = **384
-//! entries** ([`THUMB_CACHE_ENTRIES`]). GPU-side copies held by `iced`'s
-//! image cache are bounded by the same entry count.
+//! Thumbnails are decoded to the active density's real maximum (200 px in
+//! Dense, up to [`THUMB_PX`] in Spacious) and cached in a 64-entry LRU keyed
+//! by album id. That is about **9.8 MiB** at Dense and **25 MiB** at the
+//! largest density, versus the former fixed 50 MiB allocation. Prepared PNGs
+//! live in the local XDG cache, so an evicted or next-launch sleeve does not
+//! require another full source decode.
 //!
-//! **The edge went 256 → 320 with the hang** (ADR-0017 step 5/7): the wall now
-//! draws a sleeve at up to [`crate::theme::ART_MAX`] 320 px, and a cache that
-//! stayed at 256 would have made *no artwork is ever drawn larger than its
-//! source* false at every width above ~1120 px. The budget did not move; the
-//! entry count absorbed it, which is 36 % fewer entries for 56 % more pixels
-//! each. That is still ~8× the live widget count at any window size, so the
-//! only thing it costs is a scroll further back through the wall before a
-//! thumbnail has to be decoded again.
+//! **The ceiling remains 320** (ADR-0017 step 5/7), because Spacious really
+//! can draw a sleeve that large. Tighter densities now ask for their smaller
+//! ceiling instead of paying for pixels they cannot display; 64 entries still
+//! cover the visible window and its overscan without retaining distant pages.
 //!
 //! # Two tiers, because two surfaces want different things
 //!
@@ -45,10 +40,10 @@
 //!
 //! | Tier | Edge | Entries | Worst case | For |
 //! |---|---|---|---|---|
-//! | [`load_thumb`] | [`THUMB_PX`] 320 | [`THUMB_CACHE_ENTRIES`] 384 | ~150 MiB | the wall, the lane, every collage |
+//! | [`load_thumb_cached`] | density-aware, ≤ [`THUMB_PX`] 320 | [`THUMB_CACHE_ENTRIES`] 64 | 9.8–25 MiB | the wall, the lane, every collage |
 //! | [`load_hero`] | [`HERO_PX`] 1024 | [`HERO_CACHE_ENTRIES`] 2 | **8 MiB** | the Now playing place's one work |
 //!
-//! **The hero tier is 5.3 % more art memory** for the surface the owner wants
+//! **The hero tier is 16 % more art memory** for the surface the owner wants
 //! to leave running, and it is what makes *no artwork is ever drawn larger
 //! than its source* true on that surface for the first time: the edge stops
 //! being a chosen constant and becomes `min(viewport, the source's own
@@ -76,7 +71,11 @@
 //! guards the call; `the_hero_is_the_same_art_decoded_larger_and_never_upscaled`
 //! pins both tiers at both ends.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::UNIX_EPOCH;
 
 use lofty::picture::PictureType;
 use lofty::prelude::*;
@@ -89,9 +88,23 @@ use lofty::prelude::*;
 /// asserts the two are one number.
 pub const THUMB_PX: u32 = 320;
 
-/// Thumbnail LRU capacity. Derivation (do not hand-tune without redoing it):
-/// budget 150 MiB ÷ (320 × 320 px × 4 B/px = 400 KiB worst case) = 384.
-pub const THUMB_CACHE_ENTRIES: usize = 384;
+/// Thumbnail LRU capacity: 64 visible/recent works, or 9.8 MiB at Dense and
+/// 25 MiB at the Spacious tier's absolute 320 px ceiling.
+pub const THUMB_CACHE_ENTRIES: usize = 64;
+
+/// Maximum thumbnail decodes allowed to run at once.
+///
+/// Two keeps image work bounded on low-end machines while still allowing a
+/// slow file read to overlap one decode. Visible work is prioritised by the
+/// scheduler in `app`, so a larger pool would mostly increase peak CPU and
+/// allocation pressure rather than make the artwork in front of the listener
+/// arrive sooner.
+pub const THUMB_DECODE_CONCURRENCY: usize = 2;
+
+/// Prepared artwork is derived and replaceable, but it still gets a disk
+/// budget. Pruning runs once per process and removes oldest entries first.
+const PREPARED_CACHE_BYTES: u64 = 256 * 1024 * 1024;
+static PREPARED_CACHE_PRUNED: OnceLock<()> = OnceLock::new();
 
 /// Max **hero** edge in pixels: **1024** — the Now playing place's own decode
 /// tier (doc 12 §5.2).
@@ -110,7 +123,7 @@ pub const HERO_PX: u32 = 1024;
 
 /// Hero LRU capacity: **2**. Derivation, in the shape [`THUMB_CACHE_ENTRIES`]
 /// uses — 1024 × 1024 px × 4 B/px = **4 MiB** per entry, × 2 = **8 MiB**,
-/// against the thumbnail tier's 150 MiB budget (doc 12 §5.2's gate).
+/// against the thumbnail tier's 9.8–25 MiB budget.
 ///
 /// Two rather than one so that **the record that was sounding a moment ago is
 /// still decoded**: a `Prev` press, or a jump back up the run, finds its hero
@@ -197,8 +210,26 @@ fn cover_file(dir: &Path) -> Option<PathBuf> {
 /// [`THUMB_PX`] per edge: `(width, height, rgba_bytes)`. `None` when there
 /// is no art or it cannot be decoded. Blocking; call off the UI thread.
 #[must_use]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn load_thumb(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
     decode(first_track, THUMB_PX)
+}
+
+/// Load a thumbnail at the edge the active shelf density actually draws.
+///
+/// Unlike [`load_thumb`], this path keeps a prepared PNG in the local XDG
+/// cache. A warm launch therefore reads and decodes a small local image rather
+/// than parsing tags and decoding the owner's (possibly remote) full-size
+/// cover again. The key includes the track, adjacent cover-file metadata and
+/// the requested edge, so replacing either source naturally misses the old
+/// entry. Cache failures are deliberately invisible: artwork still takes the
+/// ordinary source path.
+#[must_use]
+pub fn load_thumb_cached(first_track: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
+    dirs::cache_dir().map_or_else(
+        || decode(first_track, edge),
+        |root| load_cached(first_track, edge, &root.join("baz").join("art-v1")),
+    )
 }
 
 /// Resolve and decode an album's art into an RGBA image no larger than
@@ -217,8 +248,114 @@ pub fn load_thumb(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
 /// ever drawn larger than its source* becomes arithmetic on this return value
 /// rather than a constant that happened to be small enough.
 #[must_use]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn load_hero(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
     decode(first_track, HERO_PX)
+}
+
+/// The hero tier with the same prepared local cache as thumbnails.
+#[must_use]
+pub fn load_hero_cached(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    dirs::cache_dir().map_or_else(
+        || decode(first_track, HERO_PX),
+        |root| load_cached(first_track, HERO_PX, &root.join("baz").join("art-v1")),
+    )
+}
+
+fn load_cached(first_track: &Path, edge: u32, cache: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    if std::fs::create_dir_all(cache).is_ok() {
+        PREPARED_CACHE_PRUNED.get_or_init(|| prune_prepared_cache(cache));
+    }
+    let path = cache.join(format!("{:016x}.png", cache_key(first_track, edge)));
+    if let Ok(image) = image::open(&path) {
+        return Some(into_parts(image.into_rgba8()));
+    }
+
+    let (w, h, rgba) = decode(first_track, edge)?;
+    let image = image::RgbaImage::from_raw(w, h, rgba)?;
+    if std::fs::create_dir_all(cache).is_ok() {
+        let temporary = cache.join(format!(
+            ".{:016x}-{}.tmp",
+            cache_key(first_track, edge),
+            std::process::id()
+        ));
+        if image
+            .save_with_format(&temporary, image::ImageFormat::Png)
+            .is_ok()
+        {
+            // A corrupt entry is only disposable derived data. Removing it
+            // lets rename work on Windows too, where rename does not replace.
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+            if std::fs::rename(&temporary, &path).is_err() {
+                let _ = std::fs::remove_file(&temporary);
+            }
+        }
+    }
+    Some(into_parts(image))
+}
+
+fn prune_prepared_cache(cache: &Path) {
+    let Ok(entries) = std::fs::read_dir(cache) else {
+        return;
+    };
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            metadata.is_file().then(|| {
+                (
+                    entry.path(),
+                    metadata.len(),
+                    metadata.modified().unwrap_or(UNIX_EPOCH),
+                )
+            })
+        })
+        .collect();
+    let mut bytes: u64 = files.iter().map(|(_, len, _)| len).sum();
+    if bytes <= PREPARED_CACHE_BYTES {
+        return;
+    }
+    files.sort_unstable_by_key(|(_, _, modified)| *modified);
+    for (path, len, _) in files {
+        if bytes <= PREPARED_CACHE_BYTES {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            bytes = bytes.saturating_sub(len);
+        }
+    }
+}
+
+fn cache_key(first_track: &Path, edge: u32) -> u64 {
+    let mut hash = DefaultHasher::new();
+    "baz-art-v1".hash(&mut hash);
+    first_track.hash(&mut hash);
+    edge.hash(&mut hash);
+    hash_metadata(first_track, &mut hash);
+    // Embedded art still wins. Including an adjacent cover as an additional
+    // invalidator costs one directory read but also notices the common act of
+    // replacing cover.jpg without touching the audio file.
+    if let Some(cover) = cover_file_beside(first_track) {
+        cover.hash(&mut hash);
+        hash_metadata(&cover, &mut hash);
+    }
+    hash.finish()
+}
+
+fn hash_metadata(path: &Path, hash: &mut impl Hasher) {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    metadata.len().hash(hash);
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok());
+    modified
+        .map(|time| (time.as_secs(), time.subsec_nanos()))
+        .hash(hash);
 }
 
 /// The body both tiers share: resolve, decode, downscale to fit `edge`.
@@ -227,6 +364,10 @@ pub fn load_hero(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
 /// the art came from** — a hero resolved by a different order than the
 /// thumbnail would be a record whose sleeve changed when it started playing.
 fn decode(first_track: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
+    decode_image(first_track, edge).map(into_parts)
+}
+
+fn decode_image(first_track: &Path, edge: u32) -> Option<image::RgbaImage> {
     let image = match resolve(first_track)? {
         ArtSource::Embedded(bytes) => image::load_from_memory(&bytes).ok()?,
         ArtSource::File(path) => image::open(path).ok()?,
@@ -244,8 +385,12 @@ fn decode(first_track: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
     } else {
         image.into_rgba8()
     };
-    let (w, h) = scaled.dimensions();
-    Some((w, h, scaled.into_raw()))
+    Some(scaled)
+}
+
+fn into_parts(image: image::RgbaImage) -> (u32, u32, Vec<u8>) {
+    let (w, h) = image.dimensions();
+    (w, h, image.into_raw())
 }
 
 #[cfg(test)]
@@ -379,6 +524,37 @@ mod tests {
         write_wav(&track, Some(png_bytes(400, 400)));
         let (w, h, _) = load_thumb(&track).expect("thumb");
         assert_eq!((w, h), (THUMB_PX, THUMB_PX));
+    }
+
+    #[test]
+    fn prepared_cache_is_density_sized_and_source_invalidated() {
+        let dir = tempfile::tempdir().expect("music tempdir");
+        let cache = tempfile::tempdir().expect("cache tempdir");
+        let track = dir.path().join("01 song.wav");
+        write_wav(&track, None);
+        let cover = dir.path().join("cover.png");
+        std::fs::write(&cover, png_bytes(800, 400)).expect("large cover");
+
+        let first = load_cached(&track, 200, cache.path()).expect("prepared thumb");
+        assert_eq!((first.0, first.1), (200, 100));
+        let again = load_cached(&track, 200, cache.path()).expect("warm prepared thumb");
+        assert_eq!((again.0, again.1), (200, 100));
+        assert_eq!(
+            std::fs::read_dir(cache.path())
+                .expect("cache listing")
+                .count(),
+            1,
+            "a warm read created a duplicate prepared file"
+        );
+
+        let smaller = load_cached(&track, 100, cache.path()).expect("second density");
+        assert_eq!((smaller.0, smaller.1), (100, 50));
+
+        // A replacement whose dimensions and encoded length differ cannot
+        // reuse the old source fingerprint.
+        std::fs::write(&cover, png_bytes(50, 50)).expect("replacement cover");
+        let replaced = load_cached(&track, 200, cache.path()).expect("replacement thumb");
+        assert_eq!((replaced.0, replaced.1), (50, 50));
     }
 
     /// **The hero tier reads the same file the thumbnail does, and never

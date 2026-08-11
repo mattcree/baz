@@ -191,6 +191,87 @@ fn search_caps_at_limit_in_deterministic_order() {
 }
 
 #[test]
+fn preferred_search_collapses_editions_before_applying_the_limit() {
+    let library = library_of(vec![
+        encoded(
+            "/m/mp3/01.mp3",
+            "Common Ground",
+            "First",
+            1,
+            AudioFormat::Mp3,
+            320,
+        ),
+        encoded(
+            "/m/flac/01.flac",
+            "Common Ground",
+            "First",
+            1,
+            AudioFormat::Flac,
+            900,
+        ),
+        encoded(
+            "/m/mp3/02.mp3",
+            "Common Ground",
+            "Second",
+            2,
+            AudioFormat::Mp3,
+            320,
+        ),
+        encoded(
+            "/m/flac/02.flac",
+            "Common Ground",
+            "Second",
+            2,
+            AudioFormat::Flac,
+            900,
+        ),
+    ]);
+
+    let found = library.search_preferred("common", 2);
+    assert_eq!(titles(&found), ["First", "Second"]);
+    assert!(
+        found
+            .iter()
+            .all(|track| track.format == Some(AudioFormat::Flac)),
+        "one song result per recording, from the lossless edition"
+    );
+}
+
+#[test]
+fn preferred_search_keeps_the_best_available_copy_of_a_partial_edition() {
+    let library = library_of(vec![
+        encoded(
+            "/m/flac/01.flac",
+            "Partial",
+            "First",
+            1,
+            AudioFormat::Flac,
+            900,
+        ),
+        encoded(
+            "/m/mp3/01.mp3",
+            "Partial",
+            "First",
+            1,
+            AudioFormat::Mp3,
+            320,
+        ),
+        encoded(
+            "/m/mp3/02.mp3",
+            "Partial",
+            "Only Here",
+            2,
+            AudioFormat::Mp3,
+            320,
+        ),
+    ]);
+
+    let found = library.search_preferred("only here", 8);
+    assert_eq!(titles(&found), ["Only Here"]);
+    assert_eq!(found[0].format, Some(AudioFormat::Mp3));
+}
+
+#[test]
 fn track_matching_in_several_fields_is_returned_once() {
     let mut library = Library::open_in_memory().expect("open");
     library
