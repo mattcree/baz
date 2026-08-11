@@ -16,7 +16,8 @@
 //!   path accepts in shared mode. Per ADR-0009 each session then renegotiates
 //!   the stream to the rate of the music it is about to play, so a 48 kHz
 //!   album ends up playing at 48 kHz with no conversion — this constant only
-//!   decides what the device idles at before the first click.
+//!   proposes what the device idles at before the first click. An endpoint
+//!   that rejects it is retried at its nearest advertised rate.
 //! - **Nothing is resampled** by default. When a device cannot run at a
 //!   source's rate the engine converts to the nearest rate it can and reports
 //!   that through [`Event::SignalPath`];
@@ -197,7 +198,7 @@ mod imp {
             match bridge {
                 Ok(_detached) => {
                     println!(
-                        "[playback] engine ready (device opened at {INITIAL_SAMPLE_RATE} Hz, \
+                        "[playback] engine ready (initially requested {INITIAL_SAMPLE_RATE} Hz, \
                          follows the source from there; device ring {DEVICE_RING_FRAMES} frames)"
                     );
                     Self {

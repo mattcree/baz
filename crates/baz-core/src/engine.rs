@@ -1157,13 +1157,14 @@ fn open_output(
 /// Whatever [`spawn_device_with`] reports, plus [`PlaybackError::Device`] if
 /// `BAZ_OUTPUT` names something that is not an output mode.
 ///
-/// `initial_sample_rate` is the rate the device is opened at *before any queue
-/// exists* — the engine has to hold an open sink from the moment it spawns, and
-/// nothing is known about the music yet. It is a starting point, not a policy:
-/// under the ADR-0009 default every session renegotiates the stream to the rate
-/// of the track that starts it, so a 48 kHz album ends up playing at 48 kHz
-/// whatever this argument said. Pick a rate every device accepts (44 100 Hz)
-/// and let negotiation do the rest.
+/// `initial_sample_rate` is the rate first requested *before any queue exists*
+/// — the engine has to hold an open sink from the moment it spawns, and nothing
+/// is known about the music yet. A device that rejects the request is retried
+/// at its nearest advertised rate. It is a starting point, not a policy: under
+/// the ADR-0009 default every session renegotiates the stream to the rate of
+/// the track that starts it, so a 48 kHz album ends up playing at 48 kHz
+/// whatever this argument said. 44 100 Hz remains the broadly accepted first
+/// request; the device's typed refusal decides whether to fall back.
 ///
 /// The stream stays open across pause, seek, skip and stop; the only thing
 /// that reopens it is a session starting at a rate the currently open stream

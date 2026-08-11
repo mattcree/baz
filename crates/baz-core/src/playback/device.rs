@@ -402,6 +402,43 @@ pub struct DeviceSink {
     device_name: Option<String>,
 }
 
+/// Which half of an exact stream-open attempt failed.
+///
+/// Kept typed until [`DeviceSink::open_on`] has decided whether the one
+/// recoverable case deserves a second configuration. Flattening this into
+/// [`PlaybackError`] at the `build_output_stream` call would leave no reliable
+/// way to distinguish an unsupported tuple from an unplugged device or a
+/// backend fault.
+enum OpenAttemptError {
+    Build(cpal::BuildStreamError),
+    Play(cpal::PlayStreamError),
+}
+
+impl OpenAttemptError {
+    fn action(&self) -> &'static str {
+        match self {
+            Self::Build(_) => "open",
+            Self::Play(_) => "start",
+        }
+    }
+
+    fn unsupported_configuration(&self) -> bool {
+        matches!(
+            self,
+            Self::Build(cpal::BuildStreamError::StreamConfigNotSupported)
+        )
+    }
+}
+
+impl std::fmt::Display for OpenAttemptError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Build(error) => error.fmt(formatter),
+            Self::Play(error) => error.fmt(formatter),
+        }
+    }
+}
+
 impl DeviceSink {
     /// Open the default output device at `sample_rate` (stereo) with a
     /// device ring of `ring_frames` frames.
@@ -427,21 +464,61 @@ impl DeviceSink {
         ring_frames: usize,
     ) -> Result<Self, PlaybackError> {
         let device = output_device(device_name)?;
-        // Startup deserves the same negotiation every later source-rate
-        // change receives. In particular, WASAPI endpoints commonly idle at
-        // 48 kHz and reject a literal 44.1 kHz shared stream even though they
-        // are present and otherwise healthy.
-        let sample_rate = negotiated_rate(&device, sample_rate).unwrap_or(sample_rate);
+        let channels = u16::try_from(CHANNELS)
+            .map_err(|_| PlaybackError::Device("channel count exceeds u16".into()))?;
+        let device_label = device
+            .name()
+            .unwrap_or_else(|_| "unknown output".to_owned());
+
+        // Try the request before believing the capability list. CoreAudio can
+        // accept 44.1 kHz while advertising only its current 48 kHz nominal
+        // rate; pre-emptively clamping there broke source-following and the
+        // macOS device test. WASAPI produces the typed unsupported-config
+        // error for the inverse case from the Windows report, so only then do
+        // we retry at the nearest advertised rate.
+        match Self::open_exact(&device, device_name, sample_rate, ring_frames, channels) {
+            Ok(sink) => Ok(sink),
+            Err(first) if first.unsupported_configuration() => {
+                let fallback = negotiated_rate(&device, sample_rate)
+                    .filter(|fallback| *fallback != sample_rate);
+                let Some(fallback) = fallback else {
+                    return Err(PlaybackError::Device(format!(
+                        "{device_label}: could not open stereo f32 at {sample_rate} Hz: {first}"
+                    )));
+                };
+                Self::open_exact(&device, device_name, fallback, ring_frames, channels).map_err(
+                    |second| {
+                        PlaybackError::Device(format!(
+                            "{device_label}: {sample_rate} Hz was unsupported ({first}); \
+                             {fallback} Hz fallback failed while trying to {}: {second}",
+                            second.action(),
+                        ))
+                    },
+                )
+            }
+            Err(error) => Err(PlaybackError::Device(format!(
+                "{device_label}: could not {} stereo f32 at {sample_rate} Hz: {error}",
+                error.action(),
+            ))),
+        }
+    }
+
+    /// Make one literal cpal stream attempt. No capability inference belongs
+    /// here: the caller needs the typed failure before deciding whether a
+    /// different rate is justified.
+    fn open_exact(
+        device: &cpal::Device,
+        device_name: Option<&str>,
+        sample_rate: u32,
+        ring_frames: usize,
+        channels: u16,
+    ) -> Result<Self, OpenAttemptError> {
         let config = cpal::StreamConfig {
-            channels: u16::try_from(CHANNELS)
-                .map_err(|_| PlaybackError::Device("channel count exceeds u16".into()))?,
+            channels,
             sample_rate: cpal::SampleRate(sample_rate),
             buffer_size: cpal::BufferSize::Default,
         };
         let capacity = ring_frames * CHANNELS;
-        let device_label = device
-            .name()
-            .unwrap_or_else(|_| "unknown output".to_owned());
         let (producer, mut consumer) = RingBuffer::<f32>::new(capacity);
         let failed = Arc::new(AtomicBool::new(false));
         let error_flag = Arc::clone(&failed);
@@ -496,16 +573,8 @@ impl DeviceSink {
                 },
                 None,
             )
-            .map_err(|e| {
-                PlaybackError::Device(format!(
-                    "{device_label}: could not open stereo f32 at {sample_rate} Hz: {e}"
-                ))
-            })?;
-        stream.play().map_err(|e| {
-            PlaybackError::Device(format!(
-                "{device_label}: could not start stereo f32 at {sample_rate} Hz: {e}"
-            ))
-        })?;
+            .map_err(OpenAttemptError::Build)?;
+        stream.play().map_err(OpenAttemptError::Play)?;
         Ok(Self {
             _stream: stream,
             producer,
