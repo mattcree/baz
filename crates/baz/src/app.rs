@@ -523,6 +523,11 @@ pub(crate) enum Message {
     /// an id: a message is a value, and a borrowed name could not outlive the
     /// rescan that rebuilt the wall it came from.
     OpenArtist(u64),
+    /// The artist page's quiet external door: ask the desktop to open a
+    /// Wikipedia search. Baz performs no network request itself.
+    LookUpArtist(u64),
+    /// Completion of that desktop request; failures become a status event.
+    ArtistLookUpFinished(Result<(), String>),
     /// A pick-mode press on a panel row: append what the hand holds to that
     /// playlist's *file* — the run is untouched, whichever list it is, the
     /// playing one included (09 §6's decoupling; S4).
@@ -950,6 +955,8 @@ pub(crate) enum Message {
     /// is the same answer [`Self::ThumbLoaded`] gives and is recorded in the
     /// same known-absent set.
     HeroLoaded(u64, Option<Hero>),
+    /// A listener-provided local artist portrait finished decoding.
+    ArtistImageLoaded(u64, Option<iced_image::Handle>),
     /// ~10 Hz drain of the scan worker's channel while a scan runs.
     ScanTick,
     /// A frame was presented (subscribed only until first-frame is logged).
@@ -1640,6 +1647,10 @@ impl App {
             app.playlists.refresh(Some(&state.library));
         }
         app.restore_place(saved_place);
+        let artist_image = match app.place {
+            Place::Artist(id) => app.request_artist_image(id),
+            _ => Task::none(),
+        };
         // **And the lists that were played in an earlier session** — the half
         // of the owner's defect that could not be fixed until the ledger
         // remembered which list a run came from. After the refresh, because it
@@ -1650,7 +1661,7 @@ impl App {
         // rather than the server's own defaults. The MPRIS thread may not
         // have reached its bus yet; the update simply waits in its channel.
         app.publish_mpris(false);
-        (app, task)
+        (app, Task::batch([task, artist_image]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -1666,6 +1677,7 @@ impl App {
                 | Message::Playback(_)
                 | Message::ThumbLoaded(..)
                 | Message::HeroLoaded(..)
+                | Message::ArtistImageLoaded(..)
                 | Message::ScanTick
                 | Message::FirstFrame
                 | Message::MotionTick(_)
@@ -1690,13 +1702,17 @@ impl App {
         // ask for their own — through the same cache, so a sleeve is one
         // decode however many surfaces draw it.
         let art = self.request_hero();
+        let artist_image = match self.place {
+            Place::Artist(id) => self.request_artist_image(id),
+            _ => Task::none(),
+        };
         // **And what the Now playing place draws of the record**, settled
         // after the ask rather than before it: the two things that can change
         // that surface's picture are the engine naming another record and a
         // hero landing, and both have already happened by here
         // ([`Shelf::settle_art`]).
         self.settle_art();
-        Task::batch([task, self.request_offscreen_art(), art])
+        Task::batch([task, self.request_offscreen_art(), art, artist_image])
     }
 
     /// Hand the sounding record to [`Shelf::settle_art`], which owns the whole
@@ -1786,7 +1802,38 @@ impl App {
             Message::QueueAlbum(id) => self.queue_album(id),
             // **The album page's breadcrumb**: up to the artist. Subject
             // routes are idempotent, so a repeated pointer event stays put.
-            Message::OpenArtist(id) => self.go(|place| place.artist(id)),
+            Message::OpenArtist(id) => Task::batch([
+                self.go(|place| place.artist(id)),
+                self.request_artist_image(id),
+            ]),
+            Message::LookUpArtist(id) => {
+                let Some(name) = (match &self.screen {
+                    Screen::Shelf(state) => views::artist::label(state, id).map(str::to_owned),
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
+                }) else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || crate::desktop::look_up_artist(&name))
+                            .await
+                            .unwrap_or_else(|error| Err(error.to_string()))
+                    },
+                    Message::ArtistLookUpFinished,
+                )
+            }
+            Message::ArtistLookUpFinished(result) => {
+                if let Err(error) = result
+                    && let Screen::Shelf(state) = &mut self.screen
+                {
+                    state.health.record(
+                        crate::health::Level::Warning,
+                        "Could not open the browser",
+                        error,
+                    );
+                }
+                Task::none()
+            }
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
             }
@@ -3504,6 +3551,7 @@ impl App {
                 .map(|album| album.id)
                 .collect();
             ids.extend(theirs);
+            ids.extend(state.artist_also_on(id).into_iter().map(|album| album.id));
         }
         if open_unsaved {
             ids.extend(views::queue::unsaved_art(state, &self.player));
@@ -3541,6 +3589,13 @@ impl App {
             return Task::none();
         };
         state.request_hero(sounding)
+    }
+
+    fn request_artist_image(&mut self, artist: u64) -> Task<Message> {
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        state.request_artist_image(artist)
     }
 
     /// Re-merge [`Self::lane`] if either half has been rebuilt since it was
@@ -5718,6 +5773,12 @@ pub(crate) struct Shelf {
     pub(crate) edition_choice: HashMap<u64, vm::EditionKey>,
     /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
     pub(crate) thumbs: LruCache<u64, iced_image::Handle>,
+    /// Small, bounded cache of local artist portraits visited this session.
+    artist_images: LruCache<u64, iced_image::Handle>,
+    /// Artist portrait decodes currently running off the UI thread.
+    artist_image_pending: HashSet<u64>,
+    /// Artists already found not to carry a local portrait.
+    no_artist_image: HashSet<u64>,
     /// **The shortest edge of each decoded thumbnail**, in pixels.
     ///
     /// [`art::load_thumb`] downscales only, so this is `min(w, h)` of a
@@ -5893,6 +5954,12 @@ pub(crate) struct Shelf {
     /// [`Self::rebuild_shelves`] — so it cannot describe a library that is no
     /// longer on the shelf.
     pub(crate) collection: vm::Collection,
+    /// Offline facts for each artist, rebuilt with the album wall and read by
+    /// the artist page without walking tracks during a frame.
+    pub(crate) artist_facts: HashMap<u64, vm::ArtistFacts>,
+    /// Album indices for records on which an artist is credited but which are
+    /// filed under somebody else. See [`vm::artist_inventory`].
+    artist_also_on: HashMap<u64, Vec<usize>>,
 }
 
 impl Shelf {
@@ -5964,6 +6031,11 @@ impl Shelf {
             thumbs: LruCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
             ),
+            artist_images: LruCache::new(
+                NonZeroUsize::new(art::ARTIST_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
+            ),
+            artist_image_pending: HashSet::new(),
+            no_artist_image: HashSet::new(),
             thumb_px: HashMap::new(),
             heroes: LruCache::new(
                 NonZeroUsize::new(art::HERO_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
@@ -6001,6 +6073,8 @@ impl Shelf {
             lane_recent: Vec::new(),
             lane_stamp: 0,
             collection: vm::Collection::default(),
+            artist_facts: HashMap::new(),
+            artist_also_on: HashMap::new(),
         };
         shelf.health.record(
             crate::health::Level::Working,
@@ -6160,6 +6234,18 @@ impl Shelf {
                     }
                     None => {
                         self.no_art.insert(id);
+                    }
+                }
+                Task::none()
+            }
+            Message::ArtistImageLoaded(id, image) => {
+                self.artist_image_pending.remove(&id);
+                match image {
+                    Some(image) => {
+                        self.artist_images.put(id, image);
+                    }
+                    None => {
+                        self.no_artist_image.insert(id);
                     }
                 }
                 Task::none()
@@ -6422,6 +6508,17 @@ impl Shelf {
             name,
             |id| self.edition_choice.get(&id).copied(),
         ))
+    }
+
+    /// Records carrying this artist as a track credit while filed under a
+    /// different album artist, in the wall's current order.
+    pub(crate) fn artist_also_on(&self, artist: u64) -> Vec<&vm::AlbumVm> {
+        self.artist_also_on
+            .get(&artist)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| self.albums.get(*index))
+            .collect()
     }
 
     /// Put a shelf at the top of the wall — what an index-rail entry does.
@@ -6692,6 +6789,7 @@ impl Shelf {
         // but re-counting is cheaper than reasoning about which caller changed
         // what.
         self.collection = vm::Collection::count(&self.albums, self.library.len());
+        (self.artist_facts, self.artist_also_on) = vm::artist_inventory(&self.albums);
         self.refilter();
         // The album ids survive a re-arrangement (see above), so the fold does
         // too — but a *rescan* can add and remove records, and the lane must
@@ -6993,6 +7091,7 @@ impl Shelf {
         // followed by the same clean-up a finished scan does.
         self.opened = None;
         self.no_art.clear();
+        self.no_artist_image.clear();
         self.rebuild_shelves();
         self.request_visible_thumbs()
     }
@@ -7256,6 +7355,7 @@ impl Shelf {
             // Early albums may have gained art (late tracks, cover files
             // written mid-scan): allow one clean retry pass.
             self.no_art.clear();
+            self.no_artist_image.clear();
             task = Task::batch([task, self.request_visible_thumbs()]);
         }
         task
@@ -7353,6 +7453,40 @@ impl Shelf {
             },
             move |hero| Message::HeroLoaded(id, hero),
         )
+    }
+
+    fn request_artist_image(&mut self, artist: u64) -> Task<Message> {
+        if self.artist_images.get(&artist).is_some()
+            || self.artist_image_pending.contains(&artist)
+            || self.no_artist_image.contains(&artist)
+        {
+            return Task::none();
+        }
+        let Some(album) = self
+            .albums
+            .iter()
+            .find(|album| vm::artist_id(&album.artist) == artist)
+        else {
+            return Task::none();
+        };
+        self.artist_image_pending.insert(artist);
+        let path = album.first_track.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    art::load_artist(&path)
+                        .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
+                })
+                .await
+                .ok()
+                .flatten()
+            },
+            move |image| Message::ArtistImageLoaded(artist, image),
+        )
+    }
+
+    pub(crate) fn artist_image(&self, artist: u64) -> Option<&iced_image::Handle> {
+        self.artist_images.peek(&artist)
     }
 
     /// The sounding record's hero, when one is decoded — the Now playing

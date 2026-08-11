@@ -113,6 +113,14 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
+- **Artist pages now say what is in the collection.** A quiet facts line
+  summarizes playing time, release years, formats, up to three genres and the
+  earliest arrival year; `ALSO ON` shows records carrying that artist as a
+  track credit while filed under somebody else. Both are cached with the
+  shelf, so scrolling performs no library walk. Listener-supplied
+  `artist.jpg`, `artist.png` or `folder.jpg` files above album folders appear
+  through a small bounded image cache, and `Look up` opens Wikipedia in the
+  desktop browser without giving baz network access or adding a dependency.
 - **Saved playlists now have a collection page of their own.** `Playlists` is
   a resident destination showing every saved list as its generated collage
   sleeve on the shared library grid. It can order lists A–Z or by creation

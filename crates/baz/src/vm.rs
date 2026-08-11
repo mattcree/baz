@@ -27,7 +27,7 @@
 //! the whole selection rule is a pure function of (album, choice) and is
 //! tested as one.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -598,6 +598,84 @@ impl Collection {
             playing_ms,
         }
     }
+}
+
+/// Facts and cross-credits for every artist, folded once when the shelf is
+/// rebuilt rather than rediscovered by the view on every frame.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistFacts {
+    /// Sum of every declared track duration, in milliseconds.
+    pub playing_ms: u64,
+    /// Earliest and latest declared release years.
+    pub years: Option<(u32, u32)>,
+    /// Distinct owned codec labels, in the order first encountered.
+    pub formats: Vec<String>,
+    /// Up to three distinct, case-folded genre spellings, first spelling kept.
+    pub genres: Vec<String>,
+    /// Earliest time any of the artist's records entered the library.
+    pub first_seen_ns: Option<i64>,
+}
+
+/// Build the artist facts and the `ALSO ON` index in one library pass.
+///
+/// The second result maps an artist id to indices in `albums`. A record filed
+/// under that artist is deliberately excluded, and a guest credited on two
+/// tracks of one record still contributes that record only once.
+#[must_use]
+pub fn artist_inventory(
+    albums: &[AlbumVm],
+) -> (HashMap<u64, ArtistFacts>, HashMap<u64, Vec<usize>>) {
+    let mut facts = HashMap::<u64, ArtistFacts>::new();
+    let mut also_on = HashMap::<u64, Vec<usize>>::new();
+
+    for (album_index, album) in albums.iter().enumerate() {
+        let primary = artist_id(&album.artist);
+        let entry = facts.entry(primary).or_default();
+        if let Some(year) = album.year {
+            entry.years = Some(entry.years.map_or((year, year), |(first, last)| {
+                (first.min(year), last.max(year))
+            }));
+        }
+        if let Some(seen) = album.first_seen_ns {
+            entry.first_seen_ns = Some(entry.first_seen_ns.map_or(seen, |old| old.min(seen)));
+        }
+        for edition in &album.editions {
+            let format = edition.key.label();
+            if !entry.formats.iter().any(|owned| owned == format) {
+                entry.formats.push(format.to_owned());
+            }
+            for track in &edition.tracks {
+                entry.playing_ms = entry.playing_ms.saturating_add(
+                    track
+                        .duration
+                        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+                        .unwrap_or(0),
+                );
+            }
+        }
+        if let Some(genre) = album.genre.as_ref()
+            && entry.genres.len() < 3
+            && !entry
+                .genres
+                .iter()
+                .any(|owned| owned.eq_ignore_ascii_case(genre))
+        {
+            entry.genres.push(genre.clone());
+        }
+
+        let mut credited_here = HashSet::new();
+        for track in album.all_tracks() {
+            let Some(name) = track.artist.as_deref() else {
+                continue;
+            };
+            let credited = named_artist_id(name);
+            if credited != primary && credited_here.insert(credited) {
+                also_on.entry(credited).or_default().push(album_index);
+            }
+        }
+    }
+
+    (facts, also_on)
 }
 
 /// Build the wall from the library, **arranged by `key`** —
@@ -1442,10 +1520,19 @@ pub fn artist_id(artist: &AlbumArtistVm) -> u64 {
     let hash = match artist {
         AlbumArtistVm::Unknown => fnv1a(hash, &[0x01]),
         AlbumArtistVm::Various => fnv1a(hash, &[0x02]),
-        AlbumArtistVm::Named(name) => fnv1a(hash, name.to_lowercase().as_bytes()),
+        AlbumArtistVm::Named(name) => return named_artist_id(name),
     };
     // The same 0x00 terminator `album_id` writes after its artist field, so
     // this is a prefix of that fold rather than a second scheme beside it.
+    fnv1a(hash, &[0x00])
+}
+
+/// The artist-page identity of a named track credit, without allocating an
+/// [`AlbumArtistVm`] merely to ask the same hash question.
+#[must_use]
+pub fn named_artist_id(name: &str) -> u64 {
+    let hash = fnv1a(0xcbf2_9ce4_8422_2325, &[]);
+    let hash = fnv1a(hash, name.to_lowercase().as_bytes());
     fnv1a(hash, &[0x00])
 }
 
@@ -2010,6 +2097,35 @@ mod tests {
         // may switch editions while that one is still playing.
         let playing = &album.editions[1].tracks[0].path;
         assert!(album.all_tracks().any(|t| &t.path == playing));
+    }
+
+    #[test]
+    fn artist_inventory_caches_owned_facts_and_guest_records() {
+        let mut own = meta("Alice", "Own Record", "Mine", 1);
+        own.year = Some(1999);
+        own.genre = Some("Post-Rock".to_owned());
+        own.format = Some(AudioFormat::Flac);
+        let mut guest = meta("Alice", "Bob's Record", "Together", 1);
+        guest.album_artist = Some("Bob".to_owned());
+        guest.year = Some(2004);
+        guest.format = Some(AudioFormat::Mp3);
+        let albums = build_albums(&library_with(vec![own, guest]));
+        let alice = named_artist_id("alice");
+        let (facts, also_on) = artist_inventory(&albums);
+
+        let owned = facts.get(&alice).expect("Alice's owned-record facts");
+        assert_eq!(owned.playing_ms, 200_000);
+        assert_eq!(owned.years, Some((1999, 1999)));
+        assert_eq!(owned.formats, ["FLAC"]);
+        assert_eq!(owned.genres, ["Post-Rock"]);
+
+        let appearances = also_on.get(&alice).expect("Alice's guest record");
+        assert_eq!(appearances.len(), 1);
+        assert_eq!(albums[appearances[0]].artist.label(), "Bob");
+        assert_eq!(
+            albums[appearances[0]].title.as_deref(),
+            Some("Bob's Record")
+        );
     }
 
     #[test]

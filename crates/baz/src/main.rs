@@ -35,6 +35,7 @@ use std::time::Instant;
 mod app;
 mod art;
 mod config;
+mod desktop;
 mod drag;
 mod field;
 mod font;

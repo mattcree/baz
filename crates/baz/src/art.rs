@@ -148,6 +148,14 @@ pub enum ArtSource {
 /// Matched case-insensitively (`Cover.JPG` counts).
 const COVER_FILE_NAMES: [&str; 4] = ["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg"];
 
+/// Artist portraits placed above album folders by common library managers.
+const ARTIST_FILE_NAMES: [&str; 4] = ["artist.jpg", "artist.jpeg", "artist.png", "folder.jpg"];
+
+/// Artist-page portraits are small supporting images, not Now Playing heroes.
+pub const ARTIST_PX: u32 = 256;
+/// Eight visited artists cost at most 2 MiB of decoded RGBA.
+pub const ARTIST_CACHE_ENTRIES: usize = 8;
+
 /// Rear-insert names used by common rippers and taggers, in priority order.
 const BACK_FILE_NAMES: [&str; 6] = [
     "back.jpg",
@@ -193,6 +201,15 @@ pub fn resolve_back(first_track: &Path) -> Option<ArtSource> {
 #[must_use]
 pub fn cover_file_beside(first_track: &Path) -> Option<PathBuf> {
     cover_file(first_track.parent()?)
+}
+
+/// Decode a listener-provided artist portrait from the directory above an
+/// album folder. Missing art is an ordinary `None`, never a placeholder.
+#[must_use]
+pub fn load_artist(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    let artist_dir = first_track.parent()?.parent()?;
+    let source = art_file(artist_dir, &ARTIST_FILE_NAMES)?;
+    decode_source(ArtSource::File(source), ARTIST_PX).map(into_parts)
 }
 
 /// The embedded picture bytes of `track`, if its tags carry any.
@@ -532,6 +549,20 @@ mod tests {
             resolve(&track),
             Some(ArtSource::File(dir.path().join("Cover.JPG")))
         );
+    }
+
+    #[test]
+    fn artist_picture_is_read_from_above_the_album_folder() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let artist = root.path().join("Alice");
+        let album = artist.join("A Record");
+        std::fs::create_dir_all(&album).expect("album folder");
+        let track = album.join("01 song.wav");
+        write_wav(&track, None);
+        std::fs::write(artist.join("Artist.PNG"), png_bytes(9, 7)).expect("artist picture");
+
+        let (width, height, _) = load_artist(&track).expect("local artist picture");
+        assert_eq!((width, height), (9, 7));
     }
 
     #[test]

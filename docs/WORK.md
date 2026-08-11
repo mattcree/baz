@@ -104,20 +104,7 @@
 
 ## Next
 
-1. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
-   The owner's *"ideally the by artist page could have more info"*, answered
-   with no network at all. Tier 1: one `SIZE_META` line under the header
-   (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
-   2019`, 40 px of wall pushed down, each term absent rather than empty);
-   `ALSO ON`, the records they guest on, in the wall's own tiles, from one
-   cached fold beside `vm::Collection`; and **`Look up`**, which opens the
-   artist on Wikipedia in the listener's own browser through the D-Bus
-   portal — **zero new crates and no Flatpak network permission**. Tier 2:
-   case-folded genres capped at three, an artist picture off the listener's
-   own disk (`artist.jpg` in the parent of the album folders, through
-   `art.rs`'s existing lookup), and the prose fix for the tile-size claim
-   below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-2. **Ship the public beta.** The last item by construction: it is the one
+1. **Ship the public beta.** The last item by construction: it is the one
    that makes the blockers above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
@@ -285,6 +272,16 @@ only.
   *Needs: one run on the owner's machine.*
 
 ## Recently done
+
+- **The artist's page is worth visiting, entirely offline** — doc 15 tiers 1
+  and 2. Its one-line facts band now states playing time, release years,
+  formats, up to three case-folded genres and the earliest added year, omitting
+  facts the files do not provide. `ALSO ON` draws guest records in the wall's
+  own tiles from one cached library fold. A bounded, off-thread image path
+  reads `artist.jpg`, `artist.png` or `folder.jpg` above the album folder, and
+  a quiet `Look up` opens Wikipedia through the desktop portal without giving
+  baz network access or adding a crate. The page reads cached facts during a
+  frame; no track walk or image decode was added to scrolling.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 

@@ -84,14 +84,14 @@ Two of those four are network. One is a rule about statistics. **The fourth
 is a rule about *tracks*, not about records** — and that gap is where §4's
 best proposal lives.
 
-### 1.1 Found on the way: the tiles are not the wall's to the pixel
+### 1.1 Found on the way: the tiles were not the wall's to the pixel
 
-`artist.rs:19-26` claims the records are drawn *"in **the wall's own tile**
+The version studied here claimed the records were drawn *"in **the wall's own tile**
 — the same `views::shelf::tile` with the wall's own `Grid` — so the sleeve,
 the caption, the playing mark and the hover options are the wall's to the
 pixel."*
 
-The **widget** is the wall's. The **geometry** is not, and it is worth
+The **widget** was the wall's. The **geometry** was not, and it is worth
 recording before anything is added above it, because a band above the wall
 makes the eye compare this page's covers against the Library it just came
 from.
@@ -118,11 +118,12 @@ So the covers are 4–11 px wider on the artist's page at every size, and at
 wall draws five** — the wall's `wanted` is 6 and its `ceiling` is 5, so it
 clamps; the artist page's width is 32 px larger and does not.
 
-This is not a defect the owner reported and this study does not propose
-fixing it as part of the ask. It is recorded because (a) the module's prose
-claims something the arithmetic does not support, and (b) §9 tier 3 asks
-whether the two should be reconciled, which is a one-line change with a
-visible consequence at one window size.
+**Resolved after this measurement.** The shell now resolves one
+`Shelf::grid` and hands it to the Library, Home and Artist places; the artist
+view no longer constructs a second grid. The table above is the before-state
+that justified the change, not a claim about the current page. The regression
+test `every_place_that_hangs_works_hangs_them_on_one_grid` prevents a view from
+growing its own answer again.
 
 ---
 
