@@ -252,6 +252,11 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          # The reusable CI gate also uploads its coverage report into this
+          # workflow run. Only the three `baz-*` build artifacts belong in a
+          # release; otherwise checksum generation sees coverage-html's
+          # directory and tries to hash it as an archive.
+          pattern: baz-*
           path: incoming
           merge-multiple: true
 
