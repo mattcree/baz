@@ -2155,7 +2155,7 @@ impl PlayerState {
     pub fn availability_note(&self) -> Option<String> {
         match &self.availability {
             Availability::Ready => None,
-            Availability::NoDevice(reason) => Some(format!("no audio device — {reason}")),
+            Availability::NoDevice(reason) => Some(format!("audio unavailable — {reason}")),
             Availability::Closed => Some("audio engine stopped".to_owned()),
         }
     }
@@ -2968,7 +2968,7 @@ mod tests {
         assert!(!player.next_enabled());
         assert_eq!(
             player.availability_note().as_deref(),
-            Some("no audio device — no default output")
+            Some("audio unavailable — no default output")
         );
         // engine_closed on a never-opened engine keeps the startup reason.
         player.engine_closed();

@@ -70,12 +70,13 @@
 use std::path::PathBuf;
 
 use iced::widget::{
-    Column, Space, button, checkbox, column, container, horizontal_rule, image as iced_image, row,
-    scrollable, text, text_input, tooltip,
+    Column, Space, button, checkbox, column, container, horizontal_rule, image as iced_image,
+    pick_list, row, scrollable, text, text_input, tooltip,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
+use crate::playback::OutputChoice;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
 use crate::views::place_header_with;
@@ -125,6 +126,14 @@ pub(crate) struct LibraryView<'a> {
     pub(crate) now_ns: i64,
 }
 
+/// The launch-time snapshot used by the shared-output picker.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OutputView<'a> {
+    pub(crate) choices: &'a [OutputChoice],
+    pub(crate) selected: &'a OutputChoice,
+    pub(crate) error: Option<&'a str>,
+}
+
 /// Inner padding of the place's content area (logical px).
 ///
 /// [`theme::HANG`], not `GAP_XL`: a place fills the window, so its content hangs
@@ -163,13 +172,14 @@ pub(crate) fn view<'a>(
     window_width: f32,
     section: usize,
     library: LibraryView<'a>,
+    output: OutputView<'a>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
     let blocks = if section == LIBRARY_SECTION {
         vec![library_section(library)]
     } else {
-        vec![replay_gain_section(player)]
+        vec![output_section(output), replay_gain_section(player)]
     };
     let content = container(
         scrollable(
@@ -216,6 +226,48 @@ pub(crate) fn view<'a>(
             .padding(PLACE_PAD),
     ]
     .into()
+}
+
+/// Shared-mode endpoint selection. The engine owns a cpal stream for its
+/// lifetime, so this standing decision is applied at the next launch rather
+/// than tearing a playing run out from under the listener.
+fn output_section(output: OutputView<'_>) -> Element<'_, Message> {
+    let room = theme::active();
+    let picker = pick_list(
+        output.choices,
+        Some(output.selected),
+        Message::OutputDeviceSelected,
+    )
+    .width(Length::Fill)
+    .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+    .text_size(theme::SIZE_BODY)
+    .text_line_height(theme::LEADING_BODY)
+    .style(move |_theme, status| theme::output_picker(room, status))
+    .menu_style(move |_theme| theme::output_menu(room));
+
+    let mut section = column![
+        section_heading(
+            "Audio output",
+            "Use the system default, or keep baz on one output device.",
+        ),
+        container(picker)
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .align_y(alignment::Vertical::Center),
+        text("A change takes effect the next time baz starts.")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint),
+    ]
+    .spacing(theme::GAP_SM);
+    if let Some(error) = output.error {
+        section = section.push(
+            text(error)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.alert),
+        );
+    }
+    section.into()
 }
 
 /// How wide the form gets: what the window has left for it, capped at

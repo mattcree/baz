@@ -1120,6 +1120,9 @@ fn open_output(
 ) -> Result<Output, PlaybackError> {
     match mode {
         OutputMode::Shared => DeviceSink::open(sample_rate, ring_frames).map(Output::Shared),
+        OutputMode::SharedDevice { device } => {
+            DeviceSink::open_on(Some(device), sample_rate, ring_frames).map(Output::Shared)
+        }
         #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
         OutputMode::Exclusive { device } => {
             let chosen = crate::playback::exclusive::choose(device.as_deref())?;
@@ -1245,11 +1248,16 @@ pub fn spawn_device_with(
             match open_output(&output, initial_sample_rate, device_ring_frames) {
                 Ok(sink) => {
                     let _ = ack_tx.send(Ok(()));
+                    let open_rate = match &sink {
+                        Output::Shared(shared) => shared.sample_rate(),
+                        #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+                        Output::Exclusive(_) => initial_sample_rate,
+                    };
                     let control = Control::new(
                         cmd_rx,
                         event_tx,
                         cfg,
-                        initial_sample_rate,
+                        open_rate,
                         Observable {
                             delivered: counter,
                             instruments: probes,

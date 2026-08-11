@@ -230,6 +230,16 @@ pub enum OutputMode {
     /// The default.
     #[default]
     Shared,
+    /// Play through one named device via the system's shared-mode audio path.
+    ///
+    /// cpal does not expose a stable cross-platform device id, so the name is
+    /// the same one returned by [`shared_output_devices`]. Front ends should
+    /// keep a system-default option alongside these names: it follows the
+    /// operating system when headphones, docks, or displays come and go.
+    SharedDevice {
+        /// The cpal output-device name, matched exactly.
+        device: String,
+    },
     /// Hold a hardware device exclusively for as long as baz runs.
     Exclusive {
         /// Which device, as an ALSA `hw:CARD,DEV` name. `None` asks baz to
@@ -282,6 +292,9 @@ impl OutputMode {
         matches!(self, Self::Exclusive { .. })
     }
 }
+
+#[cfg(feature = "device-output")]
+pub use device::shared_output_devices;
 
 /// The engine's fixed interleaved channel count. Every [`AudioSource`] block,
 /// ring-buffer slot, and [`Sink`] write is stereo-interleaved f32.

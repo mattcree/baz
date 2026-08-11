@@ -53,7 +53,7 @@ use lru::LruCache;
 use crate::motion::{Control, Ink, Keyed, Tween};
 use crate::mpris::Mpris;
 use crate::place::Place;
-use crate::playback::{Playback, PlayerEvent};
+use crate::playback::{OutputChoice, Playback, PlayerEvent};
 use crate::player::PlayerState;
 use crate::scan::ScanUpdate;
 use crate::{
@@ -904,6 +904,10 @@ pub(crate) enum Message {
     ReplayGainNoTagPreamp(i32),
     /// Settings panel: arm or disarm clipping prevention.
     ReplayGainPreventClipping(bool),
+    /// Settings: remember a shared-mode output endpoint. It takes effect on
+    /// the next launch, when the engine can be opened on it before any run is
+    /// restored.
+    OutputDeviceSelected(OutputChoice),
     /// Settings place: show this section of the place (index into
     /// `views::settings::SECTIONS`).
     SettingsSection(usize),
@@ -1156,6 +1160,12 @@ struct App {
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
+    /// Shared-mode endpoints found at launch, plus the system-default choice.
+    output_choices: Vec<OutputChoice>,
+    /// The endpoint written in config (or the system default).
+    output_choice: OutputChoice,
+    /// Enumeration failure, shown in Settings and recorded in status.
+    output_devices_error: Option<String>,
     /// Event-derived playback state; the only thing playback widgets read.
     player: PlayerState,
     /// Desktop media integration (Linux MPRIS2; a no-op elsewhere).
@@ -1449,10 +1459,18 @@ impl App {
                   would name four functions after the order they happen to run"
     )]
     fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
+        let stored = config::config_file().map(|path| config::load(&path));
+        let configured_output = stored
+            .as_ref()
+            .and_then(|config| config.output_device.as_deref());
+        let output_choice = OutputChoice::from_config(configured_output);
+        let (output_choices, output_devices_error) =
+            crate::playback::output_choices(configured_output);
         // Engine first: open failure must not kill the app — it becomes
         // Availability::NoDevice state that the bottom bar reports.
-        let playback = Playback::start();
-        let mut player = PlayerState::new(playback.availability());
+        let playback = Playback::start(configured_output);
+        let availability = playback.availability();
+        let mut player = PlayerState::new(availability.clone());
         // The one pull in an event-driven machine, and ADR-0011 provides it
         // for this moment: the fader shows the engine's real volume on the
         // first frame instead of assuming a default until something changes.
@@ -1474,7 +1492,6 @@ impl App {
         // returns, and an absent session bus costs one stdout line (see
         // crate::mpris).
         let mpris = Mpris::start();
-        let stored = config::config_file().map(|path| config::load(&path));
         let saved_volume = stored
             .as_ref()
             .map_or(Volume::UNITY, |config| config.volume);
@@ -1560,7 +1577,10 @@ impl App {
         // them. Pointing baz at a folder for an afternoon must not silently
         // forget the other three — and the one that was named on the command
         // line is the one being asked for, so it is scanned first.
-        let mut dirs: Vec<PathBuf> = stored.map(|config| config.music_dirs).unwrap_or_default();
+        let mut dirs: Vec<PathBuf> = stored
+            .as_ref()
+            .map(|config| config.music_dirs.clone())
+            .unwrap_or_default();
         if let Some(dir) = cli_dir {
             dirs.retain(|held| held != &dir);
             dirs.insert(0, dir);
@@ -1617,6 +1637,9 @@ impl App {
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State::default(),
             playback,
+            output_choices,
+            output_choice,
+            output_devices_error,
             player,
             mpris,
             mpris_art: (0, None),
@@ -1626,6 +1649,22 @@ impl App {
             saved_replay_gain,
             saved_volume,
         };
+        if let Screen::Shelf(state) = &mut app.screen {
+            if let crate::player::Availability::NoDevice(reason) = &availability {
+                state.health.record(
+                    crate::health::Level::Error,
+                    "Audio output unavailable",
+                    reason,
+                );
+            }
+            if let Some(error) = &app.output_devices_error {
+                state.health.record(
+                    crate::health::Level::Warning,
+                    "Could not list audio outputs",
+                    error,
+                );
+            }
+        }
         // **The run, handed back to the engine — silent.** `SetQueue` and
         // nothing else: it replaces the queue and starts nothing
         // (`baz_core::engine`'s command table), so the queue survives the quit
@@ -1862,6 +1901,23 @@ impl App {
             // decision.
             Message::SettingsSection(section) => {
                 self.settings_section = section;
+                Task::none()
+            }
+            Message::OutputDeviceSelected(choice) => {
+                if choice == self.output_choice {
+                    return Task::none();
+                }
+                let configured = choice.device().map(str::to_owned);
+                let label = choice.to_string();
+                self.output_choice = choice;
+                persist(move |config| config.output_device = configured);
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.health.record(
+                        crate::health::Level::Ready,
+                        "Audio output changed",
+                        format!("{label} will be used the next time baz starts."),
+                    );
+                }
                 Task::none()
             }
             Message::WindowResized(size) => {
@@ -4974,7 +5030,7 @@ impl App {
                 state.scanning,
                 state.unavailable.len(),
                 state.files_skipped,
-                state.problem.is_some(),
+                state.problem.is_some() || !self.player.engine_ready(),
                 state.health.attention(),
             ),
             Screen::Setup(_) | Screen::Blocked(_) => {
@@ -5143,6 +5199,11 @@ impl App {
                     self.body_width(),
                     self.settings_section,
                     state.library_view(),
+                    views::settings::OutputView {
+                        choices: &self.output_choices,
+                        selected: &self.output_choice,
+                        error: self.output_devices_error.as_deref(),
+                    },
                 )
             }
         };

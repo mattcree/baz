@@ -115,7 +115,7 @@ use std::sync::{LazyLock, OnceLock};
 use iced::font::{self, Weight};
 use iced::widget::rule::FillMode;
 use iced::widget::slider::{Handle, HandleShape, Rail};
-use iced::widget::{button, checkbox, container, rule, scrollable, slider, text_input};
+use iced::widget::{button, checkbox, container, pick_list, rule, scrollable, slider, text_input};
 use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mouse};
 
 // ---------------------------------------------------------------------------
@@ -3046,6 +3046,44 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
         placeholder: p.paper_faint,
         value: p.paper,
         selection: p.select_wash(p.recess),
+    }
+}
+
+/// The output picker is the Settings form's input well: a recess at rest and
+/// a paper edge when the pointer or its open menu arrives.
+#[must_use]
+pub fn output_picker(p: &Palette, status: pick_list::Status) -> pick_list::Style {
+    let edge = match status {
+        pick_list::Status::Active => p.recess,
+        pick_list::Status::Hovered | pick_list::Status::Opened => p.paper_ring(p.recess),
+    };
+    pick_list::Style {
+        text_color: p.paper,
+        placeholder_color: p.paper_faint,
+        handle_color: p.paper_faint,
+        background: Background::Color(p.recess),
+        border: Border {
+            color: edge,
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+    }
+}
+
+/// The menu beneath [`output_picker`], on the same raised plane as the other
+/// small floating surfaces.
+#[must_use]
+pub fn output_menu(p: &Palette) -> iced::widget::overlay::menu::Style {
+    iced::widget::overlay::menu::Style {
+        background: Background::Color(p.plinth),
+        border: Border {
+            color: p.hairline_strong(p.plinth),
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        text_color: p.paper,
+        selected_text_color: p.paper,
+        selected_background: Background::Color(p.plinth_lit),
     }
 }
 

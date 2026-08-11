@@ -120,6 +120,9 @@ const SHUFFLE: &str = "shuffle";
 /// The key the volume fader's control position is written under.
 const VOLUME: &str = "volume";
 
+/// The shared-mode output endpoint, absent to follow the system default.
+const OUTPUT_DEVICE: &str = "output_device";
+
 /// The key the last visible place is written under.
 const LAST_PLACE: &str = "last_place";
 
@@ -195,6 +198,11 @@ pub struct Config {
     /// the slider's state; a fresh launch is therefore audible at the saved
     /// level rather than silently inheriting an old temporary mute.
     pub volume: Volume,
+    /// A named shared-mode audio endpoint, or `None` to follow the operating
+    /// system's default. The name is the portable label cpal exposes; if it is
+    /// no longer present, playback reports the missing endpoint and Settings
+    /// still preserves the choice so reconnecting it repairs the next launch.
+    pub output_device: Option<String>,
     /// **Whether shuffle is on** (the owner's decision, 2026-08-10:
     /// *"can you make shuffle a property of the player i.e. toggle on/off"*).
     ///
@@ -239,6 +247,7 @@ impl Default for Config {
             density: Density::Balanced,
             sidebar_open: true,
             volume: Volume::UNITY,
+            output_device: None,
             shuffle: false,
             last_place: Place::Library,
         }
@@ -311,6 +320,14 @@ impl Config {
              {VOLUME} = {}",
             self.volume.position(),
         );
+        if let Some(device) = self.output_device.as_deref() {
+            let _ = writeln!(
+                out,
+                "# shared-mode audio endpoint; remove this line to follow the system default\n\
+                 {OUTPUT_DEVICE} = {}",
+                toml_string(device),
+            );
+        }
         let _ = writeln!(
             out,
             "# whether shuffle is on — the crossed arrows on the \
@@ -384,6 +401,12 @@ impl Config {
             .and_then(|position| u16::try_from(position).ok())
             .filter(|position| *position <= MAX_POSITION)
             .map_or(Volume::UNITY, Volume::new);
+        let output_device = table
+            .get(OUTPUT_DEVICE)
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .filter(|device| !device.is_empty())
+            .map(str::to_owned);
         // `sidebar_open`'s degradation, and it defaults the other way: a file
         // that cannot say whether shuffle was on is a file baz plays in order
         // from, because guessing *on* would re-order somebody's evening over a
@@ -407,6 +430,7 @@ impl Config {
             density,
             sidebar_open,
             volume,
+            output_device,
             shuffle,
             last_place,
         }
@@ -672,6 +696,7 @@ mod tests {
                 density: Density::Dense,
                 sidebar_open: true,
                 volume: Volume::new(618),
+                output_device: None,
                 shuffle: false,
                 last_place: Place::Library,
             };
@@ -1002,6 +1027,7 @@ mod tests {
             density: Density::Spacious,
             sidebar_open: true,
             volume: Volume::new(500),
+            output_device: None,
             shuffle: false,
             last_place: Place::Library,
         };
@@ -1023,6 +1049,7 @@ mod tests {
             density: Density::Spacious,
             sidebar_open: true,
             volume: Volume::new(750),
+            output_device: Some("USB DAC".to_owned()),
             shuffle: false,
             last_place: Place::Playlist(42),
         };
@@ -1177,6 +1204,7 @@ mod tests {
             density: Density::Dense,
             sidebar_open: true,
             volume: Volume::new(250),
+            output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
             last_place: Place::NowPlaying,
         };

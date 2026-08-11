@@ -66,6 +66,59 @@
 //! the runtime discards as a duplicate id.
 
 use baz_core::protocol::Event;
+use std::fmt;
+
+/// One entry in Settings' shared-output picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OutputChoice {
+    /// Follow the endpoint selected by Windows/macOS/the desktop audio server.
+    SystemDefault,
+    /// Keep using this cpal endpoint name across launches.
+    Device(String),
+}
+
+impl OutputChoice {
+    pub(crate) fn from_config(device: Option<&str>) -> Self {
+        device.map_or(Self::SystemDefault, |name| Self::Device(name.to_owned()))
+    }
+
+    pub(crate) fn device(&self) -> Option<&str> {
+        match self {
+            Self::SystemDefault => None,
+            Self::Device(name) => Some(name),
+        }
+    }
+}
+
+impl fmt::Display for OutputChoice {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SystemDefault => formatter.write_str("System default"),
+            Self::Device(name) => formatter.write_str(name),
+        }
+    }
+}
+
+/// Enumerate the picker once at launch. A configured endpoint that is
+/// currently unplugged remains in the list so the setting can be changed (or
+/// deliberately kept) without silently falling back.
+pub(crate) fn output_choices(configured: Option<&str>) -> (Vec<OutputChoice>, Option<String>) {
+    let mut choices = vec![OutputChoice::SystemDefault];
+    let error = match baz_core::playback::shared_output_devices() {
+        Ok(devices) => {
+            choices.extend(devices.into_iter().map(OutputChoice::Device));
+            None
+        }
+        Err(error) => Some(error.to_string()),
+    };
+    if let Some(name) = configured {
+        let configured = OutputChoice::Device(name.to_owned());
+        if !choices.contains(&configured) {
+            choices.push(configured);
+        }
+    }
+    (choices, error)
+}
 
 /// What the event bridge delivers to the UI.
 #[derive(Debug, Clone)]
@@ -110,9 +163,15 @@ mod imp {
     impl Playback {
         /// Spawn the device engine and its event bridge. Never fails: an
         /// unusable device becomes [`Availability::NoDevice`] state instead.
-        pub fn start() -> Self {
-            let spawned = baz_core::engine::spawn_device(
+        pub fn start(device: Option<&str>) -> Self {
+            let output = device.map_or(baz_core::playback::OutputMode::Shared, |device| {
+                baz_core::playback::OutputMode::SharedDevice {
+                    device: device.to_owned(),
+                }
+            });
+            let spawned = baz_core::engine::spawn_device_with(
                 EngineConfig::default(),
+                &output,
                 INITIAL_SAMPLE_RATE,
                 DEVICE_RING_FRAMES,
             );

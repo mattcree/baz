@@ -222,6 +222,50 @@ fn default_output_device() -> Option<cpal::Device> {
     cpal::default_host().default_output_device()
 }
 
+/// The names of the shared-mode output devices cpal can currently see.
+///
+/// Names are sorted and deduplicated for a stable settings list. cpal does
+/// not expose a portable endpoint id; where a host reports duplicate names,
+/// selecting that name resolves to the first matching endpoint.
+///
+/// # Errors
+///
+/// [`PlaybackError::Device`] when the platform audio host cannot enumerate
+/// its output endpoints.
+pub fn shared_output_devices() -> Result<Vec<String>, PlaybackError> {
+    anchor_cpal_host();
+    let devices = cpal::default_host().output_devices().map_err(|error| {
+        PlaybackError::Device(format!("could not list output devices: {error}"))
+    })?;
+    let mut names = devices
+        .filter_map(|device| device.name().ok())
+        .collect::<Vec<_>>();
+    names.sort_unstable_by_key(|name| name.to_lowercase());
+    names.dedup();
+    Ok(names)
+}
+
+/// Resolve either the system default or an exact name from
+/// [`shared_output_devices`].
+fn output_device(name: Option<&str>) -> Result<cpal::Device, PlaybackError> {
+    let Some(name) = name else {
+        return default_output_device()
+            .ok_or_else(|| PlaybackError::Device("no default output device".into()));
+    };
+    anchor_cpal_host();
+    let devices = cpal::default_host().output_devices().map_err(|error| {
+        PlaybackError::Device(format!("could not list output devices: {error}"))
+    })?;
+    for device in devices {
+        if device.name().ok().as_deref() == Some(name) {
+            return Ok(device);
+        }
+    }
+    Err(PlaybackError::Device(format!(
+        "no shared output device named {name:?}"
+    )))
+}
+
 /// Make the process's first cpal call on a thread that will never exit, and
 /// wait for it to finish.
 ///
@@ -353,6 +397,9 @@ pub struct DeviceSink {
     sample_rate: u32,
     /// Ring size in frames, kept so a reopen reproduces the same buffering.
     ring_frames: usize,
+    /// `None` follows the system default; `Some` keeps reopening the named
+    /// endpoint when the source rate changes.
+    device_name: Option<String>,
 }
 
 impl DeviceSink {
@@ -364,8 +411,27 @@ impl DeviceSink {
     /// [`PlaybackError::Device`] if there is no output device or the stream
     /// cannot be built/started (e.g. headless CI, unsupported rate).
     pub fn open(sample_rate: u32, ring_frames: usize) -> Result<Self, PlaybackError> {
-        let device = default_output_device()
-            .ok_or_else(|| PlaybackError::Device("no default output device".into()))?;
+        Self::open_on(None, sample_rate, ring_frames)
+    }
+
+    /// Open a named shared-mode output, or the system default when `device_name`
+    /// is `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`PlaybackError::Device`] when the endpoint is absent, cannot describe
+    /// a usable stereo `f32` configuration, or refuses to build/start it.
+    pub fn open_on(
+        device_name: Option<&str>,
+        sample_rate: u32,
+        ring_frames: usize,
+    ) -> Result<Self, PlaybackError> {
+        let device = output_device(device_name)?;
+        // Startup deserves the same negotiation every later source-rate
+        // change receives. In particular, WASAPI endpoints commonly idle at
+        // 48 kHz and reject a literal 44.1 kHz shared stream even though they
+        // are present and otherwise healthy.
+        let sample_rate = negotiated_rate(&device, sample_rate).unwrap_or(sample_rate);
         let config = cpal::StreamConfig {
             channels: u16::try_from(CHANNELS)
                 .map_err(|_| PlaybackError::Device("channel count exceeds u16".into()))?,
@@ -373,6 +439,9 @@ impl DeviceSink {
             buffer_size: cpal::BufferSize::Default,
         };
         let capacity = ring_frames * CHANNELS;
+        let device_label = device
+            .name()
+            .unwrap_or_else(|_| "unknown output".to_owned());
         let (producer, mut consumer) = RingBuffer::<f32>::new(capacity);
         let failed = Arc::new(AtomicBool::new(false));
         let error_flag = Arc::clone(&failed);
@@ -427,10 +496,16 @@ impl DeviceSink {
                 },
                 None,
             )
-            .map_err(|e| PlaybackError::Device(e.to_string()))?;
-        stream
-            .play()
-            .map_err(|e| PlaybackError::Device(e.to_string()))?;
+            .map_err(|e| {
+                PlaybackError::Device(format!(
+                    "{device_label}: could not open stereo f32 at {sample_rate} Hz: {e}"
+                ))
+            })?;
+        stream.play().map_err(|e| {
+            PlaybackError::Device(format!(
+                "{device_label}: could not start stereo f32 at {sample_rate} Hz: {e}"
+            ))
+        })?;
         Ok(Self {
             _stream: stream,
             producer,
@@ -442,6 +517,7 @@ impl DeviceSink {
             capacity,
             sample_rate,
             ring_frames,
+            device_name: device_name.map(str::to_owned),
         })
     }
 
@@ -553,7 +629,7 @@ impl Sink for DeviceSink {
         }
         // A device that has vanished since we opened is not something a rate
         // request can fix; keep the stream we have and let `write` report.
-        let Some(device) = default_output_device() else {
+        let Ok(device) = output_device(self.device_name.as_deref()) else {
             return Some(self.sample_rate);
         };
         // Ask the device what it can do rather than guessing. `None` means it
@@ -562,7 +638,7 @@ impl Sink for DeviceSink {
         if target == self.sample_rate {
             return Some(self.sample_rate);
         }
-        match Self::open(target, self.ring_frames) {
+        match Self::open_on(self.device_name.as_deref(), target, self.ring_frames) {
             // Build first, swap second, and only then let the old one go: a
             // failed open must leave the working stream in place rather than a
             // silent device, so the new stream has to exist before the old one
