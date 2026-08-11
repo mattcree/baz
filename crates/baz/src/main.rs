@@ -43,6 +43,7 @@ mod font;
 mod groove;
 mod icon;
 mod implicit;
+mod jewel_case;
 mod keys;
 mod lane;
 mod menu;

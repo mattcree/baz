@@ -21,7 +21,7 @@ dirs = "6"          # XDG config/data dir lookup for config + library DB (MIT OR
 # because neither `slider` nor `mouse_area` can express its pointer
 # affordances (evidence in crates/baz/src/seek.rs). All three are feature
 # flags on a dependency already here — no new crates. (MIT)
-iced = { version = "0.13", features = ["advanced", "image", "tokio"] }
+iced = { version = "0.13", features = ["advanced", "canvas", "image", "tokio"] }
 # Thumbnail decode + downscale; jpeg/png only — the two formats cover art
 # ships in practice (see crates/baz/src/art.rs). (MIT OR Apache-2.0)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

@@ -14,7 +14,6 @@ use crate::app::{Message, Shelf};
 use crate::field;
 use crate::player::PlayerState;
 use crate::theme;
-use crate::views::gradient_block;
 
 /// The source page Now playing can quietly lead to.
 #[derive(Debug, Clone)]
@@ -285,6 +284,7 @@ pub(crate) fn view<'a>(
     width: f32,
     height: f32,
     source: Option<Source>,
+    rotation: crate::jewel_case::Rotation,
 ) -> Element<'a, Message> {
     let Some(now) = player.now_playing() else {
         // **A start in flight is not silence.** `Resume` on the Home place
@@ -340,7 +340,11 @@ pub(crate) fn view<'a>(
         work.field,
         t,
     );
-    let song = container(record_column(&work, t, now, edge, show_album)).center(Length::Fill);
+    let insert = rear_insert(shelf, now);
+    let song = container(record_column(
+        &work, t, now, edge, show_album, rotation, insert,
+    ))
+    .center(Length::Fill);
     let body: Element<'a, Message> = match source {
         Some(source) => column![song, source_link(source)]
             .height(Length::Fill)
@@ -350,6 +354,35 @@ pub(crate) fn view<'a>(
     // The artwork-derived field sits under the one centred current-song
     // composition. Nothing else competes for this place's body.
     stack![field, body].into()
+}
+
+fn rear_insert(shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_case::Insert {
+    let album = now.album_id.and_then(|id| shelf.album(id));
+    let tracks = album
+        .and_then(|album| {
+            let chosen = shelf.edition_choice.get(&album.id).copied();
+            crate::vm::selected_edition(album, chosen)
+        })
+        .map_or_else(
+            || vec![now.title.clone()],
+            |edition| {
+                edition
+                    .tracks
+                    .iter()
+                    .map(|track| track.title.clone())
+                    .collect()
+            },
+        );
+    crate::jewel_case::Insert {
+        album_id: now.album_id.unwrap_or_default(),
+        title: now.album.clone().unwrap_or_else(|| now.title.clone()),
+        artist: now
+            .artist
+            .clone()
+            .or_else(|| now.track_artist.clone())
+            .unwrap_or_default(),
+        tracks,
+    }
 }
 
 /// **What this surface has to draw of a record, and the number that bounds
@@ -388,6 +421,7 @@ fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
     if let Some(hero) = showing.hero {
         return Work {
             handle: Some(hero.handle.clone()),
+            back: hero.back.clone(),
             source: hero.px,
             field: hero.field,
             from: showing
@@ -402,6 +436,7 @@ fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
     match (shelf.thumbs.peek(&id), shelf.thumb_edge(id)) {
         (Some(handle), Some(px)) => Work {
             handle: Some(handle.clone()),
+            back: None,
             source: px,
             field: None,
             from: None,
@@ -422,6 +457,8 @@ fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
 struct Work {
     /// The picture, or `None` for the wall's deterministic gradient.
     handle: Option<iced_image::Handle>,
+    /// A real rear cover, when the record carries one.
+    back: Option<iced_image::Handle>,
     /// `min(w, h)` of the decode being drawn — [`art_edge`]'s third term.
     source: f32,
     /// The field derived from that same decode. Read from the **hero** alone:
@@ -443,6 +480,7 @@ impl Work {
     fn bare() -> Self {
         Self {
             handle: None,
+            back: None,
             source: f32::INFINITY,
             field: None,
             from: None,
@@ -492,27 +530,22 @@ impl Work {
 fn sleeve(
     work: &Work,
     t: f32,
-    now: &crate::player::NowPlaying,
     edge: f32,
+    rotation: crate::jewel_case::Rotation,
+    insert: crate::jewel_case::Insert,
 ) -> Element<'static, Message> {
-    let Some(handle) = work.handle.clone() else {
-        // The wall's own deterministic gradient, at this scale — the same
-        // stand-in a tile shows, so a record with no cover is the same object
-        // here as it is there. **Never dissolved**: it is a stand-in rather
-        // than artwork, and fading a stand-in is decoration (ADR-0020 §3).
-        return gradient_block(now.album_id.unwrap_or_default(), edge, 1.0);
-    };
-    let square = |handle: iced_image::Handle| {
-        iced_image(handle)
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(edge))
-    };
-    match &work.from {
-        Some((from, _, _)) if t < 1.0 => {
-            stack![square(from.clone()), square(handle).opacity(t)].into()
-        }
-        _ => square(handle).into(),
-    }
+    crate::jewel_case::view(
+        edge,
+        rotation,
+        crate::jewel_case::Art {
+            front: work.handle.clone(),
+            from: work.from.as_ref().map(|(handle, _, _)| handle.clone()),
+            front_opacity: t,
+            back: work.back.clone(),
+            field: work.field,
+        },
+        insert,
+    )
 }
 
 /// **The field, laid under everything** — the place's z1, and the reason a
@@ -592,9 +625,11 @@ fn record_column<'a>(
     now: &'a crate::player::NowPlaying,
     edge: f32,
     show_album: bool,
+    rotation: crate::jewel_case::Rotation,
+    insert: crate::jewel_case::Insert,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let sleeve = sleeve(work, t, now, edge);
+    let sleeve = sleeve(work, t, edge, rotation, insert);
 
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
@@ -1282,6 +1317,7 @@ mod tests {
         let handle = || iced_image::Handle::from_rgba(1, 1, vec![0_u8; 4]);
         Work {
             handle: Some(handle()),
+            back: None,
             source: to,
             field: None,
             from: Some((handle(), from, None)),

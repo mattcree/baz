@@ -827,6 +827,17 @@ pub(crate) enum Message {
     /// icon-only law's *stable in every state* clause (doc 10 §3.1) holding in
     /// the one state anybody checks.
     WindowMaximizedChanged(bool),
+    /// Whether the compositor says this window has focus. The jewel case's
+    /// idle clock is absent while false, so background windows pay no redraws.
+    WindowFocused(bool),
+    /// Advance the Now Playing jewel case's slow unattended turn.
+    CaseTick(Instant),
+    /// The pointer took hold of the jewel case.
+    CasePressed(Point),
+    /// The held pointer moved over the jewel case.
+    CaseDragged(Point),
+    /// The pointer released the jewel case.
+    CaseReleased,
     /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -1116,10 +1127,14 @@ struct App {
     /// found the compositor had refused would be a control that lies about the
     /// window: on Wayland a maximise request is a request.
     window_maximized: bool,
+    /// Whether the window is foregrounded; gates continuous case motion.
+    window_focused: bool,
     /// When the app bar was last pressed, for the double-press that maximises
     /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
     /// double, so that three presses are a double and a single.
     last_bar_press: Option<Instant>,
+    /// The Now Playing jewel case's yaw, pitch and drag gesture.
+    case_rotation: crate::jewel_case::Rotation,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -1575,7 +1590,9 @@ impl App {
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
+            window_focused: true,
             last_bar_press: None,
+            case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             playback,
             player,
             mpris,
@@ -1635,6 +1652,8 @@ impl App {
                 | Message::ScanTick
                 | Message::FirstFrame
                 | Message::MotionTick(_)
+                | Message::CaseTick(_)
+                | Message::WindowFocused(_)
                 | Message::WindowMaximizedChanged(_)
         ) {
             self.last_interaction = now;
@@ -1708,6 +1727,7 @@ impl App {
         for machine in [
             Self::update_lane,
             Self::update_menu,
+            Self::update_case,
             Self::update_motion,
             Self::update_modified_input,
             Self::update_playlists,
@@ -2240,6 +2260,37 @@ impl App {
             // which is the same condition `button` applies to itself.
             Message::PointerPressed => self.pressed_control = self.ink.key(),
             Message::PointerReleased => self.pressed_control = None,
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    /// The jewel case's one continuous scalar and its direct-manipulation
+    /// gesture. Kept separate from bounded hover tweens because this clock is
+    /// intentionally continuous while the surface is being watched.
+    fn update_case(&mut self, message: &Message) -> Option<Task<Message>> {
+        match *message {
+            Message::WindowFocused(focused) => {
+                self.window_focused = focused;
+                if !focused {
+                    self.case_rotation.release();
+                }
+            }
+            Message::CaseTick(now) => {
+                if self.window_focused && self.place == Place::NowPlaying {
+                    self.case_rotation.tick(now);
+                }
+            }
+            Message::CasePressed(at) if self.place == Place::NowPlaying => {
+                self.case_rotation.press(at);
+            }
+            Message::CaseDragged(at) if self.place == Place::NowPlaying => {
+                self.case_rotation.drag(at);
+            }
+            Message::CaseReleased if self.place == Place::NowPlaying => {
+                self.case_rotation.release();
+            }
+            Message::CasePressed(_) | Message::CaseDragged(_) | Message::CaseReleased => {}
             _ => return None,
         }
         Some(Task::none())
@@ -4877,6 +4928,7 @@ impl App {
                 self.body_width(),
                 self.body_height(),
                 self.now_playing_source(),
+                self.case_rotation,
             ),
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
@@ -5149,6 +5201,10 @@ impl App {
                 iced::Event::Window(window::Event::FilesHoveredLeft) => {
                     Some(Message::FileHoverLeft)
                 }
+                iced::Event::Window(window::Event::Focused) => Some(Message::WindowFocused(true)),
+                iced::Event::Window(window::Event::Unfocused) => {
+                    Some(Message::WindowFocused(false))
+                }
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
@@ -5171,6 +5227,18 @@ impl App {
         // mechanism; §1.4 for the 0.0 % it measures.)
         if self.moving() {
             subs.push(iced::time::every(motion::TICK).map(|_| Message::MotionTick(Instant::now())));
+        }
+        // The jewel case is the one intentionally continuous motion in Baz.
+        // It exists only while its surface is foregrounded and has a record
+        // to draw; every other place and every background window has no timer.
+        if self.window_focused
+            && self.place == Place::NowPlaying
+            && self.player.now_playing().is_some()
+        {
+            subs.push(
+                iced::time::every(crate::jewel_case::TICK)
+                    .map(|_| Message::CaseTick(Instant::now())),
+            );
         }
         // The scan channel is drained on a coarse tick — batching by design.
         if let Screen::Shelf(state) = &self.screen {
@@ -5233,6 +5301,9 @@ pub(crate) struct GroupVm {
 pub(crate) struct Hero {
     /// The cover at up to [`art::HERO_PX`] per edge.
     pub(crate) handle: iced_image::Handle,
+    /// A real rear insert, when the files or tags carry one. `None` asks the
+    /// jewel case to typeset the album's track list instead.
+    pub(crate) back: Option<iced_image::Handle>,
     /// `min(width, height)` of what the decode actually returned — **the
     /// source's own pixels**, and the third term of the Now playing place's
     /// `art_edge`. Not [`art::HERO_PX`], which is only the decoder's ceiling:
@@ -7044,10 +7115,14 @@ impl Shelf {
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
-                    art::load_hero_cached(&path).map(|(w, h, rgba)| Hero {
+                    let (w, h, rgba) = art::load_hero_cached(&path)?;
+                    let back = art::load_back(&path)
+                        .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba));
+                    Some(Hero {
                         field: crate::field::Field::derive(w, h, &rgba),
                         px: shortest_edge(w, h),
                         handle: iced_image::Handle::from_rgba(w, h, rgba),
+                        back,
                     })
                 })
                 .await
@@ -9260,6 +9335,7 @@ mod tests {
     fn a_hero() -> Hero {
         Hero {
             handle: iced_image::Handle::from_rgba(1, 1, vec![0_u8; 4]),
+            back: None,
             px: 1.0,
             field: None,
         }

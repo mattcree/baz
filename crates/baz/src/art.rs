@@ -148,6 +148,16 @@ pub enum ArtSource {
 /// Matched case-insensitively (`Cover.JPG` counts).
 const COVER_FILE_NAMES: [&str; 4] = ["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg"];
 
+/// Rear-insert names used by common rippers and taggers, in priority order.
+const BACK_FILE_NAMES: [&str; 6] = [
+    "back.jpg",
+    "back.jpeg",
+    "back.png",
+    "rear.jpg",
+    "rear.jpeg",
+    "rear.png",
+];
+
 /// Resolve the art source for an album given its first track's path.
 /// `None` means "no art found" — the shelf renders the gradient placeholder.
 #[must_use]
@@ -157,6 +167,19 @@ pub fn resolve(first_track: &Path) -> Option<ArtSource> {
     }
     let dir = first_track.parent()?;
     cover_file(dir).map(ArtSource::File)
+}
+
+/// Resolve a real rear cover for the jewel case, when the album carries one.
+///
+/// Unlike [`resolve`], an untyped embedded picture is not accepted: using a
+/// booklet page as the rear insert is worse than Baz's generated track list.
+#[must_use]
+pub fn resolve_back(first_track: &Path) -> Option<ArtSource> {
+    if let Some(bytes) = embedded_picture_of(first_track, PictureType::CoverBack) {
+        return Some(ArtSource::Embedded(bytes));
+    }
+    let dir = first_track.parent()?;
+    art_file(dir, &BACK_FILE_NAMES).map(ArtSource::File)
 }
 
 /// The cover file sitting beside `first_track`, if the album has one — step 2
@@ -185,15 +208,28 @@ fn embedded_picture(track: &Path) -> Option<Vec<u8>> {
     Some(picture.data().to_vec())
 }
 
+fn embedded_picture_of(track: &Path, kind: PictureType) -> Option<Vec<u8>> {
+    let file = lofty::read_from_path(track).ok()?;
+    let tag = file.primary_tag().or_else(|| file.first_tag())?;
+    tag.pictures()
+        .iter()
+        .find(|picture| picture.pic_type() == kind)
+        .map(|picture| picture.data().to_vec())
+}
+
 /// The best cover file in `dir` per [`COVER_FILE_NAMES`], case-insensitive.
 fn cover_file(dir: &Path) -> Option<PathBuf> {
+    art_file(dir, &COVER_FILE_NAMES)
+}
+
+fn art_file(dir: &Path, names: &[&str]) -> Option<PathBuf> {
     let entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .map(|e| e.path())
         .collect();
-    for candidate in COVER_FILE_NAMES {
+    for candidate in names {
         let found = entries.iter().find(|path| {
             path.file_name()
                 .and_then(|n| n.to_str())
@@ -204,6 +240,13 @@ fn cover_file(dir: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Decode a real rear cover at the Now Playing tier. Missing rear artwork is
+/// not an error; the view generates a typographic insert from the track list.
+#[must_use]
+pub fn load_back(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    decode_source(resolve_back(first_track)?, HERO_PX).map(into_parts)
 }
 
 /// Resolve and decode an album's art into an RGBA thumbnail no larger than
@@ -368,7 +411,11 @@ fn decode(first_track: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
 }
 
 fn decode_image(first_track: &Path, edge: u32) -> Option<image::RgbaImage> {
-    let image = match resolve(first_track)? {
+    decode_source(resolve(first_track)?, edge)
+}
+
+fn decode_source(source: ArtSource, edge: u32) -> Option<image::RgbaImage> {
+    let image = match source {
         ArtSource::Embedded(bytes) => image::load_from_memory(&bytes).ok()?,
         ArtSource::File(path) => image::open(path).ok()?,
     };
@@ -488,12 +535,49 @@ mod tests {
     }
 
     #[test]
+    fn rear_cover_prefers_a_typed_embedded_picture_then_common_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let track = dir.path().join("01 song.wav");
+        write_wav(&track, None);
+        let front = png_bytes(3, 3);
+        let back = png_bytes(5, 4);
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverFront,
+            Some(MimeType::Png),
+            None,
+            front,
+        ));
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverBack,
+            Some(MimeType::Png),
+            None,
+            back.clone(),
+        ));
+        tag.save_to_path(&track, WriteOptions::default())
+            .expect("embed pictures");
+        std::fs::write(dir.path().join("back.jpg"), b"decoy").expect("write");
+        assert_eq!(resolve_back(&track), Some(ArtSource::Embedded(back)));
+
+        let other = dir.path().join("02 song.wav");
+        write_wav(&other, None);
+        std::fs::remove_file(dir.path().join("back.jpg")).expect("remove");
+        std::fs::write(dir.path().join("Rear.PNG"), png_bytes(4, 4)).expect("write");
+        assert_eq!(
+            resolve_back(&other),
+            Some(ArtSource::File(dir.path().join("Rear.PNG")))
+        );
+        assert!(load_back(&other).is_some());
+    }
+
+    #[test]
     fn no_art_resolves_to_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         let track = dir.path().join("01 song.wav");
         write_wav(&track, None);
         std::fs::write(dir.path().join("notes.txt"), b"x").expect("write");
         assert_eq!(resolve(&track), None);
+        assert_eq!(resolve_back(&track), None);
         assert_eq!(load_thumb(&track), None);
     }
 
