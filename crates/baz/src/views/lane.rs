@@ -175,14 +175,19 @@ pub(crate) fn view<'a>(
     .width(Length::Fill)
     .height(Length::Fill);
 
-    // The lane's own gutter is `GAP_XL` on both flanks — the measure both
-    // widths are built from (`theme::SIDEBAR_W`) — never `HANG`: the lane is a
-    // surface inside the window, not one hanging off its edge, and law L1's
-    // window gutter belongs to the wall on the other side of it.
+    // Keep the established `GAP_XL` lead at the top, but only `GAP_MD` under
+    // the footer. The old symmetric 24 px outer padding combined with the
+    // collapse control's own 12 px padding into 36 px of dead space at the
+    // bottom, paid for by the scrollable list above it.
     let lane = container(body)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(theme::pad(theme::GAP_XL, 0.0))
+        .padding(iced::Padding {
+            top: theme::GAP_XL,
+            right: 0.0,
+            bottom: theme::GAP_MD,
+            left: 0.0,
+        })
         .style(move |_theme| theme::lane_ground(room));
 
     row![
@@ -809,7 +814,15 @@ fn marks(open: bool, can_expand: bool) -> Element<'static, Message> {
     container(lane_toggle(open, can_expand))
         .width(Length::Fill)
         .align_x(alignment::Horizontal::Center)
-        .padding(theme::pad(theme::GAP_MD, 0.0))
+        // Separation belongs above the footer. The lane's outer bottom lead
+        // supplies the space below it, so symmetric padding here only reduced
+        // the scrolling viewport.
+        .padding(iced::Padding {
+            top: theme::GAP_MD,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        })
         .into()
 }
 
@@ -1171,6 +1184,21 @@ mod tests {
         assert!(
             view.contains("scrollable(body_rows.padding("),
             "the mixed rows are no longer the scroller's content"
+        );
+    }
+
+    #[test]
+    fn the_collapse_footer_spends_its_space_above_the_control() {
+        let source = source();
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        let marks = body(&source, "fn marks(open: bool, can_expand: bool)");
+        assert!(
+            view.contains("bottom: theme::GAP_MD"),
+            "the lane kept its old oversized bottom gutter"
+        );
+        assert!(
+            marks.contains("top: theme::GAP_MD") && marks.contains("bottom: 0.0"),
+            "the collapse footer still pads equally above and below itself"
         );
     }
 

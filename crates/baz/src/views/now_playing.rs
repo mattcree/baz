@@ -1,6 +1,6 @@
 //! **The Now playing place** — the current song, and nothing competing with it.
 //!
-//! One large source-bounded cover, the track-led placard, needle and figures.
+//! One large source-bounded cover and the track-led placard.
 //! The run is not another version of an album or playlist page and is not
 //! drawn here. A quiet provenance link is the road to the real source page:
 //! the originating playlist when one still exists, the current unsaved list
@@ -95,10 +95,10 @@ fn kiosk_scale(height: f32) -> f32 {
 /// sentence; [`view`]'s centring is the left one, and neither alone is the fix.
 ///
 /// So the measure is scaled by [`kiosk_scale`] — 440 up to a
-/// [`FAR_FIELD_REF`] work, **472** at 1920 × 1080, **692** at 2560 × 1440, and
+/// [`FAR_FIELD_REF`] work, **503** at 1920 × 1080, **723** at 2560 × 1440, and
 /// **1100** at 4K where the scale reaches its ceiling.
 ///
-/// The 1920 figure is 440 in doc 12 §5.5a's table and it is **472** here;
+/// The 1920 figure is 440 in doc 12 §5.5a's table and it is **503** here;
 /// `the_run_grows_with_the_panel_and_the_gap_does_not` carries the reconciliation,
 /// which is the same stale `below` the table already corrects twice for other
 /// rows. The work at that size does not change either way.
@@ -128,8 +128,8 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
     (theme::RUN_MEASURE * kiosk_scale(height)).clamp(theme::RUN_MEASURE, cap)
 }
 
-/// What the placard under the work needs: the gap off the sleeve, three lines,
-/// the needle, the two figures, and every gap between them — **146**.
+/// What the placard under the work needs with an album line: the gap off the
+/// sleeve, three identity lines, and every gap between them — **96**.
 ///
 /// It summed [`theme::TRANSPORT_HIT`] as well until the merge, which was the
 /// unspent half of ADR-0029's first step: the duplicated transport widget came
@@ -141,16 +141,14 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
 ///
 /// **Found by step A2, and it is the reason it had to be found then.** The old
 /// expression rolled the placard's internal gaps into `4 · GAP_LG` and came to
-/// 130; the column [`record_column`] actually builds comes to **146**, because
-/// `.spacing(GAP_XS)` applies between *every* pair of its six children and not
-/// only between the artist and the title, and because the needle draws
-/// `NEEDLE_H + GAP_XS` tall so its tick reads as a mark on the line rather
-/// than a longer run of it (`views::home::needle`).
+/// 130; the column [`record_column`] built then came to **146**. The duplicate
+/// progress line and timestamps have since moved entirely to the persistent
+/// bar, leaving this placard at 96 without changing its identity readings.
 ///
 /// Sixteen pixels of under-reservation, and `NOW_PLAYING_MAX` 720 was hiding
 /// it: at 1920 the clamp left 69 px of slack, so nothing overflowed. Delete
 /// the clamp and the work grows into that slack, the column overflows its
-/// container, and **iced drops the last child — the two timestamps**. It bit
+/// container, and **iced dropped the last child — the two timestamps**. It bit
 /// only where the record is height-bound *and* the run is standing, because
 /// the run's branch is the one that spends a `HANG` of padding at each end.
 ///
@@ -164,10 +162,22 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
 const BELOW: f32 = theme::GAP_XL                                  // work → placard
     + theme::LINE_HEADING + theme::GAP_XS                         // artist
     + theme::LINE_HERO + theme::GAP_XS                            // title
-    + theme::LINE_BODY + theme::GAP_XS                            // album
-    + theme::GAP_LG + theme::GAP_XS                               // the air over the needle
-    + theme::NEEDLE_H + theme::GAP_XS + theme::GAP_XS             // the needle, tick included
-    + theme::LINE_META; // the two figures
+    + theme::LINE_BODY; // album
+
+/// The album line and the one inter-child gap that exists only with it.
+const ALBUM_LINE_H: f32 = theme::LINE_BODY + theme::GAP_XS;
+
+fn placard_below(show_album: bool) -> f32 {
+    if show_album {
+        BELOW
+    } else {
+        BELOW - ALBUM_LINE_H
+    }
+}
+
+fn show_album_line(album: Option<&str>, source: Option<&Source>) -> bool {
+    album.is_some() && !matches!(source, Some(Source::Album { .. }))
+}
 
 /// The full-width source footer reserved at the bottom of the place.
 const SOURCE_CARD_H: f32 = 76.0;
@@ -306,12 +316,17 @@ pub(crate) fn view<'a>(
     // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
     // clamps against and the picture the layout draws are the same decode.
     let work = work(shelf, Some(now));
+    // An album source footer already names this exact album. A playlist or
+    // assembled run can cross records, so its current track keeps the album
+    // line where that distinction is useful.
+    let show_album = show_album_line(now.album.as_deref(), source.as_ref());
+    let below = placard_below(show_album);
     let edge = art_edge_with_below(
         width,
         height,
         0.0,
         work.source,
-        BELOW + if source.is_some() { SOURCE_CARD_H } else { 0.0 },
+        below + if source.is_some() { SOURCE_CARD_H } else { 0.0 },
     );
     // **One `t` for the cover and the room**, resolved here and passed to both.
     // See [`field_layer`] for why it is one number rather than two agreeing
@@ -325,7 +340,7 @@ pub(crate) fn view<'a>(
         work.field,
         t,
     );
-    let song = container(record_column(player, &work, t, now, edge)).center(Length::Fill);
+    let song = container(record_column(&work, t, now, edge, show_album)).center(Length::Fill);
     let body: Element<'a, Message> = match source {
         Some(source) => column![song, source_link(source)]
             .height(Length::Fill)
@@ -572,20 +587,14 @@ fn field_layer(
 
 /// The record column: the work at `edge`, and the placard under it.
 fn record_column<'a>(
-    player: &'a PlayerState,
     work: &Work,
     t: f32,
     now: &'a crate::player::NowPlaying,
     edge: f32,
+    show_album: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let sleeve = sleeve(work, t, now, edge);
-
-    // Owned: the two figures are `String`s the reading builds, and a borrow
-    // of them cannot outlive this function.
-    let stamps = player.stamps();
-    let elapsed = player.elapsed_ms();
-    let total = player.track_ms().unwrap_or(0);
 
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
@@ -610,7 +619,7 @@ fn record_column<'a>(
     ]
     .spacing(theme::GAP_XS)
     .width(Length::Fixed(edge));
-    if let Some(album) = &now.album {
+    if show_album && let Some(album) = &now.album {
         placard = placard.push(
             text(album.clone())
                 .size(theme::SIZE_BODY)
@@ -620,14 +629,6 @@ fn record_column<'a>(
         );
     }
 
-    // **The needle, on the placard and at the work's own width** — the Home
-    // page's rule, applied at this scale, and for its reason: nothing is drawn
-    // on the artwork.
-    placard = placard
-        .push(Space::with_height(Length::Fixed(theme::GAP_LG)))
-        .push(crate::views::home::needle(elapsed, total, edge))
-        .push(figures(stamps, room));
-
     // **No transport here.** The bar is under every place, this one included,
     // and it already carries play/pause and the two skips — so the page drew
     // the *same function* a second time, a few hundred pixels above the first
@@ -635,10 +636,8 @@ fn record_column<'a>(
     // does not need the play pause controls"*, and *"ensure the play next and
     // previous controls are removed"*. It was a duplicate, not a choice.
     //
-    // What this surface owes is a reading, not a control: the work at the size
-    // it deserves, who made it, where the needle stands. The one place in the
-    // product where the same fact appears twice on purpose is the lamp — and
-    // that is a mark, not a button.
+    // What this surface owes is the work at the size it deserves and who made
+    // it. Progress, timestamps and transport all live in the persistent bar.
     column![sleeve, placard]
         .spacing(theme::GAP_XL)
         .align_x(alignment::Horizontal::Center)
@@ -707,39 +706,6 @@ fn source_link(source: Source) -> Element<'static, Message> {
         }
     })
     .on_press(message)
-    .into()
-}
-
-/// `3:12` and `6:27`, at the two ends of the needle's own width.
-///
-/// The bar's own two timestamps, in the bar's own vocabulary: the position
-/// being shown on the left and the track's length on the right, with the
-/// pending mark the bar uses when the figure is a *request* rather than a
-/// confirmed reading — a number must never be mistaken for playback truth it
-/// has not earned.
-fn figures(
-    stamps: Option<crate::player::Stamps>,
-    room: &'static theme::Palette,
-) -> Element<'static, Message> {
-    let Some(stamps) = stamps else {
-        return Space::with_height(Length::Fixed(theme::LINE_META)).into();
-    };
-    let ink = if stamps.pending {
-        room.paper_faint
-    } else {
-        room.paper_dim
-    };
-    row![
-        text(stamps.elapsed)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(ink),
-        Space::with_width(Length::Fill),
-        text(stamps.total)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
-    ]
     .into()
 }
 
@@ -870,36 +836,49 @@ mod tests {
     /// - ADR-0029's first step took `TRANSPORT_HIT` **32** out, because the
     ///   duplicated transport widget came off this surface and the height it
     ///   had reserved stayed in the arithmetic.
-    /// - Step A2 put **16** back, because the expression that replaced it
-    ///   rolled six children's five `GAP_XS` gaps and the needle's own tick
-    ///   into `4 · GAP_LG` and came out 16 short of what the column lays out.
-    ///   `NOW_PLAYING_MAX` 720 hid that; deleting it dropped the two
-    ///   timestamps off the bottom at 1920 with the run standing.
+    /// - Step A2 put **16** back for the six-child placard that stood then.
+    ///   The progress line now lives only in the persistent bar, so removing
+    ///   that child and its adjacent spacing gives 10 px back honestly.
     ///
     /// **The terms are asserted, not the total**, because the total is what a
     /// future step's own additions will change and the terms are what must not
     /// silently grow a transport — or lose a figure — again.
     #[test]
     fn the_placard_reserves_exactly_what_it_draws() {
-        // **The column, summed the way iced lays it out**: six children, five
-        // `GAP_XS` between them, the needle drawn a tick taller than the line,
-        // and one `GAP_XL` off the sleeve. If any of those move, this is what
+        // **The column, summed the way iced lays it out**: three identity
+        // children, two `GAP_XS` between them, and one `GAP_XL` off the sleeve.
+        // If any of those move, this is what
         // catches the reservation not moving with them.
-        const CHILDREN: f32 = theme::LINE_HEADING
-            + theme::LINE_HERO
-            + theme::LINE_BODY
-            + theme::GAP_LG
-            + (theme::NEEDLE_H + theme::GAP_XS)
-            + theme::LINE_META;
-        const { assert!(BELOW == 146.0) }
-        const { assert!(BELOW + theme::TRANSPORT_HIT == 178.0) }
-        const { assert!(BELOW == theme::GAP_XL + CHILDREN + 5.0 * theme::GAP_XS) }
+        const CHILDREN: f32 = theme::LINE_HEADING + theme::LINE_HERO + theme::LINE_BODY;
+        const { assert!(BELOW == 96.0) }
+        const { assert!(BELOW + theme::TRANSPORT_HIT == 128.0) }
+        const { assert!(BELOW == theme::GAP_XL + CHILDREN + 2.0 * theme::GAP_XS) }
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the
         // placard.
         let bare = |w: f32, h: f32| art_edge(w, h, 0.0, f32::INFINITY);
         assert!((bare(1184.0, 779.0) - (779.0 - 80.0 - BELOW)).abs() < f32::EPSILON);
-        assert!((bare(1184.0, 779.0) - 553.0).abs() < f32::EPSILON);
+        assert!((bare(1184.0, 779.0) - 603.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn an_album_source_does_not_repeat_the_album_but_a_playlist_does() {
+        let album = Source::Album {
+            id: 1,
+            name: "Record".into(),
+        };
+        let playlist = Source::Playlist {
+            id: 2,
+            name: "Mix".into(),
+        };
+        let queue = Source::Queue { name: "Run".into() };
+
+        assert!(!show_album_line(Some("Record"), Some(&album)));
+        assert!(show_album_line(Some("Record"), Some(&playlist)));
+        assert!(show_album_line(Some("Record"), Some(&queue)));
+        assert!(show_album_line(Some("Record"), None));
+        assert!(!show_album_line(None, Some(&playlist)));
+        assert!((placard_below(true) - placard_below(false) - ALBUM_LINE_H).abs() < f32::EPSILON);
     }
 
     /// **The record column fits the space it was given**, at every window this
@@ -1069,16 +1048,16 @@ mod tests {
     ///
     /// §11.2: *"the clamp's floor of 1.0 is what keeps every window at or below
     /// 720 px of work pixel-identical to what ships today"*. **A 1920 × 1080
-    /// body's work is 773 px, not 720**, so the scale is 1.074 there and the run
-    /// goes 440 → 472. The document is not wrong about its own arithmetic; it is
+    /// body's work is 823 px, not 720**, so the scale is 1.143 there and the run
+    /// goes 440 → 503. The document is not wrong about its own arithmetic; it is
     /// out of date about one input, and this is the same correction §5.5a's
     /// table already carries twice: `below` was 190 when §11.2 was written, it
-    /// is [`BELOW`] **146** until steps A5 and A9 build the meter and the feed,
+    /// is [`BELOW`] **96** until steps A5 and A9 build the meter and the feed,
     /// and 44 px of `below` is what puts a 1920 work over the reference.
     ///
     /// **It is allowed to move because nothing a listener can see moves badly.**
-    /// The work at 1920 is height-bound at 773 px with the run at 440 and still
-    /// 773 px with it at 472 — the run takes width the record structurally
+    /// The work at 1920 is height-bound at 823 px with the run at 440 and still
+    /// 823 px with it at 503 — the run takes width the record structurally
     /// cannot use, which is the property `the_run_costs_the_record_nothing…`
     /// sweeps. What changes is that 32 px of the 323 px hole at that size closes
     /// by measure and the rest closes by centring. Recorded rather than tuned
@@ -1089,13 +1068,13 @@ mod tests {
     fn the_run_grows_with_the_panel_and_the_gap_does_not() {
         // (body, source, the run's measure)
         for (body_w, body_h, source, run) in [
-            // 1280 × 860, lane open — a 553 px work, under the reference, so
+            // 1280 × 860, lane open — a 603 px work, under the reference, so
             // the scale's floor holds it at exactly the desktop measure.
             (1000.0_f32, 779.0_f32, 1024.0_f32, 440.0_f32),
-            // 1920 × 1080, lane open — a 773 px work, just over. See above.
-            (1640.0, 999.0, 1024.0, 440.0 * (773.0 / 720.0)),
+            // 1920 × 1080, lane open — an 823 px work, just over. See above.
+            (1640.0, 999.0, 1024.0, 440.0 * (823.0 / 720.0)),
             // 2560 × 1440, lane open — the window the owner was looking at.
-            (2280.0, 1359.0, 1024.0, 440.0 * (1133.0 / 720.0)),
+            (2280.0, 1359.0, 1024.0, 440.0 * (1183.0 / 720.0)),
             // 3840 × 2160, lane collapsed — the scale at its ceiling.
             (3744.0, 2079.0, 3000.0, 440.0 * KIOSK_SCALE_MAX),
         ] {
@@ -1253,6 +1232,10 @@ mod tests {
                 && !place.contains("\"Show queue\"")
                 && !place.contains("ToggleNowPlayingMode"),
             "the queue or its old mode switch came back"
+        );
+        assert!(
+            !place.contains("views::home::needle"),
+            "Now playing duplicated the persistent bar's progress line"
         );
     }
 

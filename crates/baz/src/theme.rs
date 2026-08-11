@@ -1549,8 +1549,8 @@ pub const KNOB: f32 = 5.0;
 // The needle (ADR-0017 §1.1, step 9)
 // ---------------------------------------------------------------------------
 
-/// Thickness of the needle — the current-song seek line flush on the window's
-/// bottom edge.
+/// Thickness of the needle — the current-song seek line across the playback
+/// bar's top edge.
 ///
 /// **2**, and the number is the argument. The 260 px groove plus its two stamps
 /// and its hit band spent 45 of the bar's 102 px saying *where the playhead is*,
@@ -1560,17 +1560,17 @@ pub const KNOB: f32 = 5.0;
 /// gives the other 43 back to the collection.
 pub const NEEDLE_H: f32 = 2.0;
 
-/// The band the pointer may aim at above the needle.
+/// The band the pointer may aim at below the needle.
 ///
 /// A 2 px mark is a 2 px target, which is a miss waiting to happen (Fitts), so
-/// the needle claims height the way [`HIT_SLOP`] does — except **upward, and
+/// the needle claims height the way [`HIT_SLOP`] does — except **downward, and
 /// out of layout**: it reserves [`NEEDLE_H`] of row and tests the pointer
 /// against a band [`NEEDLE_HIT`] tall reaching into the empty lane the bar
-/// keeps under its transport. That is the only way a 2 px control can be
+/// keeps above its transport. That is the only way a 2 px control can be
 /// aimed at without charging the collection for the aiming.
 ///
 /// **12 = [`GAP_MD`] = [`BAR_LEAD`]**, and the equality is the safety property
-/// rather than a coincidence: the band is exactly the bar's bottom lane, which
+/// rather than a coincidence: the band fits within the bar's top lane, which
 /// is empty recess, so it can never take a press meant for a control.
 /// ADR-0017's `NEEDLE_HIT 22` is amended here — 22 would reach 8 px into the
 /// transport row's boxes, and a needle that swallows a press aimed at Next is
@@ -1579,8 +1579,8 @@ pub const NEEDLE_H: f32 = 2.0;
 /// It is a **third** pointer height beside law L7's `TRANSPORT_HIT` 32 and
 /// `STEPPER_HIT`/`RAIL_HIT` 24, and it is named here rather than smuggled: L7's
 /// two heights are the heights of *boxes*, and the alternative for a line
-/// flush on the window's edge is either 10 px of the transport row or 22 px of
-/// the wall. The bound that keeps it honest is asserted, not asserted-about:
+/// at the bar's edge is either 10 px of the transport row or 22 px of the
+/// page. The bound that keeps it honest is asserted, not asserted-about:
 /// `NEEDLE_HIT <= BAR_LEAD`.
 pub const NEEDLE_HIT: f32 = GAP_MD;
 
@@ -1875,7 +1875,7 @@ pub const BAR_ZONE_LEAD: f32 = GAP_MD;
 ///  20  the continuation's lane  ─┘
 ///  12  BAR_ZONE_LEAD (GAP_MD)
 /// ---
-///  81   + 2 px needle, flush on the bottom edge  →  83 of bottom furniture
+///  81   + 2 px needle across the bar's top edge  →  83 of bottom furniture
 /// ```
 ///
 /// The transport's own lead is the same band read from the other side:
@@ -3056,9 +3056,8 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
 ///
 /// - **The unplayed track is [`Palette::hairline`], not [`Palette::recess`].**
 ///   The groove was *cut into* the bar and read as a recess against the bar's
-///   own plane; a 2 px line flush on the window's bottom edge has no plane
-///   behind it to be cut into, so recess-on-recess would be a line you cannot
-///   see. The hairline is the room's "this is here and you are not meant to
+///   own plane; a 2 px line on the bar's top edge is its boundary rather than
+///   a channel cut through it. The hairline is the room's "this is here and you are not meant to
 ///   read it" mark, and it is already on the contrast test's exemption list by
 ///   name — where §1.6 put "the needle's unfilled track" before it existed.
 /// - **No handle, and no border.** A knob on a 2 px line is a dot on a hair, and
@@ -4583,15 +4582,15 @@ mod tests {
         const { assert!(BAR_CONTENT_H == 80.0) }
         const { assert!(BAR_H == 81.0) }
         const { assert!(BOTTOM_FURNITURE_H == 83.0) }
-        // The needle's aiming band reaches into the bar's bottom lane and **no
+        // The needle's aiming band reaches into the bar's top lane and **no
         // further**: that lane is empty recess, so a press aimed at Next can
-        // never be taken by a 2 px line at the window's edge. This is the whole
+        // never be taken by a 2 px line at the bar's edge. This is the whole
         // safety argument for claiming height out of layout ([`NEEDLE_HIT`]).
         const { assert!(NEEDLE_HIT <= BAR_LEAD) }
         // The hover preview is a **layer** over that same lane rather than a row
         // in it, so it costs the column no height at all — which is the whole
         // reason the transport can sit on the bar's own centre line
-        // ([`BAR_LEAD`], law L4). It floats above the needle and stops short of
+        // ([`BAR_LEAD`], law L4). It floats below the needle and stops short of
         // the transport glyphs' own box.
         const { assert!(PREVIEW_H <= BAR_LEAD + HIT_SLOP) }
         // The volume block's preview lane is the same trick, and the lane it

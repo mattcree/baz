@@ -1,5 +1,5 @@
-//! The needle: a 2 px current-song seek line flush on the window's bottom
-//! edge.
+//! The needle: a 2 px current-song seek line across the top of the persistent
+//! playback bar.
 //!
 //! ADR-0017 §1.1 calls this the best single idea in any of the three design
 //! documents, and the reason is a measurement rather than a preference. The
@@ -13,17 +13,17 @@
 //! - **The fill is the lamp**; the unplayed track is the room's hairline. Both
 //!   choices are argued in [`theme::needle`].
 //! - **Every press is a seek within the current song.** The queue remains a
-//!   list of explicit rows; the bottom edge never pretends to measure it.
+//!   list of explicit rows; the bar-wide line never pretends to measure it.
 //!
-//! # The aiming band is claimed upward, out of layout
+//! # The aiming band is claimed downward, out of layout
 //!
 //! A 2 px mark is a 2 px target, which is a miss waiting to happen. The groove
 //! solves that by *reserving* [`theme::RAIL_HIT`] and drawing a 4 px rail
 //! centred in it; the needle cannot, because the whole bargain of ADR-0017
 //! §1.1 is that it costs the collection 2 px rather than 45. So it reserves
 //! [`theme::NEEDLE_H`] of layout and tests the pointer against a band
-//! [`theme::NEEDLE_HIT`] tall reaching *up* from the window's edge — into the
-//! empty lane the bar keeps under its transport, and no further. That bound is
+//! [`theme::NEEDLE_HIT`] tall reaching *down* into the empty lane the bar keeps
+//! above its transport, and no further. That bound is
 //! the safety property and it is asserted in [`theme`]:
 //! `NEEDLE_HIT <= BAR_LEAD`, so a press aimed at Next can never be taken by a
 //! line at the bottom of the window.
@@ -91,12 +91,12 @@ impl<'a, Message> Needle<'a, Message> {
     }
 }
 
-/// The band the pointer may aim at: the drawn line, and the empty lane above
+/// The band the pointer may aim at: the drawn line, and the empty lane below
 /// it (module docs; the bound is asserted in [`theme`]).
 fn aim(bounds: Rectangle) -> Rectangle {
     Rectangle {
         x: bounds.x,
-        y: bounds.y + bounds.height - theme::NEEDLE_HIT,
+        y: bounds.y,
         width: bounds.width,
         height: theme::NEEDLE_HIT,
     }
@@ -182,9 +182,9 @@ where
         let status = pointer::status(state, self.pointers.is_some(), aim(bounds), cursor);
         let style = (self.style)(self.palette, status);
         let (fill, track) = (style.rail.backgrounds.0, style.rail.backgrounds.1);
-        // The line is drawn at the *bottom* of the reservation, so it is flush
-        // on the window's edge whatever the reservation happens to be.
-        let y = bounds.y + bounds.height - style.rail.width;
+        // The line is drawn at the top of the reservation, where the playback
+        // bar begins.
+        let y = bounds.y;
 
         // The unplayed track is always present, so starting and stopping do
         // not make the window's edge appear or disappear.
@@ -266,12 +266,9 @@ mod tests {
     /// The needle's width under test.
     const WIDTH: f32 = 260.0;
 
-    /// A cursor `x` px along the needle and `up` px above the window's edge.
-    fn on_line(x: f32, up: f32) -> mouse::Cursor {
-        mouse::Cursor::Available(Point::new(
-            ORIGIN.x + x,
-            ORIGIN.y + theme::NEEDLE_H - up - 0.5,
-        ))
+    /// A cursor `x` px along the needle and `down` px into the bar.
+    fn on_line(x: f32, down: f32) -> mouse::Cursor {
+        mouse::Cursor::Available(Point::new(ORIGIN.x + x, ORIGIN.y + down + 0.5))
     }
 
     /// A cursor `x` px along, on the drawn line itself.
@@ -281,7 +278,7 @@ mod tests {
 
     /// A cursor inside the window but clear of the needle's aiming band.
     fn off_line(x: f32) -> mouse::Cursor {
-        mouse::Cursor::Available(Point::new(ORIGIN.x + x, ORIGIN.y - theme::NEEDLE_HIT * 4.0))
+        mouse::Cursor::Available(Point::new(ORIGIN.x + x, ORIGIN.y + theme::NEEDLE_HIT * 4.0))
     }
 
     /// What a report `x` px along the needle looks like once measured.
@@ -408,18 +405,18 @@ mod tests {
     }
 
     /// **The aiming band, measured.** A 2 px line has to be hittable without
-    /// costing the collection more than 2 px, so the band is claimed upward out
-    /// of layout — and the bound that makes that safe is that it stops inside
-    /// the bar's empty bottom lane.
+    /// costing the collection more than 2 px, so the band is claimed downward
+    /// out of layout — and the bound that makes that safe is that it stops
+    /// inside the bar's empty top lane.
     #[test]
-    fn the_aiming_band_reaches_up_from_the_line_and_stops_below_the_transport() {
-        // The drawn line itself, and every pixel of the lane above it.
-        for up in [0.0, 1.0, 5.0, theme::NEEDLE_HIT - 1.5] {
+    fn the_aiming_band_reaches_down_from_the_line_and_stops_above_the_transport() {
+        // The drawn line itself, and every pixel of the lane below it.
+        for down in [0.0, 1.0, 5.0, theme::NEEDLE_HIT - 1.5] {
             let mut line = Line::live();
             assert_eq!(
-                line.press(on_line(30.0, up)),
+                line.press(on_line(30.0, down)),
                 vec![Msg::Press(at(30.0))],
-                "{up} px above the window's edge is inside the band"
+                "{down} px below the bar's top edge is inside the band"
             );
         }
         // And one pixel past it is not — which is where the transport row

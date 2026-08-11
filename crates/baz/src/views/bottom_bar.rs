@@ -1,6 +1,5 @@
 //! The persistent now-playing bar: current track, transport, the two
-//! timestamps, volume — and, flush on the window's bottom edge under all of
-//! it, the needle.
+//! timestamps, volume — and, flush across the bar's top edge, the needle.
 //!
 //! # The left zone gained a door, stopped needing it, and gave it up
 //!
@@ -67,7 +66,7 @@ pub(crate) enum Cover {
 
 /// The persistent now-playing bar, in three zones — the current track and its
 /// timestamps on the left, the transport in the middle, quiet status and the
-/// volume on the right — with the needle under all three.
+/// volume on the right — with the needle across the top of all three.
 ///
 /// **The bar is 81 px and the needle is 2**, where the bar alone was 105 before
 /// the needle and 57 after it. The seek row is not deleted so much as *moved*:
@@ -145,13 +144,19 @@ pub(crate) fn view(
     .align_y(iced::Alignment::Center);
     let line = player.needle_bar();
     let tip = line.preview.clone();
-    // **The whole of the window's bottom edge, in three layers and 59 px.** The
-    // hairline, the band, the needle — and over all of them the hover tip,
+    // **The whole persistent bar, in three layers.** The needle, hairline and
+    // band — and over all of them the hover tip,
     // which is a *layer* and therefore costs no height at all (the same trick
     // [`theme::PREVIEW_H`] documents, and the reason the transport can sit on
     // the bar's own centre line).
     stack![
         column![
+            // **The needle hangs off no gutter**, deliberately: it states the
+            // current song across the whole bar. At the top edge its aiming
+            // band reaches *down* into the empty lead above every control,
+            // which is much easier to acquire than a line against the bottom
+            // edge of the window without stealing a control's hit box.
+            needle_line(line),
             horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
             // **One centre line, one window gutter.** The band is
             // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's
@@ -166,12 +171,6 @@ pub(crate) fn view(
                 .height(Length::Fixed(theme::BAR_CONTENT_H))
                 .padding(theme::pad(0.0, theme::HANG))
                 .style(move |_theme| theme::bar(room)),
-            // **The needle hangs off no gutter**, deliberately: it is the
-            // window's own bottom edge and it states the current song, so it
-            // runs the full width. Law L5 gives the bar `HANG`, `W − HANG`, its
-            // zone boundaries and its reserved slots' edges; the needle's edges
-            // are the window's, which is the one pair every surface shares.
-            needle_line(line),
         ],
         tip_layer(tip),
     ]
@@ -204,7 +203,7 @@ fn needle_line(line: player::NeedleBar) -> Element<'static, Message> {
 }
 
 /// The layer the needle's hover tip floats in: the whole bar's height, with the
-/// tip pinned to the bottom just clear of the line it describes.
+/// tip pinned just below the line it describes.
 ///
 /// A **layer**, so the bar does not change height under the pointer and the
 /// needle keeps costing the collection [`theme::NEEDLE_H`] and nothing else.
@@ -235,11 +234,11 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
     container(lane)
         .width(Length::Fill)
         .height(Length::Fill)
-        .align_y(alignment::Vertical::Bottom)
+        .align_y(alignment::Vertical::Top)
         .padding(iced::Padding {
-            top: 0.0,
+            top: theme::NEEDLE_H + 1.0,
             right: 0.0,
-            bottom: theme::NEEDLE_H,
+            bottom: 0.0,
             left: 0.0,
         })
         .into()
@@ -1104,7 +1103,7 @@ mod tests {
         // what keeps Previous · Play/Pause · Next pointer-reachable.
         const { assert!(NOW - 32.0 == 51.0) }
         // And the needle's aiming band is still entirely inside the bar's
-        // bottom lane, which is empty recess — so claiming height out of layout
+        // top lane, which is empty recess — so claiming height out of layout
         // can never take a press meant for a control. The lane grew, so the
         // bound got looser rather than tighter.
         const { assert!(theme::NEEDLE_HIT <= theme::BAR_LEAD) }
