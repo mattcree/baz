@@ -404,6 +404,9 @@ pub(crate) enum Message {
     /// destination never closes itself ([`crate::place::Place::go`]) — and
     /// <kbd>Esc</kbd> is the way out.
     ShowNowPlaying,
+    /// Pressing the current-song block in the bottom bar: open its source and,
+    /// for a saved playlist, bring the sounding entry into view.
+    OpenPlayingSource,
     /// Open the current run as its unsaved playlist.
     ShowQueue,
     /// The subtle provenance link on Now playing: open the album the sounding
@@ -437,6 +440,9 @@ pub(crate) enum Message {
     /// against, held so `Play all`'s five-figure run costs the frame what a
     /// record does (doc 09 §7.1's gate).
     QueueScrolled(Viewport),
+    /// A saved playlist's track table scrolled; retained so the page builds
+    /// only the visible row window and requests artwork for that window.
+    PlaylistScrolled(Viewport),
     /// The pointer entered a queue row, so the row can offer its ✕.
     ///
     /// Pure view state and the only hover baz tracks itself: iced 0.13 gives a
@@ -485,9 +491,17 @@ pub(crate) enum Message {
     /// outside the wall, so no gesture on the wall can be in flight when it
     /// fires (ADR-0030 §3).
     ToggleLane,
-    /// A panel row's name was pressed: open that playlist's page — or come
-    /// back from it, when it is the page already showing ([`Place::playlist`]).
+    /// Arrange the full Playlists page by name, creation date or last play.
+    PlaylistOrderSelected(crate::playlists::PlaylistOrder),
+    /// The pointer entered a saved-playlist tile.
+    PlaylistTileEntered(u64),
+    /// The pointer left a saved-playlist tile.
+    PlaylistTileLeft(u64),
+    /// A playlist tile or panel row was pressed: open that playlist's page.
+    /// Repeating the press is a no-op ([`Place::playlist`]).
     OpenPlaylist(u64),
+    /// Play a saved playlist directly from its collection tile.
+    PlayPlaylist(u64),
     /// **The album page's breadcrumb was pressed**: open that artist's page.
     ///
     /// The owner's *"we could add an Artist > album breadcrumb though. and
@@ -503,7 +517,7 @@ pub(crate) enum Message {
     /// A pick-mode press on the picker's **Queue** row: append what the hand
     /// holds to the run — `UpdateQueue`, the music keeps playing, and
     /// appending to an empty stopped engine loads a queue without starting
-    /// it (09 §8.1; `queue_playlist`'s exact shape).
+    /// it (09 §8.1).
     PickQueue,
     /// The panel's `New playlist` row was pressed: become a name field.
     NewPlaylistStart,
@@ -523,9 +537,6 @@ pub(crate) enum Message {
     /// top ([`Command::SetQueue`] then [`Command::Play`] — ADR-0024 §4, and
     /// the counts line on the page is where the subset is declared).
     PlaylistPlay,
-    /// The playlist page's `Queue`: the playable subset appended to the run
-    /// ([`Command::UpdateQueue`] — the music keeps playing, ADR-0014).
-    PlaylistQueue,
     /// A playlist row was clicked: play this list from that row, through the
     /// same [`PlayerState::play_from`] rule every list surface uses. Carries
     /// the display row; the playable-subset position is resolved against the
@@ -554,11 +565,13 @@ pub(crate) enum Message {
     /// extension, refused in place by the storage layer's rule. The place
     /// moves with the name.
     PlaylistRenameSubmit,
-    /// The playlist page's `Delete`: the file moves to the platform trash;
-    /// the page leaves for the Library. One press, no confirm — the trash is
-    /// the safety net the confirm dialog used to stand in for (doc 11 §5
-    /// P2: reversibility first; the warning was the fallback and the
-    /// fallback is no longer needed).
+    /// The playlist page's first `Delete` press: replace the ordinary acts
+    /// with Cancel and the explicit trash confirmation.
+    PlaylistDeleteStart,
+    /// Withdraw the playlist delete confirmation.
+    PlaylistDeleteCancel,
+    /// The confirming `Move to Trash`: the playlist file moves to the
+    /// platform trash and the page leaves for the Library.
     PlaylistDelete,
     /// The place's transient `Undo` word, and <kbd>Ctrl</kbd>+<kbd>Z</kbd>
     /// over it: take back the last recorded edit on the list surface the
@@ -638,15 +651,16 @@ pub(crate) enum Message {
     /// the wall. Carries the run's index, not a pixel — the rail knows which
     /// shelf it points at and nothing about where the shelf is.
     RailJumped(usize),
-    /// An album tile was pressed: open that record's page, or come back from
-    /// it when it is the page already showing ([`Place::album`]).
+    /// An album tile was pressed: open that record's page. Repeating the
+    /// press leaves the page in place ([`Place::album`]).
     ///
     /// **One press, and it navigates.** The tile's double-click-to-play died
     /// with the inspector and is not mourned in silence: the first press now
-    /// replaces the wall, so there is no tile left for a second press to land
-    /// on. What replaced it is the page's own `Play album` — a 320 × 32 target
-    /// in a fixed place, where the gesture it succeeds had a 400 ms window.
-    /// ADR-0022 records the trade.
+    /// replaces the wall; if the toolkit has already queued a second event,
+    /// it is an idempotent navigation request. What replaced double-click
+    /// playback is the page's own `Play album` — a 320 × 32 target in a fixed
+    /// place, where the gesture it succeeds had a 400 ms window. ADR-0022
+    /// records the trade.
     ///
     /// **Shift held, the same press queues the record instead** (doc 09 §13
     /// step 7): the one-press accelerator over the picker's Queue row —
@@ -1025,6 +1039,8 @@ struct App {
     /// coming back re-creates it at zero — a remembered offset would window
     /// rows the widget is not showing.
     queue_scroll: f32,
+    /// Absolute offset of the saved-playlist page's row scroller.
+    playlist_scroll: f32,
     /// Which row of a **playlist's page** the pointer is on — the same
     /// mechanism as [`Self::hovered_queue_row`], for the page's ✕ and ▲▼
     /// slots.
@@ -1529,6 +1545,7 @@ impl App {
             place: Place::default(),
             hovered_queue_row: None,
             queue_scroll: 0.0,
+            playlist_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
             drag: None,
@@ -1689,13 +1706,13 @@ impl App {
             // The wall's hover `Queue` option: the shift-click gesture's own
             // append, reached by a named control instead of a held key.
             Message::QueueAlbum(id) => self.queue_album(id),
-            // **The album page's breadcrumb**: up to the artist. `go` carries
-            // the toggle, so pressing the artist you are already reading puts
-            // the page down, exactly as a tile pressed twice does.
+            // **The album page's breadcrumb**: up to the artist. Subject
+            // routes are idempotent, so a repeated pointer event stays put.
             Message::OpenArtist(id) => self.go(|place| place.artist(id)),
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
             }
+            Message::OpenPlayingSource => self.open_playing_source(),
             Message::ShowQueue => self.go(|_| Place::Queue),
             Message::OpenAlbum(id) => self.open_album(id),
             // The Settings place's spine. Session state and deliberately not
@@ -1706,16 +1723,36 @@ impl App {
                 Task::none()
             }
             Message::WindowResized(size) => {
+                let playlist_before = matches!(self.place, Place::Playlist(_)).then(|| {
+                    (
+                        views::page::is_playlist_two_column(self.body_width()),
+                        self.playlist_scroll,
+                    )
+                });
                 self.window = size;
                 let laid_out = match &mut self.screen {
                     Screen::Shelf(state) => state.update(Message::WindowResized(size)),
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
                 };
+                let restore_playlist =
+                    playlist_before.map_or_else(Task::none, |(before, scroll)| {
+                        let after = views::page::is_playlist_two_column(self.body_width());
+                        let y = views::playlist::reflow_scroll_offset(scroll, before, after);
+                        self.playlist_scroll = y;
+                        Task::batch([
+                            scrollable::scroll_to(
+                                views::page::scroll_id(),
+                                AbsoluteOffset { x: 0.0, y },
+                            ),
+                            self.request_playlist_art(),
+                        ])
+                    });
                 // A maximise and an unmaximise are both resizes, and iced 0.13
                 // publishes no event for either — so the state the app bar's
                 // button draws is asked for here (`Message::WindowMaximizedChanged`).
                 Task::batch([
                     laid_out,
+                    restore_playlist,
                     window::get_latest()
                         .and_then(window::get_maximized)
                         .map(Message::WindowMaximizedChanged),
@@ -2311,6 +2348,51 @@ impl App {
         })
     }
 
+    /// Follow the bottom bar's current-song block to the list that supplied
+    /// it. A saved playlist opens at the engine-confirmed playable position;
+    /// the other source kinds retain their existing destinations.
+    fn open_playing_source(&mut self) -> Task<Message> {
+        let Some(source) = self.now_playing_source() else {
+            return Task::none();
+        };
+        match source {
+            views::now_playing::Source::Playlist { id, .. } => {
+                let playing = self.player.playing_queue_row();
+                let opened = match &self.screen {
+                    Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => false,
+                };
+                if !opened {
+                    return Task::none();
+                }
+                let offset = playing.and_then(|playing| {
+                    views::playlist::scroll_offset(self.playlists.page(id)?, playing)
+                });
+                self.menu = None;
+                self.drag = None;
+                let from = self.place;
+                self.place = Place::Playlist(id);
+                let entering = self.note_place_left(from);
+                match offset {
+                    Some(y) => {
+                        self.playlist_scroll = y;
+                        Task::batch([
+                            entering,
+                            scrollable::scroll_to(
+                                views::page::scroll_id(),
+                                AbsoluteOffset { x: 0.0, y },
+                            ),
+                            self.request_playlist_art(),
+                        ])
+                    }
+                    None => entering,
+                }
+            }
+            views::now_playing::Source::Queue { .. } => self.go(|_| Place::Queue),
+            views::now_playing::Source::Album { id, .. } => self.open_album(id),
+        }
+    }
+
     /// Answer a message that belongs to the **playlist surfaces** — the
     /// panel, the page, the adds and the queue place's save — reporting
     /// whether it was one (`Some`), and with which follow-up task.
@@ -2341,34 +2423,46 @@ impl App {
                 }
             }
             Message::OpenPlaylist(id) => {
-                // The door to the page you are on puts it down, like a tile
-                // pressed twice ([`Place::playlist`]'s toggle); any other
-                // page is opened only once its file actually read.
-                let leaving = self.place == Place::Playlist(*id);
-                if leaving {
-                    self.menu = None;
-                    let from = self.place;
-                    self.place = self.place.playlist(*id);
-                    // A playlist door, or the Library after a delete —
-                    // never `Now playing`, so the only task this can answer
-                    // with is `Task::none()`, and the machine this arm lives
-                    // in answers `bool`. Discarded deliberately rather than
-                    // by omission.
-                    let _ = self.note_place_left(from);
-                } else if let Screen::Shelf(state) = &self.screen
+                // A second event in a double-click arrives after the first
+                // has already navigated. It must not reread, reset or leave
+                // the page; opening a subject is not a disguised Back action.
+                if self.place == Place::Playlist(*id) {
+                    return Some(Task::none());
+                }
+                if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
+                    self.playlist_scroll = 0.0;
                     // The place changes, so an open menu goes with it
                     // (`go`'s rule).
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
-                    // A playlist door, or the Library after a delete —
-                    // never `Now playing`, so the only task this can answer
-                    // with is `Task::none()`, and the machine this arm lives
-                    // in answers `bool`. Discarded deliberately rather than
-                    // by omission.
-                    let _ = self.note_place_left(from);
+                    let entering = self.note_place_left(from);
+                    return Some(Task::batch([
+                        entering,
+                        scrollable::scroll_to(
+                            views::page::scroll_id(),
+                            AbsoluteOffset { x: 0.0, y: 0.0 },
+                        ),
+                        self.request_playlist_art(),
+                    ]));
+                }
+            }
+            Message::PlayPlaylist(id) => {
+                let opened = match &self.screen {
+                    Screen::Shelf(state) => self.playlists.open_page(*id, &state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => false,
+                };
+                if opened {
+                    self.play_playlist();
+                }
+            }
+            Message::PlaylistOrderSelected(order) => self.playlists.order = *order,
+            Message::PlaylistTileEntered(id) => self.playlists.hovered = Some(*id),
+            Message::PlaylistTileLeft(id) => {
+                if self.playlists.hovered == Some(*id) {
+                    self.playlists.hovered = None;
                 }
             }
             Message::PickPlaylist(id) => {
@@ -2400,7 +2494,6 @@ impl App {
             Message::AddTrackToPlaylist(id, row) => self.add_track_to_playlist(*id, *row),
             Message::AddQueuedToPlaylist(row) => self.add_queued_to_playlist(*row),
             Message::PlaylistPlay => self.play_playlist(),
-            Message::PlaylistQueue => self.queue_playlist(),
             Message::PlaylistPlayTrack(row) => self.play_playlist_track(*row),
             Message::PlaylistRemoveEntry(row) => {
                 if let Screen::Shelf(state) = &self.screen {
@@ -2416,6 +2509,7 @@ impl App {
             Message::PlaylistRenameStart => {
                 if let Some(open) = &mut self.playlists.open {
                     let seeded = open.name().to_owned();
+                    open.confirming_delete = false;
                     open.renaming = Some(crate::playlists::NameEntry {
                         text: seeded,
                         error: None,
@@ -2451,16 +2545,35 @@ impl App {
                     let _ = self.note_place_left(from);
                 }
             }
+            Message::PlaylistDeleteStart => {
+                if let Some(open) = &mut self.playlists.open {
+                    open.renaming = None;
+                    open.confirming_delete = true;
+                }
+            }
+            Message::PlaylistDeleteCancel => {
+                if let Some(open) = &mut self.playlists.open {
+                    open.confirming_delete = false;
+                }
+            }
             Message::PlaylistDelete => {
+                if !self
+                    .playlists
+                    .open
+                    .as_ref()
+                    .is_some_and(|open| open.confirming_delete)
+                {
+                    return Some(Task::none());
+                }
                 let library = match &self.screen {
                     Screen::Shelf(state) => Some(&state.library),
                     Screen::Setup(_) | Screen::Blocked(_) => None,
                 };
                 if self.playlists.delete_open(library) && matches!(self.place, Place::Playlist(_)) {
-                    // The page's subject is in the trash; the Library is the
-                    // honest answer, by the same route Esc takes.
+                    // The page's subject is in the trash; its collection root
+                    // is the honest answer.
                     let from = self.place;
-                    self.place = self.place.back();
+                    self.place = Place::Playlists;
                     // A playlist door, or the Library after a delete —
                     // never `Now playing`, so the only task this can answer
                     // with is `Task::none()`, and the machine this arm lives
@@ -2502,6 +2615,10 @@ impl App {
                 }
                 return Some(Task::none());
             }
+            Message::PlaylistScrolled(viewport) => {
+                self.playlist_scroll = viewport.absolute_offset().y;
+                return Some(self.request_playlist_art());
+            }
             Message::AlbumRowEntered(row) => {
                 self.hovered_album_row = Some(*row);
                 return Some(Task::none());
@@ -2530,6 +2647,16 @@ impl App {
         }
         if let Some(open) = &self.playlists.open {
             wanted.extend(&open.art);
+            let window = views::playlist::row_window(
+                open.rows.len(),
+                self.playlist_scroll,
+                self.body_height(),
+            );
+            wanted.extend(
+                open.rows[window.first..window.end]
+                    .iter()
+                    .filter_map(|row| row.album_id),
+            );
         }
         wanted.sort_unstable();
         wanted.dedup();
@@ -2679,24 +2806,8 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// The playlist page's `Queue`: the playable subset appended to the run
-    /// through `UpdateQueue`, so the music keeps playing (ADR-0014's
-    /// guarantee; "hear this later" is its own gesture, ADR-0023 §3).
-    fn queue_playlist(&mut self) {
-        let Some(addition) = self
-            .playlists
-            .open
-            .as_ref()
-            .map(|open| open.queue.clone())
-            .filter(|queue| !queue.is_empty())
-        else {
-            return;
-        };
-        self.append_to_run(addition);
-    }
-
     /// The picker's **Queue** row: what the hand holds, appended to the run —
-    /// `queue_playlist`'s exact shape over the pick's own items (09 §8.1).
+    /// one `UpdateQueue` over the pick's own items (09 §8.1).
     fn append_items_to_run(&mut self, items: Vec<vm::QueueItemVm>) {
         if items.is_empty() {
             return;
@@ -2746,7 +2857,7 @@ impl App {
             // Appending to nothing gives the engine a queue without starting
             // it: `UpdateQueue` never begins playback, and nothing sounds
             // unasked. An append is not a play gesture, so whatever built
-            // `addition` — a playlist page's `Queue` included — the loaded
+            // `addition`, the loaded
             // run carries **no provenance** (09 §6: provenance is set by
             // reifying a file through a play gesture, and by nothing else) —
             // and it is **assembled**, whatever it was built from, because a
@@ -3352,6 +3463,11 @@ impl App {
     /// back, the wall is where you left it with the record you were reading
     /// marked, so returning is *return* rather than re-find.
     fn open_album(&mut self, id: u64) -> Task<Message> {
+        // The second event of a double-click sees the place installed by the
+        // first. Leave every bit of page and shelf state untouched.
+        if self.place == Place::Album(id) {
+            return Task::none();
+        }
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
@@ -3386,17 +3502,15 @@ impl App {
         // visit mid-gesture.
         if let Some(open) = &mut self.playlists.open {
             open.renaming = None;
+            open.confirming_delete = false;
         }
         self.playlists.saving_queue = None;
         entering
     }
 
     /// <kbd>Esc</kbd>'s place-level share of the peel: the transient field
-    /// standing *on* the current place — a playlist rename mid-type — takes
-    /// one press before the place itself leaves. (The
-    /// armed delete peeled here until doc 11 §5 P2 retired the confirm:
-    /// deletion is one press into the trash now, so there is no armed layer
-    /// left to peel.)
+    /// standing *on* the current place — a playlist rename mid-type or delete
+    /// confirmation — takes one press before the place itself leaves.
     fn peel_place_states(&mut self) -> bool {
         match self.place {
             Place::Queue => self.playlists.saving_queue.take().is_some(),
@@ -3404,7 +3518,11 @@ impl App {
                 let Some(open) = &mut self.playlists.open else {
                     return false;
                 };
-                open.renaming.take().is_some()
+                if open.renaming.take().is_some() {
+                    true
+                } else {
+                    std::mem::take(&mut open.confirming_delete)
+                }
             }
             _ => false,
         }
@@ -4417,6 +4535,9 @@ impl App {
         if from == Place::Queue {
             self.queue_undo.clear();
         }
+        if from == Place::Playlists {
+            self.playlists.hovered = None;
+        }
         if matches!(from, Place::Playlist(_)) {
             self.playlists.clear_undo();
         }
@@ -4433,19 +4554,29 @@ impl App {
         }
     }
 
-    /// The sleeve the bottom bar draws beside the track and artist: **the
-    /// sounding record's thumbnail, if the wall has decoded one**.
+    /// The sleeve the bottom bar draws beside the track and artist: the
+    /// sounding record's thumbnail, or its already-prefetched Now playing
+    /// hero while that thumbnail has not otherwise been needed.
     ///
-    /// Read from the wall's own cache with `peek` rather than `get`, so a
-    /// frame cannot reorder an LRU — the bar observes the wall's art, it does
-    /// not compete for it. `None` whenever the record has no decodable art,
-    /// and the bar then draws exactly what it drew before the cover existed.
-    fn bar_cover(&self) -> Option<iced_image::Handle> {
+    /// The hero is requested for every sounding record whether Now playing is
+    /// open or not. Falling back to it closes the gap where the bottom bar
+    /// remained blank until opening a playlist happened to request the same
+    /// record's thumbnail. Both reads use `peek`, so a frame cannot reorder an
+    /// LRU merely by observing it.
+    fn bar_cover(&self) -> Option<views::bottom_bar::Cover> {
         let Screen::Shelf(state) = &self.screen else {
             return None;
         };
         let id = self.player.playing_album()?;
-        state.thumbs.peek(&id).cloned()
+        let image = state
+            .thumbs
+            .peek(&id)
+            .cloned()
+            .or_else(|| state.hero(id).map(|hero| hero.handle.clone()));
+        Some(image.map_or(
+            views::bottom_bar::Cover::Placeholder(id),
+            views::bottom_bar::Cover::Image,
+        ))
     }
 
     /// The whole window: the current place, and the persistent bottom bar
@@ -4491,6 +4622,9 @@ impl App {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
             (Screen::Blocked(blocked), _) => return views::blocked::view(blocked),
             (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
+            (Screen::Shelf(state), Place::Playlists) => {
+                views::playlists::view(state, &self.playlists, &self.player, state.grid())
+            }
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,
@@ -4534,18 +4668,18 @@ impl App {
                     state,
                     open,
                     &self.player,
-                    self.body_width(),
+                    iced::Size::new(self.body_width(), self.body_height()),
                     self.drag
                         .as_ref()
                         .map_or(self.hovered_playlist_row, |_| None),
                     collecting,
+                    self.playlist_scroll,
                     self.drag.as_ref(),
                     self.playlists.can_undo_open(),
                 ),
-                // The playlist vanished under its page — deleted or renamed
-                // on disk. The wall is the honest answer, drawn rather than
-                // navigated to, exactly as a vanished record's page is.
-                None => state.view(&self.player, lamp, collecting),
+                // The playlist vanished under its page — its collection root
+                // is the honest fallback, not the record library.
+                None => views::playlists::view(state, &self.playlists, &self.player, state.grid()),
             },
             // **Home** and **Now playing** — the two places the owner added
             // to ADR-0030 (`place.rs` records the overrule). Their bodies land
@@ -4654,11 +4788,11 @@ impl App {
         };
         // **The app bar, over everything** (ADR-0040): the band a platform
         // title bar occupies, drawn by baz, resident and identical in all
-        // eight places.
+        // nine places.
         //
         // It is composed **here**, outside the lane and outside the place,
         // for the reason the lane is composed outside the place: a surface
-        // that is the same everywhere must be assembled once, or it is eight
+        // that is the same everywhere must be assembled once, or it is nine
         // surfaces that happen to agree. And it spans the *window* rather than
         // the body, because the window controls in its right corner belong to
         // the window and may not be inset by a lane whose width changes.
@@ -4670,9 +4804,10 @@ impl App {
         // — this `match` — rather than something a view file should be
         // guessing from a `Place`.
         let hangs_works = match (&self.screen, self.place) {
-            (Screen::Shelf(state), Place::Library | Place::Home | Place::Artist(_)) => {
-                Some(state.grid().density)
-            }
+            (
+                Screen::Shelf(state),
+                Place::Library | Place::Playlists | Place::Home | Place::Artist(_),
+            ) => Some(state.grid().density),
             // A record's page, a playlist's, Now playing and Settings hang
             // rows or nothing, and density's unit is the column (ADR-0028's
             // amendment §2). No marks — **absent, not disabled**.
@@ -4702,7 +4837,7 @@ impl App {
                     ink,
                     self.bar_cover(),
                     self.now_playing_source()
-                        .map(|source| source.open_message()),
+                        .map(|_| Message::OpenPlayingSource),
                 ),
             ]
             .into()
@@ -5449,8 +5584,18 @@ impl Shelf {
                 // window's edge and the rail is stacked under it
                 // (`views::shelf::view`). It was the bar's width alone while
                 // the rail was a `row!` sibling that took its lane first.
-                self.grid_size =
-                    Size::new((bounds.width - theme::WALL_RESERVE).max(0.0), bounds.height);
+                // A scrollable leaving the tree can briefly report an empty
+                // viewport. That is not a new one-column layout: keep the last
+                // real width until either another real viewport or a window
+                // resize supplies its replacement. This matters to the other
+                // collection places, which share this grid but have no Library
+                // wall of their own to measure it again.
+                if bounds.width > theme::WALL_RESERVE {
+                    self.grid_size.width = bounds.width - theme::WALL_RESERVE;
+                }
+                if bounds.height > 0.0 {
+                    self.grid_size.height = bounds.height;
+                }
                 self.request_visible_thumbs()
             }
             Message::WindowResized(size) => {
@@ -8615,12 +8760,11 @@ mod tests {
     /// the width alone at every width in the shipped band.
     #[test]
     fn a_tile_press_is_navigation_and_re_hangs_nothing() {
-        // The press is a place change. Twice on the same record is a round trip
-        // back to the wall, which is the one gesture of the inspector's that
-        // survived: pointing at the sleeve you are already reading puts it down.
+        // The press is a place change. Repeating it is idempotent: a
+        // double-click must not reinterpret its second event as Back.
         let place = Place::default().album(7);
         assert_eq!(place, Place::Album(7));
-        assert_eq!(place.album(7), Place::Library);
+        assert_eq!(place.album(7), Place::Album(7));
         // …and a different sleeve swaps the page rather than stacking one.
         assert_eq!(place.album(9), Place::Album(9));
 

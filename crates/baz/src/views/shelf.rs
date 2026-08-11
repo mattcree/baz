@@ -467,11 +467,7 @@ fn shelf_row<'a>(
 /// but the default, which is the one place in the wall a few pixels are
 /// visible.
 fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, Message> {
-    container(header_line(shelf, run, block))
-        .width(Length::Fixed(block))
-        .height(Length::Fixed(hang.header_h()))
-        .align_y(alignment::Vertical::Top)
-        .into()
+    header_line(shelf, hang, run, block)
 }
 
 /// The same header, **pinned** to the top of the viewport while its shelf is
@@ -506,11 +502,7 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let body: Element<'_, Message> = match run {
-        Some(run) => container(header_line(shelf, run, block))
-            .width(Length::Fixed(block))
-            .height(Length::Fixed(hang.header_h()))
-            .align_y(alignment::Vertical::Top)
-            .into(),
+        Some(run) => header_band(shelf, hang, run, block),
         None => Space::new(Length::Fixed(block), Length::Fixed(0.0)).into(),
     };
     container(body)
@@ -534,19 +526,17 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
         .into()
 }
 
-/// A group header's line of type: caps, tracked, at the quiet ink.
+/// A group header's line of type: caps, tracked, at the secondary ink.
 ///
-/// **Three axes away from the caption under a sleeve and one size smaller** —
-/// caps where the caption is sentence case, tracked where the caption is not,
-/// [`theme::Palette::paper_faint`] where a title is full paper. Hierarchy is
-/// not carried by size alone here, which is what stops the wall from needing a
-/// fourth type size to say a fourth thing.
+/// The old 10 px faint line was too slight to serve as the artist/section name
+/// over a wall of artwork. This uses the established emphasis size and dim ink
+/// instead: visibly a heading, while caps and tracking keep it distinct from a
+/// sleeve caption.
 ///
-/// The line box is [`theme::HEADING_LINE_H`] and it sits at the **top** of the
-/// band, so the air above the ink is the previous row's trailing hang and the
-/// air below is `hang − HEADING_LINE_H` — the same ratio at every density
-/// step, since both numbers are the step's. See [`theme::SHELF_HEADER_H`] for
-/// why it is that way round.
+/// The type is vertically centred in the density's whole header band. That
+/// supplies real air above a sticky heading at the viewport edge, and the
+/// in-flow and pinned forms both call [`header_band`], so their baseline and
+/// block edge cannot drift apart.
 ///
 /// # Under ARTIST the header is a **door** (ADR-0035)
 ///
@@ -556,9 +546,8 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 /// The breadcrumb on a record's page still opens the same place with the same
 /// [`crate::vm::artist_id`], so the two doors cannot land on different pages.
 ///
-/// **The type does not change when it is a door**: same face, same size, same
-/// tracking, same [`theme::Palette::paper_faint`] ink at rest, same line box,
-/// same height. What it gains is [`theme::word_button`]'s ground under the
+/// **The type does not change when it is a door**: same face, size, tracking,
+/// ink, line box and height. What it gains is [`theme::word_button`]'s ground under the
 /// pointer — the paint the record page's `Artist ›` breadcrumb already wears,
 /// because the two doors lead to one place and should not be two kinds of
 /// control. The hit box is **the word's own box, not the shelf's width**
@@ -576,28 +565,35 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 /// single place for it to lead to. The two keys draw the same line of type and
 /// only one of them is a door, which is the difference between a header that
 /// names a subject and one that names a break.
-fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
+fn header_line(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let header = shelf.groups.get(run.group).map(|group| &group.header);
     let label = header.map_or_else(String::new, vm::GroupHeaderVm::label);
     let word = text(theme::tracked(&label.to_uppercase()))
-        .size(theme::SIZE_HEADING)
-        .line_height(theme::LEADING_HEADING)
+        .size(theme::SIZE_EMPHASIS)
+        .line_height(theme::LEADING_EMPHASIS)
         .font(theme::MEDIUM)
-        .color(room.paper_faint)
+        .color(room.paper_dim)
         .wrapping(text::Wrapping::None);
     let line: Element<'_, Message> = match header {
-        Some(vm::GroupHeaderVm::Artist(artist)) => button(word)
-            .height(Length::Fixed(theme::HEADING_LINE_H))
-            .padding(0)
-            .style(move |_theme, status| theme::word_button(room, room.wall, status))
-            .on_press(Message::OpenArtist(vm::artist_id(artist)))
+        Some(vm::GroupHeaderVm::Artist(artist)) => button(
+            container(word)
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center),
+        )
+        .height(Length::Fixed(hang.header_h()))
+        .padding(0)
+        .style(move |_theme, status| theme::word_button(room, room.wall, status))
+        .on_press(Message::OpenArtist(vm::artist_id(artist)))
+        .into(),
+        _ => container(word)
+            .height(Length::Fixed(hang.header_h()))
+            .align_y(alignment::Vertical::Center)
             .into(),
-        _ => word.into(),
     };
     container(line)
         .width(Length::Fixed(block))
-        .height(Length::Fixed(theme::HEADING_LINE_H))
+        .height(Length::Fixed(hang.header_h()))
         .clip(true)
         .into()
 }

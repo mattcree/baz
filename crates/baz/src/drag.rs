@@ -74,7 +74,10 @@
 //!   button stays in the tree with its `on_press` declared — its styling,
 //!   its hover, its place in the mirror tests — but the wrapper owns the
 //!   pointer for it, so a drag's release can never double as the click that
-//!   plays the row. The pressed-flash is the one thing this costs.
+//!   plays the row. On a sub-threshold release, release-only child controls
+//!   get first refusal; this is how an artist or album label navigates without
+//!   turning the rest of the row into anything but Play. The pressed-flash is
+//!   the one thing this costs.
 //!
 //! # The insertion line, and why nothing parts
 //!
@@ -441,6 +444,24 @@ where
                     touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. },
                 ) => match std::mem::take(phase) {
                     Phase::Armed(_) => {
+                        // A row may contain a release-only named route (the
+                        // playlist's artist and album labels). The wrapper
+                        // owned the press so a drag could start anywhere, but
+                        // a release over that child belongs to the child and
+                        // must not also spend the row's Play click.
+                        let child = self.content.as_widget_mut().on_event(
+                            &mut tree.children[0],
+                            event.clone(),
+                            layout,
+                            cursor,
+                            renderer,
+                            clipboard,
+                            shell,
+                            viewport,
+                        );
+                        if child == event::Status::Captured {
+                            return child;
+                        }
                         // Sub-threshold: the row's ordinary click, made on
                         // the row's behalf.
                         if let Some(click) = &wires.click {
@@ -589,7 +610,7 @@ where
 #[cfg(test)]
 mod tests {
     use iced::advanced::clipboard;
-    use iced::widget::Space;
+    use iced::widget::{Space, mouse_area};
     use iced::{Background, Transformation};
 
     use super::*;
@@ -601,6 +622,7 @@ mod tests {
         Moved(Point),
         Dropped,
         Click,
+        Link,
         Over(bool),
     }
 
@@ -674,6 +696,23 @@ mod tests {
                     Some(Msg::Click),
                 ))
                 .observe(Msg::Over),
+            )
+        }
+
+        /// A wired row carrying one independently actionable metadata label.
+        fn linked() -> Self {
+            Self::build(
+                Source::new(
+                    mouse_area(Space::new(Length::Fixed(W), Length::Fixed(H)))
+                        .on_release(Msg::Link),
+                    &theme::CLOSING_TIME,
+                )
+                .wires(Wires::new(
+                    Msg::Lift,
+                    Msg::Moved,
+                    Msg::Dropped,
+                    Some(Msg::Click),
+                )),
             )
         }
 
@@ -761,6 +800,27 @@ mod tests {
         let (status, messages) = row.released(on_row(33.0, 13.0));
         assert_eq!(status, event::Status::Captured);
         assert_eq!(messages, vec![Msg::Click]);
+    }
+
+    #[test]
+    fn a_named_child_route_wins_the_release_without_disabling_drag() {
+        let mut row = Row::linked();
+        let (status, messages) = row.press(on_row(30.0, 10.0));
+        assert_eq!(status, event::Status::Captured);
+        assert!(messages.is_empty());
+        let (status, messages) = row.released(on_row(30.0, 10.0));
+        assert_eq!(
+            (status, messages),
+            (event::Status::Captured, vec![Msg::Link])
+        );
+
+        // Crossing the threshold turns the same initial press into a drag;
+        // its release is then the drop, never the link under the pointer.
+        row.press(on_row(30.0, 10.0));
+        let (_, messages) = row.moved(on_row(60.0, 10.0));
+        assert!(matches!(messages.as_slice(), [Msg::Lift(_)]));
+        let (_, messages) = row.released(on_row(60.0, 10.0));
+        assert_eq!(messages, vec![Msg::Dropped]);
     }
 
     /// Crossing the threshold lifts the row; every further move follows;

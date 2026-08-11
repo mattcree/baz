@@ -286,6 +286,10 @@ only.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Playlists have a collection root.** The lane's `Playlists` destination
+  shows every saved list as a collage tile on the shared density grid, ordered
+  either A–Z or by creation date, newest first. A playlist viewer now reads
+  `Playlists › Name`; its first segment returns to the collection.
 - **The volume fader survives a restart.** Its exact protocol position is
   restored from `config.toml`; only engine-confirmed movement is saved, and a
   pointer drag is coalesced to the release rather than writing once per pixel.

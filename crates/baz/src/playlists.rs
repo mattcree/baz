@@ -95,6 +95,13 @@ pub(crate) struct PanelRow {
     /// `None` when none did (a bare imported path list), so the row does not
     /// claim `0:00` about music it has not measured.
     pub(crate) seconds: Option<u64>,
+    /// Entries baz can currently hand to the engine.
+    pub(crate) playable: usize,
+    /// When the playlist file was created, in Unix seconds, when the
+    /// filesystem exposes that fact. This is the Playlists place's creation
+    /// ordering key and is deliberately not the mtime below: editing a list
+    /// must not make it newly created.
+    pub(crate) created_unix_s: Option<u64>,
     /// **When the file was last written**, in seconds since the Unix epoch —
     /// the returns lane's order key for a list (ADR-0030 §1: *a playlist is
     /// touched when it is played, or when its file is written by the user's
@@ -117,6 +124,32 @@ pub(crate) struct PanelRow {
     /// collage, fewer meaning "draw the first full-bleed", none meaning the
     /// rest tile.
     pub(crate) art: Vec<u64>,
+}
+
+/// How the full Playlists place arranges its tiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PlaylistOrder {
+    /// Names, case-insensitive, with original spelling as the stable tie-break.
+    #[default]
+    Alphabetical,
+    /// Newest-created first; files whose filesystem cannot report creation
+    /// time follow the dated files, alphabetically.
+    Created,
+    /// Most recently played first; lists with no attributed play follow the
+    /// played lists, alphabetically.
+    Played,
+}
+
+impl PlaylistOrder {
+    pub(crate) const ALL: [Self; 3] = [Self::Alphabetical, Self::Created, Self::Played];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Alphabetical => "A–Z",
+            Self::Created => "Date created",
+            Self::Played => "Played",
+        }
+    }
 }
 
 impl PanelRow {
@@ -199,15 +232,17 @@ pub(crate) struct PageRow {
     pub(crate) title: String,
     /// The track's artist, when something said one.
     pub(crate) artist: Option<String>,
+    /// The record title shown in the playlist table's Album column. Unlike
+    /// the retired group heading, this travels with every row.
+    pub(crate) album: Option<String>,
+    /// The shelf identity for this row's artwork, when the library resolved
+    /// it to a record.
+    pub(crate) album_id: Option<u64>,
     /// `m:ss`, or empty when nothing declared a length.
     pub(crate) duration: String,
     /// Whether the path resolved to nothing: drawn dimmed, unplayable, and
     /// left in the file (ADR-0024 §3).
     pub(crate) missing: bool,
-    /// The record this row opens a run of, when it is the first row of one —
-    /// the queue place's group-header rule, over consecutive same-record
-    /// runs.
-    pub(crate) head: Option<(String, String)>,
     /// This row's position in the *playable subset* — the index `JumpTo`
     /// speaks — or `None` for a missing row.
     pub(crate) playable_position: Option<usize>,
@@ -257,6 +292,9 @@ pub(crate) struct OpenPlaylist {
     pub(crate) records: usize,
     /// The rename field, while renaming.
     pub(crate) renaming: Option<NameEntry>,
+    /// Whether Delete has been pressed once and is waiting for the explicit
+    /// `Move to Trash` confirmation on the page.
+    pub(crate) confirming_delete: bool,
 }
 
 impl OpenPlaylist {
@@ -303,6 +341,10 @@ pub(crate) struct Playlists {
     folder: Option<Folder>,
     /// The panel's index: every playlist, sorted as the folder lists them.
     pub(crate) rows: Vec<PanelRow>,
+    /// The full Playlists place's session ordering.
+    pub(crate) order: PlaylistOrder,
+    /// The saved-playlist tile currently under the pointer.
+    pub(crate) hovered: Option<u64>,
     /// Whether the panel is summoned. Session state, not config — which
     /// surface you were last collecting into is not a standing decision, the
     /// same argument that keeps `settings_section` out of `config.toml`.
@@ -364,6 +406,8 @@ impl Playlists {
         let mut playlists = Self {
             folder,
             rows: Vec::new(),
+            order: PlaylistOrder::default(),
+            hovered: None,
             panel_open: false,
             pending: None,
             naming: None,
@@ -386,6 +430,8 @@ impl Playlists {
         let mut playlists = Self {
             folder: Some(folder),
             rows: Vec::new(),
+            order: PlaylistOrder::default(),
+            hovered: None,
             panel_open: false,
             pending: None,
             naming: None,
@@ -420,12 +466,17 @@ impl Playlists {
                 return;
             }
         };
-        let readings: Vec<(String, Playlist)> = listed
+        let readings: Vec<(String, Playlist, Option<u64>)> = listed
             .iter()
             .filter_map(|file| {
-                file.read()
-                    .ok()
-                    .map(|playlist| (file.name.clone(), playlist))
+                file.read().ok().map(|playlist| {
+                    let created = std::fs::metadata(&file.path)
+                        .and_then(|metadata| metadata.created())
+                        .ok()
+                        .and_then(|created| created.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|duration| duration.as_secs());
+                    (file.name.clone(), playlist, created)
+                })
             })
             .collect();
         // One walk of the index for every sleeve at once: each entry path
@@ -437,7 +488,9 @@ impl Playlists {
             Some(library) => {
                 let wanted: std::collections::HashSet<&Path> = readings
                     .iter()
-                    .flat_map(|(_, playlist)| playlist.entries().map(|entry| entry.path.as_path()))
+                    .flat_map(|(_, playlist, _)| {
+                        playlist.entries().map(|entry| entry.path.as_path())
+                    })
                     .collect();
                 library
                     .tracks()
@@ -456,12 +509,16 @@ impl Playlists {
         };
         self.rows = readings
             .iter()
-            .map(|(name, playlist)| {
+            .map(|(name, playlist, created_unix_s)| {
                 let mut entries = 0usize;
+                let mut playable = 0usize;
                 let mut seconds: Option<u64> = None;
                 let mut art: Vec<u64> = Vec::new();
                 for entry in playlist.entries() {
                     entries += 1;
+                    if records.contains_key(entry.path.as_path()) || entry.path.is_file() {
+                        playable += 1;
+                    }
                     if let Some(declared) = entry.extinf.as_ref().and_then(|extinf| extinf.seconds)
                     {
                         seconds = Some(seconds.unwrap_or(0) + declared);
@@ -478,6 +535,8 @@ impl Playlists {
                     name: name.clone(),
                     entries,
                     seconds,
+                    playable,
+                    created_unix_s: *created_unix_s,
                     // The lane's order key, from the fingerprint the
                     // external-edit check already read: no extra `stat`, and
                     // nothing new is written to learn it.
@@ -488,6 +547,39 @@ impl Playlists {
                 }
             })
             .collect();
+    }
+
+    /// Every saved playlist in the full page's selected order.
+    pub(crate) fn ordered_rows(&self) -> Vec<&PanelRow> {
+        let mut rows: Vec<&PanelRow> = self.rows.iter().collect();
+        let by_name = |a: &&PanelRow, b: &&PanelRow| {
+            (a.name.to_lowercase(), a.name.as_str()).cmp(&(b.name.to_lowercase(), b.name.as_str()))
+        };
+        match self.order {
+            PlaylistOrder::Alphabetical => rows.sort_by(by_name),
+            PlaylistOrder::Created => rows.sort_by(|a, b| {
+                match (a.created_unix_s, b.created_unix_s) {
+                    (Some(a), Some(b)) => b.cmp(&a),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+                .then_with(|| by_name(a, b))
+            }),
+            PlaylistOrder::Played => rows.sort_by(|a, b| {
+                match (
+                    self.played.get(&a.id).copied(),
+                    self.played.get(&b.id).copied(),
+                ) {
+                    (Some(a), Some(b)) => b.cmp(&a),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+                .then_with(|| by_name(a, b))
+            }),
+        }
+        rows
     }
 
     /// The counter the returns lane watches: see [`Self::stamp`]'s field.
@@ -1116,13 +1208,10 @@ impl Playlists {
     /// music stays. Reports whether it went, so the shell can leave the page
     /// it was for.
     ///
-    /// One press, no confirm (doc 11 §5 P2): the 1992 HIG ranks the
-    /// mechanisms reversible-first, and a file the desktop's own Restore can
-    /// bring back needs no warning. The confirm dialog and its sentence —
-    /// *"The file goes; your music stays"* — are retired with honour; the
-    /// trash keeps the promise the sentence made. A refusal from the trash
-    /// layer leaves the file exactly where it was and the page standing —
-    /// nothing falls back to unlinking.
+    /// The shell exposes this only after the page's explicit confirmation.
+    /// The operation remains reversible through the desktop trash; a refusal
+    /// from that layer leaves the file exactly where it was and the page
+    /// standing — nothing falls back to unlinking.
     pub(crate) fn delete_open(&mut self, library: Option<&Library>) -> bool {
         let Some(open) = &self.open else {
             return false;
@@ -1241,7 +1330,6 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
     let mut tracks: Vec<TrackVm> = Vec::new();
     let mut items: Vec<QueueItemVm> = Vec::new();
     let mut missing = 0usize;
-    let mut previous_record: Option<(String, String)> = None;
     // The sleeve's quotations: the first four distinct records, in order
     // (ADR-0024 §A1) — the same identity the wall's thumbnail cache is keyed
     // by, so the page's hero and the panel's tile read the cache the tiles
@@ -1295,11 +1383,11 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
                 .map(Duration::from_secs)
         });
         let record = meta.and_then(|meta| {
-            // The record's title, not the file's tag — the run headers on this
-            // page must name records the way the wall's tiles do, so a merged
-            // two-disc set is one run and not two named `… (Disc 1)`/`(Disc 2)`.
+            // The record's title, not the file's raw album tag, so a merged
+            // multi-disc set has one stable identity and one sleeve.
             library.record_title(meta).map(|album| {
                 (
+                    vm::album_id(AlbumArtist::of(meta), Some(album)),
                     album.to_owned(),
                     meta.album_artist
                         .clone()
@@ -1307,14 +1395,6 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
                         .unwrap_or_default(),
                 )
             })
-        });
-        // A record's name where its run begins — the first row of the page
-        // included, because unlike the queue place this page's own header
-        // names the playlist, not a record.
-        let head = record.clone().filter(|this| {
-            previous_record
-                .as_ref()
-                .is_none_or(|previous| previous != this)
         });
         let playable_position = playable.then_some(tracks.len());
         // The row's own artist line is carried only when the record's header
@@ -1324,7 +1404,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         let own_artist = artist.clone().filter(|artist| {
             record
                 .as_ref()
-                .is_none_or(|(_, album_artist)| album_artist != artist)
+                .is_none_or(|(_, _, album_artist)| album_artist != artist)
         });
         if playable {
             tracks.push(TrackVm {
@@ -1339,22 +1419,29 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
             items.push(QueueItemVm {
                 title: title.clone(),
                 artist: own_artist.clone(),
-                album: record.as_ref().map(|(album, _)| album.clone()),
-                album_artist: record.as_ref().map(|(_, artist)| artist.clone()),
+                album: record.as_ref().map(|(_, album, _)| album.clone()),
+                album_artist: record.as_ref().map(|(_, _, artist)| artist.clone()),
                 duration,
                 path: entry.path.clone(),
             });
         } else {
             missing += 1;
         }
-        previous_record = record;
         rows.push(PageRow {
             position: position + 1,
             title,
-            artist: own_artist,
+            // A flat playlist row carries its artist itself. Fall back to the
+            // record artist when the track tag does not repeat it.
+            artist: artist.or_else(|| {
+                record
+                    .as_ref()
+                    .map(|(_, _, artist)| artist.clone())
+                    .filter(|artist| !artist.is_empty())
+            }),
+            album: record.as_ref().map(|(_, album, _)| album.clone()),
+            album_id: record.as_ref().map(|(id, _, _)| *id),
             duration: duration.map(vm::format_duration).unwrap_or_default(),
             missing: !playable,
-            head,
             playable_position,
             path: entry.path.clone(),
         });
@@ -1394,6 +1481,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         art,
         records: records.len(),
         renaming: None,
+        confirming_delete: false,
     }
 }
 
@@ -1431,6 +1519,8 @@ mod tests {
             name: "Road Trip".to_owned(),
             entries: 14,
             seconds: Some(2530),
+            playable: 14,
+            created_unix_s: None,
             touched_unix_s: None,
             art: Vec::new(),
         };
@@ -1489,6 +1579,61 @@ mod tests {
                 sets_in(&line)
             );
         }
+    }
+
+    #[test]
+    fn the_full_page_orders_by_name_creation_date_or_last_played() {
+        let (_keep, folder) = folder();
+        let mut playlists = Playlists::over(folder);
+        let row = |name: &str, created_unix_s| PanelRow {
+            id: playlist_id(name),
+            name: name.to_owned(),
+            entries: 0,
+            seconds: None,
+            playable: 0,
+            created_unix_s,
+            touched_unix_s: None,
+            art: Vec::new(),
+        };
+        playlists.rows = vec![
+            row("beta", Some(20)),
+            row("Alpha", Some(10)),
+            row("Imported", None),
+        ];
+
+        playlists.order = PlaylistOrder::Alphabetical;
+        assert_eq!(
+            playlists
+                .ordered_rows()
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Alpha", "beta", "Imported"]
+        );
+
+        playlists.order = PlaylistOrder::Created;
+        assert_eq!(
+            playlists
+                .ordered_rows()
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["beta", "Alpha", "Imported"],
+            "creation order is newest first, with unknown dates last"
+        );
+
+        playlists.note_played(playlist_id("Alpha"), 10);
+        playlists.note_played(playlist_id("beta"), 20);
+        playlists.order = PlaylistOrder::Played;
+        assert_eq!(
+            playlists
+                .ordered_rows()
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["beta", "Alpha", "Imported"],
+            "played order is most recent first, with never-played lists last"
+        );
     }
 
     /// An absolute fixture path by the platform's own rule — the same lesson
@@ -1605,17 +1750,20 @@ mod tests {
         assert_eq!(open.missing, 1);
         assert_eq!(open.tracks.len(), 3, "the playable subset");
         assert_eq!(open.queue.paths().len(), 3);
-        // Indexed entries read from the index — and the row carries no artist
-        // of its own when the record's header already says it.
+        // Indexed entries read from the index. A flat playlist row carries
+        // its own artist, album and artwork identity rather than relying on a
+        // group heading above it.
         assert_eq!(open.rows[0].title, "Sunflower");
-        assert_eq!(open.rows[0].artist, None);
-        assert!(!open.rows[0].missing);
-        // The record's run is headed once, at its first row.
+        assert_eq!(open.rows[0].artist.as_deref(), Some("Low"));
+        assert_eq!(open.rows[0].album.as_deref(), Some("Things We Lost"));
         assert_eq!(
-            open.rows[0].head,
-            Some(("Things We Lost".to_owned(), "Low".to_owned()))
+            open.rows[0].album_id,
+            Some(vm::album_id(
+                AlbumArtist::Named("Low"),
+                Some("Things We Lost")
+            ))
         );
-        assert_eq!(open.rows[1].head, None, "a run is headed once");
+        assert!(!open.rows[0].missing);
         // The unindexed-but-present file plays, named from its stem.
         assert!(!open.rows[2].missing);
         assert_eq!(open.rows[2].title, "loose");

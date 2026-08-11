@@ -48,10 +48,10 @@
 //!
 //! # The head is not in here
 //!
-//! The three fixed destinations — `Home`, `Library`, `Now playing` — are the
-//! owner's decision (ADR-0030's amendment) and they are [`crate::place`]
+//! The four fixed destinations — `Home`, `Library`, `Playlists`, `Now
+//! playing` — are the owner's decision and they are [`crate::place`]
 //! members, not lane rows. They have no order to compute and no membership to
-//! decide: they are always all three, always in that order. See
+//! decide: they are always all four, always in that order. See
 //! [`Destination`].
 
 use std::collections::HashMap;
@@ -63,7 +63,7 @@ use std::collections::HashMap;
 /// a *bound on the surface*, not a window on the data: there is no "show more".
 pub(crate) const RECENT_ALBUMS: usize = 24;
 
-/// One of the lane's three fixed destinations.
+/// One of the lane's four fixed destinations.
 ///
 /// The owner's decision, verbatim: *"home will appear at the top of the left
 /// hand sidebar always either way and it will contain the top level concerns.
@@ -72,7 +72,7 @@ pub(crate) const RECENT_ALBUMS: usize = 24;
 /// rows in the lane on the grounds that a second subject is what killed the
 /// last one; the owner overruled it, and the product's preamble says
 /// that settles it. What survives of the argument is the *shape* of the
-/// concession: the head is a closed set of three, above a hairline, and the
+/// concession: the head is a fixed set of four, above a hairline, and the
 /// list below it still has exactly one subject.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Destination {
@@ -80,19 +80,23 @@ pub(crate) enum Destination {
     Home,
     /// The collection — the wall, its search and its arrangement.
     Library,
+    /// Every saved playlist, with its own catalogue ordering.
+    Playlists,
     /// The record that is sounding, at the size it deserves.
     NowPlaying,
 }
 
 impl Destination {
     /// The head, in the owner's order, and there is no other.
-    pub(crate) const ALL: [Self; 3] = [Self::Home, Self::Library, Self::NowPlaying];
+    pub(crate) const ALL: [Self; 4] =
+        [Self::Home, Self::Library, Self::Playlists, Self::NowPlaying];
 
     /// The word on the row.
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Home => "Home",
             Self::Library => "Library",
+            Self::Playlists => "Playlists",
             Self::NowPlaying => "Now playing",
         }
     }
@@ -859,14 +863,13 @@ mod tests {
         assert_eq!(marked, ["Road Trip"]);
     }
 
-    /// The head is a closed set of three, in the owner's order. A fourth
-    /// destination is a nav rail, which is the thing doc 07 L8.4 refused and
-    /// the thing this head is deliberately not allowed to grow into.
+    /// The head contains the four top-level collection destinations in the
+    /// owner's order.
     #[test]
-    fn the_head_is_three_destinations_in_the_owners_order() {
+    fn the_head_destinations_are_in_the_owners_order() {
         assert_eq!(
             Destination::ALL.map(Destination::label),
-            ["Home", "Library", "Now playing"]
+            ["Home", "Library", "Playlists", "Now playing"]
         );
     }
 }

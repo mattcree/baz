@@ -25,7 +25,7 @@
 //! | the strip's lead | `Anne-Marie Puig › Ochre`, the artist half a door | `Road Trip` |
 //! | the sleeve | the cover, one authored image | the collage of quotations (§A1) |
 //! | the commitment | `Play album` | `Play` |
-//! | the acts | `Add to playlist…` | `Queue` · `Rename` · `Delete` |
+//! | the acts | `Add to playlist…` | `Rename` · `Delete`, then `Cancel` · `Move to Trash` while confirming |
 //! | the aside's tail | the edition selector, then `DETAILS` | the rename field, while renaming |
 //! | the hero's face | `theme::WORK_TITLE`, serif italic — a work's own title | [`theme::SEMIBOLD`], sans — a label the owner typed |
 //! | the byline | the artist | `Playlist · 12 records` |
@@ -100,15 +100,36 @@
 //! inside another surface's two-column layout. Same rows, same heads, same
 //! slots; a different thing holding them.
 
+use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    Column, Row, Space, button, column, container, image as iced_image, row, scrollable, text,
-    tooltip,
+    Column, Row, Space, button, column, container, image as iced_image, mouse_area, rich_text, row,
+    scrollable, span, text, text_input, tooltip,
 };
-use iced::{Element, Font, Length, alignment};
+use iced::{Element, Font, Length, alignment, mouse};
 
 use crate::app::Message;
 use crate::views::{place_header_led, place_pad, section_rule};
 use crate::{icon, theme};
+
+/// The shared album/playlist document scroller. Source navigation uses this
+/// identity to bring the sounding row into view after opening its page.
+pub(crate) fn scroll_id() -> scrollable::Id {
+    scrollable::Id::new("baz-subject-page")
+}
+
+/// Whether the shared subject page uses its desktop table composition.
+#[must_use]
+pub(crate) fn is_two_column(window_width: f32) -> bool {
+    window_width >= theme::ALBUM_BREAKPOINT
+}
+
+/// Whether a saved playlist has enough room for the desktop table form.
+/// Its rows reserve artwork, an Album value and four edit targets in addition
+/// to the ordinary track anatomy, so it stacks sooner than an album page.
+#[must_use]
+pub(crate) fn is_playlist_two_column(window_width: f32) -> bool {
+    window_width >= theme::PLAYLIST_BREAKPOINT
+}
 
 /// **The page's identity block**: the name, the byline under it, and the line
 /// of facts under that — three lines, three sizes, three inks, one falling
@@ -136,6 +157,10 @@ pub(crate) struct Identity<'a> {
     /// files that may set it, and a shared composition that named it would put
     /// the serif one argument away from every page in the product.
     pub(crate) face: Font,
+    /// The title's inline editing state. When present, the hero itself becomes
+    /// the field and carries its compact Save action; `None` leaves the title
+    /// as ordinary text. Saved and unsaved playlists both use this slot.
+    pub(crate) edit: Option<NameEdit<'a>>,
     /// The middle line: a record's artist, or `Playlist · 12 records`.
     pub(crate) byline: String,
     /// The facts line: the catalogue line, or the counts.
@@ -143,6 +168,16 @@ pub(crate) struct Identity<'a> {
     /// One transient control beside the facts — the playlist page's `Undo`,
     /// drawn exactly while there is an edit to take back (doc 11 §5 P2).
     pub(crate) beside_facts: Option<Element<'a, Message>>,
+}
+
+/// Everything the shared identity block needs to turn its hero into a focused
+/// name field without learning which kind of playlist owns the edit.
+pub(crate) struct NameEdit<'a> {
+    pub(crate) value: &'a str,
+    pub(crate) error: Option<&'a str>,
+    pub(crate) id: text_input::Id,
+    pub(crate) on_input: fn(String) -> Message,
+    pub(crate) on_submit: Message,
 }
 
 /// **A page about one thing**: the header strip, then the object beside what
@@ -164,33 +199,49 @@ pub(crate) struct Page<'a> {
     pub(crate) identity: Identity<'a>,
     /// The rows, built by the page that owns them.
     pub(crate) rows: Vec<Element<'a, Message>>,
+    /// Whether this page has enough width for the desktop table composition.
+    /// The compositor remains shared, while each row anatomy gets to state
+    /// the width at which its flexible title lane would otherwise disappear.
+    pub(crate) side_by_side: bool,
+    /// Gap between row elements. Album rows use the ordinary list gap;
+    /// virtual playlist rows fold that gap into their fixed pitch so their
+    /// top and bottom spacers remain exact.
+    pub(crate) row_spacing: f32,
+    /// A viewport reading for pages whose row list is virtualized.
+    pub(crate) on_scroll: Option<fn(Viewport) -> Message>,
     /// What the `TRACKS` block says when there are none.
     pub(crate) empty: &'static str,
 }
 
 /// Draw a [`Page`] at `window_width`.
 ///
-/// `window_width` decides the arrangement and nothing else. The page grows
+/// `window_width` sizes the arrangement and [`Page::side_by_side`] selects its
+/// responsive form. The page grows
 /// with the window until its list reaches [`theme::LIST_MEASURE`] and then
 /// stops, centring in what is left — a measure has a comfortable range rather
 /// than a single right answer, and a track list set 1500 px wide is a row of
-/// two words at opposite ends of the screen. Below
-/// [`theme::ALBUM_BREAKPOINT`] the two columns stack, because at that point
-/// the list would be narrower than the sleeve beside it and two columns have
-/// stopped being two columns.
+/// two words at opposite ends of the screen. The columns stack before their
+/// row anatomy can consume the title's flexible width.
+///
+/// In the two-column form, the identity and aside stay at the top while the
+/// track table alone scrolls. The `TRACKS` rule is therefore the table's
+/// sticky head. The stacked form remains one document and one scroll.
 ///
 /// This arithmetic was written twice and is now written once, which is the
 /// half of *"they are different for no good reason"* that no frame would ever
 /// have shown: the two copies agreed, and nothing but a reviewer's memory kept
 /// them agreeing.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the responsive forms share one destructuring and one set of page parts"
+)]
 pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message> {
     let room = theme::active();
     // What the page's own block has to fit in: the window, less the one gutter
     // on both sides and the scrollbar's declared lane on the right
     // ([`super::place_pad`]).
     let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
-    let side_by_side = window_width >= theme::ALBUM_BREAKPOINT;
-    let measure = if side_by_side {
+    let measure = if page.side_by_side {
         (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
     } else {
         content.min(theme::LIST_MEASURE)
@@ -204,6 +255,9 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         aside_tail,
         identity,
         rows,
+        side_by_side,
+        row_spacing,
+        on_scroll,
         empty,
     } = page;
 
@@ -232,56 +286,96 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
             .color(room.paper_faint)
             .into()
     } else {
-        Column::with_children(rows).spacing(theme::GAP_XS).into()
+        Column::with_children(rows).spacing(row_spacing).into()
     };
+    // **The lead's box is [`place_header_led`]'s now**, not this page's. It
+    // stood locally for one build and made pages differ in height; the shared
+    // strip is the one answer now.
+    let header = place_header_led(lead, None);
+    if side_by_side {
+        // A desktop page behaves like a table: its subject remains available
+        // at the top while the rows turn beneath a sticky section head. This
+        // also gives source navigation a stable scroller whose content begins
+        // with row zero instead of a hero of variable height.
+        let table_scroll = scrollable(container(body).padding(iced::Padding {
+            bottom: theme::HANG,
+            ..iced::Padding::default()
+        }))
+        .id(scroll_id())
+        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let table_scroll = if let Some(on_scroll) = on_scroll {
+            table_scroll.on_scroll(on_scroll)
+        } else {
+            table_scroll
+        };
+        let table = column![section_rule("Tracks"), table_scroll]
+            .spacing(theme::GAP_SM)
+            .height(Length::Fill);
+        let main = column![identity_block(identity), table]
+            .spacing(theme::GAP_XL)
+            .height(Length::Fill);
+        let composed = row![
+            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main)
+                .width(Length::Fixed(measure))
+                .height(Length::Fill),
+        ]
+        .spacing(theme::GAP_XL)
+        .align_y(iced::Alignment::Start)
+        .height(Length::Fill);
+        return column![
+            header,
+            container(composed)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(place_pad())
+                .align_x(alignment::Horizontal::Center),
+        ]
+        .into();
+    }
+
     let main = column![
         identity_block(identity),
         column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
     ]
     .spacing(theme::GAP_XL);
-
-    let composed: Element<'a, Message> = if side_by_side {
-        row![
-            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main).width(Length::Fixed(measure)),
-        ]
-        .spacing(theme::GAP_XL)
-        .align_y(iced::Alignment::Start)
-        .into()
-    } else {
-        column![
-            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main).width(Length::Fixed(measure)),
-        ]
-        .spacing(theme::GAP_XL)
-        .into()
-    };
+    let composed = column![
+        // In the stacked form the artwork and its acts are the page's hero,
+        // centred over the text measure. The identity and track table below
+        // keep their reading edge; centring row contents would turn a list
+        // into a poster rather than a document.
+        container(container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)))
+            .width(Length::Fixed(measure))
+            .align_x(alignment::Horizontal::Center),
+        container(main).width(Length::Fixed(measure)),
+    ]
+    .spacing(theme::GAP_XL);
 
     column![
-        // **The lead's box is [`place_header_led`]'s now**, not this page's.
-        //
-        // It stood here for one build, because this page found the defect —
-        // a record's sleeve at y = 88 against a playlist's at y = 77 — and
-        // fixing it generally would have moved four other places' content on
-        // screen in a commit that was about something else. It has since been
-        // moved into the shared strip, where Queue, Settings and the Artist
-        // place get it too, and the local box is gone rather than left as a
-        // second answer to a question that now has one.
-        place_header_led(lead, None),
+        header,
         // **One scroll for the whole page.** A page is one document and
-        // turning it over is one gesture. The gutter the bar needs is
-        // reserved whether or not the page overflows, so a fourteenth track
-        // arriving shunts no duration sideways.
-        scrollable(
-            container(composed)
-                .width(Length::Fill)
-                .padding(place_pad())
-                .align_x(alignment::Horizontal::Center)
-        )
-        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .width(Length::Fill)
-        .height(Length::Fill),
+        // turning it over is one gesture in the stacked form.
+        {
+            let document = scrollable(
+                container(composed)
+                    .width(Length::Fill)
+                    .padding(place_pad())
+                    .align_x(alignment::Horizontal::Center),
+            )
+            .id(scroll_id())
+            .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+            .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+            .width(Length::Fill)
+            .height(Length::Fill);
+            if let Some(on_scroll) = on_scroll {
+                document.on_scroll(on_scroll)
+            } else {
+                document
+            }
+        },
     ]
     .into()
 }
@@ -307,16 +401,47 @@ pub(crate) fn identity_block(identity: Identity<'_>) -> Element<'_, Message> {
     if let Some(beside) = identity.beside_facts {
         facts = facts.push(beside);
     }
-    column![
-        container(
+    let title: Element<'_, Message> = match identity.edit {
+        None => container(
             text(identity.name)
                 .size(theme::SIZE_HERO)
                 .line_height(theme::LEADING_HERO)
                 .font(identity.face)
-                .color(room.paper)
+                .color(room.paper),
         )
         .max_height(2.0 * theme::LINE_HERO)
-        .clip(true),
+        .clip(true)
+        .into(),
+        Some(edit) => {
+            let valid = !edit.value.trim().is_empty();
+            let field = text_input("Playlist name", edit.value)
+                .id(edit.id)
+                .on_input(edit.on_input)
+                .on_submit(edit.on_submit.clone())
+                .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+                .size(theme::SIZE_HERO)
+                .line_height(theme::LEADING_HERO)
+                .width(Length::Fill)
+                .style(move |_theme, status| theme::input(room, status));
+            let mut block = column![
+                row![field, act("Save", valid, edit.on_submit)]
+                    .spacing(theme::GAP_SM)
+                    .align_y(iced::Alignment::Center)
+            ]
+            .spacing(theme::GAP_XS);
+            if let Some(error) = edit.error {
+                block = block.push(
+                    text(error.to_owned())
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.alert),
+                );
+            }
+            block.into()
+        }
+    };
+    column![
+        title,
         text(identity.byline)
             .size(theme::SIZE_TITLE)
             .line_height(theme::LEADING_TITLE)
@@ -440,6 +565,9 @@ pub(crate) struct TrackRow<'a> {
     /// The number lane's occupant: a position, the lamp dot, or the next
     /// ring — whatever this surface has to say about where the music is.
     pub(crate) marker: Element<'a, Message>,
+    /// A row-sized sleeve between its number and title, where this surface
+    /// identifies records per track rather than with group headings.
+    pub(crate) artwork: Option<Element<'a, Message>>,
     /// The row's own line.
     pub(crate) title: std::borrow::Cow<'a, str>,
     /// The title's ink. **Stated rather than inherited**: a record's row used
@@ -449,8 +577,14 @@ pub(crate) struct TrackRow<'a> {
     /// reader has to go to the style function to learn.
     pub(crate) ink: iced::Color,
     /// The second line, where there is one: a track artist, or the path a
-    /// missing entry went to.
-    pub(crate) under: Option<(std::borrow::Cow<'a, str>, iced::Color)>,
+    /// missing entry went to. Its optional press lets playlist metadata be a
+    /// navigation target independently of the row's playback press.
+    pub(crate) under: Option<(std::borrow::Cow<'a, str>, iced::Color, Option<Message>)>,
+    /// The playlist's Album value, its independent navigation press, and
+    /// whether it occupies the desktop table column. In the compact form it
+    /// folds beside the artist on the metadata line instead of disappearing.
+    /// Other track surfaces leave it absent.
+    pub(crate) context: Option<(std::borrow::Cow<'a, str>, Option<Message>, bool)>,
     /// The duration, already formatted.
     pub(crate) duration: std::borrow::Cow<'a, str>,
     /// Whether this is the sounding row — the medium weight and the card.
@@ -477,9 +611,11 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
     let room = theme::active();
     let TrackRow {
         marker,
+        artwork,
         title,
         ink,
         under,
+        context,
         duration,
         playing,
         press,
@@ -497,44 +633,112 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
     } else {
         heading
     };
+    let under = under.map(|(label, ink, press)| metadata_label(label, ink, press));
+    let (table_context, inline_context) = match context {
+        Some((label, press, true)) => (Some(metadata_label(label, room.paper_dim, press)), None),
+        Some((label, press, false)) => (None, Some(metadata_label(label, room.paper_dim, press))),
+        None => (None, None),
+    };
     let mut stack = column![heading].spacing(theme::GAP_XXS);
-    if let Some((line, line_ink)) = under {
-        stack = stack.push(
-            text(line)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(line_ink)
-                .wrapping(text::Wrapping::None),
+    match (under, inline_context) {
+        (Some(under), Some(context)) => {
+            stack = stack.push(
+                row![
+                    under,
+                    text("·")
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_faint),
+                    context,
+                ]
+                .spacing(theme::GAP_XS)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+        (Some(under), None) => stack = stack.push(under),
+        (None, Some(context)) => stack = stack.push(context),
+        (None, None) => {}
+    }
+    let mut contents = Row::new().push(
+        container(marker)
+            .width(Length::Fixed(theme::TRACK_NO_W))
+            .height(Length::Fixed(theme::PANEL_SLEEVE))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+    );
+    if let Some(artwork) = artwork {
+        contents = contents.push(
+            container(artwork)
+                .width(Length::Fixed(theme::PANEL_SLEEVE))
+                .height(Length::Fixed(theme::PANEL_SLEEVE)),
         );
     }
-    button(
-        row![
-            container(marker)
-                .width(Length::Fixed(theme::TRACK_NO_W))
-                .height(Length::Fixed(theme::CAPTION_LINE_H))
-                .align_x(alignment::Horizontal::Right)
-                .align_y(alignment::Vertical::Center),
-            container(stack).width(Length::Fill),
+    contents = contents.push(container(stack).width(Length::Fill));
+    if let Some(context) = table_context {
+        contents = contents.push(
+            container(context)
+                .width(Length::Fixed(theme::PLAYLIST_ALBUM_W))
+                .height(Length::Fixed(theme::PANEL_SLEEVE))
+                .align_y(alignment::Vertical::Center)
+                .clip(true),
+        );
+    }
+    contents = contents
+        .push(
             container(
                 text(duration)
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
                     .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
+                    .wrapping(text::Wrapping::None),
             )
             .width(Length::Fixed(theme::DURATION_W))
             .height(Length::Fixed(theme::CAPTION_LINE_H))
             .align_x(alignment::Horizontal::Right)
             .align_y(alignment::Vertical::Center),
-        ]
+        )
         .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Start),
-    )
-    .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
-    .on_press_maybe(press)
-    .into()
+        .align_y(iced::Alignment::Center);
+    button(contents)
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, 0.0))
+        .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
+        .on_press_maybe(press)
+        .into()
+}
+
+/// One independently actionable fact inside a track row. The surrounding row
+/// keeps its playback press; child controls capture the artist or album press
+/// first, so one piece of text has one unambiguous destination.
+fn metadata_label(
+    label: std::borrow::Cow<'_, str>,
+    ink: iced::Color,
+    press: Option<Message>,
+) -> Element<'_, Message> {
+    let room = theme::active();
+    if let Some(message) = press {
+        // The draggable-row wrapper owns the initial press. A release-only
+        // child target lets it distinguish this named route from the row's
+        // ordinary click without sacrificing drag initiation. Rich text
+        // underlines a linked span exactly while the pointer is over it, so
+        // the affordance appears only on the words that own the route.
+        let linked_label = rich_text([span(label).link(message.clone())])
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None);
+        mouse_area(linked_label)
+            .on_release(message)
+            .interaction(mouse::Interaction::Pointer)
+            .into()
+    } else {
+        text(label)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(ink)
+            .wrapping(text::Wrapping::None)
+            .into()
+    }
 }
 
 /// **The head over one record's run of rows** — its title, and who it is filed
@@ -672,6 +876,7 @@ pub(crate) fn lamp_dot() -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    use super::{is_playlist_two_column, is_two_column};
     use crate::theme;
 
     /// Both view sources, **code only** — no test module and no comment lines.
@@ -737,6 +942,31 @@ mod tests {
         // stopped being two columns.
         assert!(list(theme::ALBUM_BREAKPOINT) <= theme::ALBUM_ASIDE_W);
         assert!(list(theme::ALBUM_BREAKPOINT + 4.0 * theme::HANG) > theme::ALBUM_ASIDE_W);
+    }
+
+    #[test]
+    fn a_playlist_stacks_before_its_title_lane_collapses() {
+        assert!(is_two_column(theme::PLAYLIST_BREAKPOINT - 1.0));
+        assert!(!is_playlist_two_column(theme::PLAYLIST_BREAKPOINT - 1.0));
+        assert!(is_playlist_two_column(theme::PLAYLIST_BREAKPOINT));
+
+        let main = theme::PLAYLIST_BREAKPOINT
+            - 2.0 * theme::HANG
+            - theme::SCROLLBAR_LANE
+            - theme::ALBUM_ASIDE_W
+            - theme::GAP_XL;
+        let fixed = theme::TRACK_NO_W
+            + theme::PANEL_SLEEVE
+            + theme::PLAYLIST_ALBUM_W
+            + theme::DURATION_W
+            + 4.0 * theme::GAP_SM
+            + 4.0 * theme::STEPPER_HIT
+            + 4.0 * theme::GAP_XS;
+        assert!(
+            main - fixed >= 140.0,
+            "the desktop playlist left only {} px for its title",
+            main - fixed
+        );
     }
 
     /// **The two identity blocks are the same height** — 80 px, a record's —

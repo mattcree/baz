@@ -6,7 +6,7 @@
 //! > **The window holds one place at a time, with the returns lane to its left
 //! > in every place but Settings, and the now-playing bar under all of them.**
 //!
-//! One kind, eight members, one rule. There is no inspector, no popover and no
+//! One kind, nine members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
 //! *which place am I in* — and one key that answers it. (One summoned,
 //! single-tenant panel floats *over* a place without being one — the playlist
@@ -84,6 +84,8 @@ pub enum Place {
     /// the vision's first pillar.
     #[default]
     Library,
+    /// Every saved playlist, arranged as a collection of playlist sleeves.
+    Playlists,
     /// **Home**: the interrupted run, and what is new (ADR-0030 §9.4 as the
     /// owner chose it).
     ///
@@ -119,10 +121,8 @@ pub enum Place {
     /// removed the artist is answered with the wall rather than with a
     /// dangling borrow.
     ///
-    /// **Not a destination.** The lane's head is a closed set of three
-    /// (ADR-0030's amendment) and a fourth is the nav rail doc 07 L8.4
-    /// refused. This is reached from a record's page, like `Album` is reached
-    /// from a tile, and it lights nothing in the head.
+    /// **Not a destination.** This is reached from a record's page, like
+    /// `Album` is reached from a tile, and it lights nothing in the head.
     Artist(u64),
     /// **One record's page**: its art, its identity, the action, its tracks
     /// and its condition report, at the width of the window.
@@ -133,7 +133,7 @@ pub enum Place {
     /// "showing an album page for no album".
     Album(u64),
     /// **One playlist's page** (ADR-0024 §4): its name, its counts, `Play`,
-    /// `Queue`, `Rename`, `Delete`, and its rows in the queue place's anatomy.
+    /// `Rename`, `Delete`, and its rows in the queue place's anatomy.
     ///
     /// Carries [`crate::playlists::playlist_id`]'s hash of the playlist's
     /// *name* — the filename is the name (ADR-0024 §2), so the name is the
@@ -165,66 +165,42 @@ impl Place {
         }
     }
 
-    /// A tile was pressed, or the bar's now-playing block was: show that
-    /// record's page — or come back from it, when it is the page already
-    /// showing.
+    /// A tile was pressed, or a source route named a record: show that
+    /// record's page.
     ///
-    /// The toggle-off arm is what makes a tile press reversible with the same
-    /// press, which is the behaviour the inspector had and the one gesture of
-    /// it worth keeping.
+    /// This is idempotent. A second pointer press can arrive as part of a
+    /// double-click, and pointing at the thing already on screen must not turn
+    /// into an unrelated Back gesture. Back and the resident destinations are
+    /// the explicit ways out.
     #[must_use]
     pub fn album(self, id: u64) -> Self {
-        if self == Self::Album(id) {
-            Self::Library
-        } else {
-            Self::Album(id)
-        }
+        let _ = self;
+        Self::Album(id)
     }
 
-    /// **The album page's breadcrumb was pressed**: show that artist's page —
-    /// or come back from it, when it is the page already showing.
-    ///
-    /// [`Self::album`]'s shape exactly, and for its reason: pointing at the
-    /// thing you are already reading puts it down, and a different artist
-    /// swaps the page rather than stacking one.
-    ///
-    /// **The toggle-off arm has no route today**, and it is kept rather than
-    /// trimmed: the only door to an artist is the record page's breadcrumb, and
-    /// an artist's own page carries no breadcrumb, so there is nowhere to press
-    /// the artist you are already reading. Three identically-shaped functions
-    /// that behave identically are worth more than one branch pruned for being
-    /// briefly unreachable — the moment a second door exists (a tile's caption,
-    /// a lane row) it is live, and a sibling that quietly did not toggle would
-    /// be the surprise.
+    /// **The album page's breadcrumb was pressed**: show that artist's page.
+    /// Repeating the route leaves that page in place, exactly as repeating an
+    /// album or playlist route does.
     #[must_use]
     pub fn artist(self, id: u64) -> Self {
-        if self == Self::Artist(id) {
-            Self::Library
-        } else {
-            Self::Artist(id)
-        }
+        let _ = self;
+        Self::Artist(id)
     }
 
-    /// A playlist's name was pressed in the panel: show that playlist's page —
-    /// or come back from it, when it is the page already showing.
-    ///
-    /// [`Self::album`]'s shape exactly, and for its reason: pointing at the
-    /// thing you are already reading puts it down, and a different playlist
-    /// swaps the page rather than stacking one.
+    /// A playlist tile or name was pressed: show that playlist's page.
+    /// Repeating the press leaves it there; it is navigation, not an implicit
+    /// Back control.
     #[must_use]
     pub fn playlist(self, id: u64) -> Self {
-        if self == Self::Playlist(id) {
-            Self::Library
-        } else {
-            Self::Playlist(id)
-        }
+        let _ = self;
+        Self::Playlist(id)
     }
 
     /// <kbd>Esc</kbd>, and every place's `‹ Library`: return home.
     ///
-    /// Distinct from the three toggles above because a *back* that toggled
-    /// would send you somewhere from the Library, which is not what backing
-    /// out of anywhere means. Home is already home, so this is a no-op there —
+    /// Unlike the subject routes above, this deliberately discards the
+    /// subject and returns to the Library. Home is already home, so this is a
+    /// no-op there —
     /// and the shell asks [`Self::is_library`] first, so the key falls through to
     /// the layers underneath rather than being silently eaten by a place that
     /// had nothing to leave.
@@ -246,7 +222,7 @@ impl Place {
     /// Not a toggle, and that is the difference between a destination and a
     /// door. `Settings` is a door — press it again and it closes — because it
     /// names one thing you look at and then put down.
-    /// The head's three name *where you are*, and the current one is drawn in
+    /// The head's four name *where you are*, and the current one is drawn in
     /// full paper ink to say so; pressing the row you are already on must
     /// leave you there, because the alternative is a control whose meaning
     /// depends on a state you can already see and would be a way to fall out
@@ -264,11 +240,12 @@ impl Place {
         match to {
             crate::lane::Destination::Home => Self::Home,
             crate::lane::Destination::Library => Self::Library,
+            crate::lane::Destination::Playlists => Self::Playlists,
             crate::lane::Destination::NowPlaying => Self::NowPlaying,
         }
     }
 
-    /// Which of the head's three destinations this place *is*, if it is one —
+    /// Which of the head's four destinations this place *is*, if it is one —
     /// what the lane reads to ink the current row.
     ///
     /// The five places that are not destinations (`Album`, `Artist`, `Queue`,
@@ -281,6 +258,7 @@ impl Place {
         match self {
             Self::Home => Some(crate::lane::Destination::Home),
             Self::Library => Some(crate::lane::Destination::Library),
+            Self::Playlists => Some(crate::lane::Destination::Playlists),
             Self::NowPlaying => Some(crate::lane::Destination::NowPlaying),
             _ => None,
         }
@@ -442,21 +420,20 @@ mod tests {
     }
 
     #[test]
-    fn each_door_closes_itself_and_nothing_else() {
+    fn subject_routes_are_idempotent_and_settings_remains_a_toggle() {
         assert_eq!(Place::Library.settings(), Place::Settings);
         assert_eq!(Place::Settings.settings(), Place::Library);
         assert_eq!(Place::Library.album(7), Place::Album(7));
-        assert_eq!(Place::Album(7).album(7), Place::Library);
+        assert_eq!(Place::Album(7).album(7), Place::Album(7));
         assert_eq!(Place::Library.playlist(3), Place::Playlist(3));
-        assert_eq!(Place::Playlist(3).playlist(3), Place::Library);
+        assert_eq!(Place::Playlist(3).playlist(3), Place::Playlist(3));
         assert_eq!(Place::Playlist(3).playlist(4), Place::Playlist(4));
         assert_eq!(Place::Library.artist(5), Place::Artist(5));
-        assert_eq!(Place::Artist(5).artist(5), Place::Library);
+        assert_eq!(Place::Artist(5).artist(5), Place::Artist(5));
         assert_eq!(Place::Artist(5).artist(6), Place::Artist(6));
 
-        // …and a door pressed from *another* place is a move, not a swap back
-        // home. The key says where to go; only the place you are in says
-        // "and back".
+        // A subject route pressed from another place is still a move, and a
+        // different subject replaces the current one rather than stacking it.
         assert_eq!(Place::NowPlaying.settings(), Place::Settings);
         assert_eq!(Place::Settings.album(7), Place::Album(7));
         assert_eq!(Place::Album(7).album(8), Place::Album(8));
@@ -468,6 +445,7 @@ mod tests {
         for place in [
             Place::Library,
             Place::Home,
+            Place::Playlists,
             Place::NowPlaying,
             Place::Album(7),
             Place::Artist(5),
@@ -503,6 +481,7 @@ mod tests {
             Step::Artist(5),
             Step::Playlist(1),
             Step::Go(crate::lane::Destination::Home),
+            Step::Go(crate::lane::Destination::Playlists),
             Step::Go(crate::lane::Destination::NowPlaying),
             Step::Back,
         ];
@@ -535,7 +514,13 @@ mod tests {
                             // place that is not one names nothing.
                             assert_eq!(
                                 place.destination().is_some(),
-                                matches!(place, Place::Home | Place::Library | Place::NowPlaying),
+                                matches!(
+                                    place,
+                                    Place::Home
+                                        | Place::Library
+                                        | Place::Playlists
+                                        | Place::NowPlaying
+                                ),
                                 "{step:?} left the head disagreeing with the place"
                             );
                             // Exactly one member is on screen: the enum makes
@@ -545,6 +530,7 @@ mod tests {
                             // find it.
                             let showing = usize::from(place.is_library())
                                 + usize::from(place == Place::Home)
+                                + usize::from(place == Place::Playlists)
                                 + usize::from(place == Place::NowPlaying)
                                 + usize::from(place == Place::Settings)
                                 + usize::from(place.showing_album().is_some())

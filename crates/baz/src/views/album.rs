@@ -129,6 +129,9 @@ pub(crate) fn view<'a>(
             aside_tail: aside_tail(album, edition),
             identity: identity(album, edition),
             rows: track_rows(album, edition, player, collecting, hovered_row),
+            side_by_side: page::is_two_column(window_width),
+            row_spacing: theme::GAP_XS,
+            on_scroll: None,
             // A record with no readable edition ruled off its track list in
             // silence before the composition was shared; the slot is not
             // optional now.
@@ -465,6 +468,7 @@ fn identity<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> I
         // Serif italic: a *work's* title, against the sans name on the playlist
         // page's hero. See this function's docs.
         face: theme::WORK_TITLE,
+        edit: None,
         byline: artist.to_owned(),
         facts: meta.join(" · "),
         // Nothing stands beside a record's facts. A playlist's `Undo` is in
@@ -564,6 +568,7 @@ fn track_row(
     };
     let body = page::track_row(page::TrackRow {
         marker,
+        artwork: None,
         title: track.title.as_str().into(),
         // A published record's row has no dimmed state — nothing on it can be
         // missing or already played — so the ink is the one ink, stated. It
@@ -574,7 +579,8 @@ fn track_row(
             .artist
             .as_deref()
             .filter(|_| show_artist)
-            .map(|artist| (artist.into(), room.paper_dim)),
+            .map(|artist| (artist.into(), room.paper_dim, None)),
+        context: None,
         duration: duration.into(),
         playing,
         press,

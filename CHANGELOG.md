@@ -26,6 +26,55 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **Opening music is no longer secretly a toggle.** Repeated presses on the
+  same album, artist, or playlist are idempotent, so the second event of a
+  double-click cannot open a page and immediately throw the listener back to
+  the Library or Playlists. Back, Escape, breadcrumbs and resident navigation
+  remain the explicit ways to leave.
+- **Narrow playlist pages no longer crush their table columns.** The shared
+  subject-page layout now stacks a playlist below a 1000 px body width, before
+  its artwork, Album field, duration and edit targets can consume the title
+  lane. In that stacked form the artwork and actions are centred over the
+  content measure while identity and track rows retain their readable left
+  edge. In the desktop table, artist and album labels are independent links to
+  their pages, underlining on hover, while the rest of the row remains the
+  track's Play action. Album pages retain their simpler row anatomy and
+  existing breakpoint. Resizing preserves the playlist's scroll position,
+  including when the page crosses between its table and stacked forms.
+- **The bottom bar no longer waits for another page to load its cover.** When
+  the sounding record's wall thumbnail is not cached yet, the bar uses the
+  hero artwork already prefetched for Now playing; opening a playlist is no
+  longer what makes some current-track covers appear. Records with no image
+  keep the same deterministic coloured sleeve they use elsewhere, and the
+  artist line falls back from the track artist to the album artist rather than
+  becoming blank when either individual tag is absent.
+- **The bottom bar returns to the sounding playlist entry.** Pressing its
+  current-song block still opens the originating saved playlist, but now
+  positions the track table at the engine-confirmed playing row instead of
+  dropping the listener at the top. In the desktop two-column page, artwork,
+  actions and identity remain fixed while the track table scrolls beneath its
+  sticky `TRACKS` head; the stacked page remains one continuous document.
+  Unsaved runs and album fallbacks keep their existing Queue and album
+  destinations.
+- **Long queue positions stay visible.** The shared track-number lane now
+  accommodates four-digit positions, so queue item 1000 and beyond no longer
+  lose a digit at the edge. Collection pages also retain the last real grid
+  measurement when the Library scroller leaves the widget tree, preventing a
+  transient empty measurement from opening Playlists as a one-column wall.
+- **Playlist browsing now uses the Library's arrangement controls.** The
+  Playlists strip offers `A–Z`, `DATE CREATED`, and `PLAYED` in the same
+  tracked-key pattern as the Library; Played is most-recent-first and leaves
+  never-played lists at the end. Playlist collage tiles use the wall's
+  artwork veil for Play and Open, without restoring the removed Queue action.
+  Library artist and section headings are now
+  larger and clearer, with the normal and sticky forms sharing one vertically
+  padded layout so they stay aligned as the wall scrolls.
+- **Playlist page actions are quieter and safer.** The redundant whole-list
+  `Queue` action is gone. Rename now edits the prominent playlist title in
+  place with a pre-filled focused field and inline Save action, matching the
+  unsaved-playlist flow. Delete now requires an explicit `Move to Trash`
+  confirmation, with Cancel and <kbd>Esc</kbd> available before anything is
+  moved.
 - **The volume fader is remembered between runs.** Its exact integer control
   position is restored from `config.toml` before the first track plays and is
   persisted from the engine's confirmation, not an optimistic request. A drag
@@ -64,6 +113,12 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
+- **Saved playlists now have a collection page of their own.** `Playlists` is
+  a resident destination showing every saved list as its generated collage
+  sleeve on the shared library grid. It can order lists A–Z or by creation
+  date (newest first, undated imported files last). An individual playlist's
+  header is now rooted at `Playlists › Name`, and opening, closing or deleting
+  a playlist returns to that collection rather than the album library.
 - **Every artist page has its own `All songs` playlist.** It appears above
   `RECORDS` in the same wall-sized collage tile used by Home, plays only that
   artist, and orders releases chronologically (undated releases last) before

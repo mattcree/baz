@@ -89,13 +89,16 @@ pub(crate) mod now_playing;
 pub(crate) mod page;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
+pub(crate) mod playlists;
 pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod top_bar;
 
-use iced::widget::{Space, column, container, horizontal_rule, image as iced_image, row, text};
+use iced::widget::{
+    Space, button, column, container, horizontal_rule, image as iced_image, row, text,
+};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -354,6 +357,36 @@ pub(crate) fn place_name(name: &str) -> Element<'static, Message> {
         .font(theme::MEDIUM)
         .wrapping(text::Wrapping::None)
         .into()
+}
+
+/// One state in a place's arrangement control: tracked capitals, a quiet
+/// regular inactive state, and a medium full-ink active state.
+///
+/// Shared by the Library and Playlists strips so choosing how a collection is
+/// ordered is one control pattern rather than two buttons that merely happen
+/// to send similar messages.
+pub(crate) fn arrangement_key(
+    label: &str,
+    active: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(theme::tracked(&label.to_uppercase()))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(if active { theme::MEDIUM } else { theme::SANS })
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::group_key(room, room.wall, status, active))
+    .on_press(message)
+    .into()
 }
 
 /// [`place_header_with`], with an arbitrary **lead** and an optional quiet

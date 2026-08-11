@@ -1198,10 +1198,10 @@ mod tests {
              slot's left edge moves as the value crosses zero"
         );
 
-        // The track/queue number column: three figures, per its own docs.
+        // The track/queue number column: four figures, per its own docs.
         fits(
             &sans,
-            "999",
+            "9999",
             theme::SIZE_META,
             theme::TRACK_NO_W,
             "TRACK_NO_W",

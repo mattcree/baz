@@ -1355,7 +1355,7 @@ pub const HEADING_LINE_H: f32 = LINE_HEADING;
 
 /// One rail entry's line box — the heading's, because the rail speaks the
 /// shelf header's voice in a column instead of a line.
-pub const RAIL_LINE_H: f32 = LINE_HEADING;
+pub const RAIL_LINE_H: f32 = HEADING_LINE_H;
 /// Rail entry pitch: the line box and the gap to the next entry — **20**.
 ///
 /// [`GAP_SM`] rather than [`GAP_XS`], because the lane's own line box came down
@@ -1519,9 +1519,8 @@ pub const RADIUS_SEGMENT: f32 = 3.0;
 /// Inset of the segmented control's well around its segments.
 pub const SEGMENT_INSET: f32 = 2.0;
 /// Width of the number column in a track or queue list (logical px). Enough
-/// for three figures at [`SIZE_META`], so a long queue's positions
-/// stay in their column.
-pub const TRACK_NO_W: f32 = 24.0;
+/// for four figures at [`SIZE_META`], so positions beyond 999 remain whole.
+pub const TRACK_NO_W: f32 = 32.0;
 /// Corner radius for small floating chips — the seek preview tip, the
 /// tooltips. **3**, down from 4.
 pub const RADIUS_CHIP: f32 = 3.0;
@@ -3509,7 +3508,7 @@ pub const LIST_MEASURE: f32 = 880.0;
 /// §5.5a): [`LIST_MEASURE`] is the measure this product gives a list that owns
 /// its surface, and the run owns *half* of one — the record has the other half.
 /// It clears the run row's own anatomy with room to spare —
-/// [`TRACK_NO_W`] 24 + [`GAP_SM`] 8 + title + `GAP_SM` 8 + [`DURATION_W`] 48 +
+/// [`TRACK_NO_W`] 32 + [`GAP_SM`] 8 + title + `GAP_SM` 8 + [`DURATION_W`] 48 +
 /// [`GAP_XS`] 4 + four [`STEPPER_HIT`] 96 + three `GAP_XS` 12 +
 /// [`SCROLLBAR_LANE`] 10 = 210 + title — leaving 230 px of title lane, against
 /// the ~224 px the bar's own left block gets for the same three-line reading.
@@ -4055,6 +4054,20 @@ pub fn panel(p: &Palette) -> container::Style {
 /// panel rather than a wall. The page's sleeve is [`ART_MAX`], the album
 /// page's own bound — a playlist tile is never drawn larger than a record's.
 pub const PANEL_SLEEVE: f32 = 40.0;
+
+/// The Album column in a flat playlist table. Wide enough to identify a
+/// record without taking the title stack's flexible share of the row.
+pub const PLAYLIST_ALBUM_W: f32 = 160.0;
+
+/// Body width below which a saved playlist uses the stacked page form.
+///
+/// A playlist's table is wider than an album's: beside its flexible title it
+/// permanently reserves the number, 40 px artwork, 160 px Album value,
+/// duration, and up to four 24 px edit targets. At the album page's 744 px
+/// breakpoint that furniture consumes the title lane completely. **1000 px**
+/// leaves roughly 140 px for the title in the worst (picker-open) case; below
+/// it the shared page stacks and gives the table the body's full measure.
+pub const PLAYLIST_BREAKPOINT: f32 = 1000.0;
 
 /// **The ghost row's sleeve slot** (the owner's `New playlist`, 2026-08-09):
 /// the surface *below* the panel with a hairline edge, holding the drawn

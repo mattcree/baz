@@ -46,8 +46,7 @@
 
 use baz_core::index::GroupKey;
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, row, stack, text,
-    text_input,
+    Space, column, container, horizontal_rule, image as iced_image, row, stack, text, text_input,
 };
 use iced::{Element, Length, alignment};
 
@@ -419,32 +418,7 @@ fn match_count(shelf: &Shelf) -> String {
 /// (ADR-0035's third amendment), which is a difference the row states by
 /// putting them side by side rather than by explaining it.
 fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        // Centred in the box by the box, like every other word that is a
-        // control (law L3) — a fixed height with top-aligned content is what put
-        // `Settings` 6.4 px above its own centre, and six keys doing it beside
-        // the well would have been six more.
-        container(
-            text(theme::tracked(&key.label().to_uppercase()))
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(if active { theme::MEDIUM } else { theme::SANS })
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    // The same 32 px as the well beside it and every other control in the
-    // product, so the bar's clusters sit on one grid rather than on one centre
-    // line. Horizontal padding is `GAP_XS` — enough that the hover wash is not
-    // tight against the glyphs, small enough that five of them stay one line of
-    // type rather than five boxes.
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_XS))
-    .style(move |_theme, status| theme::group_key(room, room.wall, status, active))
-    .on_press(Message::GroupKeySelected(key))
-    .into()
+    crate::views::arrangement_key(key.label(), active, Message::GroupKeySelected(key))
 }
 
 #[cfg(test)]

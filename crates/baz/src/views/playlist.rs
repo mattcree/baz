@@ -50,11 +50,10 @@
 //! - **The lamp dot marks a row only when the queue is exactly this list**
 //!   ([`PlayerState::playing_row_in`]) — a page listing something other than
 //!   what the engine holds marks nothing.
-//! - **Delete is one press, into the platform trash** (doc 11 §5 P2): the
-//!   confirm dialog and its sentence — *"The file goes; your music stays"* —
-//!   retired with honour, because the trash keeps the promise the sentence
-//!   made. Forgiveness beats warning: reversibility first, per the 1992
-//!   HIG's own ranking, and the desktop's Restore is the road back.
+//! - **Delete asks once, then uses the platform trash.** The first press
+//!   replaces the ordinary acts with `Cancel` and `Move to Trash`; only the
+//!   explicit second press removes the playlist file. The music files remain
+//!   untouched, and the desktop's Restore remains a second safety net.
 //! - **Undo stands beside the counts while there is an edit to take back**
 //!   (P2 again): remove, reorder and append are whole-file rewrites, and
 //!   the file as it stood is one press — or <kbd>Ctrl</kbd>+<kbd>Z</kbd> —
@@ -62,15 +61,17 @@
 
 use std::borrow::Cow;
 
-use iced::widget::{button, column, container, mouse_area, row, text, text_input};
+use iced::widget::{
+    Space, button, container, image as iced_image, mouse_area, row, text, text_input,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
-use crate::playlists::{Collecting, NameEntry, OpenPlaylist, PageRow};
-use crate::views::page::{self, Identity, Page};
+use crate::playlists::{Collecting, OpenPlaylist, PageRow};
+use crate::views::page::{self, Identity, NameEdit, Page};
 use crate::views::{place_name, playlist_sleeve};
-use crate::{icon, theme};
+use crate::{icon, theme, vm};
 
 /// The rename field's id, so the caret can land in it the moment `Rename` is
 /// pressed.
@@ -101,21 +102,30 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     open: &'a OpenPlaylist,
     player: &'a PlayerState,
-    window_width: f32,
+    window: iced::Size,
     hovered: Option<usize>,
     collecting: Collecting,
+    scroll: f32,
     drag: Option<&'a crate::drag::DragState>,
     can_undo: bool,
 ) -> Element<'a, Message> {
     let live = player.engine_ready();
     let playable = !open.queue.is_empty();
-    let mut aside_tail: Vec<Element<'a, Message>> = Vec::new();
-    if let Some(renaming) = &open.renaming {
-        aside_tail.push(rename_field(renaming));
-    }
+    let side_by_side = page::is_playlist_two_column(window.width);
+    let acts = if open.confirming_delete {
+        vec![
+            page::act("Cancel", true, Message::PlaylistDeleteCancel),
+            page::act("Move to Trash", true, Message::PlaylistDelete),
+        ]
+    } else {
+        vec![
+            page::act("Rename", true, Message::PlaylistRenameStart),
+            page::act("Delete", true, Message::PlaylistDeleteStart),
+        ]
+    };
     page::view(
         Page {
-            lead: place_name(open.name()),
+            lead: breadcrumb(open.name()),
             // The collage of quotations (§A1), at the record page's own sleeve
             // edge.
             sleeve: playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
@@ -124,60 +134,204 @@ pub(crate) fn view<'a>(
             // that could never act in any state of any run is not a control.
             commitment: (*player.availability() != Availability::NotBuilt)
                 .then(|| page::commitment("Play", live && playable, Message::PlaylistPlay)),
-            acts: vec![
-                page::act("Queue", live && playable, Message::PlaylistQueue),
-                page::act("Rename", true, Message::PlaylistRenameStart),
-                // One press, into the platform trash (doc 11 §5 P2): the
-                // confirm died when the act became reversible — the desktop's
-                // own Restore is the road back, so a warning would be the
-                // fallback posture shipped as the default.
-                page::act("Delete", true, Message::PlaylistDelete),
-            ],
-            aside_tail,
+            acts,
+            aside_tail: Vec::new(),
             identity: identity(open, can_undo),
-            rows: entry_rows(open, player, hovered, collecting, drag, live),
+            rows: entry_rows(
+                shelf,
+                open,
+                player,
+                window,
+                scroll,
+                hovered,
+                collecting,
+                drag,
+                live,
+                side_by_side,
+            ),
+            side_by_side,
+            row_spacing: 0.0,
+            on_scroll: Some(Message::PlaylistScrolled),
             // The words the armed mode left behind went with it (doc 09 §9):
             // the route in is the transfer gesture — a row's `+`, or the
             // record page's `Add to playlist…`, then this list in the picker.
             empty: "Nothing here yet. Press + on any track row, or Add to playlist… on a record's page, and pick this list.",
         },
-        window_width,
+        window.width,
     )
 }
 
-/// **Every entry**, with a record's name where its run begins.
+/// `Playlists › Name`: the collection page is the stable root for every saved
+/// playlist, and the first segment is the door back to it.
+fn breadcrumb(name: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    let door = button(
+        container(place_name("Playlists"))
+            .height(Length::Fill)
+            .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(0)
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::GoTo(crate::lane::Destination::Playlists));
+    row![
+        door,
+        text("\u{203a}")
+            .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
+            .color(room.paper_faint),
+        place_name(name),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .into()
+}
+
+/// One flat playlist row plus its inter-row air. Artwork establishes a 40 px
+/// minimum, so every row has one exact pitch whether its tags carry an artist
+/// or not — the property the virtual window and source jump share.
+pub(crate) const ROW_PITCH: f32 = 2.0 * theme::GAP_XS + theme::PANEL_SLEEVE + theme::GAP_XS;
+
+/// How much content is built beyond either edge of the viewport. It absorbs
+/// the fixed playlist identity above the rows in the narrow document form and
+/// keeps fast wheel motion from exposing a spacer.
+const WINDOW_MARGIN: f32 = 600.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RowWindow {
+    pub(crate) first: usize,
+    pub(crate) end: usize,
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+/// O(1) virtual window over the playlist's fixed-pitch rows.
+#[must_use]
+pub(crate) fn row_window(total: usize, scroll: f32, viewport_h: f32) -> RowWindow {
+    let from = (scroll - WINDOW_MARGIN).max(0.0);
+    let to = (scroll + viewport_h + WINDOW_MARGIN).max(0.0);
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "non-negative pixel positions bounded by the playlist length"
+    )]
+    let first = ((from / ROW_PITCH).floor() as usize).min(total);
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "non-negative pixel positions bounded by the playlist length"
+    )]
+    let end = ((to / ROW_PITCH).ceil() as usize).min(total).max(first);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "playlist row counts fit in f32 geometry"
+    )]
+    let top = first as f32 * ROW_PITCH;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "playlist row counts fit in f32 geometry"
+    )]
+    let bottom = (total - end) as f32 * ROW_PITCH;
+    RowWindow {
+        first,
+        end,
+        top,
+        bottom,
+    }
+}
+
+/// **The visible slice of entries**, flat rather than grouped by record.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the windowed list consumes the page's independent playback, pointer and viewport readings"
+)]
 fn entry_rows<'a>(
+    shelf: &'a Shelf,
     open: &'a OpenPlaylist,
     player: &'a PlayerState,
+    window: iced::Size,
+    scroll: f32,
     hovered: Option<usize>,
     collecting: Collecting,
     drag: Option<&'a crate::drag::DragState>,
     live: bool,
+    side_by_side: bool,
 ) -> Vec<Element<'a, Message>> {
     // Which display row carries the lamp: the engine's confirmed row in the
     // playable subset, mapped back through each row's own subset position —
     // and nothing at all unless the queue is exactly this list.
     let playing_playable = player.playing_row_in(&open.tracks);
-    let mut rows: Vec<Element<'a, Message>> = Vec::new();
-    for (index, page_row) in open.rows.iter().enumerate() {
-        if let Some((album, artist)) = &page_row.head {
-            rows.push(page::list_head(Some(album), artist, rows.is_empty()));
-        }
+    // In the desktop table the scroller begins at row zero. The narrow form
+    // includes the page identity above it; the generous window margin covers
+    // that fixed prefix without forcing the renderer to duplicate its layout
+    // arithmetic here.
+    let rows_scroll = if side_by_side {
+        scroll
+    } else {
+        (scroll - WINDOW_MARGIN).max(0.0)
+    };
+    let win = row_window(open.rows.len(), rows_scroll, window.height);
+    let mut rows: Vec<Element<'a, Message>> = vec![Space::with_height(win.top).into()];
+    for index in win.first..win.end {
+        let page_row = &open.rows[index];
         let playing =
             page_row.playable_position.is_some() && page_row.playable_position == playing_playable;
-        rows.push(entry_row(
-            page_row,
-            index,
-            open.rows.len(),
-            live,
-            playing,
-            hovered == Some(index),
-            collecting,
-            drag.and_then(|held| held.line_for_row(crate::drag::List::Playlist, index)),
-            drag.is_some_and(|held| held.list == crate::drag::List::Playlist),
-        ));
+        rows.push(
+            container(entry_row(
+                shelf,
+                page_row,
+                index,
+                open.rows.len(),
+                side_by_side,
+                live,
+                playing,
+                hovered == Some(index),
+                collecting,
+                drag.and_then(|held| held.line_for_row(crate::drag::List::Playlist, index)),
+                drag.is_some_and(|held| held.list == crate::drag::List::Playlist),
+            ))
+            .height(Length::Fixed(ROW_PITCH))
+            .align_y(alignment::Vertical::Top)
+            .into(),
+        );
     }
+    rows.push(Space::with_height(win.bottom).into());
     rows
+}
+
+/// Where the row at `playable_position` sits in the rendered track table,
+/// expressed as the relative offset iced's scroller accepts.
+///
+/// Since playlist rows now have one fixed pitch and no record headings, the
+/// sounding row's absolute table position is exact even in a five-figure
+/// list. Absolute positioning also avoids the viewport-dependent error of a
+/// relative fraction near the end of a long playlist.
+pub(crate) fn scroll_offset(open: &OpenPlaylist, playable_position: usize) -> Option<f32> {
+    let target = open
+        .rows
+        .iter()
+        .position(|row| row.playable_position == Some(playable_position))?;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "playlist row positions fit in UI geometry"
+    )]
+    Some(target as f32 * ROW_PITCH)
+}
+
+/// Preserve the same row-space offset when a resize crosses between the
+/// desktop table (whose scroller starts at row zero) and the stacked document
+/// (whose artwork and identity precede the rows).
+#[must_use]
+pub(crate) fn reflow_scroll_offset(scroll: f32, was_table: bool, is_table: bool) -> f32 {
+    match (was_table, is_table) {
+        // At the genuine top, keep the document's artwork visible. Once the
+        // listener has entered the rows, the same prefix allowance used by
+        // the virtual window keeps their row-space position stable.
+        (true, false) if scroll > 0.0 => scroll + WINDOW_MARGIN,
+        (false, true) => (scroll - WINDOW_MARGIN).max(0.0),
+        _ => scroll,
+    }
 }
 
 /// What the shared identity block ([`Identity`]) says about a **made list**:
@@ -223,12 +377,19 @@ fn entry_rows<'a>(
 /// one, and the folder path in `DETAILS`, every one of which is already sans.
 /// Flattening the two heroes back into one face would delete the distinction
 /// tier 1 spent three strings stating.
-fn identity(open: &OpenPlaylist, can_undo: bool) -> Identity<'static> {
+fn identity(open: &OpenPlaylist, can_undo: bool) -> Identity<'_> {
     Identity {
         name: open.name().to_owned(),
         // Sans, against the record page's serif italic. See this function's
         // docs — it is the axis, not an omission.
         face: theme::SEMIBOLD,
+        edit: open.renaming.as_ref().map(|renaming| NameEdit {
+            value: &renaming.text,
+            error: renaming.error.as_deref(),
+            id: rename_id(),
+            on_input: Message::PlaylistRenameInput,
+            on_submit: Message::PlaylistRenameSubmit,
+        }),
         byline: byline(open.records),
         facts: open.counts_line(),
         beside_facts: can_undo.then(undo_control),
@@ -297,33 +458,6 @@ fn undo_control() -> Element<'static, Message> {
     .into()
 }
 
-/// The rename field, with the storage layer's refusal under it when the last
-/// submission was refused — the same anatomy as the panel's name field.
-fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
-    let room = theme::active();
-    let mut block = column![
-        text_input("New name…", &entry.text)
-            .id(rename_id())
-            .on_input(Message::PlaylistRenameInput)
-            .on_submit(Message::PlaylistRenameSubmit)
-            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .width(Length::Fill)
-            .style(move |_theme, status| theme::input(room, status)),
-    ]
-    .spacing(theme::GAP_XS);
-    if let Some(error) = &entry.error {
-        block = block.push(
-            text(error.clone())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.alert),
-        );
-    }
-    block.into()
-}
-
 /// One entry's row: position (or the lamp dot), title over its artist — or
 /// over its path, when the entry is missing — duration, and the three
 /// reserved edit slots.
@@ -351,22 +485,25 @@ fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
 /// remain, and the sub-threshold press is the row's ordinary click.
 #[expect(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     clippy::fn_params_excessive_bools,
     reason = "a row is one anatomy — marker, title, duration, four reserved \
               slots — and splitting it would put half the reservation rules \
               out of sight of the other half"
 )]
-fn entry_row(
-    page_row: &PageRow,
+fn entry_row<'a>(
+    shelf: &'a Shelf,
+    page_row: &'a PageRow,
     index: usize,
     total: usize,
+    side_by_side: bool,
     live: bool,
     playing: bool,
     hovered: bool,
     collecting: Collecting,
     insert_line: Option<crate::drag::Edge>,
     observing: bool,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let room = theme::active();
     let ink = if page_row.missing {
         room.paper_faint
@@ -389,18 +526,36 @@ fn entry_row(
         Some((
             Cow::Owned(page_row.path.display().to_string()),
             room.paper_muted,
+            None,
         ))
     } else {
-        page_row
-            .artist
-            .as_deref()
-            .map(|artist| (Cow::Borrowed(artist), room.paper_dim))
+        page_row.artist.as_deref().map(|artist| {
+            // Artist pages are keyed by the wall's filed-under identity. A
+            // track artist is a link only when that identity actually exists;
+            // otherwise the honest plain label is better than a door that
+            // falls through to the Library.
+            let artist_id = vm::artist_id(&vm::AlbumArtistVm::Named(artist.to_owned()));
+            let route = shelf
+                .albums
+                .iter()
+                .any(|album| vm::artist_id(&album.artist) == artist_id)
+                .then_some(Message::OpenArtist(artist_id));
+            (Cow::Borrowed(artist), room.paper_dim, route)
+        })
     };
     let body = page::track_row(page::TrackRow {
         marker,
+        artwork: Some(row_art(shelf, page_row)),
         title: page_row.title.as_str().into(),
         ink,
         under,
+        // At the desktop split the Album value gets its own table column; the
+        // compact form folds the same independent link beside the artist.
+        context: Some((
+            page_row.album.as_deref().unwrap_or("Unknown Album").into(),
+            page_row.album_id.map(Message::OpenAlbum),
+            side_by_side,
+        )),
         duration: page_row.duration.as_str().into(),
         playing,
         // A missing entry is not a control: pressing a row plays from it, and
@@ -477,9 +632,94 @@ fn entry_row(
     )
 }
 
+/// The row's own record sleeve. Real artwork comes from the same thumbnail
+/// cache as the Library; while it is being decoded, the record's deterministic
+/// placeholder occupies the exact same box.
+fn row_art(shelf: &Shelf, row: &PageRow) -> Element<'static, Message> {
+    let edge = theme::PANEL_SLEEVE;
+    match row.album_id {
+        Some(id) => shelf.thumbs.peek(&id).map_or_else(
+            || crate::views::gradient_block(id, edge, 1.0),
+            |handle| {
+                iced_image(handle.clone())
+                    .width(Length::Fixed(edge))
+                    .height(Length::Fixed(edge))
+                    .into()
+            },
+        ),
+        None => Space::new(Length::Fixed(edge), Length::Fixed(edge)).into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::KIND;
+    use super::{KIND, ROW_PITCH, reflow_scroll_offset, row_window};
+
+    #[test]
+    fn a_large_playlist_builds_a_bounded_row_window() {
+        let total = 40_000;
+        let viewport = 1080.0;
+        for offset in [0.0, 10_000.0, 500_000.0, 1_900_000.0] {
+            let window = row_window(total, offset, viewport);
+            assert!(window.end - window.first < 100, "{window:?}");
+            #[expect(clippy::cast_precision_loss, reason = "test-sized row counts")]
+            let drawn = (window.end - window.first) as f32 * ROW_PITCH;
+            #[expect(clippy::cast_precision_loss, reason = "test-sized row counts")]
+            let whole = total as f32 * ROW_PITCH;
+            assert!((window.top + drawn + window.bottom - whole).abs() < 0.1);
+        }
+    }
+
+    #[test]
+    fn every_target_inside_the_viewport_is_inside_the_built_slice() {
+        let total = 10_000;
+        let viewport = 720.0;
+        for row in (0..total).step_by(113) {
+            #[expect(clippy::cast_precision_loss, reason = "test-sized row positions")]
+            let target = row as f32 * ROW_PITCH;
+            let window = row_window(total, target, viewport);
+            assert!(
+                (window.first..window.end).contains(&row),
+                "row {row}: {window:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the reflow is exact addition/subtraction of one fixed offset"
+    )]
+    fn a_responsive_reflow_keeps_the_same_row_space_offset() {
+        assert_eq!(reflow_scroll_offset(0.0, true, false), 0.0);
+        for table_scroll in [1.0, 400.0, 40_000.0] {
+            let document_scroll = reflow_scroll_offset(table_scroll, true, false);
+            assert_eq!(
+                reflow_scroll_offset(document_scroll, false, true),
+                table_scroll
+            );
+        }
+        assert_eq!(reflow_scroll_offset(320.0, false, true), 0.0);
+        assert_eq!(reflow_scroll_offset(320.0, false, false), 320.0);
+        assert_eq!(reflow_scroll_offset(320.0, true, true), 320.0);
+    }
+
+    #[test]
+    fn delete_requires_the_explicit_trash_confirmation() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/playlist.rs"),
+        )
+        .expect("this module's source");
+        assert!(
+            source.contains("page::act(\"Delete\", true, Message::PlaylistDeleteStart)"),
+            "the first press must only arm deletion"
+        );
+        assert!(
+            source.contains("page::act(\"Cancel\", true, Message::PlaylistDeleteCancel)")
+                && source.contains("page::act(\"Move to Trash\", true, Message::PlaylistDelete)"),
+            "the armed state must offer both roads explicitly"
+        );
+    }
 
     /// **The byline states a composition it can prove**, and the first token
     /// is the kind in every form it takes (ADR-0024 §A4.3).

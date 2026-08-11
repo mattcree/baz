@@ -282,7 +282,20 @@ fn identity_head<'a>(
         1 => "Unsaved playlist · 1 record".to_owned(),
         records => format!("Unsaved playlist · {records} records"),
     };
-    let identity = unsaved_identity(name, saving, byline, facts);
+    let identity = page::identity_block(page::Identity {
+        name: name.to_owned(),
+        face: theme::SEMIBOLD,
+        edit: saving.map(|entry| page::NameEdit {
+            value: &entry.text,
+            error: entry.error.as_deref(),
+            id: save_name_id(),
+            on_input: Message::SaveQueueInput,
+            on_submit: Message::SaveQueueSubmit,
+        }),
+        byline,
+        facts,
+        beside_facts: None,
+    });
     let sleeve = playlist_sleeve(shelf, &art, name, theme::ALBUM_SLEEVE);
     if window_width >= theme::ALBUM_BREAKPOINT {
         (
@@ -298,65 +311,6 @@ fn identity_head<'a>(
             theme::ALBUM_SLEEVE + theme::GAP_XL + 80.0,
         )
     }
-}
-
-/// The playlist identity block while it is at rest, and the same block with
-/// its title turned into the save gesture while a name is being chosen.
-fn unsaved_identity<'a>(
-    name: &str,
-    saving: Option<&'a NameEntry>,
-    byline: String,
-    facts: String,
-) -> Element<'a, Message> {
-    let room = theme::active();
-    let title: Element<'a, Message> = match saving {
-        None => text(name.to_owned())
-            .size(theme::SIZE_HERO)
-            .line_height(theme::LEADING_HERO)
-            .font(theme::SEMIBOLD)
-            .color(room.paper)
-            .into(),
-        Some(entry) => {
-            let valid = !entry.text.trim().is_empty();
-            let field = text_input("Playlist name", &entry.text)
-                .id(save_name_id())
-                .on_input(Message::SaveQueueInput)
-                .on_submit(Message::SaveQueueSubmit)
-                .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-                .size(theme::SIZE_HERO)
-                .line_height(theme::LEADING_HERO)
-                .width(Length::Fill)
-                .style(move |_theme, status| theme::input(room, status));
-            let mut block = column![
-                row![field, page::act("Save", valid, Message::SaveQueueSubmit)]
-                    .spacing(theme::GAP_SM)
-                    .align_y(iced::Alignment::Center)
-            ]
-            .spacing(theme::GAP_XS);
-            if let Some(error) = &entry.error {
-                block = block.push(
-                    text(error.clone())
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.alert),
-                );
-            }
-            block.into()
-        }
-    };
-    column![
-        title,
-        text(byline)
-            .size(theme::SIZE_TITLE)
-            .line_height(theme::LEADING_TITLE)
-            .color(room.paper_dim),
-        text(facts)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
-    ]
-    .spacing(theme::GAP_XS)
-    .into()
 }
 
 /// **The run column**: the summary, the acts beside it, and the rows —
@@ -828,11 +782,13 @@ fn queue_row(
     };
     let body = page::track_row(page::TrackRow {
         marker,
+        artwork: None,
         title: row_state.title.into(),
         ink,
         under: row_state
             .artist
-            .map(|artist| (Cow::Owned(artist), room.paper_dim)),
+            .map(|artist| (Cow::Owned(artist), room.paper_dim, None)),
+        context: None,
         duration: row_state.duration.into(),
         playing,
         press: live.then_some(Message::JumpToQueued(index)),

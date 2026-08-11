@@ -59,6 +59,12 @@ use crate::motion::{Control, Ink};
 use crate::player::PlayerState;
 use crate::{groove, icon, needle, player, theme};
 
+/// What the current record contributes to the bottom bar's sleeve lane.
+pub(crate) enum Cover {
+    Image(iced_image::Handle),
+    Placeholder(u64),
+}
+
 /// The persistent now-playing bar, in three zones — the current track and its
 /// timestamps on the left, the transport in the middle, quiet status and the
 /// volume on the right — with the needle under all three.
@@ -105,7 +111,7 @@ use crate::{groove, icon, needle, player, theme};
 pub(crate) fn view(
     player: &PlayerState,
     ink: Ink,
-    cover: Option<iced_image::Handle>,
+    cover: Option<Cover>,
     source: Option<Message>,
 ) -> Element<'_, Message> {
     let room = theme::active();
@@ -259,7 +265,7 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// words rather than by a gesture or an icon.
 fn now_playing_block(
     player: &PlayerState,
-    cover: Option<iced_image::Handle>,
+    cover: Option<Cover>,
     source: Option<Message>,
 ) -> Element<'_, Message> {
     let stamps = player.stamps();
@@ -351,7 +357,7 @@ fn stamp(
 ///   assertion is in this module's tests.
 fn back_to_source(
     player: &PlayerState,
-    cover: Option<iced_image::Handle>,
+    cover: Option<Cover>,
     source: Option<Message>,
 ) -> Element<'_, Message> {
     let room = theme::active();
@@ -365,22 +371,24 @@ fn back_to_source(
     // sibling of it. [`theme::BAR_COVER`] carries the fit; nothing about the
     // band moved to make room.
     //
-    // With no artwork there is no lane and no placeholder — the block is drawn
-    // exactly as it was before this existed. The wall's own rule, one surface
-    // along: a tile with no decoded art draws its gradient because a tile is
-    // *about* the record, and the bar's block is about the track, so the
-    // honest absence here is nothing at all.
+    // A sounding record always keeps this lane: real artwork where one exists,
+    // otherwise the same deterministic colour field its Library tile uses.
+    // `None` means there is no resolved sounding record, not merely no image.
     let lines: Element<'_, Message> = match cover {
         None => lines,
-        Some(handle) => row![
-            iced_image(handle)
-                .width(Length::Fixed(theme::BAR_COVER))
-                .height(Length::Fixed(theme::BAR_COVER)),
-            container(lines).width(Length::Fill).clip(true),
-        ]
-        .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::Center)
-        .into(),
+        Some(cover) => {
+            let artwork: Element<'static, Message> = match cover {
+                Cover::Image(handle) => iced_image(handle)
+                    .width(Length::Fixed(theme::BAR_COVER))
+                    .height(Length::Fixed(theme::BAR_COVER))
+                    .into(),
+                Cover::Placeholder(id) => crate::views::gradient_block(id, theme::BAR_COVER, 1.0),
+            };
+            row![artwork, container(lines).width(Length::Fill).clip(true),]
+                .spacing(theme::GAP_MD)
+                .align_y(iced::Alignment::Center)
+                .into()
+        }
     };
     // There is no lit state: this block names the playing track, while its
     // destination may be either a playlist or an album. Lighting it for either
@@ -475,7 +483,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
                 .wrapping(text::Wrapping::None)
         )
         .height(Length::Fixed(theme::LINE_BODY)),
-        container(match &now.artist {
+        container(match now.track_artist.as_ref().or(now.artist.as_ref()) {
             Some(artist) => Element::from(
                 text(artist.as_str())
                     .size(theme::SIZE_META)
@@ -1136,8 +1144,7 @@ mod tests {
         const { assert!(theme::BAR_COVER <= theme::ART_MAX) }
     }
 
-    /// **With artwork the cover is part of the control; without it the block
-    /// is what it always was.**
+    /// **Real artwork and the record placeholder share one hit target.**
     ///
     /// Two claims, both about where the widget sits rather than about what it
     /// says, so both are pinned to the source:
@@ -1145,11 +1152,10 @@ mod tests {
     /// 1. The image is built **inside** `back_to_source`, before the
     ///    `button` — so the cover and the type are one hit target that goes
     ///    one place, not a picture beside a link.
-    /// 2. The `None` arm returns the lines untouched. No reserved lane, no
-    ///    placeholder, no gradient: a record with no decodable art draws the
-    ///    bar that shipped before this existed.
+    /// 2. A resolved record with no image draws the Library's deterministic
+    ///    gradient; only no resolved current record leaves the lane absent.
     #[test]
-    fn the_cover_joins_the_blocks_own_hit_target_and_is_absent_without_art() {
+    fn the_cover_and_its_placeholder_join_the_blocks_own_hit_target() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/bottom_bar.rs"),
         )
@@ -1169,20 +1175,11 @@ mod tests {
             "the cover is not inside the block's button — a picture beside a \
              link is two objects where the design asks for one"
         );
+        assert!(block.contains("None => lines,"));
         assert!(
-            block.contains("None => lines,"),
-            "no artwork must return the lines exactly as they were"
+            block.contains("Cover::Placeholder(id)") && block.contains("gradient_block(id"),
+            "a resolved record without an image must retain its coloured sleeve"
         );
-        for forbidden in [
-            "gradient_block",
-            "Space::new(Length::Fixed(theme::BAR_COVER",
-        ] {
-            assert!(
-                !block.contains(forbidden),
-                "the bar reserves `{forbidden}` for artwork that does not \
-                 exist — the brief says the block renders exactly as today"
-            );
-        }
     }
 
     /// Every glyph the transport row can draw is the same sprite square in the

@@ -3,15 +3,15 @@
 //!
 //! Three parts, top to bottom:
 //!
-//! 1. **The head** — **the search well**, then `Home`, `Library`,
-//!    `Now playing`, always all three and always in that order. The owner's
+//! 1. **The head** — **the search well**, then `Home`, `Library`, `Playlists`,
+//!    `Now playing`, always all four and always in that order. The owner's
 //!    decisions: *"home will appear at the top of the left hand sidebar always
 //!    either way and it will contain the top level concerns. think spotify"*,
 //!    extended by *"as an extension we will want a Now playing page at the top
 //!    with the Home and Library"*, and — the one this file's [`well`] answers
 //!    — *"the design does not match properly… the search should really be in
 //!    the sidebar"*, then *"search belongs at the top"*.
-//!    The place you are in is drawn in full paper ink; the other two rest at
+//!    The place you are in is drawn in full paper ink; the others rest at
 //!    `paper_dim`. **`Now playing` carries the lamp dot when something is
 //!    sounding** — the accent's one reserved meaning, spent so the lane can
 //!    answer *is anything on?* without being read.
@@ -41,10 +41,8 @@
 //! buy the heading.
 //!
 //! *"Under library"* is read as **under the head**, not literally between
-//! `Library` and `Now playing`: the three destinations are a closed set
-//! *always all three and always in that order* (§1 above, ADR-0030's first
-//! amendment), and a section between two of them would split the one triple
-//! this surface is not allowed to grow.
+//! `Library` and `Now playing`: the destinations are one fixed group, and a
+//! recency section between two of them would split it.
 //!
 //! # Why the well is a field here and not a `Search` destination
 //!
@@ -221,7 +219,7 @@ pub(crate) fn view<'a>(
     .into()
 }
 
-/// One of the head's three destinations: the glyph, and — expanded — its word.
+/// One of the head's four destinations: the glyph, and — expanded — its word.
 ///
 /// **Not a toggle.** [`Place::go`] argues it: pressing the destination you are
 /// already at leaves you there, where `Queue` and `Settings` close themselves.
@@ -240,6 +238,7 @@ fn destination_row(
     let glyph = match to {
         Destination::Home => icon::Glyph::Home,
         Destination::Library => icon::Glyph::Library,
+        Destination::Playlists => icon::Glyph::Queue,
         Destination::NowPlaying => icon::Glyph::NowPlaying,
     };
     let mark = iced_image(icon::handle(glyph))
