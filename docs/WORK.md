@@ -48,7 +48,7 @@
 > A report from him is a functional change by definition, because the thing he
 > is looking at is the product.
 >
-> ## The public beta is the goal, and this list is its scope
+> ## The public beta remains a goal; the 2026-08-12 review now orders the work
 >
 > The owner, 2026-08-10: *"can we start to hone in on what a public beta would
 > look like? can we trim anything ongoing/in the backlog so we can focus on
@@ -61,13 +61,15 @@
 > nothing baz does loses or corrupts anything** — and the few things it cannot
 > do are stated on the front page rather than discovered.
 >
-> **Everything in `## Next` is a beta blocker.** That is the whole of what the
-> list now means. Nothing joins it that is not, and an item finishing does not
-> entitle the next idea to the slot.
+> The beta argument above still defines the quality bar, but the owner's live
+> review on 2026-08-12 supersedes the former interface freeze. He asked to work
+> through the **critical usability** issues first, then tackle **Home through
+> vibe/generated playlists**. `## Next` is therefore a phased execution queue,
+> not a list containing only beta blockers. Its order is authoritative after a
+> context reset.
 >
-> **What is deliberately not in the beta**, recorded here rather than left to
-> be re-argued each time somebody reads the backlog and finds something
-> appealing:
+> **What is deliberately outside the critical-usability tranche**, recorded so
+> the phases do not blur together:
 >
 > - **The remainder of ambient `Now playing`** — the local facts feed and kiosk
 >   affordances. The cover-derived field, rotating jewel case and independently
@@ -77,10 +79,12 @@
 > - **Kiosk mode**, for the same reason and because iced cannot enumerate
 >   monitors.
 > - **Vibe- or prompt-generated playlists** — designed, unmerged, and a whole
->   feature rather than a finish.
-> - **Borderless window chrome and the iced fork.** The app bar lands with the
->   system decorations still on; a forked dependency in a first public release
->   is a cost with no beta-shaped benefit.
+>   feature rather than a finish. On 2026-08-12 the owner placed Home/vibe work
+>   immediately after the critical-usability tranche; that makes it the next
+>   feature area, not a beta blocker ahead of those fixes.
+> - **Borderless window chrome and the iced migration.** The direction is now
+>   accepted and iced 0.14 means no fork is required, but the framework upgrade
+>   is platform-foundation work after the usability and Home phases.
 > - **Opus.** Closed rather than deferred: the owner's library was scanned on
 >   2026-08-10 and holds **zero** `.opus`, `.ogg` or `.oga` files across
 >   `~/Music` and both NAS shares. The refusal in *Known gaps* stands on its
@@ -102,26 +106,366 @@
 > **The one thing that outranks this list** is unchanged: a defect the owner is
 > looking at. A beta scope is not a reason to tell him his own product is fine.
 
-## Next
+## Next — authoritative execution order
 
-1. **Ship the public beta.** The last item by construction: it is the one
-   that makes the blockers above reach anybody. `v0.1.0` is prepared up to the
-   tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
-   asks two more things of the release than a private tag does. **Flathub** —
-   an account and a PR to `flathub/flathub`, which is the owner's and has
-   never been an agent's; the manifest wants `tag` and `commit` filled from
-   the cut tag. And **the corrected release dry run still needs to run on
-   GitHub**: it now gives a rehearsal the same non-fuzz CI gate as a tag, so it
-   can finally exercise all three platform builds and their checksums before
-   the tag rather than discovering them after.
+When the owner says *"work through the backlog"*, begin at the first unfinished
+number below. Do not ask him to reconstruct the review or choose an item. Read
+the matching detailed brief later in this file, its row in `BACKLOG.md`, and
+the ADR/design it names; settle ordinary implementation details from those
+constraints. Complete one coherent numbered item, verify it in the dev
+container, update both queue and backlog, then continue to the next safe item.
+Ask only when a genuinely unrecorded choice would materially change the
+product.
+
+### Phase A — critical usability
+
+1. **Done 2026-08-12 — Unify selection and activation.** One shared content
+   selection now covers album, playlist and implicit-list tiles plus album,
+   search, playlist and queue rows: one click highlights, a second matching
+   click activates, and labelled Play/Open controls remain direct. Enter
+   activates the current selection outside search; Space remains transport.
+2. **Done 2026-08-12 — Build the app-bar search dropover.** The sole full well
+   now lives in the app bar and type-anywhere opens ranked Tracks and Albums
+   over the unchanged place in one virtualized scroll/selection surface.
+   Up/Down clamp and reveal, Left/Right choose track `Play | Enqueue`, Enter
+   confirms, and Esc/click-outside clears and dismisses. The lane, narrow
+   strip and Library-body search presentations are gone.
+3. **Done 2026-08-12 — Make deliberate playback land correctly.** Every
+   explicit or double-click album start uses one start-and-show path. It arms
+   the destination only after both queue and Play commands are accepted, then
+   opens Now Playing on a matching `TrackStarted`; empty, exhausted, refused
+   and closed-engine starts stay put.
+4. **Done 2026-08-12 — Add wheel-over-volume control.** Vertical wheel travel
+   over the live fader uses the keyboard's bounded ~1 dB step. Line input maps
+   to notches; pixel input accumulates at 32 px per step. The fader captures
+   the whole gesture, mute remains independent, endpoints clamp, and one
+   settled confirmed value is persisted after a 240 ms quiet boundary.
+5. **Done 2026-08-12 — Keep visible artwork visible.** Current wall, page and
+   chrome targets now live in a resident handle tier; only off-screen recent
+   artwork competes in the existing 64-entry LRU. An 80-album Artist-page
+   stress run retained every sleeve through churn at about 25.3 MiB decoded.
+6. **Done 2026-08-12 — Finish the Now Playing visual states.** The persisted
+   foreground is Cover / Jewel case / None, independent of Spectrum. None has
+   no object or reserved square, uses a soft metadata mask, and skips hero/case
+   work. Focus no longer pauses visible motion or sampling; place, sounding
+   state and enabled visuals still gate every continuous cost.
+7. **Done 2026-08-12 — Stop the Recent-row sounding pip from reflowing text.**
+   Every expanded row now reserves a far-trailing lamp slot and the same fixed
+   146 px measure for both lines. Long album and playlist strings use measured
+   end ellipses; playback changes ink without moving row geometry.
+8. **Done 2026-08-12 — Converge saved and unsaved playlist detail.**
+   `views::playlist_page` now owns one sleeve, breakpoint, responsive document,
+   identity hierarchy, empty state, scroller and row presentation for both
+   persistence states. Saved Play/Rename/Delete/counts and unsaved
+   Save/cursor/remaining-time/provenance occupy named capability slots. The
+   live-review follow-up also makes global search's action contextual here:
+   `Add to playlist` edits the saved file on screen, while other places retain
+   live-run `Enqueue`; the chooser starts unselected and visibly teaches its
+   now-focus-safe arrow grammar.
+9. **Converge the Playlists root with Library.** Use one collection scaffold,
+   including the right rail; define honest rail buckets for each ordering.
+10. **Add browser-style place history.** Visible Back/Forward arrows, normal
+    branch semantics and stable disabled states; never confuse them with track
+    transport. Search-dropover open/dismiss does not create history.
+11. **Move operational health behind the app-bar bell.** One canonical event
+    surface, no bottom-bar duplicate; restrained attention, condition
+    resolution, manual Retry and/or bounded backoff. Include a listener-visible
+    route to skipped-file details rather than terminal-only paths.
+12. **Fix Windows GUI launch packaging.** Release/package builds open only baz,
+    no companion console; debug builds retain diagnostics and the packaged
+    `.exe` is exercised on Windows.
+
+Phase A is complete only when all twelve items are implemented and verified;
+“critical usability” does not need to be redefined in a future conversation.
+
+### Phase B — Home is the next feature area
+
+13. **Research, design and stage local-first vibe playlists on Home.** Compare
+    deterministic metadata/prompt grammar, lightweight local NLP/ML and local
+    audio features against measured cost and result quality. Then build the
+    smallest approach that wins. Output is always an ordinary editable,
+    listener-requested playlist: no cloud, hidden pool, autoplay or silent
+    regeneration.
+
+### Phase C — make releases sustainable, then ship
+
+14. **Choose and implement distribution-aware updates.** Flatpak is optional.
+    Managed installs hand off; direct installs need signed discovery,
+    verification, staged replacement, restart and rollback. A GitHub link alone
+    is not completion.
+15. **Ship the public beta through the chosen channel(s).** Re-run the corrected
+    GitHub release rehearsal and all three platform builds. Do not assume a
+    Flathub submission if the distribution research chose otherwise.
+
+### Phase D — accepted follow-on work
+
+16. **Upgrade to iced 0.14 and make baz's app bar the default window chrome.**
+    Use upstream eight-way drag-resize; retain native-feeling resize, drag,
+    maximise, system menu and cross-platform builds.
+17. **Ship built-in and JSON custom themes.** Four polarity rooms, versioned
+    schema/examples/import/export, runtime accessibility validation and safe
+    fallback; no executable theme content.
+18. **Continue the remaining briefs below and `BACKLOG.md` functional-first.**
+    Defects and data correctness precede interface polish; do not silently drop
+    an ask merely because it is not named in phases A–D.
 
 ## Doing
 
-*Nothing in flight.* The interface freeze is on: `## Next` is beta blockers
-only.
+None. Item 8's search/playlist follow-up is complete; the owner asked to stop
+after this task.
 
-## Waiting on the owner
+## Detailed briefs, later work, and genuine unresolved choices
 
+This section preserves the evidence and acceptance detail behind `## Next`,
+plus lower-priority and truly owner-blocked work. It is **not execution order**
+and a brief repeated in `## Next` is ready—not waiting for the owner. Search by
+its bold title from the numbered item above.
+
+- **Wheel over volume adjusts volume and consumes the scroll.** Recorded from
+  the owner's 2026-08-12 live review. Give the interactive volume block
+  target-aware wheel handling: vertical travel reuses `VolumeStep` and
+  `PlayerState::step_volume`; while hovered it captures the event so no wall,
+  lane or dropover beneath it scrolls, and it takes precedence over global
+  Ctrl+wheel density. Normalize line input and accumulate high-resolution pixel
+  deltas, clamp endpoints, preserve the unity detent and existing engine/
+  persistence path, and ignore horizontal travel. *Critical usability. Needs
+  during implementation: step/acceleration, mute semantics, exact hover bounds
+  and settled-write boundary; tests for wheel/trackpad, endpoints, muted state,
+  no scroll leak and pointer-elsewhere behavior. **Done 2026-08-12:** the live
+  fader's own hit band is the target (the mute button remains a discrete act);
+  line notches and accumulated 32 px touchpad steps feed `step_volume`, capped
+  to the fader's 25-step span per event. Wheel changes the level behind mute
+  without unmuting, capture prevents underlying scroll and Ctrl+density, and a
+  240 ms quiet boundary coalesces confirmation-driven persistence.*
+- **Now Playing foreground has 2D, 3D and None states.** Recorded from the
+  owner's 2026-08-12 live review so Spectrum can be enjoyed without an album
+  object. Add `None` beside Cover and Jewel Case while keeping Spectrum an
+  independent toggle. None removes both the object and its reserved stage/
+  spectrum exclusion pocket—never a blank square—while keeping the placard
+  readable; None + Spectrum on is the spectrum-led view, and neither control
+  silently changes the other. Persist the choice and stop artwork/rotation work
+  when unused. *Critical usability. Needs during implementation: third mark/
+  tooltip, metadata composition and spectrum mask in the absent-art state,
+  transition behavior, and all six foreground × spectrum combinations across
+  width, track change and focus loss. **Done 2026-08-12:** a third crossed-cover
+  mark selects persisted `none`; its branch never constructs the hero or case,
+  reserves no square and centres the stable placard inside a soft horizontal
+  mask while the spectrum remains full-body. All six states have independent
+  clock tests, objectless measures are swept from narrow through 4K, and
+  returning to Cover/Case self-heals the hero request and existing dissolve.*
+- **After critical usability, tackle Home through local-first vibe playlist
+  generation.** This is the owner's explicit ordering from the 2026-08-12 live
+  review. Do not spend the Home pass on decorative rearrangement: give it the
+  entry point for a listener-requested vibe/prompt and the ordinary editable
+  playlist that results. The existing ground rules remain binding—explicit
+  request, visible candidate pool, inert provenance, no autoplay, no silent
+  regeneration, no cloud/account, and no second playlist species. Run a signal
+  spike from cheapest to richest: deterministic metadata/history plus a small
+  prompt grammar; lightweight local NLP/classification or embeddings; then
+  incremental local audio features (tempo/energy/timbre) if they beat the
+  simpler baseline. Measure output quality as well as model/binary size, CPU,
+  memory, library-analysis time, licensing, offline/cross-platform packaging
+  and explainability. *Starts only after the critical-usability tranche. Needs
+  then: a precise definition of that tranche, a research corpus/evaluation
+  method, prompt/vibe interaction, visible scope/progress/cancel behavior,
+  diversity rules, sparse-library fallback, analysis index/versioning, and a
+  staged implementation plan.*
+- **Ship four polarity themes and a safe, AI-friendly custom-theme JSON
+  format.** Recorded from the owner's live review on 2026-08-12. The rendering
+  system already routes styles through one semantic `Palette`; Closing Time is
+  the dark endpoint, Reading Room is the defined-but-unselectable light
+  endpoint, and Stone/Plaster were deferred candidates for intermediate rooms.
+  Turn that foundation into four selectable/persisted built-ins—Light,
+  light-biased middle, dark-biased middle, Dark—and a versioned custom-theme
+  document. JSON is data only: semantic palette colors and tightly bounded
+  visual values, never code, URLs, paths, downloaded fonts, layout or behavior.
+  Ship a JSON Schema, built-in examples, exportable template and concise prompt
+  so a listener can ask an external AI for a theme, then import/paste and
+  preview it locally without baz gaining an AI/network dependency. Runtime
+  validation must enforce the same contrast/elevation/accent laws as built-ins,
+  diagnose exact fields, and always retain/fall back to a valid room. *Needs
+  later: priority; final names and middle palettes; live switching versus
+  restart (today `ACTIVE` and themed glyphs are startup caches); picker/import/
+  export UI; theme directory and stable IDs; schema migration and OS-following;
+  derived-token policy; and malformed, unreadable, missing-selected-theme and
+  round-trip tests.*
+- **Users need a safe, distribution-aware path to new baz releases; Flatpak is
+  optional.** Recorded from the owner's live review on 2026-08-12. The current
+  release pipeline already creates direct Linux, Windows and macOS archives;
+  they are unsigned and have no installer/update mechanism. Do not let the
+  existing Flatpak manifest choose the distribution strategy by inertia.
+  Compare a first-class direct installer/updater and Linux formats such as
+  AppImage or native packages with Flatpak/store channels. Split release
+  discovery from installation: a managed build delegates to its actual owner
+  and never self-overwrites, while a direct install needs a signed, verified,
+  atomic update path with user-controlled restart and preservation of config,
+  library data and playlists. This deliberately reopens baz's “no network at
+  all” promise, so checking needs explicit policy rather than silently phoning
+  home. An available update can use the pending notification bell; network
+  failure stays non-disruptive. *Needs later: priority and a research/design
+  spike choosing supported formats, install-origin detection, stable/prerelease
+  channels, metadata/cadence/consent, signing and platform installers,
+  package-manager handoff, rollback/restart, and database downgrade safety.
+  The spike must produce the complete post-check mechanism too: manager handoff
+  for managed installs, or signed download → verification → staged external
+  updater → app exit → atomic replacement → relaunch/rollback for direct
+  installs. A notification or GitHub link alone does not complete the task.*
+- **The packaged Windows app must not open a companion command window.**
+  Recorded from the owner's live review on 2026-08-12. `crates/baz/src/main.rs`
+  currently declares no Windows GUI subsystem, so the executable is linked as
+  a console application. Apply the GUI subsystem to packaged/release Windows
+  builds while retaining the console in debug builds for developer stderr.
+  User-facing failures must continue through the health/event UI; decide on an
+  intentional file or Windows-native diagnostic sink before relying on release
+  console output that will no longer exist. *Needs later: priority and a test
+  of the actual packaged `.exe` from Explorer and Start—no terminal flash or
+  persistent console—plus confirmation that debug launches retain useful
+  diagnostics.*
+- **The sounding pip must trail a Recent row without reflowing its text.**
+  **Done 2026-08-12.** Every expanded row now carries the same six-pixel slot
+  at its far trailing edge whether it is sounding or quiet. Both title and
+  metadata share the exact 146 px boundary left by the existing sleeve,
+  padding and gaps; each is fitted with its actual bundled face and ends in an
+  ellipsis when necessary. The sleeve/text origins and 64 px row pitch are
+  unchanged, and the collapsed lane keeps its existing card treatment.
+- **Typing should reveal a keyboard-navigable search result/action chooser.**
+  Recorded and refined during the owner's 2026-08-12 live review. A
+  type-anywhere query opens a bounded dropover from the app-bar well over the
+  current place; it does not navigate to Library or alter history. Tracks and
+  Albums are the primary sections in one continuous, optionally virtualized
+  scroll surface—no eight-track cap, separate wall scroller or nested trap.
+  Up/Down select, reveal and highlight a result across the section boundary;
+  Left/Right select `Play` or `Enqueue` for that track, and Enter executes the
+  selected action. Merely moving selection cannot play or enqueue anything;
+  enqueue means append to the current run without replacing it or starting
+  playback. This mode contextually owns the arrows that currently control
+  volume vertically and seek horizontally, while those transport bindings stay
+  unchanged outside result selection. Do not steal Left/Right caret movement
+  while the query field itself is active: define an explicit handoff between
+  editing and result navigation. Share the pending click-selection highlight
+  model rather than creating a search-only visual state. *Needs later:
+  priority; dropover geometry/virtualization; default track action; album
+  activation; Enter/Esc/click-outside and post-action behavior; clamp/wrap;
+  selection reset/auto-scroll as ranking changes; no-result handling; and
+  whether any result type beyond Tracks/Albums earns admission.* **Done
+  2026-08-12:** Play is the default; movement clamps; reranking selects the
+  first answer; selected rows auto-scroll; Enqueue keeps the chooser open;
+  Play and Open complete it; Esc/click-outside clear rather than hiding a live
+  query; Albums retain Play/Open and the shared selection/double-activation
+  grammar. No secondary result type was admitted.
+- **The Playlists collection should be the Library wall with playlist data,
+  including its right-hand rail.** Recorded from the owner's live review on
+  2026-08-12; “Playlists page” here means the saved-playlist root. It currently
+  borrows `shelf::Grid` but owns a separate top-level scroll/virtualization/tile
+  composition and has no index rail, so visual similarity is convention rather
+  than structure. Later extract/use one collection scaffold for viewport,
+  gutters, density, virtualization, scrollbar, selection/hover grammar and the
+  right rail, parameterized by album versus playlist items and their grouping.
+  This decides ADR-0024's deferred playlist-rail question in favor of having
+  one. *Needs later: priority and rail semantics for `Date created` and `Played`
+  ordering—date/recency buckets, or a rail present only for `A–Z`; never an
+  alphabetical rail whose jumps disagree with the visible order.*
+- **Now Playing animation freezes whenever the window loses focus.** Recorded
+  from the owner's live review on 2026-08-12. This is the current code's
+  deliberate `window_focused` gate on both the continuous timer and spectrum
+  sampling, but focus is not visibility: an ambient player on a second monitor
+  is expected to keep moving while another app receives input. Later remove
+  focus from animation eligibility while keeping the meaningful guards—Now
+  Playing is the current place, a record is sounding, and Jewel Case or
+  Spectrum is enabled. Minimized/fully occluded throttling is still reasonable
+  only if iced/platform state can say it reliably. *Needs later: priority and
+  performance measurement; acceptance covers continuous jewel rotation and
+  live spectrum across focus loss, no reset/jump on refocus, and zero continuous
+  redraws on non-Now-Playing places. **Done 2026-08-12:** focus is absent from
+  both timer and tap eligibility; losing it only releases a case drag. The
+  remaining gate is exactly visible Now Playing + sounding record + Spectrum
+  or Jewel case. Rotation ticks retain their bounded elapsed step, and the
+  pre-volume spectrum tap now stays truthful even while output is muted.*
+- **`Play album` should open Now playing after playback starts.** Recorded from
+  the owner's live review on 2026-08-12. This reverses the current source-level
+  rule and test that Resume is the only play gesture which navigates. The
+  transition must follow a successful start—not an empty queue, refused command
+  or closed engine—and should be expressed as a shared start-and-show path so
+  the playback request and destination cannot disagree. **Done 2026-08-12:**
+  command acceptance arms the destination and a matching `TrackStarted` spends
+  it. `QueueEnded` and engine closure cancel it; explicit Play, search album
+  Play and item 1's album activation all share the route.
+- **Single click selects; double click plays.** Recorded from the owner's live
+  review on 2026-08-12 as a product-wide content interaction rule. One ordinary
+  click must only select and visibly highlight the album, playlist or playable
+  row; activation requires a double click. This reverses the present mix of
+  one-click navigation and one-click row playback, as well as the earlier
+  removal of wall double-click-to-play. Build one selection/activation state
+  machine rather than per-view timers. The explicit `Play album` ask above
+  suggests labelled Play controls remain one-click commands; confirm that when
+  this is designed. *Needs later: priority and a complete surface matrix—what
+  single-click selection does to detail navigation; album/playlist/implicit
+  tiles; album, saved-list and unsaved-run rows; keyboard activation; touch;
+  queue jump semantics; and existing explicit hover Play controls.*
+- **Saved and unsaved playlists must be one component, not lookalike pages.**
+  Recorded from the owner's live review on 2026-08-12. His observed mismatch is
+  evidence that the current partial reuse is insufficient: `views::playlist`
+  and `views::queue` share identity, rows and collage primitives but retain two
+  top-level compositions, despite the source calling them “the same editor.”
+  Later, capture both at the same viewport, inventory the drift, and replace
+  the pair with one playlist-page component parameterized by state/capability.
+  Saved-only rename/delete/file identity and unsaved-only Save/live-cursor/
+  remaining-time behavior are legitimate slots; geometry, hierarchy,
+  typography, sleeve, breakpoint, empty state and row presentation are not.
+  **Done 2026-08-12.** The saved page is the reference anatomy. One
+  `views::playlist_page` call now owns the collage, responsive breakpoint,
+  fixed aside/table or stacked document, identity, empty state and scroller.
+  The unsaved run moved its live summary into the shared facts line and Save
+  into the shared acts slot; its rows now use the saved page's fixed pitch,
+  artwork and Album context. Same-size before/after frames and the drift
+  inventory live in `docs/design/impl/one-playlist-page/`; source guards refuse
+  a private `page::view`, sleeve, breakpoint or scroll composition in either
+  persistence-state module.
+- **Browser-style Back and Forward in the app bar.** Recorded from the owner's
+  live review on 2026-08-12, with Spotify's top-left navigation arrows as the
+  interaction reference. These navigate places/subjects, never playback
+  tracks. This is a deliberate reversal of `place.rs`'s current model: places
+  replace each other, no history exists, and Back is a total function that
+  always returns Library. It also reopens ADR-0040's closed app-bar tenancy and
+  its identity-only top-left zone. Begin later from ordinary browser semantics:
+  Back/Forward walk visited entries, a new branch after Back drops the forward
+  branch, revisiting the current identity creates no duplicate, and each arrow
+  has a stable disabled state. *Needs later: priority; whether an entry stores
+  only `Place` or query/scroll/local state too; how Esc, breadcrumbs and resident
+  destinations interact with history; placement beside or instead of the baz
+  mark; and whether Alt+Left/Right plus mouse navigation buttons ship with the
+  visible controls.*
+- **Visible artwork sometimes unloads under the bounded cache.** Recorded from
+  the owner's live review on 2026-08-12. **Done 2026-08-12:** reproduction
+  proved that a page consumer could churn the shared 64-entry LRU, evict an
+  on-screen sleeve, and then meet the unchanged-viewport guard that suppressed
+  its reload. Current wall, page and resident-chrome IDs now pin decoded
+  handles in a resident tier; leaving every current target returns a handle to
+  the same bounded recent LRU immediately. Unit stress reproduces the old
+  eviction and proves the new invariant. A release GUI run loaded an 80-album
+  Artist page, scrolled away and back after all 80 decodes, and retained every
+  visible cover; its Balanced-density resident cost was about **25.3 MiB**,
+  deliberately proportional to that non-virtual page rather than a blank/pop.
+- **Move the canonical health/event surface behind a notification bell in the
+  app bar and give failures a recovery path.** Recorded from the owner's live
+  review on 2026-08-12, for later prioritisation rather than implementation
+  during the beta freeze. This refines the earlier status-log direction: the
+  log remains the source of truth for an offline folder or other operational
+  condition, but its one resident entry point moves from the current bottom-bar
+  dot to a notification bell in the app bar. Put it in the application zone
+  beside Settings, reserve its hit box in every place, anchor the history layer
+  to it, and remove the bottom-bar indicator rather than drawing two doors.
+  Important/unread red status may briefly pulse or use a restrained badge; a
+  standing condition must not cause permanent animation. Recoverable events
+  carry `Retry`, bounded automatic exponential backoff, or both, and recovery
+  resolves the existing condition and returns the bell/summary to good rather
+  than accumulating duplicates. The existing five-minute periodic rescan
+  already retries offline roots coarsely, so first decide whether to expose it,
+  add targeted immediate retry, or replace it with per-condition scheduling.
+  *Needs later: priority; bell/read/severity states and acknowledgement; panel
+  placement and narrow-width app-bar tenancy; the canonical event/condition
+  model; safe retry classes; manual/automatic and backoff/cap/reset rules; and
+  what Settings retains once status owns runtime health.*
 - **Where does a listener find out *which* files were skipped?** The Zappa
   album above was lost for as long as it was because the answer was
   "nowhere" — `14 files skipped` in the status line is a statistic, and a
@@ -143,20 +487,21 @@ only.
     cannot play in the one place everything is playable.
 
   *Needs: Settings readout, or is the log line enough for the beta?*
-- **Does the search well move into the app bar?** His question, 2026-08-10:
-  *"maybe we could put the search in the top bar?"* — a *maybe*, so it is
-  priced rather than built. The full case each way is in `BACKLOG.md`'s *What
-  the owner asked for*; the short of it is that the bar's own admission rule
-  (his) **admits** search more cleanly than it admits the display options, and
-  the composition **refuses** it: the field fits the 304 px of slack, and the
-  always-drawn counts line under it does not fit a band one `TRANSPORT_HIT`
-  tall. Moving it back up would also revive the thing ADR-0030's second
-  amendment cured on his own instruction — the frame's identity in two places
-  at once. **Recommendation: no**, and it is close; the cheapest honest yes is
-  the *collapsed* well (the magnifier alone, opening the lane onto the caret),
-  which costs 32 px and keeps one home for the field and one place for the
-  counts. *Needs: yes, no, or the magnifier.* Nothing is queued behind this —
-  if the answer is no, the line closes and the well stays where he put it.
+- **Move the one full search well into the app bar.** The owner settled the
+  earlier maybe on 2026-08-12: *"I think we should move the search up into the
+  top bar"*. Remove the lane well and narrow Library-strip copy rather than
+  adding another road. The former layout blocker no longer exists: resting
+  library totals now live on Home and the live match count sits inside the
+  field, so the 232 px well plus seam fits the bar's measured 304 px slack.
+  Type-anywhere focuses this resident `Search library` field without changing
+  place; its non-empty state anchors the scrollable Tracks/Albums dropover over
+  whatever page remains beneath it. This supersedes the current
+  `reach_the_well` navigation to Library while retaining library-wide scope.
+  *Needs later: priority and a minimum-width
+  app-bar composition with Back/Forward, density marks, notification bell,
+  Settings and conditional window controls; sufficient borderless drag region;
+  responsive behavior that never duplicates/hides a standing query; and tests
+  that place/width changes preserve query, selection, count and clear action.*
 - **Does baz's chrome spend an accent that is not playback truth?** The app
   bar now draws the application's own icon in zone 1 (his *"we probably want an
   icon for our app to show in the bar"*), and the mark carries the lamp dot —
@@ -202,12 +547,11 @@ only.
   returns lane already does without performing. The other two are a frame
   question (one band line or two) and the tile-size one below. *Needs: one
   sentence each.*
-- **Borderless window chrome — the bar is built; the field is not flipped.**
+- **Borderless window chrome — accepted for later prioritisation.**
   The app bar shipped (ADR-0040): it is resident in all eight places, it moves
   and maximises and closes the window, and it holds the display options, the
   gear and the three window buttons. What is not done is `decorations: false`,
-  so the platform still draws its title bar *above* baz's own — the whole cost
-  of the change, and it clears the moment this is answered.
+  so the platform still draws its title bar *above* baz's own.
   - **The fork is off the table, and that is the news.** `BACKLOG.md` priced
     this as a ~30-line patch to a forked iced. It is no longer a fork:
     **iced 0.14.0 ships `window::drag_resize(id, Direction)` upstream**
@@ -216,15 +560,21 @@ only.
     sources too — there is genuinely nothing there, and winit's own frame
     gives its resize edges up when decorations go, so there is no platform
     fallback either.
-  - So the question changed shape: **do we take iced 0.13 → 0.14?** Measured
+  - The owner answered **yes** on 2026-08-12: *"I would really like it if we
+    could get rid of the native window chrome"*. Take iced 0.13 → 0.14 and
+    deliver borderless chrome without sacrificing ordinary edge/corner resize.
+    The migration is measured
     in ADR-0040 §"What the owner still has to answer": ~130–170 edited lines
     across 12–14 files, all five hand-built `Widget`s touched, wgpu 0.19 → 27
     and cosmic-text 0.12 → 0.15 in the graph, ~15–25 new Flatpak pins — and,
     on the other side, **both RUSTSEC ignores in `deny.toml` can be deleted**,
     because cosmic-text 0.15 completes the fontations migration they are
     waiting on.
-  - `BAZ_BORDERLESS=1` runs it borderless today, so the finished thing can be
-    looked at before the decision. *Needs: yes or no to the iced 0.14 upgrade.*
+  - `BAZ_BORDERLESS=1` previews it today, but must not become the default on
+    iced 0.13 because it loses pointer resize edges. *Needs later: priority,
+    the iced 0.14 migration, eight-way resize hit testing, cross-platform CI,
+    and hands-on Wayland/X11 validation before `decorations: false` becomes the
+    default.*
 - **Is the `Dense` display-option mark legible enough?** He said *"the way they
   appear for the library is nice"* and the four marks moved into the app bar
   unchanged on the strength of it. The fourth is a 4 × 4 whose cells minify to

@@ -1,5 +1,15 @@
 # 12 — The now-playing screen: a surface for the far field
 
+> **Implementation amendment (2026-08-12).** The owner's third foreground
+> state is now shipped: **Cover / Jewel Case / None**, still independent of
+> Spectrum. None removes the album object and the square stage itself, leaving
+> one softly masked metadata placard in the full spectrum field; it is never an
+> empty placeholder. The choice is persisted. Hero decode/composition and case
+> rotation stop while None is selected and resume through the existing request
+> and dissolve paths when an object returns. Keyboard focus no longer gates the
+> visible surface's timer or sample tap; only place, sounding state and enabled
+> visuals do. The tap is pre-volume in both engine paths, as §10 required.
+
 > **Implementation amendment (2026-08-11).** The owner removed the VU view
 > after seeing it and separated the remaining visual choices into two axes:
 > *"make the spectrum take up the background… a toggle like shuffle… and the

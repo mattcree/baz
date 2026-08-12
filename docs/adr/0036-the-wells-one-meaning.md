@@ -1,11 +1,66 @@
 # ADR-0036: The well has one meaning, and it says so — search off the Library, and the `×`
 
-**Status**: accepted (2026-08-10) · **extends
+**Status**: accepted (2026-08-10), **amended 2026-08-12** · **extends
 [ADR-0017](0017-design-direction.md) §1.2** (type-anywhere, whose promise is the
 reason a scoped well is refused) · **amends
 [ADR-0030](0030-the-returns-lane-and-the-home-band.md) §2**'s well by naming its
 subject in the placeholder and putting a control in its mark's box · the frames
 are [`docs/design/impl/search-scope/`](../design/impl/search-scope/)
+
+## 2026-08-12 amendment — global results come to the current place
+
+The owner first moved the well into the app bar and then clarified its result
+model:
+
+> *"consider the search more like a dropover so it can appear anywhere we are
+> in the app, but it searches mostly just tracks and albums, and it's all just
+> scrollable"*
+
+The well still has **one meaning** and still says `Search library`: it searches
+the whole collection, never the current playlist/page. What changes is the road
+to the answer. A printable key, `/` or `Ctrl+F` now focuses the resident app-bar
+well **without changing `Place`** and opens a bounded results dropover over the
+current surface. Dismissing it reveals that surface unchanged and search itself
+does not push navigation history.
+
+Tracks and Albums are the primary result sections in one continuous scroll
+surface, with one keyboard selection and no nested album-wall scroller. This
+supersedes §1's `reach_the_well` requirement to go to Library first, the strip/
+lane placement arithmetic in §2, and any claim below that the Library wall is
+the result presentation. It does **not** supersede global scope, type-anywhere,
+the `Search library` wording, or the visible `×`/Esc clear act. The historical
+decision below remains intact so the reason contextual page filtering was
+rejected is not lost.
+
+The shipped interaction resolves the amendment's remaining ordinary choices:
+Tracks precede Albums in one virtualized result scroller; selection resets to
+the first ranked answer, clamps rather than wraps and scrolls into view. Track
+actions default to `Play`, Left/Right choose `Play | Enqueue`, and Enter
+confirms. Enqueue appends one track without starting playback and leaves the
+chooser open; Play and album Open complete it. Albums retain explicit Play/Open
+and the shared select-then-activate grammar. Esc, the clear mark and
+click-outside all clear and dismiss—no live query is hidden behind a place.
+
+### 2026-08-12 interaction correction — selection is stated, and destination is visible
+
+The owner exercised that description and found two contradictions. The focused
+well consumed Left/Right as caret movement, so the written action axis did not
+exist after typing; and selecting the first answer automatically made an
+unrequested choice look deliberate. The chooser now claims its four bare
+arrows before the field's capture report and teaches the grammar in its Tracks
+heading: `↑↓ select · ←→ action · Enter confirm`. Typing selects **nothing**.
+Search has its own selection clock, so dismissing it exposes the unchanged
+place's selection rather than a result leaking into the page beneath.
+
+The second action is also contextual in destination, not search scope. Over a
+saved playlist page it reads **`Add to playlist`** and appends that one track to
+the file on screen; elsewhere it remains **`Enqueue`** and appends to the live
+run. The query still searches the whole Library in either case. This is not the
+contextual filtering §3 refused: the answers are global, while the explicit
+action says where the chosen answer will go. Neither route starts playback.
+
+The earlier sentence saying selection resets to the first ranked answer is
+therefore superseded; ranking still decides order, not selection.
 
 ## Context
 

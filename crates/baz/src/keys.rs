@@ -11,12 +11,11 @@
 //! A key press belongs to a focused text field or it belongs to the
 //! application, never to both. baz does not *guess* which: iced reports an
 //! [`event::Status`](iced::event::Status) alongside every runtime event
-//! saying whether a widget already consumed it, and that report is the whole
-//! of the rule. [`Focus::TextField`] (iced said `Captured`) means the search
+//! saying whether a widget already consumed it, and that report is almost the
+//! whole of the rule. [`Focus::TextField`] (iced said `Captured`) means the search
 //! well took the key — typed it, moved its cursor, or dismissed itself — and
 //! [`binding_for`] answers `None` for **every** key in that state. Space
-//! types a space. `/` types a slash. Left and Right move the caret. `n`
-//! types an `n`.
+//! types a space. `/` types a slash. `n` types an `n`.
 //!
 //! This is stronger than tracking focus ourselves would be. iced 0.13 exposes
 //! no "is this widget focused" query a subscription could ask synchronously,
@@ -26,11 +25,14 @@
 //! be wrong, because it is the same decision the text field itself made a
 //! moment earlier.
 //!
-//! One consequence is worth stating plainly: iced's `text_input` captures
-//! *every* key press while focused except Tab and the vertical arrows, so
-//! while the search well has focus no transport binding is live at all. The
-//! way out is the way in — Escape, which the field consumes to blur itself,
-//! after which the transport keys work. (**Nothing has focus at startup**, so
+//! There is one visible, state-bounded exception: while search results stand,
+//! the chooser claims the four **bare arrows before capture status**. Its own
+//! guide advertises `↑↓ select · ←→ action`; without that seam iced's focused
+//! `text_input` would consume Left/Right as caret movement and the advertised
+//! action axis would be unreachable. The first arrow blurs the well, so every
+//! other key continues to obey the ordinary focus rule. While the search well
+//! has focus no transport binding is live at all. Escape leaves it, after
+//! which the transport keys work. (**Nothing has focus at startup**, so
 //! this is something a listener walks into rather than the first thing they
 //! meet: <kbd>Space</kbd> means play/pause on the first frame. This
 //! parenthetical said the opposite until 2026-08-10 — the well *did* take
@@ -153,17 +155,12 @@
 //! `SetMute { muted }` the protocol asks for rather than a toggle two front
 //! ends could disagree about.
 //!
-//! # Enter — what plays
+//! # Enter — what confirms
 //!
-//! <kbd>Enter</kbd> plays **the top-ranked match** when a query is narrowing
-//! the wall, and the selected album when one is not. That sentence is only
-//! defensible because ADR-0021 shipped: `Library::search` used to return
-//! corpus order — which is library order — so "the first match" meant
-//! whichever matching record happened to be alphabetically earliest by album
-//! artist. `Library::search_albums` now ranks by how well the query fits, then
-//! by which field it landed in, then by library order, and keeps an album's
-//! tracks together, so the first result is the best one and pressing Enter on
-//! it is a defensible thing for a listener to do.
+//! <kbd>Enter</kbd> confirms the explicitly selected result and action while
+//! the search chooser stands. Typing selects nothing: Up/Down or a pointer
+//! first states the result, and Left/Right states a track's action. Outside
+//! search, Enter activates the ordinary selected content.
 //!
 //! It is also the one binding that arrives by two roads and must mean the same
 //! thing on both. With the well focused iced's `text_input` consumes
@@ -399,16 +396,24 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowLeft) if command => Some(Message::PreviousTrack),
 
         // Seeking. Shift widens the step; nothing else may ride along.
-        Key::Named(key::Named::ArrowRight) if bare => Some(Message::SeekBy(SEEK_STEP_MS)),
+        Key::Named(key::Named::ArrowRight) if bare => {
+            Some(Message::Direction(crate::search::Direction::Right))
+        }
         Key::Named(key::Named::ArrowRight) if shift => Some(Message::SeekBy(SEEK_STEP_LARGE_MS)),
-        Key::Named(key::Named::ArrowLeft) if bare => Some(Message::SeekBy(-SEEK_STEP_MS)),
+        Key::Named(key::Named::ArrowLeft) if bare => {
+            Some(Message::Direction(crate::search::Direction::Left))
+        }
         Key::Named(key::Named::ArrowLeft) if shift => Some(Message::SeekBy(-SEEK_STEP_LARGE_MS)),
 
         // Volume. The vertical arrows are the axis a fader moves on — they are
         // not printable and keep their bare bindings — and mute moved to the
         // modifier layer with every other letter (module docs).
-        Key::Named(key::Named::ArrowUp) if bare => Some(Message::VolumeStep(1)),
-        Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
+        Key::Named(key::Named::ArrowUp) if bare => {
+            Some(Message::Direction(crate::search::Direction::Up))
+        }
+        Key::Named(key::Named::ArrowDown) if bare => {
+            Some(Message::Direction(crate::search::Direction::Down))
+        }
         Key::Character("m" | "M") if command => Some(Message::ToggleMute),
 
         // Places. Ctrl+U goes to Now playing — what is playing and what is
@@ -459,7 +464,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("/") if bare || shift => Some(Message::FocusSearch),
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
-        // Play the top-ranked match, else the selected album (module docs).
+        // Confirm the open chooser, else activate selected content (module docs).
         Key::Named(key::Named::Enter) if bare => Some(Message::PlayFirstMatch),
 
         // Peel one layer, top down (module docs; `app.rs` holds the order).
@@ -671,11 +676,11 @@ mod tests {
     fn arrows_seek_by_the_documented_steps() {
         assert_eq!(
             bind(&named(key::Named::ArrowRight), none()).as_deref(),
-            Some("SeekBy(5000)")
+            Some("Direction(Right)")
         );
         assert_eq!(
             bind(&named(key::Named::ArrowLeft), none()).as_deref(),
-            Some("SeekBy(-5000)")
+            Some("Direction(Left)")
         );
         assert_eq!(
             bind(&named(key::Named::ArrowRight), Modifiers::SHIFT).as_deref(),
@@ -694,14 +699,14 @@ mod tests {
     }
 
     #[test]
-    fn the_vertical_arrows_step_the_volume() {
+    fn the_vertical_arrows_route_by_open_surface() {
         assert_eq!(
             bind(&named(key::Named::ArrowUp), none()).as_deref(),
-            Some("VolumeStep(1)")
+            Some("Direction(Up)")
         );
         assert_eq!(
             bind(&named(key::Named::ArrowDown), none()).as_deref(),
-            Some("VolumeStep(-1)")
+            Some("Direction(Down)")
         );
     }
 
@@ -772,11 +777,11 @@ mod tests {
             bind(&named(key::Named::ArrowLeft), Modifiers::COMMAND).as_deref(),
             Some("PreviousTrack")
         );
-        // …and the bare and Shift arms still seek, so the modifier is the
-        // whole of the difference.
+        // …and bare Left routes through the open surface while Shift still
+        // asks the transport for its larger seek.
         assert_eq!(
             bind(&named(key::Named::ArrowLeft), none()).as_deref(),
-            Some("SeekBy(-5000)")
+            Some("Direction(Left)")
         );
         assert_eq!(
             bind(&named(key::Named::ArrowLeft), Modifiers::SHIFT).as_deref(),
@@ -954,11 +959,11 @@ mod tests {
         );
     }
 
-    /// **Enter plays the top-ranked match**, and it is the same message the
-    /// well's own `on_submit` sends, so the two roads a press can take are one
-    /// intention (module docs, ADR-0021).
+    /// **Enter confirms the explicit search choice**, and it is the same
+    /// message the well's own `on_submit` sends, so the two roads a press can
+    /// take are one intention (module docs, ADR-0036's interaction correction).
     #[test]
-    fn enter_plays_the_first_match() {
+    fn enter_confirms_the_search_choice() {
         assert_eq!(
             bind(&named(key::Named::Enter), none()).as_deref(),
             Some("PlayFirstMatch")

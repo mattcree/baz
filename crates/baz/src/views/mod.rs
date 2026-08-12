@@ -88,9 +88,11 @@ pub(crate) mod list_tile;
 pub(crate) mod now_playing;
 pub(crate) mod page;
 pub(crate) mod playlist;
+pub(crate) mod playlist_page;
 pub(crate) mod playlist_panel;
 pub(crate) mod playlists;
 pub(crate) mod queue;
+pub(crate) mod search;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
@@ -238,7 +240,7 @@ pub(crate) fn playlist_sleeve(
 /// wall's cache, or — while its decode is in flight, or where no art can be
 /// decoded — the same deterministic gradient the record's own tile shows.
 fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message> {
-    match shelf.thumbs.peek(&album) {
+    match shelf.thumb(album) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(size))
             .height(Length::Fixed(size))
@@ -615,38 +617,6 @@ fn density_mark(
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// [`section_rule`], with one quiet fact at the rule's right edge — the
-/// Songs section teaching its own accelerator (*"Enter plays the first
-/// match."*, doc 11 §5 P6.4): the era printed the shortcut beside the verb
-/// it accelerates, and without menus that duty falls to the surface the
-/// verb lives on. The note takes the readout ink, never a control's — it is
-/// a fact about the rows below, not a thing to press.
-pub(crate) fn section_rule_noted(
-    name: &'static str,
-    note: &'static str,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
-        row![
-            text(theme::tracked(&name.to_uppercase()))
-                .size(theme::SIZE_HEADING)
-                .line_height(theme::LEADING_HEADING)
-                .font(theme::MEDIUM)
-                .color(room.paper_faint),
-            Space::with_width(Length::Fill),
-            text(note)
-                .size(theme::SIZE_CAPTION)
-                .line_height(theme::LEADING_CAPTION)
-                .color(room.paper_faint)
-                .wrapping(text::Wrapping::None),
-        ]
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(theme::GAP_SM)
     .into()
 }
 

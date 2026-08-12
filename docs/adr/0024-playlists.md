@@ -1,5 +1,12 @@
 # ADR-0024: Playlists — files the user owns, a page, and one summoned panel
 
+> **Interaction amendment (2026-08-12).** Saved-playlist collection tiles and
+> playable rows now join ADR-0022's product-wide content grammar: one click
+> selects/highlights, double click plays or needle-drops. Queue rows use the
+> same selection state and double click to jump. The page's labelled `Play`,
+> edit/transfer controls, panel destination rows and context-menu verbs remain
+> direct because they are explicit commands, not ordinary content activation.
+
 > **Amendment (2026-08-09), from
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
 > — the implicit-playlist study, on the owner's report that the shipped
@@ -94,16 +101,15 @@ is the strip's lead, and the frames are at
 **And the row inside it, later the same day** — the owner's *"ensure our
 playlist view in the now playing and the playlist view/album view are the same
 thing"*: a record's track, a playlist's entry and the **run column's** row were
-three literal copies of one anatomy, the record head was two, and `views/queue.rs`
-held four more copies of the reserved icon slot this ADR had already shared for
-the two pages. They are `views::page::track_row`, `list_head` and `icon_slot`
-now, moving no pixels. **The one-arrangement rule reaches the row, and it stops
-at the composition**: the run column is not drawn through `page::view`, because
-`view` is a centred aside-and-main document in one scroll and the run is a
-virtualized column standing beside the record inside `Place::NowPlaying`'s own
-two-column layout. What may differ is the owner's `DETAILS`, the next-track
-ring, the trailing slot sets and the head — a page states a *name*, a run
-states a *position*. Frames at
+three literal copies of one anatomy, the record head was two, and
+`views/queue.rs` held four more copies of the reserved icon slot this ADR had
+already shared for the two pages. `views::page::track_row` and `icon_slot`
+ended those copies, moving no pixels. At that point the one-arrangement rule
+explicitly stopped at the composition: the run column was not drawn through
+`page::view`. **A7 supersedes that boundary.** What may still differ is the
+owner's `DETAILS`, the next-track ring and trailing slot sets; they are
+capabilities or row content inside the shared composition, not permission for
+a second page. Historical frames are at
 [`docs/design/impl/one-list-drawn-once/`](../design/impl/one-list-drawn-once/README.md).
 §A3's closing paragraph and §A4.4's last sentence are the two questions
 **left to the owner** ·
@@ -812,3 +818,25 @@ guard that makes this the right shape of fix.
   is *what you touched*, and sorting by kind would make it two lists sharing
   a column. Declining it is what puts the work on the per-row signal, which
   is §A3.1.
+
+### A7. 2026-08-12 — saved and unsaved detail are one component
+
+The owner's eye found the limit the earlier row merge had documented and left
+in place: saved and unsaved playlists shared primitives but retained two
+top-level compositions. The saved page used `views::page`; the run owned a
+different breakpoint, scroll document, summary strip, empty state and grouped
+row presentation. Calling them “the same editor” did not keep them looking or
+behaving like one.
+
+The saved page's established fixed-aside/table anatomy is the reference.
+`views::playlist_page` is now the only playlist-specific caller of
+`views::page` and owns the collage, sleeve size, responsive form, identity,
+`TRACKS`/empty block, scroller and row-space mapping. Both states use the saved
+page's fixed row pitch, artwork and Album context.
+
+Persistence remains a capability, never a second layout. A saved file supplies
+Play, Rename/Delete, durable counts and file Undo. The transient run supplies a
+reserved commitment slot, Save/provenance readout, live cursor/remaining time,
+run Undo and the next-track ring. Same-viewport evidence and the complete drift
+inventory are in `docs/design/impl/one-playlist-page/`; a source guard rejects
+a direct page, sleeve, breakpoint, padding or scroller in either state module.

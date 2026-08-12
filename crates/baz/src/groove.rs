@@ -221,6 +221,56 @@ pub struct Groove<'a, Message> {
     style: StyleFn,
     detent: Option<Detent>,
     pointers: Option<Pointers<'a, Message>>,
+    wheel: Option<Box<dyn Fn(i32) -> Message + 'a>>,
+}
+
+/// A high-resolution wheel's unspent travel.
+///
+/// Line deltas already describe deliberate notches, while pixel deltas from a
+/// touchpad need a physical threshold. Thirty-two pixels is one ordinary
+/// finger notch at the shipped control size: enough that resting jitter does
+/// nothing, but short enough that a deliberate stroke answers before it ends.
+#[derive(Debug, Default)]
+struct Wheel {
+    lines: f32,
+    pixels: f32,
+}
+
+const PIXELS_PER_STEP: f32 = 32.0;
+const MAX_STEPS_PER_EVENT: i32 = 25;
+const MAX_TRAVEL_PER_EVENT: f32 = 25.0;
+
+impl Wheel {
+    fn push(&mut self, delta: mouse::ScrollDelta) -> i32 {
+        let (held, incoming, unit) = match delta {
+            mouse::ScrollDelta::Lines { y, .. } => (&mut self.lines, y, 1.0),
+            mouse::ScrollDelta::Pixels { y, .. } => (&mut self.pixels, y, PIXELS_PER_STEP),
+        };
+        if !incoming.is_finite() {
+            return 0;
+        }
+        // One event can at most cross the whole 25-step fader. Besides being
+        // the only useful magnitude, the bound makes hostile/driver-spike
+        // deltas ordinary without a lossy float-to-integer conversion.
+        let limit = unit * MAX_TRAVEL_PER_EVENT;
+        *held = (*held + incoming.clamp(-limit, limit)).clamp(-limit, limit);
+        let mut steps = 0;
+        while *held >= unit && steps < MAX_STEPS_PER_EVENT {
+            *held -= unit;
+            steps += 1;
+        }
+        while *held <= -unit && steps > -MAX_STEPS_PER_EVENT {
+            *held += unit;
+            steps -= 1;
+        }
+        steps
+    }
+}
+
+#[derive(Default)]
+struct GrooveState {
+    pointer: State,
+    wheel: Wheel,
 }
 
 impl<'a, Message> Groove<'a, Message> {
@@ -235,6 +285,7 @@ impl<'a, Message> Groove<'a, Message> {
             style,
             detent: None,
             pointers: None,
+            wheel: None,
         }
     }
 
@@ -276,6 +327,15 @@ impl<'a, Message> Groove<'a, Message> {
         self.pointers = Some(Pointers::new(press, drag, hover, release, exit));
         self
     }
+
+    /// Wires vertical wheel travel over the groove to signed deliberate steps.
+    /// The event is captured even while a pixel gesture is accumulating, so a
+    /// fader stroke can never scroll the surface underneath it.
+    #[must_use]
+    pub fn on_wheel(mut self, message: impl Fn(i32) -> Message + 'a) -> Self {
+        self.wheel = Some(Box::new(message));
+        self
+    }
 }
 
 impl<Message, Renderer> Widget<Message, Theme, Renderer> for Groove<'_, Message>
@@ -284,11 +344,11 @@ where
     Renderer: renderer::Renderer,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<State>()
+        tree::Tag::of::<GrooveState>()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State::default())
+        tree::State::new(GrooveState::default())
     }
 
     fn size(&self) -> Size<Length> {
@@ -320,8 +380,19 @@ where
         // so the pointer aims at the whole reservation. (The needle cannot do
         // that and claims its band upward instead — [`crate::pointer`].)
         let bounds = layout.bounds();
+        let state = tree.state.downcast_mut::<GrooveState>();
+        if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event
+            && let Some(wheel) = &self.wheel
+            && cursor.is_over(bounds)
+        {
+            let steps = state.wheel.push(delta);
+            if steps != 0 {
+                shell.publish(wheel(steps));
+            }
+            return event::Status::Captured;
+        }
         pointer::handle(
-            tree.state.downcast_mut::<State>(),
+            &mut state.pointer,
             self.pointers.as_ref(),
             &event,
             bounds,
@@ -340,7 +411,7 @@ where
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         pointer::interaction(
-            tree.state.downcast_ref::<State>(),
+            &tree.state.downcast_ref::<GrooveState>().pointer,
             self.pointers.is_some(),
             layout.bounds(),
             cursor,
@@ -357,7 +428,7 @@ where
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_ref::<State>();
+        let state = &tree.state.downcast_ref::<GrooveState>().pointer;
         let bounds = layout.bounds();
         let status = pointer::status(state, self.pointers.is_some(), bounds, cursor);
         let style = (self.style)(self.palette, status);
@@ -465,6 +536,7 @@ mod tests {
         Press(Pointer),
         Drag(Pointer),
         Hover(Pointer),
+        Wheel(i32),
         Release,
         Exit,
     }
@@ -548,7 +620,8 @@ mod tests {
                         at: 1.0,
                         engaged: false,
                     })
-                    .on_pointer(Msg::Press, Msg::Drag, Msg::Hover, Msg::Release, Msg::Exit),
+                    .on_pointer(Msg::Press, Msg::Drag, Msg::Hover, Msg::Release, Msg::Exit)
+                    .on_wheel(Msg::Wheel),
             )
         }
 
@@ -600,6 +673,14 @@ mod tests {
             .1
         }
 
+        fn wheel(
+            &mut self,
+            delta: mouse::ScrollDelta,
+            cursor: mouse::Cursor,
+        ) -> (event::Status, Vec<Msg>) {
+            self.feed(Event::Mouse(mouse::Event::WheelScrolled { delta }), cursor)
+        }
+
         /// The pointer left the window: iced reports the cursor as gone
         /// along with it.
         fn cursor_left(&mut self) -> (event::Status, Vec<Msg>) {
@@ -629,6 +710,64 @@ mod tests {
         // And the release leaves an ordinary hover behind it.
         assert_eq!(bar.moved(on_bar(95.0)), vec![Msg::Hover(at(95.0))]);
         assert_eq!(bar.moved(off_bar(95.0)), vec![Msg::Exit]);
+    }
+
+    #[test]
+    fn a_wheel_over_the_fader_is_steps_and_never_the_page_under_it() {
+        let mut bar = Bar::fader();
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }, on_bar(80.0)),
+            (event::Status::Captured, vec![Msg::Wheel(1)])
+        );
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, on_bar(80.0)),
+            (event::Status::Captured, vec![Msg::Wheel(-2)])
+        );
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }, off_bar(80.0)),
+            (event::Status::Ignored, vec![]),
+            "the same wheel belongs to the ordinary surface off the fader"
+        );
+    }
+
+    #[test]
+    fn pixel_travel_accumulates_without_turning_a_trackpad_into_a_catapult() {
+        let mut bar = Bar::fader();
+        for delta in [8.0, 8.0, 8.0] {
+            assert_eq!(
+                bar.wheel(
+                    mouse::ScrollDelta::Pixels { x: 0.0, y: delta },
+                    on_bar(80.0)
+                ),
+                (event::Status::Captured, vec![]),
+                "sub-step travel is consumed but changes no volume"
+            );
+        }
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Pixels { x: 0.0, y: 8.0 }, on_bar(80.0)),
+            (event::Status::Captured, vec![Msg::Wheel(1)])
+        );
+        assert_eq!(
+            bar.wheel(
+                mouse::ScrollDelta::Pixels { x: 0.0, y: -64.0 },
+                on_bar(80.0)
+            ),
+            (event::Status::Captured, vec![Msg::Wheel(-2)])
+        );
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Pixels { x: 90.0, y: 0.0 }, on_bar(80.0)),
+            (event::Status::Captured, vec![]),
+            "horizontal travel is ignored inside the owned target"
+        );
+    }
+
+    #[test]
+    fn an_inert_fader_owns_no_wheel() {
+        let mut bar = Bar::inert();
+        assert_eq!(
+            bar.wheel(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }, on_bar(80.0)),
+            (event::Status::Ignored, vec![])
+        );
     }
 
     /// The reported bug: the button comes up outside the window, so baz

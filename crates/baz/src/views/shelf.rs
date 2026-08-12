@@ -14,9 +14,10 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
+use crate::selection::Content;
 use crate::shelf::{Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
-use crate::views::{gradient_block, section_rule};
+use crate::views::gradient_block;
 use crate::{icon, rail, theme, vm};
 
 /// **The wall**: the shelved, virtualized grid, its pinned group header, and
@@ -166,22 +167,7 @@ pub(crate) fn view<'a>(
         .and_then(|index| runs.get(index))
         .copied();
     let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
-    // **The Songs section** (doc 09 §5): under a query with matching tracks,
-    // the ranked track-level answers render above the filtered wall — two
-    // sections, separate. In the same left cell as the wall, so both centre
-    // against the same width and the rail stays the sibling of the whole
-    // body; absent (not empty) whenever there are no song answers, in which
-    // case the composition is exactly what it always was.
-    let body: Element<'a, Message> = if shelf.songs.is_empty() {
-        wall.into()
-    } else {
-        column![
-            songs_section(shelf, player, collecting, hang.block_width()),
-            wall
-        ]
-        .width(Length::Fill)
-        .into()
-    };
+    let body: Element<'a, Message> = wall.into();
     // **The rail is the layer under the body**, right-aligned in its own lane,
     // at the same x it occupied as a `row!` sibling — see this function's docs
     // for why it is under rather than over, and what the 4 px it yields to the
@@ -195,233 +181,6 @@ pub(crate) fn view<'a>(
     ]
     .width(Length::Fill)
     .height(Length::Fill)
-    .into()
-}
-
-/// **The Songs section's block**: a `Songs` rule, up to [`vm::SONGS`] ranked
-/// track rows, then an `Albums` rule naming the filtered wall below — the
-/// two sections the owner asked for, visibly separate (doc 09 §5, S1).
-///
-/// It is laid out **on the wall's own ruler**: the block is
-/// [`Grid::block_width`] wide and centred exactly as the wall's rows are, so
-/// its left edge is the first column's left edge and the section introduces
-/// no x-position of its own (law L5 — the wall permits `HANG` and the hang's
-/// derived column edges, nothing else). Its top air is [`theme::HANG`], the
-/// wall's own top-edge unit.
-///
-/// The rows are the full match set's ranked head, not its whole: the wall
-/// below is the exhaustive answer, in covers.
-fn songs_section<'a>(
-    shelf: &'a Shelf,
-    player: &'a PlayerState,
-    collecting: Collecting,
-    block: f32,
-) -> Element<'a, Message> {
-    let interactive = player.engine_ready();
-    let mut rows = column![].spacing(theme::GAP_XS);
-    for (index, song) in shelf.songs.iter().enumerate() {
-        // The song resolved onto the record the wall holds: the wall id and
-        // the row in its **selected edition** — what the press and the `+`
-        // both spend ([`vm::song_row`]). A row a rescan has just unmoored
-        // asks for nothing rather than playing a track nobody pointed at.
-        let resolved = shelf.album(song.album_id).and_then(|album| {
-            let chosen = shelf.edition_choice.get(&album.id).copied();
-            vm::song_row(album, chosen, song).map(|row| (album.id, row))
-        });
-        let press = resolved
-            .filter(|_| interactive)
-            .map(|(id, row)| Message::PlayTrack(id, row));
-        // The row's mark follows `TrackStarted`, never the click (S1): the
-        // dot lights when the engine says this file is sounding.
-        let playing = player.now_playing_path() == Some(song.path.as_path());
-        rows = rows.push(song_row(
-            song,
-            index,
-            playing,
-            press,
-            resolved,
-            collecting,
-            shelf.hovered_song == Some(index),
-        ));
-    }
-    container(
-        column![
-            // The rule carries the accelerator it accelerates (doc 11 §5
-            // P6.4): Enter's meaning while a query stands was true and
-            // unannounced — the era printed the shortcut beside the verb,
-            // and without menus the section's own rule is where the verb
-            // lives.
-            crate::views::section_rule_noted("Songs", "Enter plays the first match."),
-            rows,
-            section_rule("Albums")
-        ]
-        .spacing(theme::GAP_SM)
-        .width(Length::Fixed(block)),
-    )
-    .width(Length::Fill)
-    .padding(iced::Padding {
-        top: theme::HANG,
-        // **The same two lanes the wall's scrollable reserves**
-        // ([`theme::WALL_RESERVE`]): the section is a sibling of the
-        // scrollable, not a child of it, so nothing reserves them on its
-        // behalf — and a block centred in the whole body would sit 56 px right
-        // of the wall's own centre line, which is the one x-position this file
-        // is not allowed to introduce.
-        right: theme::WALL_RESERVE,
-        ..iced::Padding::ZERO
-    })
-    .align_x(alignment::Horizontal::Center)
-    .into()
-}
-
-/// One row of the Songs section: the reserved mark lane (the lamp dot when
-/// this file is sounding), the title, `artist · record` with **the record's
-/// name a door to its page**, the right-aligned duration, and the reserved
-/// `+` slot — a list row (doc 09 §5: *rows play; tiles navigate*), one line
-/// tall.
-///
-/// **The press is a needle-drop** (ADR-0023 §2 extended to this section):
-/// [`Message::PlayTrack`] with the record's wall id and the song's row in
-/// the selected edition — the record page's exact path, decided by
-/// [`crate::player::PlayerState::play_from`], never a new grammar. The door
-/// sends [`Message::AlbumClicked`] and captures its own press (iced's
-/// `button` returns `Captured` for a child's press before its own
-/// `on_press` fires), and the `+` is the album page's own slot sending
-/// [`Message::AddTrackToPlaylist`].
-///
-/// Every lane is a token the list surfaces already share —
-/// [`theme::TRACK_NO_W`], [`theme::DURATION_W`], [`theme::STEPPER_HIT`] —
-/// and the row's box is `2 × GAP_XS + STEPPER_HIT` = [`theme::TRANSPORT_HIT`],
-/// the product's one control height (law L7).
-fn song_row<'a>(
-    song: &'a vm::SongVm,
-    index: usize,
-    playing: bool,
-    press: Option<Message>,
-    resolved: Option<(u64, usize)>,
-    collecting: Collecting,
-    hovered: bool,
-) -> Element<'a, Message> {
-    let room = theme::active();
-    let duration = song.duration.map(vm::format_duration).unwrap_or_default();
-    let marker: Element<'a, Message> = if playing {
-        lamp_dot()
-    } else {
-        Space::with_width(Length::Fixed(0.0)).into()
-    };
-    // The playing row's title takes the medium weight the bar, the queue and
-    // the album page give the same string.
-    let heading = text(song.title.as_str())
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .color(room.paper)
-        .wrapping(text::Wrapping::None);
-    let heading = if playing {
-        heading.font(theme::MEDIUM)
-    } else {
-        heading
-    };
-    let lane = |content: Element<'a, Message>, width: f32| {
-        container(content)
-            .width(Length::Fixed(width))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Center)
-    };
-    let body = button(
-        row![
-            // The mark lane the album page and the queue rows reserve, at
-            // the same width, so the dot arriving moves no text.
-            lane(marker, theme::TRACK_NO_W),
-            container(
-                row![
-                    heading,
-                    text(format!("{} ·", song.artist))
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.paper_dim)
-                        .wrapping(text::Wrapping::None),
-                    album_door(song),
-                ]
-                .spacing(theme::GAP_SM)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .align_y(alignment::Vertical::Center)
-            .clip(true),
-            lane(
-                text(duration)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
-                    .into(),
-                theme::DURATION_W,
-            ),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    // No horizontal inset: the mark lane starts on the block's own edge and
-    // the duration lane ends on it (law L5) — the album page's rule.
-    .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
-    .on_press_maybe(press);
-    // The row's right press opens the track menu (doc 09 §5.2) — the album
-    // page's exact target, because a resolved song row *is* that record's
-    // row: same press, same `+`, same mirror. Unresolved, there is nothing
-    // for a verb to act on, so there is no menu either.
-    let target = resolved.map(|(id, row)| crate::menu::Target::Track { album: id, row });
-    let with_menu = |element: Element<'a, Message>| match target {
-        Some(target) => crate::menu::area(element, target),
-        None => element,
-    };
-    if !collecting.available {
-        return with_menu(body.into());
-    }
-    let offered = collecting.panel_open || hovered;
-    let slot: Element<'a, Message> = match resolved {
-        Some((id, row)) => {
-            crate::views::page::transfer_slot(offered, Message::AddTrackToPlaylist(id, row))
-        }
-        None => Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into(),
-    };
-    with_menu(
-        mouse_area(
-            row![body, slot]
-                .spacing(theme::GAP_XS)
-                .align_y(iced::Alignment::Center),
-        )
-        .on_enter(Message::SongRowEntered(index))
-        .on_exit(Message::SongRowLeft(index))
-        .into(),
-    )
-}
-
-/// The record's name as **a door to its page** — the one navigation inside a
-/// section whose rows otherwise play. A quiet word control
-/// ([`theme::word_button`]: `paper_dim` at rest, full paper under the
-/// pointer), [`theme::STEPPER_HIT`] tall — the named secondary square — so a
-/// single-line row stays one line.
-fn album_door(song: &vm::SongVm) -> Element<'_, Message> {
-    let room = theme::active();
-    button(
-        container(
-            text(song.album.as_deref().unwrap_or("Unknown Album"))
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .height(Length::Fixed(theme::STEPPER_HIT))
-    .padding(theme::pad(0.0, theme::GAP_XS))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::AlbumClicked(song.album_id))
     .into()
 }
 
@@ -849,6 +608,7 @@ pub(crate) fn tile<'a>(
     let room = theme::active();
     let playing = player.playing_album() == Some(album.id);
     let engine = player.engine_ready();
+    let selected = shelf.selection.is(Content::Album(album.id));
     let edge = hang.art;
     // **The work, inside its reserved mat.** Every sleeve on the wall is drawn
     // at the grid's art edge less two [`theme::SLEEVE_MAT`]s, in every state.
@@ -860,7 +620,7 @@ pub(crate) fn tile<'a>(
     // reclaim 4 px would be a change to the collection to tidy away a mark.
     // What is gone is the ink; the mat is the wall's own colour.
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
-    let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
+    let art: Element<'_, Message> = match shelf.thumb(album.id) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(work))
             .height(Length::Fixed(work))
@@ -870,7 +630,7 @@ pub(crate) fn tile<'a>(
     // **The hover options** (see [`hover_options`]) — a layer over the work
     // and only while the pointer is on this tile. `stack` hands events to its
     // topmost layer first, so an option is reached before the sleeve under it.
-    let art: Element<'_, Message> = if shelf.hovered_album == Some(album.id) {
+    let art: Element<'_, Message> = if shelf.hovered_album == Some(album.id) || selected {
         stack![art, hover_options(album.id, work, engine, collecting)].into()
     } else {
         art
@@ -913,13 +673,9 @@ pub(crate) fn tile<'a>(
             .color(room.paper)
             .wrapping(text::Wrapping::None),
     );
-    // **The record you last opened** ([`Shelf::opened`]), which is what the
-    // 2 px rule marks now that there is no selection to mark. ADR-0022 made a
-    // tile press *navigation*: the wall is replaced by the record's page, and
-    // when `Esc` brings you back this rule is how you find your place again.
-    // That is the whole of the mitigation for the round trip a page costs that
-    // a column did not, and it is one rule under one label.
-    let selected = shelf.opened == Some(album.id);
+    // **The selected record**, through the product-wide content state. The
+    // rule is paper-toned rather than amber: selection is intent, not playback
+    // truth, and it composes with the independent sounding halo/dot.
     // Two one-line lanes, not one two-line box: a title iced lays out over two
     // lines despite `Wrapping::None` clips at its own lane's edge instead of
     // pushing the artist out of the block that was reserved to hold it still
@@ -984,7 +740,7 @@ pub(crate) fn tile<'a>(
             .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
             .padding(0)
             .style(move |_theme, status| theme::tile(room, status, selected))
-            .on_press(Message::AlbumClicked(album.id)),
+            .on_press(Message::ContentPressed(Content::Album(album.id))),
         )
         .on_enter(Message::TileEntered(album.id))
         .on_exit(Message::TileLeft(album.id)),
@@ -1220,75 +976,6 @@ mod tests {
     use crate::shelf::{Density, Grid};
     use crate::theme;
 
-    /// **The Songs section sits on the same ruler as the wall it tops**
-    /// (doc 09 §5; laws L2, L5, L7).
-    ///
-    /// Three claims, each the kind that drifts if unpinned:
-    ///
-    /// - **The lattice (L2)**: every lane a songs row reserves is a token
-    ///   the list surfaces already share, on the unit of 4 — the section
-    ///   adds no token of its own — and the row's box is `2 × GAP_XS +
-    ///   STEPPER_HIT`, which is exactly [`theme::TRANSPORT_HIT`]: the
-    ///   product's one control height (L7), by arithmetic rather than by a
-    ///   new number.
-    /// - **The ruler (L5)**: the section's block is `Grid::block_width` wide
-    ///   and centred exactly as the wall's rows are, so its left edge *is*
-    ///   the first column's left edge and the wall's permitted-edge list is
-    ///   untouched. Pinned in the source, the way the alignment laws are,
-    ///   because a hardcoded width here would pass every unit test and fail
-    ///   the composition.
-    /// - **The gutter**: the section's top air is [`theme::HANG`] — the
-    ///   wall's own top-edge unit — and its rows carry no horizontal inset
-    ///   of their own (the row's-own-padding defect L5 names).
-    #[test]
-    fn the_songs_section_sits_on_the_walls_own_ruler() {
-        const { assert!(2.0 * theme::GAP_XS + theme::STEPPER_HIT == theme::TRANSPORT_HIT) }
-        const { assert!(theme::TRACK_NO_W % 4.0 == 0.0) }
-        const { assert!(theme::DURATION_W % 4.0 == 0.0) }
-        const { assert!(theme::STEPPER_HIT % 4.0 == 0.0) }
-        const { assert!(theme::HANG % 4.0 == 0.0) }
-
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
-        )
-        .expect("this module's own source")
-        .replace("\r\n", "\n");
-        // The call site hands the section the wall's own block width…
-        assert!(
-            source.contains("songs_section(shelf, player, collecting, hang.block_width())"),
-            "the songs section is laid out at the wall's block width"
-        );
-        // …and the section spends it as its block, centred the wall's way.
-        let section = source
-            .split_once("fn songs_section")
-            .expect("the songs section exists")
-            .1;
-        let section = &section[..section.find("\n}\n").expect("a function ends")];
-        assert!(
-            section.contains(".width(Length::Fixed(block))"),
-            "the block is the width it was handed, not a width of its own"
-        );
-        assert!(
-            section.contains("alignment::Horizontal::Center"),
-            "centred exactly as the wall's rows are"
-        );
-        assert!(
-            section.contains("top: theme::HANG"),
-            "the section's top air is the wall's own unit"
-        );
-        // The row keeps the album page's no-inset rule: its one padding call
-        // is vertical-only, on the token, with no x-inset of its own.
-        let row = source
-            .split_once("fn song_row")
-            .expect("the songs row exists")
-            .1;
-        let row = &row[..row.find("\n}\n").expect("a function ends")];
-        assert!(
-            row.contains(".padding(theme::pad(theme::GAP_XS, 0.0))"),
-            "a songs row hangs from the block's own edges (law L5)"
-        );
-    }
-
     /// **A density mark's press is the gesture's exact message** (ADR-0028;
     /// the mirror rule, doc 07 L8.7; the discipline of
     /// `every_menu_item_is_a_press_some_control_also_makes`).
@@ -1414,7 +1101,7 @@ mod tests {
     /// edge** — the arrangement the owner's *"scroll bar is in a strange
     /// location… it seems to have padding on the right"* asked for.
     ///
-    /// Three things have to stay true together, and each of them is a way of
+    /// Two things have to stay true together, and each of them is a way of
     /// getting it wrong that a plausible edit would reintroduce:
     ///
     /// 1. **The wall asks for [`theme::shelf_scrollbar`]**, not the bar every
@@ -1425,9 +1112,6 @@ mod tests {
     ///    layer the pointer first, so a rail pushed after the body would own
     ///    the 4 px the bar is drawn in and the bar would be ungrabbable —
     ///    which looks exactly like a bar that is merely decorative.
-    /// 3. **The Songs section reserves the same two lanes**, because it is the
-    ///    scrollable's sibling rather than its child and nothing reserves them
-    ///    on its behalf.
     ///
     /// Read off the source, the way the density marks' placement is: what is
     /// being pinned is the *composition*, and the composition is the code.
@@ -1467,16 +1151,6 @@ mod tests {
             stack.trim_end().ends_with("body"),
             "the body is no longer the layer over the rail — the bar is under \
              the rail and cannot be grabbed"
-        );
-
-        let songs = source
-            .split_once("fn songs_section<'a>(")
-            .expect("the Songs section exists")
-            .1;
-        let songs = &songs[..songs.find("\n}\n").expect("a function ends")];
-        assert!(
-            songs.contains("right: theme::WALL_RESERVE"),
-            "the Songs section centres on a different axis than the wall"
         );
     }
 
@@ -1552,7 +1226,7 @@ mod hover_option_tests {
     /// | `Play` | `PlayAlbum` | the record page's `Play album`, and the menu's |
     /// | `Queue` | `QueueAlbum` | shift-click a sleeve, and the menu's `Queue album` |
     /// | `Add to…` | `AddAlbumToPlaylist` | the record page's `Add to playlist…`, and the menu's |
-    /// | `Open` | `AlbumClicked` | the tile's own press, and the menu's `Open` |
+    /// | `Open` | `AlbumClicked` | the selected tile's retained veil, and the menu's `Open` |
     #[test]
     fn every_option_is_a_press_some_visible_control_already_makes() {
         let source = source();
@@ -1608,20 +1282,21 @@ mod hover_option_tests {
              press would reach them before they reached it, or not at all"
         );
         // The stack is inside the button, not around it: the `on_press` that
-        // opens the page comes after the column that holds the sleeve.
+        // selects/activates the tile comes after the column that holds the sleeve.
         let sleeve_at = tile.find("let sleeve = container(").expect("the sleeve");
         let stack_at = tile.find("stack![art, hover_options(").expect("the layer");
         let press_at = tile
-            .find(".on_press(Message::AlbumClicked(album.id))")
+            .find(".on_press(Message::ContentPressed(Content::Album(album.id)))")
             .expect("the tile's own press");
         assert!(
             stack_at < sleeve_at && sleeve_at < press_at,
             "the options must be built into the work the tile's button holds"
         );
-        // And the tile still opens the page from anywhere else on it.
+        // And the tile still sends the product-wide content press from anywhere
+        // else on it; Open remains the veil's explicit direct control.
         assert!(
-            tile.contains(".on_press(Message::AlbumClicked(album.id))"),
-            "pressing the sleeve outside an option no longer opens the record"
+            tile.contains(".on_press(Message::ContentPressed(Content::Album(album.id)))"),
+            "pressing the sleeve outside an option no longer selects the record"
         );
     }
 
@@ -1681,18 +1356,14 @@ mod hover_option_tests {
         }
     }
 
-    /// **Options are the wall's alone.** Not on the Songs section's rows, not
-    /// in the lane — a row plays and a tile navigates (doc 09 §5), and a verb
-    /// group laid over a one-line row would be neither.
+    /// **Options are the wall's alone.** Not in a shelf header or the lane.
     #[test]
     fn only_a_wall_tile_carries_the_options() {
         let source = source();
-        for surface in ["song_row<'a>", "songs_section<'a>", "header_line"] {
-            assert!(
-                !function(&source, surface).contains("hover_options"),
-                "`{surface}` grew the wall's hover options"
-            );
-        }
+        assert!(
+            !function(&source, "header_line").contains("hover_options"),
+            "the shelf header grew the wall's hover options"
+        );
         // Only the drawing half of the file — the tests below name it too.
         let drawn = source
             .split_once("#[cfg(test)]")

@@ -1,6 +1,6 @@
 # ADR-0022: Places, and nothing else — removing every side surface
 
-**Status**: accepted (2026-08-08) · **supersedes the surface model of
+**Status**: accepted (2026-08-08), **interaction amended 2026-08-12** · **supersedes the surface model of
 [ADR-0016](0016-places-inspector-popover-bar.md)** (its inspector, its popover
 and the four-kinds rule; its queue vocabulary and its `Esc` layering survive
 re-stated) · spends the deferral [ADR-0017](0017-design-direction.md) costed as
@@ -8,6 +8,35 @@ re-stated) · spends the deferral [ADR-0017](0017-design-direction.md) costed as
 move · deletes two of [ADR-0020](0020-motion.md)'s five transitions by removing
 their subjects · changes no engine command and no protocol message · spends
 [ADR-0014](0014-queue-editing.md)'s `JumpTo` and `UpdateQueue` unchanged
+
+---
+
+## 2026-08-12 amendment — selection no longer navigates
+
+The owner replaced the mixed tile/row grammar with one desktop content rule:
+an ordinary first click selects and visibly highlights an album, playlist or
+playable row; a second click on the same object inside the double-click interval
+activates it. Activation means play for an album/list and needle-drop or jump
+for a track row. Explicit labelled `Play` controls remain direct one-click
+commands, as do explicit `Open` controls and named navigation links.
+
+This restores a `Selection` state, but not ADR-0016's selected-album side
+surface. It is one session-scoped content key plus one click clock and changes
+no layout: selecting a sleeve does not open its page, resize the wall or move
+the second press's target. Album and playlist detail remain reachable through
+their explicit `Open` option, context menu and source/navigation links. Enter
+activates the current selection when no query stands; the search amendment
+owns Enter while a query is active. Space retains its global play/pause meaning
+outside text entry rather than becoming a second content-activation key. iced
+0.13 exposes no platform double-click setting, so all surfaces share the
+existing 400 ms desktop interval until the 0.14 migration can consume toolkit
+click counts. Touch uses the same repeated press state machine, and the first
+tap also leaves a tile's labelled Play/Open veil visible so neither action
+depends on hover.
+
+Everything below is the historical place decision. Its one-place model and
+removal of side surfaces stand; claims that a tile's first press navigates are
+superseded by this amendment.
 
 ---
 

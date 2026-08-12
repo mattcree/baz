@@ -450,7 +450,28 @@
 > left as they were written — this record's rule is that history is amended,
 > not rewritten — so this one is the sixth by sequence and the seventh block.)*
 
-**Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10) · extracts the decisions of
+> ## Amendment (2026-08-12) — the sounding lamp trails without moving the row
+>
+> The owner, reading the built lane: *"when playing a playlist or album the
+> recent shows a pip which reflows text... just show the pip at the right of
+> the little row, and ensure it just makes the text ellipsis when it is eating
+> into the space. we don't want reflowing text"*. Section 2.6's placement
+> **before the name is replaced**. The row vocabulary remains a lamp dot plus
+> the existing playing card; only the dot's tenancy changes.
+>
+> Every expanded row now reserves the same `DOT` 6 px slot at its far trailing
+> edge, sounding or quiet. The row's existing 232 px measure, horizontal
+> padding, 48 px sleeve and two 8 px gaps leave **146 px** for both title and
+> metadata. Both are one-line lanes fitted against the real bundled face and
+> size, with a visible end ellipsis when longer; clipping remains the final
+> guard. Moving a run between a record and a playlist therefore changes ink
+> only. The sleeve, both text origins, row height and neighbours cannot move.
+> The collapsed lane has no text and keeps the playing card that already
+> survives there. No clock, animation, engine state or additional idle work is
+> introduced.
+
+**Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10,
+2026-08-12) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes the product's no-resident-side-surfaces
 entry and `11-jobs-era-critique.md` P10** · **restates ADR-0022's

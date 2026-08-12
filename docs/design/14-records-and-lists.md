@@ -1156,3 +1156,25 @@ correct on the machine that shipped it:
 > A record is a work you found; a playlist is a label you made. The line
 > under a name now says which, `Save as playlist` says what it is saving,
 > and a made list's page gets the byline line a found one always had.
+
+---
+
+## 12. 2026-08-12 amendment — one playlist, two persistence states
+
+The distinction this study established still holds in words: a saved file is
+durable and a run is transient. It no longer permits separate page anatomy.
+The owner's same-size review found that the run's private composition had
+drifted even though both states shared collage, identity and row primitives.
+
+The saved detail page is now the reference. Both states enter
+`views::playlist_page`, which owns the collage, 320 px sleeve/aside, playlist
+breakpoint, responsive document, three-line identity, section rule, empty
+state, scroller and fixed-pitch artwork/Album rows. The semantic distinctions
+occupy slots: durable Play/Rename/Delete/counts versus transient
+Save/provenance/cursor/remaining-time. The next ring remains because a run has
+a cursor; it changes the marker's content, not the row's composition.
+
+The before/after frames and drift inventory are
+`docs/design/impl/one-playlist-page/`. This supersedes the earlier acceptance
+of separate top-level compositions while preserving the data-model separation
+and no-write-back rule.

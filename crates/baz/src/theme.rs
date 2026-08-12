@@ -1081,6 +1081,41 @@ pub const SIDEBAR_SLEEVE: f32 = PANEL_SLEEVE + GAP_SM;
 /// centred, and it is above the hit-target floor at every density.
 pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE + 2.0 * GAP_SM;
 
+/// The stable trailing slot in every expanded `RECENT` row: exactly the lamp
+/// dot's six pixels, present whether the row is sounding or quiet.
+///
+/// The two-line text lane yields one [`GAP_SM`] before this slot. Keeping the
+/// reservation in quiet rows means moving playback between records and lists
+/// changes ink only; sleeve, title origin, metadata and row pitch cannot move.
+pub const SIDEBAR_LAMP_SLOT_W: f32 = DOT;
+
+/// The exact one-line measure left to an expanded `RECENT` row's title and
+/// metadata: **146 px**.
+///
+/// ```text
+/// SIDEBAR_MEASURE                                      232
+///   − button's fixed left and right padding        2 × 8
+///   − SIDEBAR_SLEEVE                                    48
+///   − sleeve→text and text→lamp gaps             2 × 8
+///   − SIDEBAR_LAMP_SLOT_W                                6
+///   =                                                     146
+/// ```
+///
+/// Both lines are fitted to this same boundary before Iced sees them, then
+/// clipped as a final guard. The lamp therefore never borrows geometry from
+/// one line while leaving the other wider.
+pub const SIDEBAR_ROW_TEXT_W: f32 =
+    SIDEBAR_MEASURE - 2.0 * GAP_SM - SIDEBAR_SLEEVE - 2.0 * GAP_SM - SIDEBAR_LAMP_SLOT_W;
+
+/// The end-ellipsis subslot inside [`SIDEBAR_ROW_TEXT_W`]: 16 px, always wide
+/// enough for the bundled faces' ellipsis at body or metadata size.
+///
+/// Iced 0.13 can still break `Wrapping::None` text at a constrained width. A
+/// long line therefore puts its fitted prefix in the clipped space before this
+/// slot and draws the ellipsis separately, guaranteeing that the one-line
+/// failure sign remains visible even if the renderer rounds advances upward.
+pub const SIDEBAR_ELLIPSIS_SLOT_W: f32 = GAP_LG;
+
 /// The head's destination row: **40** — [`TRANSPORT_HIT`] 32, the product's
 /// control hit box, with one [`GAP_SM`] of air under it.
 ///
@@ -1158,8 +1193,8 @@ pub const SIDEBAR_HEAD_TEXT_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX + GAP_MD;
 /// it rather than leaving it 4 px off three glyphs above it.
 pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
 
-/// **The search well's block in the lane's head**: **32** — the field, and
-/// nothing under it.
+/// **The search well's control height**: **32** — the field, and nothing
+/// under it. It now lives in the app bar; the geometry is unchanged.
 ///
 /// It was 52: the field over an always-drawn [`LINE_META`] line carrying the
 /// collection's counts at rest and the query's match count while one narrowed
@@ -1180,17 +1215,11 @@ pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
 /// because the arithmetic that preceded the measurement predicted the opposite.
 /// The height is still *fixed* for the reason it always was: nothing below the
 /// well may move when a key lands in it.
-pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT;
-
-/// **The match count's reserved slot inside the lane's well**: **72**.
+/// **The match count's reserved slot inside the app-bar well**: **72**.
 ///
-/// The lane's own figure, not the strip's. [`crate::views::top_bar::MATCH_W`]
-/// is 88 because the strip could afford room for `40000 / 40000` beside a
-/// 280 px well; at [`SIDEBAR_MEASURE`] 232 that reservation would leave the
-/// query 88 px, which is what drove both figures out of the field in the first
-/// place. 72 holds `9999 / 9999` — a collection ten times the owner's — and
-/// leaves the query **104 px**, which `font.rs` measures rather than assumes
-/// (`the_lanes_well_holds_a_query_beside_its_match_count`).
+/// At [`SIDEBAR_MEASURE`] 232, 72 holds `9999 / 9999` — a collection ten
+/// times the owner's — and leaves the query **104 px**, which `font.rs`
+/// measures rather than assumes.
 ///
 /// Fixed, for the reason every readout slot in the product is fixed: the
 /// figures change as the query narrows, and a right-aligned slot of constant
@@ -1948,8 +1977,7 @@ pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 /// own number: a floor that is a taste is a promise nobody can check later. It
 /// is the fixed furniture plus one row of the tightest wall —
 ///
-/// - the two-line Library strip, which is the **tallest** the top can be, so
-///   the floor holds at every width rather than only above the strip's split;
+/// - the one-line Library arrangement strip;
 /// - the bottom bar, its hairline and the needle;
 /// - one row at [`crate::shelf::Density::Dense`]: its smallest work, the
 ///   caption's lead and line, and the row's trailing hang.
@@ -1962,7 +1990,7 @@ pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 /// It does **not** track the density: the floor is a property of the window and
 /// the listener may be at any step when they drag, so it takes the tightest,
 /// which is the only step that cannot be squeezed further.
-pub const WINDOW_FLOOR_H: f32 = TOP_BAR_2LINE_H
+pub const WINDOW_FLOOR_H: f32 = TOP_BAR_H
     + BAR_CONTENT_H
     + 1.0
     + NEEDLE_H
@@ -1997,6 +2025,7 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_2LINE_H
 /// one place that resolution happens. The **app bar** above it is a different
 /// band with a different width (the window's own) and no split at all; see
 /// [`APP_BAR_H`].
+#[cfg(test)]
 pub const TOP_BAR_SPLIT: f32 = 680.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
@@ -2026,6 +2055,7 @@ pub const TOP_BAR_FLOOR: f32 = 600.0;
 /// the virtualizer's pre-first-scroll viewport is derived from this number
 /// and an estimate that disagreed with the drawing has already cost the rail
 /// its capacity math once.
+#[cfg(test)]
 pub const TOP_BAR_2LINE_H: f32 = 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0;
 
 /// Vertical lead of the **app bar** (logical px) — [`GAP_XS`] **4**, half the
@@ -2120,8 +2150,8 @@ pub fn app_bar_pad() -> Padding {
 
 /// The app bar's reserved slot for the **display options** (logical px) — the
 /// widest tenant is the wall's four [`STEPPER_HIT`] density detents, **96**.
-/// Now Playing right-aligns its two foreground choices and spectrum toggle in
-/// the same slot.
+/// Now Playing right-aligns its three foreground choices and spectrum toggle
+/// in the same four-detent slot.
 ///
 /// Reserved at every width and in **every place**, including the five that
 /// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism
@@ -2165,53 +2195,13 @@ pub const APP_BAR_NAME_W: f32 = ICON_PX + GAP_SM;
 /// law adds up has to be the geometry actually drawn.
 pub const APP_BAR_BUTTONS_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * GAP_XS;
 
-/// **Whether the Library strip carries the search well** — true exactly where
-/// the returns lane cannot hold it.
-///
-/// The owner's decision (ADR-0030's search amendment): *"the search should
-/// really be in the sidebar"*. The lane is where the query lives, and it can
-/// hold a field at [`SIDEBAR_W`] and reach one at [`SIDEBAR_RAIL_W`] — the
-/// rail's magnifier opens the lane onto the caret. Below [`SIDEBAR_FLOOR`]
-/// the lane is a rail that *cannot* open ([`sidebar_can_expand`]), so there is
-/// nothing for a magnifier there to lead to, and the well goes back to the
-/// strip in the form doc 10 §4.1 drew for it.
-///
-/// **One home at a time, and the breakpoint is the lane's own.** The defect
-/// the owner named — *"the design does not match properly"* — was two surfaces
-/// both carrying the frame's identity; a well drawn in both would be that
-/// defect with an extra field.
+/// The Library arrangement strip's resolved height. Search now lives in the
+/// app bar, so the strip has one line at every supported width; the arguments
+/// remain in the API because its callers already resolve the surrounding lane
+/// and viewport from them.
 #[must_use]
-pub fn strip_holds_the_well(window_w: f32) -> bool {
-    !sidebar_can_expand(window_w)
-}
-
-/// The Library strip's resolved height: [`TOP_BAR_H`] in the single-line
-/// regime, [`TOP_BAR_2LINE_H`] where the strip splits.
-///
-/// The one function every consumer of the strip's height must read — the
-/// strip's own view and `app.rs`'s viewport estimate both — so the two regimes
-/// cannot disagree about where the seam is.
-///
-/// **It takes the window and the lane's state, not a width**, and that is a
-/// correction. The strip is drawn at `App::body_width` — the window less the
-/// returns lane — while this function was still being handed the *window*, so
-/// between a 1000 px and a 1056 px window with the lane open the strip drew
-/// two lines and the virtualizer's viewport estimate assumed one. Taking the
-/// same two facts the composition takes makes the pair impossible to disagree.
-///
-/// Where the well has left the strip ([`strip_holds_the_well`]) the split
-/// cannot be reached at all: the narrowest strip in that regime is
-/// `SIDEBAR_FLOOR − SIDEBAR_W` = 720, against a well-less single line of 608.
-/// That is asserted, which is what makes this branch a fact rather than a
-/// hope.
-#[must_use]
-pub fn top_bar_h(window_w: f32, lane_open: bool) -> f32 {
-    let strip = (window_w - sidebar_w(window_w, lane_open)).max(0.0);
-    if strip_holds_the_well(window_w) && strip < TOP_BAR_SPLIT {
-        TOP_BAR_2LINE_H
-    } else {
-        TOP_BAR_H
-    }
+pub fn top_bar_h(_window_w: f32, _lane_open: bool) -> f32 {
+    TOP_BAR_H
 }
 
 /// Vertical padding that makes a text well exactly [`TRANSPORT_HIT`] tall.
@@ -3470,14 +3460,29 @@ pub fn track_row(
     status: button::Status,
     playing: bool,
 ) -> button::Style {
+    selectable_track_row(p, ground, status, playing, false)
+}
+
+/// A playable content row with an independent selection wash. Selection is
+/// paper-toned keyboard/pointer state; the lamp remains playback truth.
+#[must_use]
+pub fn selectable_track_row(
+    p: &Palette,
+    ground: Color,
+    status: button::Status,
+    playing: bool,
+    selected: bool,
+) -> button::Style {
     let lit = p.step_up(ground);
     let carded = p.step_up(lit);
-    let background = match (playing, status) {
+    let selected_ground = p.select_wash(ground);
+    let background = match (playing, selected, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(carded),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(lit),
-        (false, button::Status::Active | button::Status::Disabled) => None,
+        (true, _, _) => Some(carded),
+        (false, true, _) => Some(selected_ground),
+        (false, false, button::Status::Hovered | button::Status::Pressed) => Some(lit),
+        (false, false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
         background: background.map(Background::Color),
@@ -3487,6 +3492,8 @@ pub fn track_row(
         border: Border {
             color: if playing {
                 p.hairline_strong(carded)
+            } else if selected {
+                p.paper_ring(selected_ground)
             } else {
                 Color::TRANSPARENT
             },
@@ -4397,6 +4404,17 @@ mod tests {
                     panic!("{}: the playing row keeps its card", p.name);
                 };
                 assert!(visible(playing, hovered), "{}: on {ground:?}", p.name);
+
+                let Some(Background::Color(selected)) =
+                    selectable_track_row(p, ground, button::Status::Active, false, true).background
+                else {
+                    panic!("{}: a selected row keeps its wash", p.name);
+                };
+                assert!(
+                    visible(selected, ground) && visible(selected, playing),
+                    "{}: selection, rest and playback remain distinct on {ground:?}",
+                    p.name
+                );
             }
             // The wall's rows are the shipped values, exactly.
             let Some(Background::Color(hovered)) =
@@ -7257,17 +7275,10 @@ mod tests {
             "the shared row insets by GAP_XS, which is the 21-left / \
              14-right asymmetry the audit measured"
         );
-        // A record's name inside a list sits on the heading lane rather than 4
-        // and 5 px inside it. It carries a *vertical* inset — the air above a
-        // new record's name — and that is a different axis: this law is about
-        // x-edges, and the assertion is that the horizontal half is literally
-        // zero.
-        assert!(
-            shared.contains("container(block).padding(theme::pad(air, 0.0))"),
-            "a record's head inside a list has a horizontal inset again"
-        );
         // …and **no surface lays a row out for itself any more**, which is what
-        // lets the three assertions above stand for all of them. This is the
+        // lets the two assertions above stand for all of them. Record headings
+        // are no longer part of a playlist row: both saved and unsaved lists
+        // carry record context in the shared row itself. This is the
         // L5 half of `views::page`'s own
         // `the_two_pages_are_one_composition`: a view that spelled the row's
         // pad again would be a fourth lane nobody declared.
@@ -7591,20 +7602,13 @@ mod tests {
         const { assert!(top_bar::WELL_W == 200.0) }
         const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W < 1200.0) }
 
-        // And the resolved height is the regime the window and the lane say it
-        // is — the function `app.rs`'s viewport estimate reads, asserted at the
-        // seam itself. The lane is collapsed at every width the seam is
-        // reachable at, so the strip there is the window less the rail.
+        // The historical seam arithmetic remains recorded above, but the well
+        // now lives in the app bar and the rendered arrangement strip has one
+        // height across it. `app.rs` reads the same function for its viewport.
         let window = |strip: f32| strip + SIDEBAR_RAIL_W;
         assert!((top_bar_h(window(TOP_BAR_SPLIT), false) - TOP_BAR_H).abs() < f32::EPSILON);
-        assert!(
-            (top_bar_h(window(TOP_BAR_SPLIT - 1.0), false) - TOP_BAR_2LINE_H).abs() < f32::EPSILON
-        );
-        assert!((top_bar_h(window(TOP_BAR_FLOOR), false) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
-        // Above the lane's floor there is no two-line regime at all, in
-        // either state — the defect the old signature could not even express,
-        // because it was handed the window while the strip was drawn at the
-        // body's width.
+        assert!((top_bar_h(window(TOP_BAR_SPLIT - 1.0), false) - TOP_BAR_H).abs() < f32::EPSILON);
+        assert!((top_bar_h(window(TOP_BAR_FLOOR), false) - TOP_BAR_H).abs() < f32::EPSILON);
         for open in [true, false] {
             for w in [SIDEBAR_FLOOR, 1056.0, 1280.0, 1920.0] {
                 assert!(
@@ -7643,9 +7647,9 @@ mod tests {
         /// The same, for the display options' slot.
         const MARKS_FROM_RIGHT: f32 = GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG;
         /// The bar's one line: the leading gutter, the application's mark, the
-        /// drag gap's two `GAP_LG` flanks, the display options' reserved slot,
-        /// the seam, the gear, the seam, the window controls' reserved slot,
-        /// the trailing gutter.
+        /// resident search well and seam, the drag gap's two `GAP_LG` flanks,
+        /// the display options' reserved slot, the seam, the gear, the seam,
+        /// the window controls' reserved slot, and the trailing gutter.
         ///
         /// The drag gap contributes **zero** of its own — it is the fill, and
         /// what the law has to hold is the line with the fill at nothing.
@@ -7657,6 +7661,8 @@ mod tests {
         /// two values.
         const LINE: f32 = HANG
             + APP_BAR_NAME_W
+            + GAP_LG
+            + SIDEBAR_MEASURE
             + 2.0 * GAP_LG
             + APP_BAR_MARKS_W
             + GAP_LG
@@ -7667,22 +7673,16 @@ mod tests {
 
         const { assert!(APP_BAR_MARKS_W == 96.0) }
         const { assert!(APP_BAR_BUTTONS_W == 104.0) }
-        const { assert!(LINE == 392.0) }
+        const { assert!(LINE == 640.0) }
         const { assert!(LINE <= FLOOR) }
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
         // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
         //
-        // **It is the figure the search well is argued against**, which is the
-        // owner's open question of 2026-08-10 (*"maybe we could put the search
-        // in the top bar?"*, `docs/BACKLOG.md`): the lane's well is
-        // `SIDEBAR_MEASURE` 232 and its seam `GAP_LG` 16, so it fits here with
-        // 56 px left over — and its always-drawn counts line does not fit at
-        // all, because this band is one `TRANSPORT_HIT` tall. The arithmetic is
-        // stated so the answer is a decision rather than a discovery.
-        const { assert!(FLOOR - LINE == 304.0) }
-        const { assert!(SIDEBAR_MEASURE + GAP_LG < FLOOR - LINE) }
-        const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == SIDEBAR_WELL_H) }
+        // The app-bar amendment spends 248 px of the old 304 px slack on the
+        // 232 px well and its 16 px seam, leaving 56 px at the minimum window.
+        const { assert!(FLOOR - LINE == 56.0) }
+        const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 
         // **The display options' slot is held in every place**, which is what
         // makes one bar the same bar everywhere (ADR-0040 §5): the distance
@@ -7911,9 +7911,9 @@ mod window_floor_tests {
     /// rather than becoming a stale constant that used to mean that.
     #[test]
     fn the_window_floor_is_the_furniture_plus_one_row() {
-        use super::{BAR_CONTENT_H, GAP_LG, LABEL_H, NEEDLE_H, TOP_BAR_2LINE_H, WINDOW_FLOOR_H};
+        use super::{BAR_CONTENT_H, GAP_LG, LABEL_H, NEEDLE_H, TOP_BAR_H, WINDOW_FLOOR_H};
         let dense = crate::shelf::Density::Dense;
-        let furniture = TOP_BAR_2LINE_H + BAR_CONTENT_H + 1.0 + NEEDLE_H;
+        let furniture = TOP_BAR_H + BAR_CONTENT_H + 1.0 + NEEDLE_H;
         let row = dense.art_min() + GAP_LG + LABEL_H + dense.hang();
         assert!(
             (WINDOW_FLOOR_H - (furniture + row)).abs() < f32::EPSILON,

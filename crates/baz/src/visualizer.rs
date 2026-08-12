@@ -17,15 +17,37 @@ const BAR_GAP: f32 = 4.0;
 pub(crate) enum Foreground {
     Cover,
     JewelCase,
+    None,
 }
 
 impl Foreground {
-    const ALL: [Self; 2] = [Self::Cover, Self::JewelCase];
+    const ALL: [Self; 3] = [Self::Cover, Self::JewelCase, Self::None];
+
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Cover => "cover",
+            Self::JewelCase => "jewel-case",
+            Self::None => "none",
+        }
+    }
+
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|choice| choice.code() == code)
+    }
+
+    pub(crate) const fn draws_art(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub(crate) const fn draws_case(self) -> bool {
+        matches!(self, Self::JewelCase)
+    }
 
     fn label(self) -> &'static str {
         match self {
             Self::Cover => "Cover art",
             Self::JewelCase => "Jewel case",
+            Self::None => "No album object",
         }
     }
 
@@ -33,6 +55,7 @@ impl Foreground {
         match self {
             Self::Cover => crate::icon::Glyph::VisualCover,
             Self::JewelCase => crate::icon::Glyph::VisualCase,
+            Self::None => crate::icon::Glyph::VisualNone,
         }
     }
 }
@@ -54,6 +77,9 @@ impl Default for State {
 }
 
 /// Draw the selected record object in the square foreground stage.
+///
+/// `None` is handled by the parent composition instead of this function: its
+/// defining property is that the stage itself does not exist.
 pub(crate) fn foreground(
     choice: Foreground,
     width: f32,
@@ -63,6 +89,7 @@ pub(crate) fn foreground(
     let subject = match choice {
         Foreground::Cover => cover,
         Foreground::JewelCase => jewel_case,
+        Foreground::None => unreachable!("None has no foreground stage"),
     };
     // Both choices occupy the same square stage. The physical jewel case is
     // wider than it is tall, so it is centred inside that stage; switching the
@@ -75,11 +102,10 @@ pub(crate) fn foreground(
         .into()
 }
 
-/// Two radio-like foreground marks followed by one independent spectrum
+/// Three radio-like foreground marks followed by one independent spectrum
 /// toggle, all in the app bar's existing display-options slot.
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
     row(Foreground::ALL.map(|choice| foreground_button(choice, state.foreground)))
-        .push(Space::with_width(Length::Fixed(theme::GAP_SM)))
         .push(spectrum_button(state.spectrum))
         .into()
 }
@@ -154,7 +180,7 @@ fn spectrum_button(on: bool) -> Element<'static, Message> {
         text(if on {
             "Spectrum is on — hide the audio background"
         } else {
-            "Spectrum is off — show it behind the artwork"
+            "Spectrum is off — show the audio background"
         })
         .size(theme::SIZE_CAPTION)
         .line_height(theme::LEADING_CAPTION),
@@ -268,6 +294,28 @@ mod tests {
         assert_eq!(state.foreground, Foreground::JewelCase);
         state.foreground = Foreground::Cover;
         assert!(state.spectrum);
+        state.foreground = Foreground::None;
+        assert!(state.spectrum);
+        state.spectrum = false;
+        assert_eq!(state.foreground, Foreground::None);
+    }
+
+    #[test]
+    fn every_foreground_has_a_stable_config_word() {
+        for foreground in Foreground::ALL {
+            assert_eq!(Foreground::from_code(foreground.code()), Some(foreground));
+        }
+        assert_eq!(Foreground::from_code("future-object"), None);
+    }
+
+    #[test]
+    fn none_is_the_only_choice_without_art_or_a_stage() {
+        assert!(Foreground::Cover.draws_art());
+        assert!(Foreground::JewelCase.draws_art());
+        assert!(!Foreground::None.draws_art());
+        assert!(Foreground::JewelCase.draws_case());
+        assert!(!Foreground::Cover.draws_case());
+        assert!(!Foreground::None.draws_case());
     }
 
     #[test]

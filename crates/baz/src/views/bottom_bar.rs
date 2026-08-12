@@ -863,6 +863,7 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
                 Message::VolumeReleased,
                 Message::VolumeLeft,
             )
+            .on_wheel(Message::VolumeWheel)
             .into()
     } else {
         fader.into()

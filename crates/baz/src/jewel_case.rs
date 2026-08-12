@@ -23,8 +23,9 @@ use lru::LruCache;
 use crate::app::Message;
 use crate::vm;
 
-/// The focused animation cadence. The shader changes one 32-byte uniform at
-/// each step; the timer does not exist away from Now Playing or when unfocused.
+/// The visible animation cadence. The shader changes one 32-byte uniform at
+/// each step; the timer does not exist away from Now Playing or when neither
+/// the case nor spectrum needs it.
 pub(crate) const TICK: Duration = Duration::from_millis(33);
 const TURN: Duration = Duration::from_secs(32);
 const DRAG_YAW_PER_PX: f32 = 0.012;

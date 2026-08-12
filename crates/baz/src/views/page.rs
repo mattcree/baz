@@ -72,10 +72,9 @@
 //! button's paint and its padding — and that was written **three** times, in
 //! `views::album`, `views::playlist` and `views::queue`.
 //!
-//! So [`track_row`] draws it once, and [`list_head`] draws the record heading
-//! that stood between them twice. The third surface is the run column on
-//! `Now playing`, which is the same list of tracks read as a position rather
-//! than as a document.
+//! So [`track_row`] draws it once. The third surface was the run column on
+//! `Now playing`; it is now the unsaved persistence state of
+//! [`super::playlist_page`], through this same document composition.
 //!
 //! ## What the owner named as the difference, and what else stayed
 //!
@@ -83,22 +82,20 @@
 //! exploration type data"* and lives on a record's page in the aside, which the
 //! run column does not have. That is his own line and it holds.
 //!
-//! Three more differences survived the merge because they are facts about the
-//! subject rather than drift, and each is named where it is drawn:
+//! Three differences survive because they are facts about the subject rather
+//! than drift, and each is named where it is drawn:
 //!
 //! - **the next-track ring** (`views::queue`'s `next_ring`) — a run has a
 //!   cursor, so it has a *next*; a document has neither;
 //! - **the trailing slots** — ▲▼✕ belong to an editable list (doc 09 §8.2) and
 //!   a published record's tracks are not one;
-//! - **the head** — a page states a *name* ([`Identity`], 80 px, three lines);
-//!   the run states a *position* (`3 of 12 · 38:12 left`). They are different
-//!   sentences, not two spellings of one.
+//! - **the identity facts** — a saved page states durable counts; the run uses
+//!   that same line for its live cursor and remaining-time sentence.
 //!
-//! The run column is also not drawn *through* [`view`], and that is the honest
-//! limit of this merge: [`view`] composes a centred aside-and-main document in
-//! one scroll, and the run is a virtualized column standing beside the record
-//! inside another surface's two-column layout. Same rows, same heads, same
-//! slots; a different thing holding them.
+//! The old limit of this merge was the run's private top-level composition.
+//! The owner's 2026-08-12 review showed that partial reuse still drifted, so
+//! [`super::playlist_page`] now parameterizes both persistence states and is
+//! the only playlist-page caller of [`view`].
 
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
@@ -589,6 +586,8 @@ pub(crate) struct TrackRow<'a> {
     pub(crate) duration: std::borrow::Cow<'a, str>,
     /// Whether this is the sounding row — the medium weight and the card.
     pub(crate) playing: bool,
+    /// Whether one ordinary press selected this row.
+    pub(crate) selected: bool,
     /// What pressing it does, or `None` where it cannot act: no engine, or a
     /// missing file with nothing to play.
     pub(crate) press: Option<Message>,
@@ -618,6 +617,7 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
         context,
         duration,
         playing,
+        selected,
         press,
     } = row;
     let heading = text(title)
@@ -702,7 +702,9 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
     button(contents)
         .width(Length::Fill)
         .padding(theme::pad(theme::GAP_XS, 0.0))
-        .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
+        .style(move |_theme, status| {
+            theme::selectable_track_row(room, room.wall, status, playing, selected)
+        })
         .on_press_maybe(press)
         .into()
 }
@@ -739,54 +741,6 @@ fn metadata_label(
             .wrapping(text::Wrapping::None)
             .into()
     }
-}
-
-/// **The head over one record's run of rows** — its title, and who it is filed
-/// under, in the room's quietest voice.
-///
-/// A playlist page's `record_head` and the run column's `album_group` were the
-/// same block written twice, differing only in how they spelled *is this the
-/// first one* (a `bool` on one side, a raw number of pixels on the other) and
-/// in which of the two strings was allowed to be absent. Both spellings said
-/// [`theme::GAP_MD`] or nothing, and the anatomy under them was identical.
-///
-/// `air` goes **above**: a break needs room before it because it is a break,
-/// and a head sitting directly under the `TRACKS` rule is not breaking
-/// anything — so the first one in a list takes none.
-///
-/// A record with no title of its own is headed by its artist, and the artist
-/// line beneath is dropped rather than repeating it — which is the run
-/// column's own rule, and a playlist page inherits it rather than being unable
-/// to express it.
-///
-/// **On the column's own heading lane**, with no inset of its own: two x-edges
-/// in the surface rather than four (law L5).
-pub(crate) fn list_head(
-    album: Option<&str>,
-    artist: &str,
-    first: bool,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    let mut block = column![
-        text(album.unwrap_or(artist).to_owned())
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_XXS);
-    if album.is_some() && !artist.is_empty() {
-        block = block.push(
-            text(artist.to_owned())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.heading())
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    let air = if first { 0.0 } else { theme::GAP_MD };
-    container(block).padding(theme::pad(air, 0.0)).into()
 }
 
 /// **One row's reserved control slot**: the drawn glyph while the pointer is
@@ -1006,7 +960,8 @@ mod tests {
     /// avoids all of them is a new duplicate somebody chose.
     #[test]
     fn the_two_pages_are_one_composition() {
-        for (page, source) in pages() {
+        let pages = pages();
+        for (page, source) in &pages {
             for token in [
                 "theme::SIZE_HERO",
                 "theme::LEADING_HERO",
@@ -1025,11 +980,20 @@ mod tests {
                      the drift ADR-0024 §A2 was made literal to end"
                 );
             }
-            assert!(
-                source.contains("page::view(") && source.contains("Page {"),
-                "{page} page must reach the shared composition"
-            );
         }
+        assert!(
+            pages[0].1.contains("page::view(") && pages[0].1.contains("Page {"),
+            "a record page must reach the shared subject composition"
+        );
+        assert!(
+            pages[1].1.contains("playlist_page::view(")
+                && !pages[1]
+                    .1
+                    .replace("playlist_page::view(", "")
+                    .contains("page::view("),
+            "a saved playlist must reach the playlist compositor rather than \
+             growing another direct subject-page call"
+        );
     }
 
     /// **The hero's face is the axis, and it is named at the call sites.**
@@ -1111,11 +1075,19 @@ mod tests {
     /// composition's now, so having one is not optional.
     #[test]
     fn neither_page_rules_off_an_empty_list_in_silence() {
-        for (page, source) in pages() {
-            assert!(
-                source.contains("empty:"),
-                "{page} page hands the composition no empty state"
-            );
-        }
+        let [(_, record), (_, saved)] = pages();
+        assert!(record.contains("empty:"));
+        assert!(
+            saved.contains("playlist_page::view("),
+            "a saved list bypasses the component that owns its empty state"
+        );
+        let shared = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/playlist_page.rs"),
+        )
+        .expect("the shared playlist composition's source");
+        assert!(
+            shared.contains("empty: EMPTY"),
+            "the shared playlist page hands no empty state to the subject page"
+        );
     }
 }

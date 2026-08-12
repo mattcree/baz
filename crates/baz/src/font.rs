@@ -628,14 +628,8 @@ mod tests {
     fn the_group_key_row_fits_the_top_bar_at_the_shipped_window() {
         let medium = Face::parse(SANS_MEDIUM);
         let keys = arrangement_row(&medium);
-        // **At the shipped window the strip has no well**: the lane holds it
-        // (ADR-0030's search amendment), so the strip's left cluster is the
-        // states alone, hanging from the window gutter, and the strip's own
-        // width is the window less the expanded lane.
-        assert!(
-            !theme::strip_holds_the_well(1280.0),
-            "at the shipped window the well is the lane's"
-        );
+        // Search is in the app bar, so this strip's left cluster is the
+        // arrangement states alone, hanging from the window gutter.
         let strip = 1280.0 - theme::sidebar_w(1280.0, true);
         let left = theme::HANG + keys;
 
@@ -681,14 +675,10 @@ mod tests {
         })
     }
 
-    /// **The lane's well holds a query beside its match count** — the
-    /// arithmetic that let the count come back *inside* the field when the
-    /// collection's counts left for Home.
+    /// **The app-bar well holds a query beside its match count.**
     ///
-    /// The shipped lane put both figures on a line under the field because the
-    /// strip's [`crate::views::top_bar::MATCH_W`] 88 slot inside a
-    /// [`theme::SIDEBAR_MEASURE`] 232 well left the query 88 px. Only one
-    /// figure is in the field now and it has a slot of its own —
+    /// One compact figure sits inside the [`theme::SIDEBAR_MEASURE`] 232 well
+    /// in a slot of its own —
     /// [`theme::SIDEBAR_MATCH_W`] 72, sized here rather than guessed:
     ///
     /// ```text
@@ -697,11 +687,9 @@ mod tests {
     ///
     /// Two claims, and the second is the one the owner would notice: the slot
     /// **holds its worst figure**, so a right-aligned count never runs left
-    /// under the query; and what is left is **more room than a reserved
-    /// `MATCH_W` would have left**, which is why this is not the arrangement
-    /// the lane already rejected.
+    /// under the query, while the remaining 104 px still holds the query.
     #[test]
-    fn the_lanes_well_holds_a_query_beside_its_match_count() {
+    fn the_app_bar_well_holds_a_query_beside_its_match_count() {
         let sans = sans();
         // `9999 / 9999` — a collection ten times the owner's. Above that the
         // slot clips rather than colliding, because the count is drawn in a
@@ -719,30 +707,8 @@ mod tests {
             - theme::SIDEBAR_MATCH_W;
         assert!(
             (query - 104.0).abs() < f32::EPSILON,
-            "the query's room in the lane's well is {query} px, not the 104 \
+            "the query's room in the app-bar well is {query} px, not the 104 \
              the design records"
-        );
-        assert!(
-            query
-                > theme::SIDEBAR_MEASURE
-                    - theme::SIDEBAR_HEAD_TEXT_X
-                    - theme::GAP_MD
-                    - crate::views::top_bar::MATCH_W,
-            "the lane's slot buys the query no room over the strip's, so the \
-             count belongs back under the field"
-        );
-        // And the strip's own well, at the one regime it is still drawn in:
-        // the collection's counts as the placeholder, past the magnifier's
-        // reserved lane and the input's own padding. Unchanged by the move —
-        // a strip is one control tall and has no second line to give.
-        let strip_lane = crate::views::top_bar::WELL_W
-            - (theme::GAP_MD + theme::ICON_PX + theme::GAP_SM)
-            - theme::GAP_MD;
-        let measured = sans.width("1284 albums · 9902 tracks", theme::SIZE_META);
-        assert!(
-            measured <= strip_lane,
-            "the owner-scale counts measure {measured:.1} px against the \
-             strip well's {strip_lane:.0}"
         );
     }
 
@@ -761,7 +727,7 @@ mod tests {
     /// candidate for it is longer still and the slot should be known to hold
     /// that too.
     #[test]
-    fn the_lanes_well_names_the_scope_it_searches() {
+    fn the_app_bar_well_names_the_scope_it_searches() {
         let sans = sans();
         let resting = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
         assert!(
@@ -771,7 +737,7 @@ mod tests {
         );
         fits(
             &sans,
-            crate::views::lane::SCOPE,
+            crate::views::search::SCOPE,
             theme::SIZE_BODY,
             resting,
             "the well's resting width",
@@ -1223,19 +1189,6 @@ mod tests {
         // The strip's Settings door is the gear now (doc 10 §7 step 1): a
         // glyph in a fixed square has no word to measure, and its name rides
         // the tooltip, whose card sizes to its own text.
-
-        // The well's reserved match-count slot (doc 10 §4.1): `7 / 1284` up
-        // to a library far larger than the owner's, in the readout's own
-        // face and size.
-        for count in ["7 / 1284", "40000 / 40000"] {
-            fits(
-                &sans,
-                count,
-                theme::SIZE_META,
-                crate::views::top_bar::MATCH_W,
-                "MATCH_W",
-            );
-        }
     }
 
     /// The Settings place's reserved note slot still holds every sentence it

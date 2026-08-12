@@ -126,6 +126,9 @@ const OUTPUT_DEVICE: &str = "output_device";
 /// The key the last visible place is written under.
 const LAST_PLACE: &str = "last_place";
 
+/// The foreground album object selected on Now Playing.
+const VISUALIZATION_FOREGROUND: &str = "visualization_foreground";
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -227,6 +230,11 @@ pub struct Config {
     /// launches with shuffle on should be two different shuffles; remembering
     /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
+    /// The album object drawn on Now Playing: flat cover, jewel case or none.
+    ///
+    /// View state, persisted beside density rather than exposed as a Settings
+    /// row. The three radio-like marks live on the surface they change.
+    pub(crate) visualization_foreground: crate::visualizer::Foreground,
     /// The place restored on the next launch after a clean close.
     ///
     /// This is view state, not a Settings row. Subject places keep their
@@ -249,6 +257,7 @@ impl Default for Config {
             volume: Volume::UNITY,
             output_device: None,
             shuffle: false,
+            visualization_foreground: crate::visualizer::Foreground::JewelCase,
             last_place: Place::Library,
         }
     }
@@ -336,6 +345,12 @@ impl Config {
         );
         let _ = writeln!(
             out,
+            "# Now Playing foreground: \"cover\", \"jewel-case\" or \"none\"\n\
+             {VISUALIZATION_FOREGROUND} = {}",
+            toml_string(self.visualization_foreground.code()),
+        );
+        let _ = writeln!(
+            out,
             "# the screen to restore after a clean close\n{LAST_PLACE} = {}",
             toml_string(&self.last_place.code()),
         );
@@ -415,6 +430,11 @@ impl Config {
             .get(SHUFFLE)
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
+        let visualization_foreground = table
+            .get(VISUALIZATION_FOREGROUND)
+            .and_then(toml::Value::as_str)
+            .and_then(crate::visualizer::Foreground::from_code)
+            .unwrap_or(crate::visualizer::Foreground::JewelCase);
         // A place this build cannot name is Library, and only Library: never
         // guess which screen a newer spelling meant. Subject existence is
         // checked later, once the library and playlists are available.
@@ -432,6 +452,7 @@ impl Config {
             volume,
             output_device,
             shuffle,
+            visualization_foreground,
             last_place,
         }
     }
@@ -624,6 +645,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn round_trips_every_now_playing_foreground_as_its_own_word() {
+        for foreground in [
+            crate::visualizer::Foreground::Cover,
+            crate::visualizer::Foreground::JewelCase,
+            crate::visualizer::Foreground::None,
+        ] {
+            let config = Config {
+                visualization_foreground: foreground,
+                ..Config::default()
+            };
+            let text = config.to_toml();
+            assert!(
+                text.contains(&format!(
+                    "{VISUALIZATION_FOREGROUND} = {:?}",
+                    foreground.code()
+                )),
+                "{foreground:?} was not written legibly:\n{text}"
+            );
+            assert_eq!(Config::from_toml(&text), config);
+        }
+    }
+
+    #[test]
+    fn an_invalid_foreground_degrades_alone() {
+        for value in ["\"future-object\"", "7", "true"] {
+            let config = Config::from_toml(&format!(
+                "{VISUALIZATION_FOREGROUND} = {value}\nvolume = 618\ngroup_key = \"year\"\n"
+            ));
+            assert_eq!(
+                config.visualization_foreground,
+                crate::visualizer::Foreground::JewelCase,
+                "{value}"
+            );
+            assert_eq!(config.volume, Volume::new(618), "{value}");
+            assert_eq!(config.group_key, GroupKey::Year, "{value}");
+        }
+    }
+
     /// One damaged volume value costs only the volume, never a neighbouring
     /// standing decision.
     #[test]
@@ -698,6 +758,7 @@ mod tests {
                 volume: Volume::new(618),
                 output_device: None,
                 shuffle: false,
+                visualization_foreground: crate::visualizer::Foreground::JewelCase,
                 last_place: Place::Library,
             };
             let back = Config::from_toml(&config.to_toml());
@@ -1029,6 +1090,7 @@ mod tests {
             volume: Volume::new(500),
             output_device: None,
             shuffle: false,
+            visualization_foreground: crate::visualizer::Foreground::JewelCase,
             last_place: Place::Library,
         };
         let text = config.to_toml();
@@ -1051,6 +1113,7 @@ mod tests {
             volume: Volume::new(750),
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
+            visualization_foreground: crate::visualizer::Foreground::None,
             last_place: Place::Playlist(42),
         };
         store(&path, &config).expect("store creates parents and writes");
@@ -1206,6 +1269,7 @@ mod tests {
             volume: Volume::new(250),
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
+            visualization_foreground: crate::visualizer::Foreground::Cover,
             last_place: Place::NowPlaying,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");

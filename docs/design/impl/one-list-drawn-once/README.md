@@ -212,3 +212,21 @@ carries `-before` or `-after`.
 | `05/15/25-playlist-…` | a playlist's page |
 | `06/16/26-band-both-…` | **the band, before over after** — the width claim in one look |
 | `08-three-lists-1280x860.png` | **the three lists, stacked** — the merge claim in one look |
+
+---
+
+## 2026-08-12 supersession — the documented limit did drift
+
+Section 2 accepted the run's separate top-level composition. The owner's later
+same-size review found exactly the failure that boundary allowed: the two
+playlist states shared row primitives but no longer looked like one component.
+The virtual-window concern did not require a separate page; both states now use
+the saved playlist's fixed row pitch and continue to build only a bounded
+slice.
+
+`views::playlist_page` now owns both persistence states through
+`views::page::view`. The run keeps its cursor, remaining-time, Save/provenance
+and next-ring semantics as capability/marker content while adopting the saved
+page's sleeve, breakpoint, document, empty state, artwork and Album row
+presentation. See `docs/design/impl/one-playlist-page/` for the before/after
+frames and source guard.

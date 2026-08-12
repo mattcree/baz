@@ -3,14 +3,9 @@
 //!
 //! Three parts, top to bottom:
 //!
-//! 1. **The head** — **the search well**, then `Home`, `Library`, `Playlists`,
-//!    `Now playing`, always all four and always in that order. The owner's
-//!    decisions: *"home will appear at the top of the left hand sidebar always
-//!    either way and it will contain the top level concerns. think spotify"*,
-//!    extended by *"as an extension we will want a Now playing page at the top
-//!    with the Home and Library"*, and — the one this file's [`well`] answers
-//!    — *"the design does not match properly… the search should really be in
-//!    the sidebar"*, then *"search belongs at the top"*.
+//! 1. **The head** — `Home`, `Library`, `Playlists`, `Now playing`, always all
+//!    four and always in that order. Search moved from this surface to the
+//!    resident app bar in ADR-0040's 2026-08-12 amendment.
 //!    The place you are in is drawn in full paper ink; the others rest at
 //!    `paper_dim`. **`Now playing` carries the lamp dot when something is
 //!    sounding** — the accent's one reserved meaning, spent so the lane can
@@ -23,44 +18,20 @@
 //!    chevron pointing the way the lane will move. Collapsed it is the
 //!    chevron alone under its tooltip, like the destinations above it.
 //!
-//! # Why the well is a field here and not a `Search` destination
+//! # Why search is still not a destination
 //!
 //! Spotify — the reference the owner keeps naming — makes `Search` a
 //! destination you navigate to. baz must not, and the reason is a feature baz
 //! has that Spotify does not: **type-anywhere** (ADR-0017 §1.2). Any printable
-//! key filters the wall from anywhere in the product, so the query is already
+//! key reveals the chooser from anywhere in the product, so the query is already
 //! open before you have decided to search; a destination row would say *go
 //! somewhere first*, which is the opposite of what the product does, and it
 //! would leave the thing the keystroke actually fills — the field — somewhere
 //! else on screen.
 //!
-//! The well is also **as much a readout as an input**: it is where you read
-//! what you asked for and how much of the collection answered — the match
-//! count sits inside the field, which is what [`well`] argues. A readout of
-//! the frame's own state belongs in the frame's own resident surface, and it
-//! is the last piece of the frame that was still in the strip. With it moved,
-//! the strip stops carrying identity — it is the wall's arrangement and the
-//! wall's verbs, and nothing about the frame — and the eye has **one** place
-//! to start, which is what the owner's *"the design does not match properly"*
-//! was about.
-//!
-//! # Collapsed, the well is the magnifier, and pressing it opens the lane
-//!
-//! 96 px cannot hold a text field, so at [`theme::SIDEBAR_RAIL_W`] the well is
-//! its own mark in the destinations' exact anatomy, and pressing it expands the
-//! lane and puts the caret in the field. So do <kbd>/</kbd>,
-//! <kbd>Ctrl</kbd>+<kbd>F</kbd> and the first key of a type-anywhere query.
-//! That is Spotify's collapsed behaviour and it is defensible for the reason
-//! the collapse itself is: it is **one frame, no tween** (§3.1), so the field
-//! is under the caret in the same frame the press lands. The mark takes the
-//! lit ink while a query stands, so a rail can still answer *is the wall
-//! filtered?* without a word on it.
-//!
-//! Below [`theme::SIDEBAR_FLOOR`] the lane cannot open at all, so no magnifier
-//! is drawn: there would be nothing for it to lead to. The well is in the strip
-//! at those widths, in the form doc 10 §4.1 drew — [`theme::strip_holds_the_well`]
-//! is the one predicate, and it is the lane's own floor rather than a second
-//! breakpoint.
+//! The well is now an app-wide frame control: it remains visible while the
+//! listener moves between places, and its dropover covers rather than replaces
+//! the place underneath.
 //!
 //! # The collapse is a hard cut
 //!
@@ -79,30 +50,27 @@
 //! from whatever it stands on ([`theme::Palette::step_up`]), so on the recess
 //! a hovered row lands on the wall's own colour.
 
+use std::sync::LazyLock;
+
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, row, scrollable, text,
-    text_input,
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf, search_id};
+use crate::app::{Message, Shelf};
 use crate::lane::{Destination, Subject, Touched};
 use crate::place::Place;
 use crate::playlists::Playlists;
-use crate::views::{clear_mark, playlist_sleeve};
-use crate::{icon, theme};
+use crate::views::playlist_sleeve;
+use crate::{font, icon, theme};
 
-/// **What the well searches, said in the field itself** — ADR-0036 §2.
-///
-/// The well is resident in all eight places and searches exactly one of them,
-/// so `Search` alone was a promise about the control rather than about its
-/// subject. `Search library` is the noun on the destination row two rows below
-/// it, which is where the query lands.
-///
-/// Set in the field's *placeholder* lane, which is free exactly when the query
-/// is empty — the same slot the collection's counts held before they left for
-/// Home, and the whole reason this costs nothing.
-pub(crate) const SCOPE: &str = "Search library";
+static LANE_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(font::SANS_REGULAR).expect("the bundled regular face is valid")
+});
+static LANE_MEDIUM: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(font::SANS_MEDIUM).expect("the bundled medium face is valid")
+});
 
 /// The lane, at the width its state says.
 ///
@@ -122,21 +90,7 @@ pub(crate) fn view<'a>(
     let open = theme::sidebar_w(window_w, shelf.lane_open) >= theme::SIDEBAR_W;
     let width = theme::sidebar_w(window_w, shelf.lane_open);
 
-    // **The well leads the lane** — *"search belongs at the top"* (owner,
-    // 2026-08-09). It shipped under the three destinations, on the reading
-    // that `Home` being top-of-lane put everything else below it; the owner
-    // read the built thing and placed the well above them instead, which is
-    // also where every product he named for reference puts it.
-    //
-    // It is in the head because the head is the frame's own concerns and
-    // searching the collection is one. Below `SIDEBAR_FLOOR` the lane cannot
-    // open, so the head has no well and no mark for one — the strip carries it
-    // there instead ([`theme::strip_holds_the_well`]).
     let mut head = column![];
-    if theme::sidebar_can_expand(window_w) {
-        head = head.push(well(shelf, open));
-        head = head.push(Space::with_height(Length::Fixed(theme::GAP_SM)));
-    }
     for to in Destination::ALL {
         head = head.push(destination_row(to, place, open, sounding));
     }
@@ -322,251 +276,6 @@ fn destination_row(
     .into()
 }
 
-/// **The search well** — the lane's fourth head row, and the only field in the
-/// frame.
-///
-/// # Expanded: one field, one control tall
-///
-/// The magnifier is laid over the field's left padding as a `stack` (doc 10
-/// §4.1: iced 0.13's `text_input::Icon` is font-based and therefore not it),
-/// and the field's left padding is [`theme::SIDEBAR_HEAD_TEXT_X`], so **the
-/// mark stands on the destinations' glyph vertical and the query stands on
-/// their word vertical**. Four head rows, two verticals.
-///
-/// # The two figures separate: one is a statistic, one is feedback
-///
-/// The well shipped with a quiet line under it carrying both — `25 albums ·
-/// 206 tracks` at rest, `12 of 25 albums` while narrowing — and the owner read
-/// the built thing: *"the album and track count below the search bar doesn't
-/// look good… maybe this should go into the home as some basic stats?"*. He is
-/// right, and the reason is that the two states were never one readout:
-///
-/// - **The resting counts are a statistic about the collection.** Nothing is
-///   being searched when they are on screen, and they were standing in the
-///   lane's most valuable space — above the records you actually return to.
-///   They are the Home place's `COLLECTION` footer now
-///   ([`crate::views::home`]), where a fact about the whole library belongs.
-/// - **The match count is feedback about the query**, so it stays with the
-///   field that answers it — and it goes **inside** the field, right-aligned
-///   in a reserved [`theme::SIDEBAR_MATCH_W`] 72 slot. That is the ordinary
-///   anatomy of a search input, it is doc 07 §3.1's own prescription (`12 / 25`
-///   reads inside the control it is about, where the query is its subject), and
-///   it costs no line at all.
-///
-/// The slot is the lane's own 72 rather than the strip's
-/// [`crate::views::top_bar::MATCH_W`] 88, and that is what makes it fit where
-/// the shipped design said it would not:
-///
-/// ```text
-///   SIDEBAR_MEASURE                     232
-///     − SIDEBAR_HEAD_TEXT_X              44
-///     − GAP_MD                           12
-///     − SIDEBAR_MATCH_W                  72     (was MATCH_W 88)
-///     = the query's own room            104     (was 88)
-/// ```
-///
-/// **Nothing moves when the first character lands.** The reservation is on the
-/// *right* and the query sets from the left, so the caret does not shift; the
-/// well's block is [`theme::SIDEBAR_WELL_H`], one control tall in both states,
-/// so no `RECENT` row below is pushed down; and the slot is a fixed width with
-/// the figures right-aligned in it, so `12 / 25` becoming `3 / 25` changes in
-/// place.
-///
-/// # Collapsed: the mark, and the press that opens the lane
-///
-/// The destination anatomy, tooltipped `Search`, sending
-/// [`Message::FocusSearch`] — which expands the lane and lands the caret in
-/// one frame (`app.rs`'s `focus_the_well`). The mark takes the lit ink while a
-/// query stands, so the rail says *the wall is filtered* without a word.
-///
-/// # The placeholder names the scope, because the well is resident in seven
-/// places and searches one
-///
-/// ADR-0036. The owner asked what search should do off the Library — *"should
-/// it just pop to the library view when you start typing? or should it search
-/// whatever page you are on?"* — and the answer is that it keeps the one
-/// meaning it already has: **it searches the collection**, from anywhere, and
-/// the road there is `app.rs`'s `reach_the_well`. What was missing was
-/// that the field never *said* so. It said `Search`, which is a promise about
-/// the control and not about its subject, and a field that reads `Search` while
-/// the window is showing `Road Trip` is fairly read as offering to search
-/// `Road Trip`.
-///
-/// So it reads **`Search library`**, in every place, permanently — the same
-/// noun as the destination row two rows below it, which is the thing the query
-/// will take you to. It costs no chrome and no pixel: the placeholder is drawn
-/// exactly when the query is empty, which is exactly when the count's
-/// [`theme::SIDEBAR_MATCH_W`] slot is *not* reserved, so the lane it sets in is
-/// the field's whole 176 px rather than the 104 a query gets
-/// (`crate::font`'s `the_lanes_well_names_the_scope_it_searches`).
-///
-/// # The clear mark takes the magnifier's box
-///
-/// The `×` the owner asked for, and it is on the **left**, in the mark's own
-/// slot, because the right-hand furniture is full and the query's room is the
-/// scarce thing. The right of the field is `GAP_MD` 12 + `SIDEBAR_MATCH_W` 72,
-/// sized for `1284 / 1284` at a library ten times the owner's, and putting a
-/// glyph box beside it would take the query's own room from the 104 px that
-/// justified this arrangement down to 80 — *below* the 88 the design measured
-/// and rejected when the count was moved into the field. The mark's box is
-/// already paid for, and it is 24 px wide on the destinations' glyph vertical,
-/// so the swap moves nothing at all: at rest the box holds the magnifier, which
-/// is a label saying *this field searches*; with a query standing it holds the
-/// cross, which is a control saying *press to stop*. A field with text and a
-/// count in it does not need to be told it is a search field.
-fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
-    let room = theme::active();
-    let filtering = !shelf.query.trim().is_empty();
-    if !open {
-        return collapsed_well(filtering);
-    }
-    // **The placeholder names what the field searches** (ADR-0036 §2). The
-    // well is resident in every place and searches exactly one of them, so the
-    // one line it owes a listener standing on a playlist is which.
-    let input = text_input(SCOPE, &shelf.query)
-        .id(search_id())
-        .on_input(Message::SearchChanged)
-        // Enter plays the top-ranked match, whichever road reached the query
-        // (ADR-0017 §1.2, ADR-0021) — `crate::keys` binds the identical
-        // message for a listener who typed from the wall.
-        .on_submit(Message::PlayFirstMatch)
-        .padding(iced::Padding {
-            top: theme::WELL_PAD_V,
-            // While a query narrows the collection the match count holds a
-            // reserved slot at the field's right edge, and the input's own
-            // padding is what keeps the query out of it. At rest there is no
-            // count, so the field is the query's whole width.
-            right: if filtering {
-                theme::GAP_MD + theme::SIDEBAR_MATCH_W
-            } else {
-                theme::GAP_MD
-            },
-            bottom: theme::WELL_PAD_V,
-            left: theme::SIDEBAR_HEAD_TEXT_X,
-        })
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .width(Length::Fill)
-        .style(move |_theme, status| theme::input(room, status));
-    // The mark's box, in one of its two states — the label at rest, the clear
-    // control while a query stands. Both stand on [`theme::SIDEBAR_HEAD_GLYPH_X`],
-    // the destinations' own glyph vertical, so the swap is a change of meaning
-    // and not of geometry.
-    let mark: Element<'_, Message> = if filtering {
-        container(clear_mark(room.recess))
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .padding(theme::pad(0.0, theme::GAP_SM))
-            .align_y(alignment::Vertical::Center)
-            .into()
-    } else {
-        container(
-            iced_image(icon::handle(icon::Glyph::Magnifier))
-                .width(Length::Fixed(theme::ICON_PX))
-                .height(Length::Fixed(theme::ICON_PX))
-                .opacity(theme::GLYPH_OPACITY),
-        )
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(theme::pad(0.0, theme::SIDEBAR_WELL_GLYPH_LEAD))
-        .align_y(alignment::Vertical::Center)
-        .into()
-    };
-    let mut layers = iced::widget::stack![input, mark];
-    if filtering {
-        // **The match count, inside the control being typed into.** Right
-        // aligned in a fixed slot, so the figure shrinking from `12 / 25` to
-        // `3 / 25` moves nothing; `paper_faint`, which is a readout's ink and
-        // never a control's.
-        layers = layers.push(
-            container(
-                container(
-                    text(match_count(shelf))
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.paper_faint)
-                        .wrapping(text::Wrapping::None),
-                )
-                .width(Length::Fixed(theme::SIDEBAR_MATCH_W))
-                .align_x(alignment::Horizontal::Right)
-                .clip(true),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .padding(theme::pad(0.0, theme::GAP_MD))
-            .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Center),
-        );
-    }
-    container(layers)
-        .width(Length::Fill)
-        .height(Length::Fixed(theme::SIDEBAR_WELL_H))
-        .into()
-}
-
-/// The well at [`theme::SIDEBAR_RAIL_W`]: the mark alone, in the head's own
-/// box, pressing to open the lane onto the caret.
-fn collapsed_well(filtering: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Magnifier))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            // Lit while a query stands — the one thing a 96 px lane can say
-            // about the wall's state without a word on it.
-            .opacity(if filtering {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY
-            }),
-    )
-    .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-    .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let row_button = button(
-        container(mark)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center)
-            .clip(true),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::SIDEBAR_DEST_H))
-    .padding(0)
-    .style(move |_theme, status| theme::track_row(room, room.recess, status, filtering))
-    .on_press(Message::FocusSearch);
-    // The icon-only law (doc 10 §3.1), the same clause that names the head's
-    // three glyphs and the list's sleeves.
-    iced::widget::tooltip(
-        row_button,
-        text("Search")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Right,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// **The query, answered**: `3 / 25`, in the well's reserved right-hand slot.
-///
-/// The pair rather than the bare figure, and the slash rather than a caption:
-/// inside the control being typed into the query is the count's subject, so
-/// `3 / 25` needs no word to say what it counts — and the denominator is what
-/// turns *three* into *three of a small collection*, which is the whole of what
-/// a match count is for. Doc 07 §3.1's own form, in the position it was written
-/// for — and the identical string the strip's own well has drawn all along
-/// (`views::top_bar`'s `match_count`), so the two regimes answer one query one
-/// way.
-///
-/// The `Songs` section states its own count in its own heading, as it always
-/// did.
-fn match_count(shelf: &Shelf) -> String {
-    format!("{} / {}", shelf.visible.len(), shelf.albums.len())
-}
-
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
 /// else.
 ///
@@ -693,7 +402,7 @@ fn lane_row<'a>(
     // measures 40.
     let edge = theme::SIDEBAR_SLEEVE;
     let sleeve: Element<'a, Message> = match entry.subject {
-        Subject::Record(id) => match shelf.thumbs.peek(&id) {
+        Subject::Record(id) => match shelf.thumb(id) {
             Some(handle) => iced_image(handle.clone())
                 .width(Length::Fixed(edge))
                 .height(Length::Fixed(edge))
@@ -712,43 +421,56 @@ fn lane_row<'a>(
         Subject::Record(id) => Message::AlbumClicked(id),
         Subject::Playlist(id) => Message::OpenPlaylist(id),
     };
-    // **The lamp dot before the name**, when this record is the one sounding
-    // (doc 13 §2.6). The *row's* vocabulary rather than the tile's: the wall
-    // marks a playing record with a halo around its art and a dot before its
-    // title, and every row list in the product — the queue, a playlist's page —
-    // marks it with the dot and the row's own card ([`theme::track_row`]'s
-    // `playing`). A lane row is a row, so it takes the row's form; a warmed
-    // halo would also need the lamp's own clock plumbed into a surface ADR-0030
-    // §4 costs at zero idle CPU.
-    let mut named = row![]
-        .spacing(theme::GAP_XS)
-        .align_y(iced::Alignment::Center);
-    if playing && open {
-        named = named.push(lamp_dot());
-    }
+    // **The lamp owns the far trailing six pixels in every expanded row.** It
+    // used to be conditionally inserted before the title, so starting a run
+    // shifted the name right and switching its origin shifted two rows. A
+    // permanent trailing slot makes playback a change of ink, not geometry.
+    // Both text lines share the 146 px boundary in `SIDEBAR_ROW_TEXT_W` and
+    // are fitted with the actual bundled face before clipping, so a long album
+    // or playlist name yields with an ellipsis instead of wrapping under it.
+    let lamp: Element<'static, Message> = if playing {
+        lamp_dot()
+    } else {
+        Space::new(
+            Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W),
+            Length::Fixed(theme::DOT),
+        )
+        .into()
+    };
+    let lamp_slot = container(lamp)
+        .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Right)
+        .align_y(alignment::Vertical::Center);
     let body: Element<'a, Message> = if open {
         row![
             sleeve,
             container(
                 column![
-                    named.push(
-                        text(entry.name.clone())
-                            .size(theme::SIZE_BODY)
-                            .line_height(theme::LEADING_BODY)
-                            .font(theme::MEDIUM)
-                            .color(room.paper)
-                            .wrapping(text::Wrapping::None)
+                    lane_line(
+                        &entry.name,
+                        &*LANE_MEDIUM,
+                        theme::SIZE_BODY,
+                        theme::LEADING_BODY,
+                        theme::LINE_BODY,
+                        theme::MEDIUM,
+                        room.paper,
                     ),
-                    text(entry.under.clone())
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.paper_faint)
-                        .wrapping(text::Wrapping::None),
+                    lane_line(
+                        &entry.under,
+                        &*LANE_REGULAR,
+                        theme::SIZE_META,
+                        theme::LEADING_META,
+                        theme::LINE_META,
+                        theme::SANS,
+                        room.paper_faint,
+                    ),
                 ]
                 .spacing(theme::GAP_XXS)
             )
-            .width(Length::Fill)
+            .width(Length::Fixed(theme::SIDEBAR_ROW_TEXT_W))
             .clip(true),
+            lamp_slot,
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center)
@@ -790,6 +512,101 @@ fn lane_row<'a>(
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room))
     .into()
+}
+
+/// One fixed-height expanded-lane line. When it is long, the prefix and the
+/// ellipsis occupy separate clipped subslots: Iced 0.13 can still break
+/// `Wrapping::None` text, so relying on one text widget can put the ellipsis on
+/// an invisible second line.
+fn lane_line<'a>(
+    content: &str,
+    face: &impl Font,
+    size: f32,
+    leading: f32,
+    line_height: f32,
+    font: iced::Font,
+    color: iced::Color,
+) -> Element<'a, Message> {
+    let (fitted, truncated) = fit_lane_line(content, face, size);
+    let prefix = container(
+        text(fitted)
+            .size(size)
+            .line_height(leading)
+            .font(font)
+            .color(color)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(if truncated {
+        Length::Fixed(theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W)
+    } else {
+        Length::Fill
+    })
+    .height(Length::Fixed(line_height))
+    .clip(true);
+    let ending: Element<'a, Message> = if truncated {
+        container(
+            text("…")
+                .size(size)
+                .line_height(leading)
+                .font(font)
+                .color(color)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fixed(theme::SIDEBAR_ELLIPSIS_SLOT_W))
+        .height(Length::Fixed(line_height))
+        .align_x(alignment::Horizontal::Right)
+        .clip(true)
+        .into()
+    } else {
+        Space::with_width(Length::Fixed(0.0)).into()
+    };
+
+    container(row![prefix, ending])
+        .width(Length::Fixed(theme::SIDEBAR_ROW_TEXT_W))
+        .height(Length::Fixed(line_height))
+        .clip(true)
+        .into()
+}
+
+/// Fit the prefix of one expanded-lane line using the same face and size the
+/// widget draws. The ellipsis itself owns a separate slot in [`lane_line`].
+fn fit_lane_line(text: &str, face: &impl Font, size: f32) -> (String, bool) {
+    if text_width(face, size, text) <= theme::SIDEBAR_ROW_TEXT_W {
+        return (text.to_owned(), false);
+    }
+
+    let scaled = face.as_scaled(PxScale::from(size));
+    let prefix_w = theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W;
+    let mut fitted = String::new();
+    let mut width = 0.0;
+    let mut previous = None;
+    for character in text.chars() {
+        let glyph = scaled.glyph_id(character);
+        let next =
+            width + previous.map_or(0.0, |was| scaled.kern(was, glyph)) + scaled.h_advance(glyph);
+        if next > prefix_w {
+            break;
+        }
+        fitted.push(character);
+        width = next;
+        previous = Some(glyph);
+    }
+    (fitted, true)
+}
+
+fn text_width(face: &impl Font, size: f32, text: &str) -> f32 {
+    let scaled = face.as_scaled(PxScale::from(size));
+    let mut width = 0.0;
+    let mut previous = None;
+    for character in text.chars() {
+        let glyph = scaled.glyph_id(character);
+        if let Some(was) = previous {
+            width += scaled.kern(was, glyph);
+        }
+        width += scaled.h_advance(glyph);
+        previous = Some(glyph);
+    }
+    width
 }
 
 /// **One control at the lane's foot**: `Collapse` when the lane is open,
@@ -893,7 +710,6 @@ fn lane_toggle(open: bool, can_expand: bool) -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::SCOPE;
     use crate::theme;
 
     /// This file's own source, for the pins below.
@@ -908,231 +724,6 @@ mod tests {
             .unwrap_or_else(|| panic!("`{signature}` exists"))
             .1;
         rest[..rest.find("\n}\n").expect("a function ends")].to_owned()
-    }
-
-    /// **The well is in the head, and it is in the head only where the lane
-    /// can hold it.**
-    ///
-    /// The owner's decision — *"the search should really be in the sidebar"* —
-    /// and its one boundary. Below [`theme::SIDEBAR_FLOOR`] the lane cannot
-    /// open, so a magnifier there would lead nowhere and the strip carries the
-    /// well instead ([`theme::strip_holds_the_well`], the single predicate).
-    /// **Never both**: two wells would be the defect the move was made to
-    /// close, with an extra field.
-    #[test]
-    fn the_well_stands_in_the_head_wherever_the_lane_can_hold_it() {
-        let source = source();
-        let view = body(&source, "pub(crate) fn view<'a>(");
-        let head = view
-            .split_once("let mut head")
-            .expect("the head is built")
-            .1;
-        let (head, _) = head.split_once("let body_rows").expect("the head ends");
-        assert!(
-            head.contains("theme::sidebar_can_expand(window_w)"),
-            "the head's well is not conditioned on the lane being able to open"
-        );
-        assert!(
-            head.contains("head.push(well(shelf, open))"),
-            "the well is not pushed onto the head"
-        );
-        // **The well leads** — the owner's *"search belongs at the top"*. The
-        // order is the claim, so the order is what is pinned: a later edit
-        // that puts the destinations first passes every other assertion here.
-        let well_at = head.find("head.push(well(shelf, open))").expect("the well");
-        let dests_at = head
-            .find("for to in Destination::ALL")
-            .expect("the three destinations");
-        assert!(
-            well_at < dests_at,
-            "the well must stand above the three destinations, not below them"
-        );
-    }
-
-    /// **Collapsed, the well is the mark, and the mark opens the lane onto the
-    /// caret.**
-    ///
-    /// 96 px cannot hold a field. What it can hold is the destination
-    /// anatomy — the same box, the same tooltip clause (doc 10 §3.1) — and one
-    /// press that spends [`Message::FocusSearch`], which is the same message
-    /// <kbd>/</kbd> and <kbd>Ctrl</kbd>+<kbd>F</kbd> spend. One road, three
-    /// doors: the mirror rule.
-    #[test]
-    fn the_collapsed_well_is_a_mark_that_opens_the_lane() {
-        let source = source();
-        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
-        assert!(
-            well.contains("if !open {\n        return collapsed_well(filtering);"),
-            "the collapsed lane still tries to draw a text field"
-        );
-        let collapsed = body(&source, "fn collapsed_well(filtering: bool)");
-        assert!(
-            collapsed.contains("icon::Glyph::Magnifier"),
-            "the collapsed well is not the magnifier"
-        );
-        assert!(
-            collapsed.contains(".on_press(Message::FocusSearch)"),
-            "the collapsed well's press is not the one `/` and Ctrl+F send"
-        );
-        assert!(
-            collapsed.contains("theme::SIDEBAR_DEST_H"),
-            "the collapsed well is not a head row's height"
-        );
-        assert!(
-            collapsed.contains("tooltip") && collapsed.contains("\"Search\""),
-            "an icon-only control with no name (doc 10 §3.1)"
-        );
-        // The rail's one word about the wall's state: lit while a query
-        // stands, resting otherwise.
-        assert!(
-            collapsed.contains("if filtering {\n                theme::GLYPH_OPACITY_HOVER"),
-            "the collapsed mark does not answer whether the wall is filtered"
-        );
-    }
-
-    /// **The well is one control tall, and the only figure in it is the match
-    /// count** — the owner's *"the album and track count below the search bar
-    /// doesn't look good… maybe this should go into the home as some basic
-    /// stats?"*, delivered.
-    ///
-    /// The two states of the retired readout had two different jobs. The
-    /// resting counts are a statistic about the collection and are Home's
-    /// `COLLECTION` footer now — the pin for that lives in
-    /// [`crate::views::home`]'s tests, and this one is its other half: the
-    /// second line is **gone from the lane**, not merely quieter. The match
-    /// count is feedback about the query, so it is inside the field it answers,
-    /// right-aligned in [`theme::SIDEBAR_MATCH_W`] rather than the strip's
-    /// wider `MATCH_W`, which is the whole reason it fits.
-    #[test]
-    fn the_wells_one_figure_is_the_match_count_inside_the_field() {
-        let source = source();
-        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
-        let shipped = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a source has a head");
-        assert!(
-            !shipped.contains("fn readout"),
-            "the well's second line is still being built; the collection's \
-             counts belong to the Home place now"
-        );
-        assert!(
-            well.contains("text_input(SCOPE, &shelf.query)"),
-            "the lane's well no longer names itself in its placeholder"
-        );
-        assert!(
-            well.contains("match_count(shelf)"),
-            "the match count is not drawn in the well"
-        );
-        // The lane's own slot, never the strip's 88 — 88 inside a 232 px well
-        // is what drove both figures out of the field in the first place.
-        assert!(
-            well.contains("theme::GAP_MD + theme::SIDEBAR_MATCH_W")
-                && well.contains("Length::Fixed(theme::SIDEBAR_MATCH_W)"),
-            "the count's slot is not both reserved by the field's padding and \
-             drawn at one fixed width, so typed text can collide with it"
-        );
-        assert!(
-            !well.contains("top_bar::MATCH_W"),
-            "the lane's well reserved the strip's wider match slot"
-        );
-        // Nothing moves as the first character lands: the reservation is on
-        // the right, and the block is a fixed height whatever is in it.
-        assert!(
-            well.contains("Length::Fixed(theme::SIDEBAR_WELL_H)"),
-            "the well's block is not held at a fixed height, so a keystroke \
-             would push the lane's rows down"
-        );
-        let count = body(&source, "fn match_count(shelf: &Shelf)");
-        assert!(
-            count.contains("shelf.visible.len()") && count.contains("shelf.albums.len()"),
-            "the match count is no longer the query's answer over the \
-             collection's size"
-        );
-    }
-
-    /// **The well says what it searches, and the answer is never the place you
-    /// are standing in** — ADR-0036 §2.
-    ///
-    /// The owner asked what search should do off the Library. The decision is
-    /// that it keeps one meaning — the collection — and that the field states
-    /// it, because a resident field reading `Search` over a page called
-    /// `Road Trip` is fairly read as offering to search `Road Trip`. Two things
-    /// are pinned here: the placeholder is the scope word, and it is a
-    /// **constant** rather than anything resolved from [`crate::place::Place`],
-    /// which is what makes a scoped well a visible edit rather than a quiet
-    /// drift.
-    #[test]
-    fn the_wells_placeholder_names_the_one_thing_it_searches() {
-        let source = source();
-        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
-        assert_eq!(
-            SCOPE, "Search library",
-            "the well's placeholder no longer names the collection"
-        );
-        assert!(
-            well.contains("text_input(SCOPE, &shelf.query)"),
-            "the well's placeholder is not the scope word"
-        );
-        assert!(
-            !well.contains("Place"),
-            "the well resolves its placeholder against the place — that is a \
-             scoped search, and ADR-0036 §3 refused it because type-anywhere \
-             is a promise about the collection"
-        );
-    }
-
-    /// **One box, two meanings**: the magnifier at rest, the `×` under a query
-    /// (ADR-0036 §4, the owner's *"maybe a little x or esc to clear"*).
-    ///
-    /// The claim that matters is geometric. The clear mark could not go beside
-    /// the count — the field's right edge already spends `GAP_MD` 12 +
-    /// [`theme::SIDEBAR_MATCH_W`] 72 and a glyph box more would take the
-    /// query's own room to 80 px, below the 88 the design measured and rejected
-    /// (`crate::font`'s `the_lanes_well_holds_a_query_beside_its_match_count`).
-    /// The mark's box on the left is already paid for and is exactly
-    /// [`theme::STEPPER_HIT`] wide on [`theme::SIDEBAR_HEAD_GLYPH_X`], so the
-    /// swap moves nothing — which is the same guarantee the count's fixed slot
-    /// gives, on the other side of the field.
-    #[test]
-    fn the_wells_mark_is_a_label_at_rest_and_the_clear_under_a_query() {
-        let source = source();
-        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
-        assert!(
-            well.contains("let mark: Element<'_, Message> = if filtering {")
-                && well.contains("clear_mark(room.recess)"),
-            "the well's mark does not become the clear control under a query"
-        );
-        assert!(
-            well.contains("icon::Glyph::Magnifier"),
-            "the well lost the label it wears at rest"
-        );
-        // The swap costs the field nothing on either edge: the left lead is
-        // the mark's own box and the right is the count's reserved slot,
-        // unchanged.
-        assert!(
-            !well.contains("theme::SIDEBAR_MATCH_W + ")
-                && !well.contains("+ theme::STEPPER_HIT")
-                && !well.contains("theme::SIDEBAR_MATCH_W\n                    +"),
-            "the clear mark took room from the query's own 104 px"
-        );
-        // Centred on the destinations' glyph vertical without a constant of
-        // its own: SIDEBAR_HEAD_GLYPH_X = GAP_SM + SIDEBAR_GLYPH_BOX / 2, and
-        // the box is STEPPER_HIT = SIDEBAR_GLYPH_BOX, so the inset is GAP_SM.
-        assert!(
-            well.contains(".padding(theme::pad(0.0, theme::GAP_SM))"),
-            "the clear mark is not inset to the head's glyph vertical"
-        );
-        assert!(
-            (theme::STEPPER_HIT - theme::SIDEBAR_GLYPH_BOX).abs() < f32::EPSILON,
-            "a control's box and the head's glyph box have diverged, so the \
-             clear mark needs an inset of its own"
-        );
-        assert!(
-            (theme::GAP_SM + theme::STEPPER_HIT / 2.0 - theme::SIDEBAR_HEAD_GLYPH_X).abs()
-                < f32::EPSILON,
-            "the clear mark's centre is off the destinations' glyph vertical"
-        );
     }
 
     /// **A lane row's sleeve is [`theme::SIDEBAR_SLEEVE`] in both states.**
@@ -1208,8 +799,8 @@ mod tests {
     /// whose whole subject is *things you have touched* could not say which of
     /// them was on.
     ///
-    /// The dot before the name and the row's card, which is the **row's**
-    /// vocabulary — what the queue and a playlist's page already draw — rather
+    /// The trailing dot and the row's card, which is the **row's** vocabulary
+    /// — what the queue and a playlist's page already draw — rather
     /// than the tile's halo, which would want the lamp's clock in a surface
     /// ADR-0030 §4 costs at zero idle CPU.
     ///
@@ -1254,12 +845,67 @@ mod tests {
         );
         let row = body(&source, "fn lane_row<'a>(");
         assert!(
-            row.contains("if playing && open {") && row.contains("named.push(lamp_dot())"),
-            "the sounding row lost its lamp dot"
+            row.contains("let lamp: Element<'static, Message> = if playing")
+                && row.contains("lamp_dot()")
+                && row.contains("lamp_slot"),
+            "the sounding row lost its stable trailing lamp slot"
         );
         assert!(
             row.contains("theme::track_row(room, room.recess, status, playing)"),
             "the sounding row lost the card that survives the collapse"
+        );
+    }
+
+    /// The owner's no-reflow rule is geometry first: every open row reserves
+    /// the same far-trailing slot, and both one-line strings stop at the same
+    /// boundary whether this row is sounding or quiet.
+    #[test]
+    fn an_expanded_recent_row_reserves_one_trailing_lamp_slot() {
+        const {
+            assert!(theme::SIDEBAR_LAMP_SLOT_W == theme::DOT);
+            assert!(theme::SIDEBAR_ROW_TEXT_W == 146.0);
+        }
+
+        let source = source();
+        let row = body(&source, "fn lane_row<'a>(");
+        assert_eq!(
+            row.matches("lamp_slot").count(),
+            2,
+            "the slot should be built once and placed once"
+        );
+        assert!(
+            row.contains("Length::Fixed(theme::SIDEBAR_ROW_TEXT_W)")
+                && row.matches("lane_line(").count() == 2,
+            "title and metadata no longer share the stable trailing boundary"
+        );
+        assert!(
+            !row.contains("if playing && open"),
+            "playback still changes the expanded row's child geometry"
+        );
+    }
+
+    #[test]
+    fn long_album_and_playlist_lines_end_in_a_measured_ellipsis() {
+        let album = "A record title deliberately much longer than the returns lane can ever hold";
+        let playlist =
+            "Playlist · 12345 · a deliberately impossible amount of metadata for one row";
+        let short = "Ochre";
+        // These are measurement inputs; the corresponding drawn calls above
+        // supply the leading named beside each size.
+        let body_size = theme::SIZE_BODY; // drawn with theme::LEADING_BODY
+        let meta_size = theme::SIZE_META; // drawn with theme::LEADING_META
+
+        let (album, album_truncated) = super::fit_lane_line(album, &*super::LANE_MEDIUM, body_size);
+        let (playlist, playlist_truncated) =
+            super::fit_lane_line(playlist, &*super::LANE_REGULAR, meta_size);
+        assert!(album_truncated);
+        assert!(playlist_truncated);
+        let prefix_w = theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W;
+        assert!(super::text_width(&*super::LANE_MEDIUM, body_size, &album) <= prefix_w);
+        assert!(super::text_width(&*super::LANE_REGULAR, meta_size, &playlist) <= prefix_w);
+        assert_eq!(
+            super::fit_lane_line(short, &*super::LANE_MEDIUM, body_size),
+            (short.to_owned(), false)
         );
     }
 }

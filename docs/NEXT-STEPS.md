@@ -88,12 +88,13 @@ building it.
 ### 3. Finish the ambient Now playing
 
 The cover-derived field, rotating jewel case and spectrum analyser now ship.
-Cover / Jewel Case are the two foreground alternatives; Spectrum is a separate
-full-body background toggle, and its sample tap and redraw cost disappear when
-off. The four-way visual selector was tried and simplified by the owner on
-2026-08-11, removing the VU mode entirely. What remains from ADR-0029 is the
-local facts feed and kiosk affordances; design 12's implementation amendment
-records the new boundary.
+Cover / Jewel Case / None are the three persisted foreground alternatives;
+Spectrum is a separate full-body toggle. None is the spectrum-led composition,
+with no art stage, and visible continuous visuals do not pause merely because
+another app has keyboard focus. Their sample tap and redraw cost disappear off
+the place or when no enabled visual needs them. The VU mode was tried and
+removed by the owner on 2026-08-11. What remains from ADR-0029 is the local
+facts feed and kiosk affordances; design 12 records the boundary.
 
 ### 4. Three decisions waiting on the owner
 
@@ -119,11 +120,13 @@ records the new boundary.
 
 ### 5. The chapters not yet begun
 
-- **Steered shuffle / generated playlists.** The ground rules are already
-  law (ADR-0024 §7, design 09 S10): an ordinary editable file, asked for by
-  a person, no hidden pool. The signal — bliss-rs or equivalent local
-  analysis — is unbuilt. `VISION.md` stages this; nothing about it is
-  urgent.
+- **Home / steered generated playlists.** The ground rules are already law
+  (ADR-0024 §7, design 09 S10): an ordinary editable file, asked for by a
+  person, no hidden pool. On 2026-08-12 the owner made this the first major
+  feature area **after the critical-usability tranche**, not work ahead of it.
+  The signal remains unbuilt and deliberately unchosen: compare deterministic
+  metadata/prompt parsing, lightweight local NLP/ML, and richer local audio
+  analysis before committing to bliss-rs or an equivalent dependency.
 - **Enrichment, scrobbling, tagging** — the paid-parity extensions, each
   individually opt-in, none prioritized over the core.
 

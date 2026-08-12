@@ -284,34 +284,34 @@ enqueues its record whole and starts at that track.
 > it, so that it is playing within seconds and I have not had to think about
 > albums to get there.
 
-**Task flow** (from anywhere in the Library place): ① type — the first
-keystroke routes into the query, the wall filters, and a **Songs** section
-appears above the albums (§5); ② click the song's row → its record is
-queued whole and the needle drops on it. Two actions, one of them typing.
-Keyboard: type, `Enter` — the top-ranked song plays the same way.
+**Task flow** (from any place): ① type — the first keystroke focuses the
+resident app-bar query and opens its Tracks/Albums dropover over the unchanged
+place; ② select a track with pointer or Up/Down; ③ choose `Play` (Left/Right on
+the keyboard) and confirm. The result surface is scrollable rather than a
+capped preview of a separately scrolling wall.
 
 **Acceptance criteria**
 
-- Given the Library place and a non-empty query, when at least one track
-  matches, then a `Songs` section renders above the album wall, showing the
-  top-ranked matching tracks (up to 8), each row: title, artist · album,
-  duration — and the album wall renders below, filtered as today, under its
-  own heading. The two sections are visibly separate.
-- Given a `Songs` row, when it is clicked, then the engine receives that
-  song's record (selected edition, whole, in order) as the queue and starts
-  at that song — `SetQueue` + `JumpTo`, exactly the record page's
-  `play_track` path (`app.rs:1449–1501`) — and the row's mark follows
-  `TrackStarted`, never the click.
-- Given a query with matches, when `Enter` is pressed, then the top-ranked
-  *song* starts within its record's context by the same rule (supersedes
-  today's album-level `enter_plays`, `app.rs:2255–2273`; ranking per
-  ADR-0021, which already orders tracks).
-- Given no matching tracks but matching albums, when the results render,
-  then the `Songs` section is absent (not empty) and the wall shows the
-  albums.
-- Given the `Songs` section, when a row is right-clicked, then the track
-  menu (§5.2's table) opens at the pointer; when its reserved `+` slot is
-  pressed, then the picker opens holding that song.
+- Given any place and a non-empty query, the Tracks and Albums sections render
+  in one bounded dropover and that place remains underneath; opening/dismissing
+  search does not navigate or alter history.
+- Given enough results to exceed the dropover, one scrollbar traverses both
+  sections. The implementation may virtualize/page results, but it exposes no
+  eight-track cap, nested wall scroller or unreachable tail.
+- Given a track selection, Up/Down changes the selected result and keeps it in
+  view; Left/Right changes `Play | Enqueue`; Enter performs the highlighted
+  action. Navigation keys alone do not start sound or alter the queue.
+- Given `Play`, preserve the existing needle-drop context unless the later
+  interaction design explicitly changes it: queue the selected edition and
+  start at that track. Given `Enqueue`, append the track without replacing or
+  starting the current run—except over an existing playlist page, where the
+  action is labelled `Add to playlist` and appends to that file instead.
+- Given no matching tracks but matching albums, the Tracks section is absent,
+  not empty, and Albums remain in the same scroller. Album activation behavior
+  is completed in the implementation story rather than inferred from tracks.
+- Given Esc or click outside, dismiss the dropover and expose the unchanged
+  place. The clear/dismiss layering and post-action behavior are settled in the
+  implementation brief in `WORK.md`.
 
 ### S2 — Browse, open a record, drop the needle
 
@@ -567,23 +567,33 @@ model it lands on is finished, and these criteria bind any implementation
 
 ## 5. Decision: search answers in songs
 
+> **Amended 2026-08-12:** search now answers in a scrollable app-bar dropover
+> over any place. “Songs” below means the dropover's **Tracks** section and the
+> album wall means its **Albums** section; the cap and Library-body placement
+> are superseded. The ranking/context reasoning remains.
+
 *"People are really searching for songs in most cases."* The data already
 agrees: `Library::search` returns ranked **tracks** (`index.rs:1119`,
 ADR-0021 — whose entire context section is about a chosen *track* coming
 out of the speakers), and the current surface folds them onto albums and
 discards the track-level answer (`vm.rs:1810`'s pinned fold). The design:
 
-- **Two sections, separate**, exactly as asked. Under a non-empty query the
-  Library place's body becomes: a `Songs` section rule, up to eight ranked
-  track rows (echoing the room's other handful, `SLEEVES`), then an
-  `Albums` section rule and the wall, filtered as today. The full match set
-  still drives the wall; the songs section is the ranked head, not an
-  exhaustive list — the wall below is the exhaustive answer, in covers.
-- **A song row is a list row** — title, artist · album, duration, the
-  reserved `+` slot, the context menu — and **its press plays**, because
-  that is what a row's press means on every list surface in the product
-  (album page, queue, playlist). Tiles navigate; rows play. The two
-  meanings never mix.
+- **Two sections, one scroller.** Under a non-empty query the app-bar well
+  opens a dropover containing ranked `Tracks` followed by `Albums`. It appears
+  over whichever place was already open, does not navigate to Library, and has
+  one continuous scroll/selection model. Results may be virtualized but are not
+  deliberately capped at eight tracks.
+- **A track result is a selectable list row** — title, artist · album and
+  duration — using the product-wide selection grammar. Playback is explicit
+  through its `Play | Enqueue` action choice; merely moving or single-selecting
+  the row does nothing.
+- **Typing selects nothing.** The Tracks heading teaches
+  `↑↓ select · ←→ action · Enter confirm`; the chooser owns those bare arrows
+  even while the well still has focus, and its selection is separate from the
+  unchanged place underneath.
+- On an existing playlist page the second action reads **`Add to playlist`**
+  and appends the searched track to that file. On every other place it remains
+  **`Enqueue`** and appends to the live run. Neither route starts playback.
 - **The press is a needle-drop** (ADR-0023 §2): the song's record is queued
   whole, the cursor on the song. The alternatives are rejected by the
   model: *play the song alone* is three minutes and a dead stop — the
@@ -592,13 +602,10 @@ discards the track-level answer (`vm.rs:1810`'s pinned fold). The design:
   answer, already learned from S2, no third grammar. The listener who
   truly wants only the song has the ✕ on everything after it — or simply
   plays something else, because leaving is free.
-- **`Enter` plays the top-ranked song** by the same needle-drop,
-  superseding today's album-level answer (`app.rs:2255–2273` routes to
-  `play_album`). When the query matched an album's own name, ADR-0021's
-  field ranking puts that album's opening track on top and the sound is
-  unchanged from today; when it matched a song, `Enter` finally lands on
-  the song. Type-anywhere is untouched: the first bare keystroke both
-  filters and grows the songs section in the same frame.
+- **`Enter` confirms the selected result's selected action**, rather than
+  unconditionally playing the top-ranked track. Type-anywhere is untouched:
+  the first bare keystroke focuses the query and opens the dropover in the same
+  frame without changing place.
 
 ## 5.2 Decision: a context menu, as a mirror layer
 

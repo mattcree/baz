@@ -1,5 +1,20 @@
 # ADR-0029: The ambient surface — the field, the spectrum, the meter, the feed, the run, and the class that admits them
 
+> ## Amendment (2026-08-12) — the album object may leave; focus may not stop the room
+>
+> The foreground choice is now **Cover / Jewel case / None**, persisted and
+> independent of Spectrum. None is not an invisible square: it removes the
+> object and its reserved stage, centres the placard in a soft calm mask, and
+> lets the full-body bars occupy the rest. It also constructs no hero/case and
+> runs no rotation work until an album object is selected again.
+>
+> Keyboard focus is removed from continuous eligibility. The structural gate
+> remains Now Playing visible, a sounding record, and Jewel case or Spectrum
+> enabled; another application receiving input is not the surface becoming
+> invisible. The spectrum tap is taken before ReplayGain/volume/mute in both
+> pump branches, so the visual continues to describe the record rather than
+> the fader.
+
 > ## Amendment (2026-08-10) — the queue is this surface's other half
 >
 > The owner: *"we need to work on the now playing since I think the queue and

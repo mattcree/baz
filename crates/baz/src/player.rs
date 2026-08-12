@@ -4542,6 +4542,22 @@ mod tests {
     }
 
     #[test]
+    fn stepping_while_muted_prepares_the_level_without_unmuting() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(
+            &volume_changed(600, true, VolumePath::SoftwareGain),
+            &albums,
+        );
+
+        assert_eq!(player.step_volume(1), Some(640));
+        let bar = player.volume_bar();
+        assert!(bar.muted, "volume and mute remain independent controls");
+        assert!((bar.position - 0.64).abs() < 1e-6);
+        assert!(!bar.mute_pending, "a volume step asks for no mute change");
+    }
+
+    #[test]
     fn absolute_sets_clamp_into_the_travel() {
         let mut player = ready_with_queue(1);
         assert_eq!(player.set_volume(0), Some(0));

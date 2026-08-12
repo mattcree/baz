@@ -95,6 +95,7 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Phase, PlayerState};
+use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::views::{gradient_block, section_rule};
 use crate::{icon, theme, vm};
@@ -278,7 +279,7 @@ fn continue_band<'a>(
             .map(|track| (album, track))
     })?;
     let edge = theme::CONTINUE_SLEEVE;
-    let sleeve: Element<'a, Message> = match shelf.thumbs.peek(&album.id) {
+    let sleeve: Element<'a, Message> = match shelf.thumb(album.id) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(edge))
             .height(Length::Fixed(edge))
@@ -557,6 +558,7 @@ fn all_songs_tile<'a>(
         &list,
         shelf.hovered_all_songs,
         crate::views::list_tile::Actions {
+            content: Content::AllSongs,
             play: Message::PlayEverything,
             open: Some(Message::ShowAllSongs),
             enter: Message::AllSongsHovered(true),

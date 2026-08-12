@@ -132,16 +132,14 @@
 > in the bar — it costs a second drawing of the mark and keeps the accent
 > discipline whole.
 >
-> ### 3. Search in the bar is **his question**, not this record's answer
+> ### 3. Search in the bar was his question; it is now his answer
 >
 > > *"maybe we could put the search in the top bar?"*
 >
-> Not built, and deliberately not decided here. It is genuinely arguable — §1's
-> admission rule is the owner's own and search passes it more cleanly than the
-> display options do, while ADR-0036 gave the well one meaning and one home and
-> ADR-0030's second amendment records what moving it into the lane *cured*. The
-> case each way, the costs and the recommendation are in `docs/BACKLOG.md`'s
-> *What the owner asked for*, which is where an ask lives until he answers it.
+> On 2026-08-12 the owner answered it: *"I think we should move the search up
+> into the top bar."* The accepted shape is the full resident well, not a second
+> collapsed magnifier; its lane and narrow-strip homes leave when it lands.
+> ADR-0036's one library-search meaning survives and its one home moves.
 >
 > What this record adds is the arithmetic, so the answer is a decision rather
 > than a discovery. It is `const`-asserted beside the bar's budget: the lane's
@@ -149,7 +147,15 @@
 > 304 px of slack with 56 px to spare — and the band is one `TRANSPORT_HIT`
 > tall, which is exactly the well's own height and leaves **nothing** for the
 > always-drawn counts line under it that ADR-0030's second amendment §3 put
-> there. The field fits. Its readout does not.
+> there. That arithmetic was true when written and its blocker has since gone:
+> resting collection totals moved to Home, while the active match count moved
+> inside the well's reserved trailing slot. The field and its live readout now
+> ship in zone 2, between the application mark and drag region, with 56 px
+> still unspent at the minimum window. Its result card is a layer below the
+> bar, so the field remains editable while Tracks and Albums cover the
+> unchanged place. Back/Forward and the notification bell remain later tenants
+> and must be costed against that now-spent line rather than the old 304 px
+> slack.
 >
 > ### What this amendment does not touch
 >

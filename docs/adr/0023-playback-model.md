@@ -1,5 +1,25 @@
 # ADR-0023: The playback model — one list with a cursor, and the queue as a record of a choice
 
+> **Start-confirmation amendment (2026-08-12).** A deliberate album Play now
+> carries the listener to Now Playing, but the place follows playback truth,
+> not command optimism. Explicit `Play album`, a search album's Play, Enter's
+> album answer and the shared album double-click all call one
+> `start_and_show`: an accepted `SetQueue` plus `Play` arms the requested run,
+> and only a `TrackStarted` whose path belongs to that run spends the
+> destination. An empty queue never arms it; refused commands and engine
+> closure stay put; a wholly failed run reaches `QueueEnded` and cancels it.
+> `Resume` remains immediate because it names the validated run the engine is
+> already holding, rather than claiming a fresh run has begun.
+
+> **Interaction amendment (2026-08-12).** A playable content row no longer
+> spends its playback command on an ordinary single click. The first click
+> selects/highlights; a double click activates through the exact existing
+> `play_from`/`JumpTo` path described below. Album, playlist and implicit-list
+> tiles use the same rule. Labelled Play controls and menu verbs remain direct.
+> This changes only how intent reaches the model: the list, cursor, queue and
+> engine protocol are untouched. ADR-0022's 2026-08-12 amendment owns the
+> shared selection state and timing.
+
 > **Amendment (2026-08-10) — shuffle is a property of the player, and it is a
 > property of the *walk* rather than of the list.**
 >

@@ -31,8 +31,9 @@
 //! It also fixes what may **not** migrate in, which matters more, because the
 //! failure mode of a resident bar is accretion one locally argued admission at
 //! a time — exactly how the Library strip got crowded enough to complain
-//! about. The search well is the lane's (ADR-0036 gave it one meaning and one
-//! home). A place's identity, breadcrumb and note are the place's. The
+//! about. Search is the app-wide exception recorded in ADR-0040's 2026-08-12
+//! amendment: it is resident in every place and overlays answers without
+//! navigating away. A place's identity, breadcrumb and note are the place's. The
 //! transport is the bottom bar's, whose ratchet says nothing leaves it either.
 //! The wall's arrangement keys are the wall's. All of it is pinned in this
 //! file's tests.
@@ -41,13 +42,13 @@
 //!
 //! The owner, approving the right-hand placement: *"I don't mind if we have
 //! the controls on the right hand side as long as we have **a sensible
-//! consistent pattern**"*. So the bar is four named zones, in this order at
+//! consistent pattern**"*. So the bar is six named zones, in this order at
 //! every width and in every place:
 //!
 //! ```text
-//!   ▧  ·······························  ▤ ▤ ▤ ▤    ⚙    ─  □  ✕
-//!   1              2                       3       4       5
-//!  mark          handle                   view    app    window
+//!   ▧  [ Search library ]  ·············  ▤ ▤ ▤ ▤    ⚙    ─  □  ✕
+//!   1          2                 3          4       5       6
+//!  mark      search            handle      view    app    window
 //! ```
 //!
 //! 1. **The application's mark.** What this window *is* — the one thing a title
@@ -55,22 +56,23 @@
 //!    statement rather than a control (L8.5). It was the word `baz` until the
 //!    owner asked for the icon on 2026-08-10; [`mark`] records why it replaced
 //!    the word rather than joining it.
-//! 2. **The handle.** Never a tenant. It is the gesture surface: press and
+//! 2. **Search.** The application-wide chooser, resident and place-preserving.
+//! 3. **The handle.** Never a tenant. It is the gesture surface: press and
 //!    travel moves the window, press twice maximises it. A control admitted
 //!    here would be a control that eats the window's own gesture.
-//! 3. **The view** — controls that change *how the place you are in is shown*.
+//! 4. **The view** — controls that change *how the place you are in is shown*.
 //!    The display options today.
-//! 4. **The application** — doors to what the application holds rather than
+//! 5. **The application** — doors to what the application holds rather than
 //!    what a place does. The gear today.
-//! 5. **The window** — controls that act on the window as an object of the
+//! 6. **The window** — controls that act on the window as an object of the
 //!    desktop. Minimise, maximise, close, in that order, always.
 //!
 //! **The pattern is that scope widens rightward**: the view you are in, then
 //! the application around it, then the window around that. It is a rule and
 //! not a description, which is the test the owner set — *given a new control,
 //! the rule says where it goes without an argument*. Ask what it acts on. One
-//! place: it does not enter the bar. The view, in every place: zone 3. The
-//! application: zone 4. The window: zone 5. Two people reading that cannot
+//! place: it does not enter the bar. The view, in every place: zone 4. The
+//! application: zone 5. The window: zone 6. Two people reading that cannot
 //! disagree, which is what *"consistent pattern"* has to mean if it is to be
 //! worth anything.
 //!
@@ -140,7 +142,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::Message;
+use crate::app::{Message, Shelf};
 use crate::motion::{Control, Ink};
 use crate::{icon, theme};
 
@@ -174,15 +176,17 @@ use crate::{icon, theme};
 /// the state that ships, because the row spent a seam on the `Space` that stood
 /// in for them. Both are fixed above; the claim is now the one that is true.
 pub(crate) fn view(
+    shelf: &Shelf,
     window_w: f32,
     density: Option<crate::shelf::Density>,
     visualization: Option<crate::visualizer::State>,
     maximized: bool,
     owns_chrome: bool,
     ink: Ink,
-) -> Element<'static, Message> {
+) -> Element<'_, Message> {
     let room = theme::active();
     let name = mark();
+    let search = crate::views::search::well(shelf);
     let furniture = row![marks(density, visualization), gear(ink),]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
@@ -207,7 +211,7 @@ pub(crate) fn view(
     // arrangement rather than a mirrored pair: the owner's *"as long as we
     // have a sensible consistent pattern"* is better served by one layout
     // everywhere than by two that are each correct on one platform.
-    let line = row![name, gap, furniture]
+    let line = row![name, search, gap, furniture]
         .push_maybe(buttons)
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
@@ -656,6 +660,7 @@ mod tests {
         let source = source();
         let code = source.split("#[cfg(test)]").next().expect("a head");
         for tenant in [
+            "views::search::well",
             "Message::ToggleSettings",
             "Message::DensityStep",
             "Message::WindowMinimised",
@@ -676,8 +681,6 @@ mod tests {
         // to, because a list of forbidden *messages* would be a list somebody
         // could satisfy by inventing a new one:
         //
-        // - `SearchChanged` / `ClearSearch` — the well is the lane's, and
-        //   ADR-0036 gave it one meaning and one home;
         // - `GroupKeySelected` — the arrangement is the wall's;
         // - `PlayPause` / `PlayEverything` / `ToggleShuffle` — playback is the
         //   bottom bar's, and its ratchet says nothing leaves it either;
@@ -691,8 +694,6 @@ mod tests {
             "PlayPause",
             "PlayEverything",
             "ToggleShuffle",
-            "SearchChanged",
-            "ClearSearch",
             "place_header",
         ] {
             assert!(
@@ -773,14 +774,14 @@ mod tests {
     /// consistent pattern"*, and the thing that would quietly break it is a
     /// second arrangement — a mirror for one platform, a variant for one
     /// place. So what is pinned is that the line is built **unconditionally**,
-    /// in the order the module documents: name, handle, view, application,
-    /// window.
+    /// in the order the module documents: mark, search, handle, view,
+    /// application, window.
     #[test]
     fn the_bar_has_one_arrangement_and_it_is_the_stated_order() {
         let source = source();
         let code = source.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            code.contains("let line = row![name, gap, furniture]")
+            code.contains("let line = row![name, search, gap, furniture]")
                 && code.contains(".push_maybe(buttons)"),
             "the bar's zones are no longer in the order the pattern states"
         );
@@ -789,7 +790,7 @@ mod tests {
             "a second arrangement has come back: one layout everywhere is the \
              whole of what the owner asked for by *consistent*"
         );
-        // Zone 3 before zone 4 inside the right cluster — the view, then the
+        // Zone 4 before zone 5 inside the right cluster — the view, then the
         // application. Scope widens rightward, and that is the rule a future
         // tenant is placed by.
         let furniture = code

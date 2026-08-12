@@ -10,6 +10,7 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
 use crate::playlists::{PanelRow, PlaylistOrder, Playlists};
+use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::theme;
 use crate::views::{arrangement_key, place_header_led, place_pad, playlist_sleeve};
@@ -104,10 +105,11 @@ fn tile<'a>(
     engine: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
+    let selected = shelf.selection.is(Content::Playlist(playlist.id));
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
     let art = playlist_sleeve(shelf, &playlist.art, &playlist.name, work);
-    let art: Element<'_, Message> = if hovered {
+    let art: Element<'_, Message> = if hovered || selected {
         let mut options = Vec::new();
         if engine && playlist.playable > 0 {
             options.push(crate::views::shelf::VeilOption::accented(
@@ -163,15 +165,15 @@ fn tile<'a>(
             )
         ]
         .height(Length::Fixed(theme::CAPTION_H)),
-        crate::views::shelf::state_rule(if hovered { 1.0 } else { 0.0 }, false, edge)
+        crate::views::shelf::state_rule(if hovered { 1.0 } else { 0.0 }, selected, edge)
     ]
     .spacing(theme::GAP_XS)
     .width(Length::Fixed(edge));
     mouse_area(
         button(body)
             .padding(0)
-            .style(move |_theme, status| theme::tile(room, status, false))
-            .on_press(Message::OpenPlaylist(playlist.id)),
+            .style(move |_theme, status| theme::tile(room, status, selected))
+            .on_press(Message::ContentPressed(Content::Playlist(playlist.id))),
     )
     .on_enter(Message::PlaylistTileEntered(playlist.id))
     .on_exit(Message::PlaylistTileLeft(playlist.id))

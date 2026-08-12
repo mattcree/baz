@@ -24,8 +24,62 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Changed
+
+- Search now starts without an implicit result selection, teaches and honors
+  its arrow-key chooser while the query field is focused, and adds searched
+  tracks directly to the saved playlist currently on screen.
+- **Saved and unsaved playlists now use one detail component.** Both states
+  share the collage, responsive page, identity hierarchy, empty state,
+  scroller and artwork/Album row presentation. Durable Play/Rename/Delete and
+  transient Save/live-position behavior occupy the same stable capability
+  slots instead of forking the page.
+- **Now Playing can become a spectrum-led room with no album object.** Its
+  foreground marks are now Cover, Jewel case and a persisted None choice,
+  independently of Spectrum. None removes the object and reserved square,
+  keeps metadata readable in a soft mask, and stops hero/case work. Visible
+  case motion and spectrum sampling continue when another application has
+  keyboard focus, while remaining absent off Now Playing or without a sounding
+  record. The spectrum tap is also correctly pre-volume, so mute changes sound
+  rather than the record's visual reading.
+- **The volume fader now responds to wheel and trackpad travel.** Scroll up or
+  down over the live fader uses the same bounded step as the keyboard and
+  captures the gesture so the surface underneath cannot move. Pixel travel is
+  accumulated into deliberate steps, mute remains independent, and confirmed
+  changes are persisted once the gesture settles.
+- **A successful album Play now lands on Now Playing.** The explicit album
+  control, search answer, Enter answer and album double-click share one
+  start-and-show route. Accepted commands only arm the transition; a matching
+  engine `TrackStarted` completes it, while empty/refused/dead or exhausted
+  failed runs stay on the place where Play was requested.
+- **Search is now an app-wide, keyboard-first dropover.** The one full
+  `Search library` well lives in the app bar at every width and place;
+  type-anywhere opens ranked Tracks and Albums over the unchanged surface in
+  one virtualized scroller. Up/Down move a clamped, auto-revealed selection;
+  Left/Right choose track `Play | Enqueue`; Enter confirms. Enqueue appends
+  without starting or replacing the run, Play/Open complete the chooser, and
+  Esc, the clear mark or click-outside clear it. The old lane/strip wells,
+  eight-track Songs section and Library-wall filtering are removed.
+- **Playable content now has one selection-first interaction grammar.** One
+  click highlights an album, playlist, implicit list or track row; a second
+  matching click activates it. Explicit labelled `Play` and `Open` controls
+  remain immediate, and selecting a tile also exposes those controls for
+  touch/no-hover use. Enter activates the current selection outside search,
+  while Space retains its global play/pause meaning. Selection uses a
+  paper-toned treatment distinct from the amber playback state.
+
 ### Fixed
 
+- **The `RECENT` sounding lamp no longer reflows its row.** Every expanded
+  row reserves the same far-trailing dot slot, while title and metadata keep
+  fixed one-line lanes and gain measured end ellipses when they run long.
+  Switching playback between an album and playlist now changes ink only;
+  sleeves, text origins, row height and neighbours remain still.
+- **Loaded, currently relevant artwork no longer disappears under cache
+  churn.** Handles for the visible wall range, current page and resident chrome
+  are pinned outside the bounded 64-entry recent LRU, then return to ordinary
+  eviction as soon as every current surface releases them. An 80-album page
+  stress run retained every cover through scrolling and cross-surface churn.
 - **The bounded artwork cache no longer carries the panic-safety flaw reported
   as RUSTSEC-2026-0253.** `lru` is updated to the fixed 0.18.2 release; cache
   behaviour and budgets are unchanged.

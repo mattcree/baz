@@ -11,11 +11,13 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf};
 use crate::implicit::ImplicitList;
 use crate::player::PlayerState;
+use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::{icon, theme};
 
 /// The gestures exposed by one implicit-list tile.
 pub(crate) struct Actions {
+    pub(crate) content: Content,
     pub(crate) play: Message,
     pub(crate) open: Option<Message>,
     pub(crate) enter: Message,
@@ -24,8 +26,9 @@ pub(crate) struct Actions {
 
 /// Draw `list` as one tile in the wall's own grid anatomy.
 ///
-/// The tile itself plays the list. The veil repeats that visible action and
-/// may also carry an `Open` road when the list has a distinct place to open.
+/// The tile itself selects on one press and plays on double-click. The veil's
+/// labelled Play remains direct and may also carry an `Open` road when the
+/// list has a distinct place to open.
 /// `enter` and `exit` feed the one hover bit held by [`Shelf`]; only one
 /// implicit-list tile is ever on screen at once.
 pub(crate) fn view<'a>(
@@ -40,10 +43,11 @@ pub(crate) fn view<'a>(
         return None;
     }
     let room = theme::active();
+    let selected = shelf.selection.is(actions.content);
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
     let art = crate::views::playlist_sleeve(shelf, &list.art, list.name(), work);
-    let art: Element<'_, Message> = if hovered {
+    let art: Element<'_, Message> = if hovered || selected {
         let mut options = Vec::new();
         if player.engine_ready() {
             options.push(crate::views::shelf::VeilOption::accented(
@@ -105,14 +109,14 @@ pub(crate) fn view<'a>(
     let tile = column![
         sleeve,
         caption_block,
-        crate::views::shelf::state_rule(hover, false, edge)
+        crate::views::shelf::state_rule(hover, selected, edge)
     ]
     .spacing(theme::GAP_XS)
     .width(Length::Fixed(edge));
     let pressable = button(tile)
         .padding(0)
-        .style(move |_theme, status| theme::tile(room, status, false))
-        .on_press(actions.play);
+        .style(move |_theme, status| theme::tile(room, status, selected))
+        .on_press(Message::ContentPressed(actions.content));
     Some(
         mouse_area(pressable)
             .on_enter(actions.enter)

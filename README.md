@@ -6,7 +6,7 @@
 <p align="center">
   <strong>A music player for the music you already own.</strong><br>
   Point it at a folder — a drive, a NAS — and your records are the home screen.
-  Click one and it plays front to back, gapless. No account, no subscription,
+  Double-click one and it plays front to back, gapless. No account, no subscription,
   nothing between you and your files.
 </p>
 
@@ -64,11 +64,11 @@ from the channel count (Vorbis and WAVE order 5.1 differently, and getting that
 wrong puts the centre channel in one ear). 7.1 and 6.1 are still refused, and
 say which layout they found.
 
-**Search as you type, for songs and for records.** No field to click into
-first: any letter, anywhere, starts filtering the wall, and the search well
-takes the caret with it. Records rank by how well the query fits and which
-field it landed in; the songs that matched are listed too, rather than folded
-away into their albums. <kbd>Enter</kbd> plays the best match.
+**Search as you type, for tracks and records.** No field to click into first:
+any letter, anywhere, opens the app-bar chooser over the place you are already
+using. Ranked Tracks and Albums share one scroll surface. Arrow keys select a
+result and choose `Play` or `Enqueue`; Enter confirms, while Esc or a click
+outside clears the chooser and returns to the unchanged place.
 
 **Playlists are files you own.** One UTF-8 `.m3u8` per list, in baz's own data
 folder, written as plain text any other player can read. Edit one in a text
@@ -95,12 +95,14 @@ With no session bus baz prints one line and runs exactly as before.
 
 **A wall you can arrange.** Six arrangements — A–Z, artist, year, genre, added,
 played — and four densities, changed with <kbd>Ctrl</kbd>+scroll or the four
-marks at the top right. baz remembers where you left it.
+marks at the top right. One click selects and highlights a record; double-click
+plays it. The same selection-first rule applies to playlists and track rows,
+while labelled Play controls act immediately. baz remembers where you left it.
 
 |  |  |
 |---|---|
 | ![Now playing](docs/screenshots/now-playing.png) | ![A playlist](docs/screenshots/playlist.png) |
-| **Now playing** — the record, and the rest of the run beside it. | **A playlist** — thirty-five songs off four records, and one `.m3u8` on disk. |
+| **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **A playlist** — thirty-five songs off four records, and one `.m3u8` on disk. |
 
 ![Home](docs/screenshots/home.png)
 
@@ -156,16 +158,19 @@ This list is a feature, and it is not going to get shorter.
 
 ## Keyboard
 
-**Start typing.** Any letter, anywhere, filters the wall — there is no field to
-click into first, and the search well fills in as you type. That is why every
-letter shortcut below wears a modifier: the letters belong to the query now.
-Nothing has focus when baz starts, so <kbd>Space</kbd> means play/pause on the
-very first frame.
+**Start typing.** Any letter, anywhere, opens the app-wide Tracks and Albums
+chooser over the place you are on — there is no field to click into first, and
+the app-bar search well fills in as you type. Up/Down choose a result;
+Left/Right choose a track's Play or Enqueue action; Enter confirms. That is why
+every letter shortcut below wears a modifier: the letters belong to the query
+now. Nothing has focus when baz starts, so <kbd>Space</kbd> means play/pause on
+the very first frame. A successful album Play carries you to Now Playing only
+after the audio engine confirms that a track began.
 
 | Key | Does |
 |---|---|
-| any printable character | filter the wall by it, from wherever you are — the search well takes the caret with the first keystroke |
-| <kbd>Enter</kbd> | play the best match for what you typed; with no query, play the selected record |
+| any printable character | open and filter the app-wide Tracks and Albums chooser; the search well takes the caret with the first keystroke |
+| <kbd>Enter</kbd> | confirm the selected search result; with no query, activate the selected album, playlist or track |
 | <kbd>Esc</kbd> | peel one layer, top down: a drag in flight, then a menu, then the playlists panel, then a field, then the place you are in, then the query |
 | <kbd>Space</kbd> | play / pause |
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
@@ -187,6 +192,8 @@ Media keys — play/pause, previous, next, stop — work too. On Linux they usua
 arrive over MPRIS rather than as key presses, which is the same thing by a
 different road. The *volume* media keys are deliberately left alone: on every
 desktop they mean the system's volume, and baz's fader is baz's own.
+Wheel or trackpad travel directly over that fader adjusts baz's volume in the
+same bounded steps as Up/Down without scrolling the page underneath it.
 
 **Shuffle has no key**, only the control in the bottom bar. The rule runs one
 way — every action needs a visible control, not every control needs a key — and

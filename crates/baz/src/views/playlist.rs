@@ -11,9 +11,10 @@
 //! main column, stacking below the same breakpoint by the same arithmetic.
 //!
 //! Since *one page, two subjects* (2026-08-10) that is not a resemblance but
-//! an identity: the arrangement is [`views::page`](super::page) and this
-//! module hands it a playlist. Everything here is what a *made list* puts in
-//! the composition's slots, and nothing here lays out a page.
+//! an identity: the arrangement is [`views::page`](super::page). Since the
+//! 2026-08-12 persistence-state convergence, this module hands its facts and
+//! file capabilities to [`playlist_page`], the same
+//! component the unsaved run enters. Nothing here lays out a playlist page.
 //!
 //! The rows themselves stay the queue place's — one anatomy for every list in
 //! baz — plus the reserved edit slots a durable artefact earns: the ✕ that
@@ -61,16 +62,16 @@
 
 use std::borrow::Cow;
 
-use iced::widget::{
-    Space, button, container, image as iced_image, mouse_area, row, text, text_input,
-};
+use iced::widget::{Space, button, container, mouse_area, row, text, text_input};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
 use crate::playlists::{Collecting, OpenPlaylist, PageRow};
-use crate::views::page::{self, Identity, NameEdit, Page};
-use crate::views::{place_name, playlist_sleeve};
+use crate::selection::Content;
+use crate::views::page::{self, Identity, NameEdit};
+use crate::views::place_name;
+use crate::views::playlist_page::{self, PlaylistPage};
 use crate::{icon, theme, vm};
 
 /// The rename field's id, so the caret can land in it the moment `Rename` is
@@ -79,8 +80,7 @@ pub(crate) fn rename_id() -> text_input::Id {
     text_input::Id::new("baz-playlist-rename")
 }
 
-/// The playlist's page: [`views::page`](crate::views::page)'s composition, with
-/// a made list in it.
+/// A durable list's data and capabilities, handed to the one playlist page.
 ///
 /// The arrangement is the shared one and this module supplies what is *about a
 /// list*: the collage sleeve, `Play`, the three acts a durable artefact earns,
@@ -111,7 +111,7 @@ pub(crate) fn view<'a>(
 ) -> Element<'a, Message> {
     let live = player.engine_ready();
     let playable = !open.queue.is_empty();
-    let side_by_side = page::is_playlist_two_column(window.width);
+    let layout = playlist_page::layout(window.width);
     let acts = if open.confirming_delete {
         vec![
             page::act("Cancel", true, Message::PlaylistDeleteCancel),
@@ -123,39 +123,23 @@ pub(crate) fn view<'a>(
             page::act("Delete", true, Message::PlaylistDeleteStart),
         ]
     };
-    page::view(
-        Page {
+    playlist_page::view(
+        shelf,
+        PlaylistPage {
             lead: breadcrumb(open.name()),
-            // The collage of quotations (§A1), at the record page's own sleeve
-            // edge.
-            sleeve: playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
+            name: open.name().to_owned(),
+            art: open.art.clone(),
             commitment: Some(page::commitment(
                 "Play",
                 live && playable,
                 Message::PlaylistPlay,
             )),
             acts,
-            aside_tail: Vec::new(),
             identity: identity(open, can_undo),
             rows: entry_rows(
-                shelf,
-                open,
-                player,
-                window,
-                scroll,
-                hovered,
-                collecting,
-                drag,
-                live,
-                side_by_side,
+                shelf, open, player, window, scroll, hovered, collecting, drag, live, layout,
             ),
-            side_by_side,
-            row_spacing: 0.0,
-            on_scroll: Some(Message::PlaylistScrolled),
-            // The words the armed mode left behind went with it (doc 09 §9):
-            // the route in is the transfer gesture — a row's `+`, or the
-            // record page's `Add to playlist…`, then this list in the picker.
-            empty: "Nothing here yet. Press + on any track row, or Add to playlist… on a record's page, and pick this list.",
+            on_scroll: Message::PlaylistScrolled,
         },
         window.width,
     )
@@ -196,7 +180,7 @@ pub(crate) const ROW_PITCH: f32 = 2.0 * theme::GAP_XS + theme::PANEL_SLEEVE + th
 /// How much content is built beyond either edge of the viewport. It absorbs
 /// the fixed playlist identity above the rows in the narrow document form and
 /// keeps fast wheel motion from exposing a spacer.
-const WINDOW_MARGIN: f32 = 600.0;
+pub(crate) const WINDOW_MARGIN: f32 = 600.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RowWindow {
@@ -256,7 +240,7 @@ fn entry_rows<'a>(
     collecting: Collecting,
     drag: Option<&'a crate::drag::DragState>,
     live: bool,
-    side_by_side: bool,
+    layout: playlist_page::Layout,
 ) -> Vec<Element<'a, Message>> {
     // Which display row carries the lamp: the engine's confirmed row in the
     // playable subset, mapped back through each row's own subset position —
@@ -266,11 +250,7 @@ fn entry_rows<'a>(
     // includes the page identity above it; the generous window margin covers
     // that fixed prefix without forcing the renderer to duplicate its layout
     // arithmetic here.
-    let rows_scroll = if side_by_side {
-        scroll
-    } else {
-        (scroll - WINDOW_MARGIN).max(0.0)
-    };
+    let rows_scroll = layout.rows_scroll(scroll);
     let win = row_window(open.rows.len(), rows_scroll, window.height);
     let mut rows: Vec<Element<'a, Message>> = vec![Space::with_height(win.top).into()];
     for index in win.first..win.end {
@@ -281,15 +261,20 @@ fn entry_rows<'a>(
             container(entry_row(
                 shelf,
                 page_row,
+                open.id,
                 index,
                 open.rows.len(),
-                side_by_side,
+                layout.side_by_side(),
                 live,
                 playing,
                 hovered == Some(index),
                 collecting,
                 drag.and_then(|held| held.line_for_row(crate::drag::List::Playlist, index)),
                 drag.is_some_and(|held| held.list == crate::drag::List::Playlist),
+                shelf.selection.is(Content::PlaylistTrack {
+                    playlist: open.id,
+                    row: index,
+                }),
             ))
             .height(Length::Fixed(ROW_PITCH))
             .align_y(alignment::Vertical::Top)
@@ -317,21 +302,6 @@ pub(crate) fn scroll_offset(open: &OpenPlaylist, playable_position: usize) -> Op
         reason = "playlist row positions fit in UI geometry"
     )]
     Some(target as f32 * ROW_PITCH)
-}
-
-/// Preserve the same row-space offset when a resize crosses between the
-/// desktop table (whose scroller starts at row zero) and the stacked document
-/// (whose artwork and identity precede the rows).
-#[must_use]
-pub(crate) fn reflow_scroll_offset(scroll: f32, was_table: bool, is_table: bool) -> f32 {
-    match (was_table, is_table) {
-        // At the genuine top, keep the document's artwork visible. Once the
-        // listener has entered the rows, the same prefix allowance used by
-        // the virtual window keeps their row-space position stable.
-        (true, false) if scroll > 0.0 => scroll + WINDOW_MARGIN,
-        (false, true) => (scroll - WINDOW_MARGIN).max(0.0),
-        _ => scroll,
-    }
 }
 
 /// What the shared identity block ([`Identity`]) says about a **made list**:
@@ -494,6 +464,7 @@ fn undo_control() -> Element<'static, Message> {
 fn entry_row<'a>(
     shelf: &'a Shelf,
     page_row: &'a PageRow,
+    playlist: u64,
     index: usize,
     total: usize,
     side_by_side: bool,
@@ -503,6 +474,7 @@ fn entry_row<'a>(
     collecting: Collecting,
     insert_line: Option<crate::drag::Edge>,
     observing: bool,
+    selected: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let ink = if page_row.missing {
@@ -545,7 +517,7 @@ fn entry_row<'a>(
     };
     let body = page::track_row(page::TrackRow {
         marker,
-        artwork: Some(row_art(shelf, page_row)),
+        artwork: Some(playlist_page::row_art(shelf, page_row.album_id)),
         title: page_row.title.as_str().into(),
         ink,
         under,
@@ -558,9 +530,15 @@ fn entry_row<'a>(
         )),
         duration: page_row.duration.as_str().into(),
         playing,
+        selected,
         // A missing entry is not a control: pressing a row plays from it, and
         // there is nothing there to play.
-        press: (live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)),
+        press: (live && !page_row.missing).then_some(Message::ContentPressed(
+            Content::PlaylistTrack {
+                playlist,
+                row: index,
+            },
+        )),
     });
     // The drag wrapper owns the pointer for the body (crate::drag): every
     // row of the artefact is draggable — a file edit needs no engine, the
@@ -570,7 +548,10 @@ fn entry_row<'a>(
         move |at| Message::DragLift(crate::drag::List::Playlist, index, at),
         Message::DragMoved,
         Message::DragDropped,
-        (live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)),
+        (live && !page_row.missing).then_some(Message::ContentPressed(Content::PlaylistTrack {
+            playlist,
+            row: index,
+        })),
     ));
     if observing {
         source = source.observe(move |before| {
@@ -632,28 +613,10 @@ fn entry_row<'a>(
     )
 }
 
-/// The row's own record sleeve. Real artwork comes from the same thumbnail
-/// cache as the Library; while it is being decoded, the record's deterministic
-/// placeholder occupies the exact same box.
-fn row_art(shelf: &Shelf, row: &PageRow) -> Element<'static, Message> {
-    let edge = theme::PANEL_SLEEVE;
-    match row.album_id {
-        Some(id) => shelf.thumbs.peek(&id).map_or_else(
-            || crate::views::gradient_block(id, edge, 1.0),
-            |handle| {
-                iced_image(handle.clone())
-                    .width(Length::Fixed(edge))
-                    .height(Length::Fixed(edge))
-                    .into()
-            },
-        ),
-        None => Space::new(Length::Fixed(edge), Length::Fixed(edge)).into(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{KIND, ROW_PITCH, reflow_scroll_offset, row_window};
+    use super::{KIND, ROW_PITCH, row_window};
+    use crate::views::playlist_page::reflow_scroll_offset;
 
     #[test]
     fn a_large_playlist_builds_a_bounded_row_window() {

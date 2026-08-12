@@ -56,6 +56,7 @@ use crate::place::Place;
 use crate::playback::{OutputChoice, Playback, PlayerEvent};
 use crate::player::PlayerState;
 use crate::scan::ScanUpdate;
+use crate::selection::{Content, Press};
 use crate::{
     art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
 };
@@ -84,6 +85,9 @@ const REFRESH_TICK: Duration = Duration::from_secs(60);
 /// Do not launch the comparatively expensive filesystem walk while the
 /// listener is actively scrolling, resizing or choosing music.
 const REFRESH_IDLE: Duration = Duration::from_secs(30);
+/// Quiet time after the last fader wheel step before its confirmed position is
+/// persisted. Audio answers every step immediately; disk sees one settled act.
+const VOLUME_WHEEL_SETTLE: Duration = Duration::from_millis(240);
 
 /// The shelf scrollable's id — the update loop scrolls it back to the top
 /// when the query changes, and [`crate::views::shelf`] attaches it.
@@ -341,6 +345,21 @@ pub(crate) enum Message {
     /// state the keyboard cannot reach and none may act where the key would
     /// not.
     ClearSearch,
+    /// Put the search dropover away. Dismissal and clearing are one act: a
+    /// standing query is never hidden behind the unchanged place.
+    DismissSearch,
+    /// A bare arrow, routed to search while its dropover is open and to the
+    /// established transport control otherwise. Search claims this before a
+    /// focused well can spend Left/Right on its caret.
+    Direction(crate::search::Direction),
+    /// Confirm the selected result/action in the search dropover.
+    SearchConfirmed,
+    /// A pointer press on one of a search row's explicit actions.
+    SearchAction(crate::selection::Content, crate::search::Action),
+    /// The album result's explicit navigation action.
+    SearchOpenAlbum(u64),
+    /// The one result scroll surface reporting its viewport.
+    SearchScrolled(scrollable::Viewport),
     /// **Type anywhere**: a bare printable character was pressed with nothing
     /// focused, so it is the query's (ADR-0017 §1.2, [`crate::keys`]).
     ///
@@ -351,11 +370,9 @@ pub(crate) enum Message {
     /// see. Every keystroke *after* it is the field's by the ordinary focus
     /// rule, so this arrives exactly once per query.
     QueryTyped(String),
-    /// <kbd>Enter</kbd>, from the wall or from the well's own submit: while a
-    /// query narrows the wall, **needle-drop the top-ranked song** — the
-    /// Songs section's own first row, its record queued whole with the cursor
-    /// on it (doc 09 §5, ADR-0023 §2's amendment; supersedes the album-level
-    /// answer) — else the record the wall was last left for.
+    /// <kbd>Enter</kbd> outside a focused field: confirm the open search
+    /// chooser's selected result/action, otherwise activate the current
+    /// content selection.
     ///
     /// Only defensible because the first match is the best match — ADR-0021
     /// ranks `Library::search` by fit, then field, then library order —
@@ -651,13 +668,6 @@ pub(crate) enum Message {
     AlbumRowEntered(usize),
     /// The pointer left a track row on the record's page.
     AlbumRowLeft(usize),
-    /// The pointer entered a row of the wall's **Songs** section
-    /// (doc 09 §5), so the row can offer its reserved `+` — the album page's
-    /// hover mechanism, for the same toolkit reason.
-    SongRowEntered(usize),
-    /// The pointer left a songs row. Carries which, for the reason
-    /// [`Self::QueueRowLeft`] carries which row.
-    SongRowLeft(usize),
     /// Shelf scrolled; carries the real viewport geometry.
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
@@ -669,16 +679,9 @@ pub(crate) enum Message {
     /// the wall. Carries the run's index, not a pixel — the rail knows which
     /// shelf it points at and nothing about where the shelf is.
     RailJumped(usize),
-    /// An album tile was pressed: open that record's page. Repeating the
-    /// press leaves the page in place ([`Place::album`]).
-    ///
-    /// **One press, and it navigates.** The tile's double-click-to-play died
-    /// with the inspector and is not mourned in silence: the first press now
-    /// replaces the wall; if the toolkit has already queued a second event,
-    /// it is an idempotent navigation request. What replaced double-click
-    /// playback is the page's own `Play album` — a 320 × 32 target in a fixed
-    /// place, where the gesture it succeeds had a 400 ms window. ADR-0022
-    /// records the trade.
+    /// An explicit record-opening route: the veil/menu's labelled `Open`, a
+    /// record link or source navigation. Ordinary tile presses instead send
+    /// [`Self::ContentPressed`] and use the shared select/double-click grammar.
     ///
     /// **Shift held, the same press queues the record instead** (doc 09 §13
     /// step 7): the one-press accelerator over the picker's Queue row —
@@ -690,6 +693,9 @@ pub(crate) enum Message {
     /// shared message makes structural: shift turns *open the record* into
     /// *queue the record*, wherever it is said.
     AlbumClicked(u64),
+    /// A playable tile or row was pressed. One product-wide state machine
+    /// selects on the first press and activates the same object on the second.
+    ContentPressed(Content),
     /// The pointer entered an album's tile, so the tile can draw its hover
     /// rule under the wall label.
     ///
@@ -879,9 +885,11 @@ pub(crate) enum Message {
     VolumeLeft,
     /// Bottom bar: the fader was released, ending the gesture.
     VolumeReleased,
-    /// Up/Down: step the volume by this many
-    /// [`player::VOLUME_STEP`]s; negative goes down.
-    VolumeStep(i32),
+    /// Vertical wheel travel over the live fader, normalized by the groove to
+    /// deliberate signed steps. It never changes mute.
+    VolumeWheel(i32),
+    /// The coalescing clock for wheel-driven volume persistence.
+    VolumeWheelSettled(Instant),
     /// Bottom bar's speaker, or `M`: mute if unmuted and back again,
     /// resolved against the confirmed state.
     ToggleMute,
@@ -1084,6 +1092,11 @@ struct App {
     queue_scroll: f32,
     /// Absolute offset of the returns lane's single list scroller.
     lane_scroll: f32,
+    /// A deliberate start whose first successfully decoded track should open
+    /// Now Playing. Paths identify the requested run without trusting command
+    /// acceptance as playback truth; the marker is spent only by a matching
+    /// [`Event::TrackStarted`] and cleared when another run supersedes it.
+    show_on_start: Option<Vec<PathBuf>>,
     /// Absolute offset of the saved-playlist page's row scroller.
     playlist_scroll: f32,
     /// Absolute offset of the saved-playlist collection grid.
@@ -1147,8 +1160,6 @@ struct App {
     /// found the compositor had refused would be a control that lies about the
     /// window: on Wayland a maximise request is a request.
     window_maximized: bool,
-    /// Whether the window is foregrounded; gates continuous case motion.
-    window_focused: bool,
     /// When the app bar was last pressed, for the double-press that maximises
     /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
     /// double, so that three presses are a double and a single.
@@ -1210,6 +1221,10 @@ struct App {
     /// event. Mute and output-path changes report through the same event but do
     /// not move this value, so they cost no write.
     saved_volume: Volume,
+    /// The last wheel step's settling boundary. While armed, engine
+    /// confirmations redraw normally but do not write config one step at a
+    /// time; the short subscription below commits the final confirmed value.
+    volume_wheel_settles: Option<Instant>,
     /// The play ledger the engine is appending to (ADR-0018), or `None` when
     /// it could not be opened.
     ///
@@ -1549,6 +1564,11 @@ impl App {
         let saved_place = stored
             .as_ref()
             .map_or_else(Place::default, |config| config.last_place);
+        let saved_visualization_foreground = stored
+            .as_ref()
+            .map_or(crate::visualizer::Foreground::JewelCase, |config| {
+                config.visualization_foreground
+            });
         // **The shuffle property, restored.** A standing decision
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
@@ -1621,6 +1641,7 @@ impl App {
             hovered_queue_row: None,
             queue_scroll: 0.0,
             lane_scroll: 0.0,
+            show_on_start: None,
             playlist_scroll: 0.0,
             playlists_scroll: 0.0,
             hovered_playlist_row: None,
@@ -1632,10 +1653,12 @@ impl App {
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
-            window_focused: true,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
-            visualization: crate::visualizer::State::default(),
+            visualization: crate::visualizer::State {
+                foreground: saved_visualization_foreground,
+                ..crate::visualizer::State::default()
+            },
             playback,
             output_choices,
             output_choice,
@@ -1648,6 +1671,7 @@ impl App {
             warmth: Tween::settled(0.0).with_curve(motion::Curve::Linear),
             saved_replay_gain,
             saved_volume,
+            volume_wheel_settles: None,
         };
         if let Screen::Shelf(state) = &mut app.screen {
             if let crate::player::Availability::NoDevice(reason) = &availability {
@@ -1721,6 +1745,7 @@ impl App {
                 | Message::FirstFrame
                 | Message::MotionTick(_)
                 | Message::CaseTick(_)
+                | Message::VolumeWheelSettled(_)
                 | Message::WindowFocused(_)
                 | Message::WindowMaximizedChanged(_)
         ) {
@@ -1745,13 +1770,28 @@ impl App {
             Place::Artist(id) => self.request_artist_image(id),
             _ => Task::none(),
         };
+        // Queue rows now wear the saved playlist page's artwork and Album
+        // cells. Ask for the visible slice after every queue message, exactly
+        // as the saved page does on its scroll callback; the cache deduplicates
+        // already-resident handles.
+        let playlist_art = if self.place == Place::Queue {
+            self.request_playlist_art()
+        } else {
+            Task::none()
+        };
         // **And what the Now playing place draws of the record**, settled
         // after the ask rather than before it: the two things that can change
         // that surface's picture are the engine naming another record and a
         // hero landing, and both have already happened by here
         // ([`Shelf::settle_art`]).
         self.settle_art();
-        Task::batch([task, self.request_offscreen_art(), art, artist_image])
+        Task::batch([
+            task,
+            self.request_offscreen_art(),
+            art,
+            artist_image,
+            playlist_art,
+        ])
     }
 
     /// Hand the sounding record to [`Shelf::settle_art`], which owns the whole
@@ -1769,12 +1809,9 @@ impl App {
         // for nothing. That is the one cost ADR-0020's argument does not
         // license, and it is the owner's standing rule about responsiveness.
         //
-        // It deliberately does **not** follow [`Self::request_hero`], which is
-        // ungated on purpose: a decode is 4 MiB and one per record, and gating
-        // it would make the surface grow its artwork into place every time it
-        // was opened. A decode is a fact to have ready; a transition is
-        // something to watch.
-        let watching = self.place == Place::NowPlaying;
+        // A `None` foreground is also not watching artwork: no invisible
+        // dissolve is allowed to keep the bounded motion clock alive.
+        let watching = self.place == Place::NowPlaying && self.visualization.foreground.draws_art();
         if let Screen::Shelf(state) = &mut self.screen {
             state.settle_art(sounding, watching, Instant::now());
         }
@@ -1820,15 +1857,30 @@ impl App {
         }
         match message {
             Message::EscapePressed => self.escape(),
+            Message::DismissSearch => match &mut self.screen {
+                Screen::Shelf(state) => state.clear_query(),
+                Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+            },
+            Message::Direction(direction) => self.direction(direction),
+            Message::SearchConfirmed => self.confirm_search(),
+            Message::SearchAction(content, action) => self.search_action(content, action),
+            Message::SearchOpenAlbum(id) => {
+                let clear = match &mut self.screen {
+                    Screen::Shelf(state) => state.clear_query(),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                };
+                Task::batch([clear, self.open_album(id)])
+            }
             // **The doors, and the one way back.** Every one of them is
             // navigation and nothing else: no panel opens, no width changes,
             // and the Library's own state — scroll, query, arrangement — is
             // untouched by all of them, which is what makes coming back free.
             Message::ToggleSettings => self.go(Place::settings),
+            Message::ContentPressed(content) => self.press_content(content),
             // **Shift-click a sleeve queues the record** — the one-press
             // accelerator over the picker's Queue row (ADR-0023 §3's stack;
-            // doc 09 §13 step 7). A plain press navigates, exactly as
-            // before.
+            // doc 09 §13 step 7). Explicit Open routes arrive here directly;
+            // ordinary tile presses are handled by `press_content` above.
             Message::AlbumClicked(id) => {
                 if self.modifiers.shift() {
                     self.queue_album(id)
@@ -1921,12 +1973,19 @@ impl App {
                 Task::none()
             }
             Message::WindowResized(size) => {
-                let playlist_before = matches!(self.place, Place::Playlist(_)).then(|| {
-                    (
-                        views::page::is_playlist_two_column(self.body_width()),
+                let playlist_before = match self.place {
+                    Place::Playlist(_) => Some((
+                        true,
+                        views::playlist_page::layout(self.body_width()).side_by_side(),
                         self.playlist_scroll,
-                    )
-                });
+                    )),
+                    Place::Queue => Some((
+                        false,
+                        views::playlist_page::layout(self.body_width()).side_by_side(),
+                        self.queue_scroll,
+                    )),
+                    _ => None,
+                };
                 self.window = size;
                 self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX);
                 let laid_out = match &mut self.screen {
@@ -1934,17 +1993,23 @@ impl App {
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
                 };
                 let restore_playlist =
-                    playlist_before.map_or_else(Task::none, |(before, scroll)| {
-                        let after = views::page::is_playlist_two_column(self.body_width());
-                        let y = views::playlist::reflow_scroll_offset(scroll, before, after);
-                        self.playlist_scroll = y;
-                        Task::batch([
-                            scrollable::scroll_to(
-                                views::page::scroll_id(),
-                                AbsoluteOffset { x: 0.0, y },
-                            ),
-                            self.request_playlist_art(),
-                        ])
+                    playlist_before.map_or_else(Task::none, |(saved, before, scroll)| {
+                        let after = views::playlist_page::layout(self.body_width()).side_by_side();
+                        let y = views::playlist_page::reflow_scroll_offset(scroll, before, after);
+                        if saved {
+                            self.playlist_scroll = y;
+                        } else {
+                            self.queue_scroll = y;
+                        }
+                        let restore = scrollable::scroll_to(
+                            views::page::scroll_id(),
+                            AbsoluteOffset { x: 0.0, y },
+                        );
+                        if saved {
+                            Task::batch([restore, self.request_playlist_art()])
+                        } else {
+                            restore
+                        }
                     });
                 // A maximise and an unmaximise are both resizes, and iced 0.13
                 // publishes no event for either — so the state the app bar's
@@ -1959,19 +2024,24 @@ impl App {
             }
             Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
-            Message::Playback(event) => {
-                self.apply_player_event(event);
-                Task::none()
-            }
+            Message::Playback(event) => self.apply_player_event(event),
             Message::PlayAlbum(id) => {
-                self.play_album(id);
-                self.finish_search_launch()
+                if self.play_album(id) {
+                    self.complete_search_launch()
+                } else {
+                    Task::none()
+                }
             }
-            // **Enter plays the top-ranked match** (ADR-0017 §1.2).
+            // Enter confirms the chooser's explicit selection/action.
             Message::PlayFirstMatch => self.play_first_match(),
             Message::PlayTrack(id, row) => {
-                self.play_track(id, row);
-                self.finish_search_launch()
+                let searching = matches!(&self.screen, Screen::Shelf(state) if state.search_open);
+                if self.play_track(id, row) && searching {
+                    self.show_current_run_on_start();
+                    self.complete_search_launch()
+                } else {
+                    Task::none()
+                }
             }
             Message::ShowAllSongs => {
                 // The panel closes with the press, exactly as picking a
@@ -2250,9 +2320,9 @@ impl App {
         }
     }
 
-    /// <kbd>Enter</kbd>: needle-drop the top-ranked **song** while a query
-    /// stands (doc 09 §5, ADR-0023 §2's amendment), else play the record the
-    /// wall was last left for (ADR-0017 §1.2's fall-through).
+    /// <kbd>Enter</kbd>: confirm the open search chooser, otherwise activate
+    /// the current shared content selection. The older query fall-through is
+    /// retained defensively for a restored state that predates the dropover.
     ///
     /// Resolved on the shell because playing is the shell's job and the answer
     /// is the shelf's — the same split every other play route in this file
@@ -2262,46 +2332,260 @@ impl App {
     /// The song path is [`Self::play_track`] — the record page's own needle
     /// drop, `SetQueue` (selected edition, whole, in order) + `JumpTo`
     /// through [`PlayerState::play_from`]'s decision — so <kbd>Enter</kbd> is
-    /// exactly a press on the Songs section's first row, not a third play
+    /// exactly a press on the selected track result, not a third play
     /// grammar.
     fn play_first_match(&mut self) -> Task<Message> {
+        if matches!(&self.screen, Screen::Shelf(state) if state.search_open) {
+            return self.confirm_search();
+        }
+        let query_stands = matches!(
+            &self.screen,
+            Screen::Shelf(state) if !state.query.trim().is_empty()
+        );
+        if !query_stands {
+            let selected = match &self.screen {
+                Screen::Shelf(state) => state.selection.selected(),
+                Screen::Setup(_) | Screen::Blocked(_) => None,
+            };
+            return selected.map_or_else(Task::none, |content| self.activate_content(content));
+        }
+        let selected = match &self.screen {
+            Screen::Shelf(state) => state.selected_search_track(),
+            Screen::Setup(_) | Screen::Blocked(_) => None,
+        };
+        if let Some(content) = selected {
+            return self.activate_content(content);
+        }
         let needle = match &self.screen {
             Screen::Shelf(state) => state.enter_drops_needle(),
             Screen::Setup(_) | Screen::Blocked(_) => None,
         };
         if let Some((id, row)) = needle {
-            self.play_track(id, row);
-            return self.finish_search_launch();
+            if self.play_track(id, row) {
+                self.show_current_run_on_start();
+                return self.complete_search_launch();
+            }
+            return Task::none();
         }
         let album = match &self.screen {
             Screen::Shelf(state) => state.enter_plays(),
             Screen::Setup(_) | Screen::Blocked(_) => None,
         };
         if let Some(id) = album {
-            self.play_album(id);
-            return self.finish_search_launch();
+            return if self.play_album(id) {
+                self.complete_search_launch()
+            } else {
+                Task::none()
+            };
         }
         Task::none()
     }
 
-    /// Complete a play gesture made on the Library's live search results.
+    /// One click selects; the second click on the same playable object inside
+    /// the shared interval activates. Shift-click on an album retains its
+    /// established explicit Queue accelerator.
+    fn press_content(&mut self, content: Content) -> Task<Message> {
+        if let Content::Album(id) = content
+            && self.modifiers.shift()
+        {
+            return self.queue_album(id);
+        }
+        let press = match &mut self.screen {
+            Screen::Shelf(state) => {
+                let is_search_result =
+                    state.search_open && state.search_result_index(content).is_some();
+                if is_search_result && matches!(content, Content::SearchTrack { .. }) {
+                    state.search_action = crate::search::Action::Play;
+                }
+                if is_search_result {
+                    state.search_selection.press(content, Instant::now())
+                } else {
+                    state.selection.press(content, Instant::now())
+                }
+            }
+            Screen::Setup(_) | Screen::Blocked(_) => return Task::none(),
+        };
+        match press {
+            Press::Selected => Task::none(),
+            Press::Activated => self.activate_content(content),
+        }
+    }
+
+    /// Spend an activation through the existing play/jump paths. Labelled
+    /// Play controls keep sending those direct messages and bypass timing.
+    fn activate_content(&mut self, content: Content) -> Task<Message> {
+        match content {
+            Content::Album(id) => {
+                if self.play_album(id) {
+                    self.complete_search_launch()
+                } else {
+                    Task::none()
+                }
+            }
+            Content::Playlist(id) => {
+                let opened = match &self.screen {
+                    Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => false,
+                };
+                if opened {
+                    self.play_playlist();
+                }
+                Task::none()
+            }
+            Content::AllSongs => {
+                self.play_everything();
+                Task::none()
+            }
+            Content::ArtistSongs(id) => {
+                self.play_artist_songs(id);
+                Task::none()
+            }
+            Content::AlbumTrack { album, row } => {
+                self.play_track(album, row);
+                Task::none()
+            }
+            Content::SearchTrack { album, row } => {
+                if self.play_track(album, row) {
+                    self.show_current_run_on_start();
+                    self.complete_search_launch()
+                } else {
+                    Task::none()
+                }
+            }
+            Content::PlaylistTrack { playlist, row } if self.place == Place::Playlist(playlist) => {
+                self.play_playlist_track(row);
+                Task::none()
+            }
+            Content::QueueTrack(row) if self.place == Place::Queue => {
+                self.jump_to_queued(row);
+                Task::none()
+            }
+            Content::PlaylistTrack { .. } | Content::QueueTrack(_) => Task::none(),
+        }
+    }
+
+    /// Complete a play gesture made on the app-wide search results.
     ///
     /// Search is a way to reach music, not a mode the listener should have to
-    /// dismiss after the music starts. A result press therefore clears and
-    /// blurs the query, restores the unfiltered wall, and lands on the music
-    /// it just started. The place guard is important: `PlayTrack` and
-    /// `PlayAlbum` are shared with record pages and other surfaces, where a
-    /// retained Library query is background state and must stay untouched.
-    fn finish_search_launch(&mut self) -> Task<Message> {
-        if self.place != Place::Library {
-            return Task::none();
-        }
-        let clear = match &mut self.screen {
+    /// dismiss after an accepted request. A result press therefore clears and
+    /// blurs the query immediately; [`Self::apply_player_event`] moves to Now
+    /// Playing only when the engine confirms a matching track actually began.
+    fn complete_search_launch(&mut self) -> Task<Message> {
+        match &mut self.screen {
             Screen::Shelf(state) if !state.query.trim().is_empty() => state.clear_query(),
-            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => return Task::none(),
+            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+        }
+    }
+
+    /// Put exactly one search answer in the list the current place presents.
+    /// On a saved playlist page that means the playlist file; everywhere else
+    /// it means the live run. Neither route starts playback.
+    fn enqueue_search_track(&mut self, album: u64, row: usize) -> Task<Message> {
+        let item = match &self.screen {
+            Screen::Shelf(state) => state
+                .albums
+                .iter()
+                .find(|record| record.id == album)
+                .and_then(|record| {
+                    let queue = vm::album_queue(record, state.edition_choice.get(&album).copied());
+                    queue.items.get(row).cloned()
+                }),
+            Screen::Setup(_) | Screen::Blocked(_) => None,
         };
-        let now = self.go(|place| place.go(crate::lane::Destination::NowPlaying));
-        Task::batch([clear, now])
+        if let Some(item) = item {
+            if let Place::Playlist(id) = self.place {
+                if let Screen::Shelf(state) = &self.screen {
+                    let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
+                    self.playlists.append(id, entries, &state.library);
+                }
+            } else {
+                self.append_items_to_run(vec![item]);
+            }
+        }
+        Task::none()
+    }
+
+    fn search_action(&mut self, content: Content, action: crate::search::Action) -> Task<Message> {
+        if let Screen::Shelf(state) = &mut self.screen {
+            state.search_selection.select(content);
+            state.search_action = action;
+        }
+        match (content, action) {
+            (Content::SearchTrack { album, row }, crate::search::Action::Enqueue) => {
+                self.enqueue_search_track(album, row)
+            }
+            (_, crate::search::Action::Play) => self.activate_content(content),
+            (_, crate::search::Action::Enqueue) => Task::none(),
+        }
+    }
+
+    fn confirm_search(&mut self) -> Task<Message> {
+        let choice = match &self.screen {
+            Screen::Shelf(state) if state.search_open => state
+                .search_selection
+                .selected()
+                .and_then(|content| state.search_result_index(content).map(|_| content))
+                .map(|content| (content, state.search_action)),
+            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => None,
+        };
+        choice.map_or_else(Task::none, |(content, action)| {
+            self.search_action(content, action)
+        })
+    }
+
+    /// Give bare arrows to the open search chooser and retain their existing
+    /// volume/seek meaning everywhere else. The open chooser's raw-event seam
+    /// deliberately delivers Left/Right even while the query field owns the
+    /// caret, then this blur makes subsequent arrows unambiguous.
+    fn direction(&mut self, direction: crate::search::Direction) -> Task<Message> {
+        let searching = matches!(&self.screen, Screen::Shelf(state) if state.search_open);
+        if searching {
+            return match direction {
+                crate::search::Direction::Up => match &mut self.screen {
+                    Screen::Shelf(state) => state.move_search_selection(-1),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                },
+                crate::search::Direction::Down => match &mut self.screen {
+                    Screen::Shelf(state) => state.move_search_selection(1),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                },
+                crate::search::Direction::Left | crate::search::Direction::Right => {
+                    if let Screen::Shelf(state) = &mut self.screen
+                        && matches!(
+                            state.search_selection.selected(),
+                            Some(Content::SearchTrack { .. })
+                        )
+                    {
+                        let delta = if direction == crate::search::Direction::Left {
+                            -1
+                        } else {
+                            1
+                        };
+                        state.search_action = state.search_action.moved(delta);
+                    }
+                    blur_search()
+                }
+            };
+        }
+        match direction {
+            crate::search::Direction::Up => {
+                let target = self.player.step_volume(1);
+                self.send_volume(target);
+            }
+            crate::search::Direction::Down => {
+                let target = self.player.step_volume(-1);
+                self.send_volume(target);
+            }
+            crate::search::Direction::Left => {
+                let target = self.player.seek_by(-keys::SEEK_STEP_MS);
+                self.send_seek(target);
+            }
+            crate::search::Direction::Right => {
+                let target = self.player.seek_by(keys::SEEK_STEP_MS);
+                self.send_seek(target);
+            }
+        }
+        Task::none()
     }
 
     /// Everything that depends on **which modifiers are down**: the zoom, and
@@ -2409,42 +2693,38 @@ impl App {
     fn update_case(&mut self, message: &Message) -> Option<Task<Message>> {
         match *message {
             Message::WindowFocused(focused) => {
-                self.window_focused = focused;
                 if !focused {
                     self.case_rotation.release();
                 }
             }
             Message::CaseTick(now) => {
-                if self.window_focused
-                    && self.place == Place::NowPlaying
-                    && self.visualization.foreground == crate::visualizer::Foreground::JewelCase
-                {
+                if self.place == Place::NowPlaying && self.visualization.foreground.draws_case() {
                     self.case_rotation.tick(now);
                 }
             }
             Message::CasePressed(at)
                 if self.place == Place::NowPlaying
-                    && self.visualization.foreground
-                        == crate::visualizer::Foreground::JewelCase =>
+                    && self.visualization.foreground.draws_case() =>
             {
                 self.case_rotation.press(at);
             }
             Message::CaseDragged(at)
                 if self.place == Place::NowPlaying
-                    && self.visualization.foreground
-                        == crate::visualizer::Foreground::JewelCase =>
+                    && self.visualization.foreground.draws_case() =>
             {
                 self.case_rotation.drag(at);
             }
             Message::CaseReleased
                 if self.place == Place::NowPlaying
-                    && self.visualization.foreground
-                        == crate::visualizer::Foreground::JewelCase =>
+                    && self.visualization.foreground.draws_case() =>
             {
                 self.case_rotation.release();
             }
             Message::VisualizationForeground(foreground) if self.place == Place::NowPlaying => {
-                self.visualization.foreground = foreground;
+                if self.visualization.foreground != foreground {
+                    self.visualization.foreground = foreground;
+                    persist_visualization_foreground(foreground);
+                }
                 self.case_rotation.release();
             }
             Message::ToggleSpectrum if self.place == Place::NowPlaying => {
@@ -2463,8 +2743,7 @@ impl App {
     /// Pay the sample-copy cost only while an audio visualization is visible.
     fn sync_visualization_tap(&self) {
         self.playback.set_visualization_enabled(
-            self.window_focused
-                && self.place == Place::NowPlaying
+            self.place == Place::NowPlaying
                 && self.player.now_playing().is_some()
                 && self.visualization.spectrum,
         );
@@ -2729,8 +3008,7 @@ impl App {
                 }
             }
             Message::OpenPlaylist(id) => {
-                // A second event in a double-click arrives after the first
-                // has already navigated. It must not reread, reset or leave
+                // Repeating an explicit Open must not reread, reset or leave
                 // the page; opening a subject is not a disguised Back action.
                 if self.place == Place::Playlist(*id) {
                     return Some(Task::none());
@@ -2738,6 +3016,9 @@ impl App {
                 if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
+                    if let Screen::Shelf(state) = &mut self.screen {
+                        state.selection.select(Content::Playlist(*id));
+                    }
                     self.playlist_scroll = 0.0;
                     // The place changes, so an open menu goes with it
                     // (`go`'s rule).
@@ -2948,9 +3229,9 @@ impl App {
     }
 
     /// Ask for the playlist artwork belonging to the current place only.
-    /// An open playlist needs its header and visible track rows; the collection
-    /// root needs its tiles. Other places leave playlist collages to the lane's
-    /// viewport-aware background request.
+    /// An open playlist needs its header and visible track rows; the unsaved
+    /// state needs the same; the collection root needs its tiles. Other places
+    /// leave playlist collages to the lane's viewport-aware background request.
     fn request_playlist_art(&mut self) -> Task<Message> {
         let mut wanted: Vec<u64> = Vec::new();
         match self.place {
@@ -2982,6 +3263,36 @@ impl App {
                             .iter()
                             .filter_map(|row| row.album_id),
                     );
+                }
+            }
+            Place::Queue => {
+                if let Screen::Shelf(state) = &self.screen
+                    && let Some(queue) = self.player.queue()
+                {
+                    wanted.extend(views::queue::unsaved_art(state, &self.player));
+                    let window = views::playlist::row_window(
+                        queue.items.len(),
+                        views::playlist_page::layout(self.body_width())
+                            .rows_scroll(self.queue_scroll),
+                        self.body_height(),
+                    );
+                    for item in &queue.items[window.first..window.end] {
+                        let filed_under = item
+                            .album_artist
+                            .as_deref()
+                            .unwrap_or(queue.artist.as_str());
+                        let id = item.album.as_deref().and_then(|title| {
+                            state
+                                .albums
+                                .iter()
+                                .find(|album| {
+                                    album.title.as_deref() == Some(title)
+                                        && album.artist.label() == filed_under
+                                })
+                                .map(|album| album.id)
+                        });
+                        wanted.extend(id);
+                    }
                 }
             }
             _ => {}
@@ -3351,7 +3662,7 @@ impl App {
     }
 
     /// **`Resume`**: the run put back on where the band said it was — and the
-    /// one play gesture in the product that navigates.
+    /// one play gesture in the product that navigates immediately.
     ///
     /// **Two shapes**, because [`views::home::standing`] has two things the
     /// band can be describing and this must not disagree with it:
@@ -3376,10 +3687,10 @@ impl App {
     /// playing"*. Three things about that are deliberate:
     ///
     /// 1. **It is part of this press**, not a second gesture, and it is the
-    ///    front end's own act: it does not wait on [`Event::TrackStarted`] to
-    ///    land. A place that arrived a frame after the press would be the
-    ///    interface acknowledging you late, and the shell does not need the
-    ///    engine's permission to change which surface it is drawing.
+    ///    front end's own act: unlike a fresh album start, it does not wait on
+    ///    [`Event::TrackStarted`] to land. Resume names a run the engine is
+    ///    already holding (or one restored and validated at launch), while an
+    ///    album `Play` must not claim a dead or wholly unplayable run began.
     /// 2. **It happens last**, after the commands are away and after the
     ///    MPRIS publish, for the reason every other route here follows: this
     ///    codebase has been bitten by *announcing* a state before publishing
@@ -3597,6 +3908,15 @@ impl App {
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
+        // Each pin set belongs to one kind of current surface. A place change
+        // retires the old set before the new surface's request below fills its
+        // own; the handles return to the bounded LRU rather than being dropped.
+        if self.place != Place::Library {
+            state.thumbs.focus_wall(std::iter::empty());
+        }
+        if !matches!(self.place, Place::Playlists | Place::Playlist(_)) {
+            state.thumbs.focus_page(std::iter::empty());
+        }
         let mut ids = lane_records;
         if self.place == Place::Home {
             ids.extend(state.home_art());
@@ -3611,6 +3931,9 @@ impl App {
         }
         if open_unsaved {
             ids.extend(views::queue::unsaved_art(state, &self.player));
+        }
+        if let Some(id) = self.player.playing_album() {
+            ids.push(id);
         }
         ids.extend(quoted);
         state.request_thumbs_for(&ids)
@@ -3629,18 +3952,20 @@ impl App {
     /// `Option` compare and a hash lookup ([`Shelf::request_hero`] is the
     /// guard).
     ///
-    /// **Not gated on being in the place.** A hero is 4 MiB and one decode per
-    /// *record*, not per track, and gating it would mean the surface the owner
-    /// wants to leave running grows its artwork into place every time it is
-    /// opened. The budget for that trade is [`art::HERO_CACHE_ENTRIES`]'s.
+    /// **Not gated on being in the place while an album object is selected.**
+    /// That keeps the chosen 2D/3D surface ready to open. `None` deliberately
+    /// declines the decode: when no album object is drawn, paying artwork work
+    /// in advance would make its zero-cost claim false. Album detail remains
+    /// independent and always requests its own visible hero.
     fn request_hero(&mut self) -> Task<Message> {
         // A record page needs a detail-sized sleeve just as Now playing does.
         // Prefer the thing visibly occupying the page; the sounding record is
         // requested again as soon as that page is left.
-        let sounding = match self.place {
-            Place::Album(id) => Some(id),
-            _ => self.player.playing_album(),
-        };
+        let sounding = hero_target(
+            self.place,
+            self.player.playing_album(),
+            self.visualization.foreground,
+        );
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
@@ -3759,16 +4084,14 @@ impl App {
         self.set_lane(!self.lane_open)
     }
 
-    /// Put the lane in `open` — the marks at its foot,
-    /// <kbd>Ctrl</kbd>+<kbd>B</kbd>, and every road to the well
-    /// ([`Self::reach_the_well`]) — persisting the state and re-hanging the
+    /// Put the lane in `open` — from the marks at its foot or
+    /// <kbd>Ctrl</kbd>+<kbd>B</kbd> — persisting the state and re-hanging the
     /// wall.
     ///
     /// It does nothing at all when the window cannot hold the expanded lane
     /// ([`theme::sidebar_can_expand`]) or when the lane is already in the state
     /// asked for. That second guard is what keeps the re-hang to the presses
-    /// whose subject is the collection's width: reaching for the well while
-    /// the lane is already open must not touch the grid.
+    /// whose subject is the collection's width.
     fn set_lane(&mut self, open: bool) -> Task<Message> {
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
@@ -3782,60 +4105,29 @@ impl App {
         state.rehang()
     }
 
-    /// **Make the well reachable**, without asking for the caret: go to the
-    /// Library, and open the lane if the well is in it and it is shut.
-    ///
-    /// Both halves are consequences of the owner's decision to move search
-    /// into the lane, and both are about not typing into something you cannot
-    /// see:
-    ///
-    /// - **The Library**, because the well searches the collection and the
-    ///   collection is what answers. Type-anywhere has always filtered the wall
-    ///   from anywhere; until the well was resident, doing it from `Home` or a
-    ///   record's page filled a field that was not on screen and narrowed a
-    ///   wall that was not either. The lane put the field in every place, and
-    ///   this puts the wall back under it.
-    /// - **The lane**, because at [`theme::SIDEBAR_RAIL_W`] there is no field
-    ///   to focus until it opens. One frame, no tween (ADR-0030 §3.1), so the
-    ///   caret lands in the same frame the key did.
-    ///
-    /// Below [`theme::SIDEBAR_FLOOR`] the second half is a no-op by
-    /// [`Self::set_lane`]'s own guard, which is correct: there the well is in
-    /// the strip ([`theme::strip_holds_the_well`]) and the Library is the only
-    /// place that draws one.
-    fn reach_the_well(&mut self) -> Task<Message> {
-        if !matches!(self.screen, Screen::Shelf(_)) {
-            return Task::none();
-        }
-        let there = self.go(|place| place.go(crate::lane::Destination::Library));
-        let open = self.set_lane(true);
-        Task::batch([there, open])
-    }
-
-    /// <kbd>/</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd> and the collapsed lane's
-    /// magnifier: reach the well, then put the caret in it.
+    /// <kbd>/</kbd> and <kbd>Ctrl</kbd>+<kbd>F</kbd>: focus the resident app-bar
+    /// well without changing the place underneath it.
     fn focus_the_well(&mut self) -> Task<Message> {
-        if !matches!(self.screen, Screen::Shelf(_)) {
+        let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
+        };
+        if !state.query.trim().is_empty() {
+            state.search_open = true;
         }
-        Task::batch([self.reach_the_well(), text_input::focus(search_id())])
+        self.menu = None;
+        self.status_open = false;
+        text_input::focus(search_id())
     }
 
-    /// **Type anywhere** (ADR-0017 §1.2) — the shell's half of it, which
-    /// exists because the owner moved the well into the lane.
-    ///
-    /// The shelf still appends the text, filters and takes the caret
-    /// ([`Shelf::type_into_query`]). What the shell adds, *first*, is a
-    /// visible field to append into and the wall the filter is about. Every
-    /// road to the query goes through [`Self::reach_the_well`], so the letter,
-    /// the slash and the lane's magnifier all land in the same state.
+    /// **Type anywhere** (ADR-0017 §1.2): append into the resident app-bar
+    /// field and reveal results over the current place.
     fn type_anywhere(&mut self, text: &str) -> Task<Message> {
-        let reach = self.reach_the_well();
-        let typed = match &mut self.screen {
+        self.menu = None;
+        self.status_open = false;
+        match &mut self.screen {
             Screen::Shelf(state) => state.type_into_query(text),
             Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
-        };
-        Task::batch([reach, typed])
+        }
     }
 
     /// **Go somewhere**, by whichever door was pressed.
@@ -3882,8 +4174,8 @@ impl App {
         Task::none()
     }
 
-    /// **Open a record's page** — a tile press, or source navigation from Now
-    /// playing and the persistent bar.
+    /// **Open a record's page** — an explicit Open control, or source
+    /// navigation from Now playing and the persistent bar.
     ///
     /// Two things happen and they are deliberately separable: the *place*
     /// changes, and the wall remembers which record you left it for
@@ -3892,8 +4184,8 @@ impl App {
     /// back, the wall is where you left it with the record you were reading
     /// marked, so returning is *return* rather than re-find.
     fn open_album(&mut self, id: u64) -> Task<Message> {
-        // The second event of a double-click sees the place installed by the
-        // first. Leave every bit of page and shelf state untouched.
+        // Repeating an explicit Open leaves every bit of page and shelf state
+        // untouched.
         if self.place == Place::Album(id) {
             return Task::none();
         }
@@ -3901,6 +4193,7 @@ impl App {
             return Task::none();
         };
         state.opened = Some(id);
+        state.selection.select(Content::Album(id));
         // The place changes, so an open menu and any drag go with it
         // (`go`'s rule).
         self.menu = None;
@@ -4005,6 +4298,11 @@ impl App {
             }
             return Task::none();
         }
+        if let Screen::Shelf(state) = &mut self.screen
+            && state.search_open
+        {
+            return state.clear_query();
+        }
         // The playlist panel floats *over* every place it exists in, so its
         // layers peel first: the name field, a pick in flight, the panel
         // itself — one per press (ADR-0024 §5–§6, as amended by doc 09).
@@ -4048,7 +4346,12 @@ impl App {
     /// Fold a bridge message into the state machine, with a stdout trace of
     /// the notable per-track moments (matching the `[scan]`/`[config]` log
     /// style).
-    fn apply_player_event(&mut self, message: PlayerEvent) {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive fold over the engine protocol; splitting event arms would hide \
+                  the shared apply/publish order that makes engine events playback truth"
+    )]
+    fn apply_player_event(&mut self, message: PlayerEvent) -> Task<Message> {
         // Whether a seek we asked for is still awaiting its confirming
         // event. MPRIS wants a `Seeked` signal when the position jumps for a
         // reason a polling client could not have predicted, and the engine's
@@ -4061,6 +4364,7 @@ impl App {
         // "the light moved" is a comparison rather than a guess (see
         // [`Self::warm_lamp`]).
         let lit = self.player.playing_album();
+        let mut show_now_playing = false;
         match message {
             PlayerEvent::Engine(event) => {
                 let volume_confirmed = matches!(&event, Event::VolumeChanged { .. });
@@ -4096,6 +4400,17 @@ impl App {
                                 }
                             }
                         }
+                        // Command acceptance is not playback truth. Spend the
+                        // pending destination only when this event belongs to
+                        // the run the deliberate start requested.
+                        if self
+                            .show_on_start
+                            .as_ref()
+                            .is_some_and(|paths| paths.contains(path))
+                        {
+                            self.show_on_start = None;
+                            show_now_playing = true;
+                        }
                     }
                     Event::TrackFailed { path, reason } => {
                         println!("[playback] track skipped: {} ({reason})", path.display());
@@ -4109,6 +4424,7 @@ impl App {
                     }
                     Event::QueueEnded => {
                         println!("[playback] queue ended");
+                        self.show_on_start = None;
                         // The run the history described is over — the third
                         // of P2's three ends for an edit history (next
                         // edit, navigation, the run ending).
@@ -4164,11 +4480,18 @@ impl App {
             }
             PlayerEvent::Closed => {
                 println!("[playback] engine shut down");
+                self.show_on_start = None;
+                self.volume_wheel_settles = None;
                 self.player.engine_closed();
             }
         }
         self.warm_lamp(lit, Instant::now());
         self.publish_mpris(seek_confirmed);
+        if show_now_playing {
+            self.go(|place| place.go(crate::lane::Destination::NowPlaying))
+        } else {
+            Task::none()
+        }
     }
 
     /// Write the ReplayGain setting the engine has just confirmed, if it moved.
@@ -4196,7 +4519,7 @@ impl App {
     /// into config writes, while drag, keyboard and MPRIS volume gestures all
     /// share this one confirmation-driven persistence path.
     fn persist_volume(&mut self) {
-        if self.player.volume_gesture_active() {
+        if self.player.volume_gesture_active() || self.volume_wheel_settles.is_some() {
             return;
         }
         let volume = self.player.volume();
@@ -4325,9 +4648,18 @@ impl App {
                 // it once more when it arrives.
                 self.persist_volume();
             }
-            Message::VolumeStep(steps) => {
+            Message::VolumeWheel(steps) => {
                 let target = self.player.step_volume(steps);
                 self.send_volume(target);
+                if target.is_some() && self.player.engine_ready() {
+                    self.volume_wheel_settles = Some(Instant::now() + VOLUME_WHEEL_SETTLE);
+                }
+            }
+            Message::VolumeWheelSettled(now) => {
+                if self.volume_wheel_settles.is_some_and(|at| now >= at) {
+                    self.volume_wheel_settles = None;
+                    self.persist_volume();
+                }
             }
             Message::SetVolume(position) => {
                 let target = self.player.set_volume(position);
@@ -4399,34 +4731,45 @@ impl App {
     }
 
     /// Queue an album (the selected edition's tracks, in the view model's
-    /// disc/track order) and play it. State stays untouched until events
-    /// confirm — only the request-side notes are recorded (see `player.rs`).
-    fn play_album(&mut self, id: u64) {
+    /// disc/track order), ask it to play, and arrange to show Now Playing only
+    /// after the engine confirms that one of its tracks began.
+    fn play_album(&mut self, id: u64) -> bool {
         let Screen::Shelf(state) = &self.screen else {
-            return;
+            return false;
         };
         let Some(album) = state.albums.iter().find(|album| album.id == id) else {
-            return;
+            return false;
         };
         let queue = vm::album_queue(album, state.edition_choice.get(&id).copied());
         if queue.is_empty() {
-            return;
+            return false;
         }
-        // **The shuffle property applies to a new play gesture**, and it is
-        // applied in exactly one place ([`Self::send_run`]): press `Play` on a
-        // record with shuffle on and the record plays shuffled, with its own
-        // sleeve order kept as the order to come back to. One construction,
-        // two uses — the payload the engine is sent and the list the queue
-        // panel shows come from the same value, so they cannot describe
-        // different music (see [`vm::QueueVm`]).
+        self.start_and_show(queue)
+    }
+
+    /// One request path for a run whose successful start should become the
+    /// visible Now Playing place. Channel acceptance is necessary but not
+    /// sufficient: the path set is held until a matching `TrackStarted`.
+    fn start_and_show(&mut self, queue: vm::QueueVm) -> bool {
+        let paths = queue.paths();
         if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
+            self.show_on_start = Some(paths);
+            // A queue where there was none moves `CanPlay`, and that is the
+            // one MPRIS-visible change that arrives without an engine event.
+            self.publish_mpris(false);
+            true
         } else {
             self.player.engine_closed();
+            false
         }
-        // A queue where there was none moves `CanPlay`, and that is the one
-        // MPRIS-visible change that arrives without an engine event.
-        self.publish_mpris(false);
+    }
+
+    /// Apply the same confirmation boundary to a search needle-drop, whose
+    /// queue may already have been held and therefore did not pass through
+    /// [`Self::start_and_show`].
+    fn show_current_run_on_start(&mut self) {
+        self.show_on_start = self.player.queue().map(vm::QueueVm::paths);
     }
 
     /// **Append the record to the run** — a shift-click on its sleeve (or on
@@ -4479,35 +4822,35 @@ impl App {
     /// Nothing on screen moves here. The dot follows `TrackStarted` exactly as
     /// it does for every other way of starting a track — never the click, per
     /// ADR-0014's front-end contract.
-    fn play_track(&mut self, id: u64, row: usize) {
+    fn play_track(&mut self, id: u64, row: usize) -> bool {
         let Screen::Shelf(state) = &self.screen else {
-            return;
+            return false;
         };
         let Some(album) = state.albums.iter().find(|album| album.id == id) else {
-            return;
+            return false;
         };
         let chosen = state.edition_choice.get(&id).copied();
         let Some(edition) = vm::selected_edition(album, chosen) else {
-            return;
+            return false;
         };
         // The list the row was drawn from and the list that would be queued
         // come from the same `selected_edition`, so "is this album the queue"
         // is asked about exactly what the user clicked.
         let Some(decision) = self.player.play_from(&edition.tracks, row) else {
-            return;
+            return false;
         };
         let position = match decision {
             player::PlayFrom::Jump { position } => position,
             player::PlayFrom::Requeue { position } => {
                 let queue = vm::album_queue(album, chosen);
                 if queue.is_empty() {
-                    return;
+                    return false;
                 }
                 // The row the click named, handed to the one arranger: with
                 // shuffle off it is the position to jump to; with shuffle on
                 // the track is hoisted to the front and the answer is 0.
                 let Some(at) = self.send_run(queue, Some(position)) else {
-                    return;
+                    return false;
                 };
                 at
             }
@@ -4516,11 +4859,13 @@ impl App {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
+            return false;
         }
         // A queue where there was none moves `CanPlay`, exactly as in
         // `play_album`, and that is the one MPRIS-visible change that arrives
         // without an engine event.
         self.publish_mpris(false);
+        true
     }
 
     /// **Send a run, and say how it is to be walked.**
@@ -4551,6 +4896,9 @@ impl App {
     /// take the queue, which is the caller's cue to stop rather than to send a
     /// transport command into a run that does not exist.
     fn send_run(&mut self, queue: vm::QueueVm, lead: Option<usize>) -> Option<usize> {
+        // Any new run supersedes a still-unconfirmed start. A late event from
+        // that run must not navigate after the listener chose another one.
+        self.show_on_start = None;
         let origin = run_origin(&queue);
         // **A fresh pass per run**, and only when the mode is on. The same seed
         // over a re-played record would be the same shuffle twice, which is the
@@ -5014,8 +5362,7 @@ impl App {
         };
         let id = self.player.playing_album()?;
         let image = state
-            .thumbs
-            .peek(&id)
+            .thumb(id)
             .cloned()
             .or_else(|| state.hero(id).map(|hero| hero.handle.clone()));
         Some(image.map_or(
@@ -5306,8 +5653,12 @@ impl App {
             (Screen::Shelf(_), Place::NowPlaying)
         )
         .then_some(self.visualization);
+        let Screen::Shelf(state) = &self.screen else {
+            unreachable!("setup and blocked screens return before app-bar composition")
+        };
         let screen: Element<'_, Message> = column![
             views::app_bar::view(
+                state,
                 self.window.width,
                 hangs_works,
                 visualization,
@@ -5333,6 +5684,19 @@ impl App {
             ),
         ]
         .into();
+        let whole: Element<'_, Message> = match &self.screen {
+            Screen::Shelf(state) if state.search_open => iced::widget::stack![
+                whole,
+                views::search::layer(
+                    state,
+                    &self.player,
+                    self.window,
+                    matches!(self.place, Place::Playlist(_)),
+                ),
+            ]
+            .into(),
+            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => whole,
+        };
         let whole: Element<'_, Message> = if self.status_open {
             match &self.screen {
                 Screen::Shelf(state) => iced::widget::stack![
@@ -5431,11 +5795,12 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let mut subs = vec![
-            // Raw events rather than `keyboard::on_key_press`, because the
-            // capture status is the focus rule: a key a focused text field
-            // consumed is not a shortcut (see `crate::keys`).
-            iced::event::listen_with(|event, status, _window| match event {
+        fn event_message(
+            event: iced::Event,
+            status: iced::event::Status,
+            _window: window::Id,
+        ) -> Option<Message> {
+            match event {
                 iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                     keys::binding_for(&key, modifiers, keys::Focus::from(status))
                 }
@@ -5452,10 +5817,7 @@ impl App {
                 )) => Some(Message::PointerReleased),
                 // The zoom's pointer half. iced 0.13 reports no modifiers on a
                 // wheel event and its `scrollable` does not consult them
-                // either, so both halves have to be assembled here: the
-                // modifier state is tracked from its own event, and the notch
-                // is answered against it in the update loop
-                // ([`keys::wheel_binding`]).
+                // either, so both halves have to be assembled here.
                 iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                     Some(Message::ModifiersChanged(modifiers))
                 }
@@ -5465,11 +5827,6 @@ impl App {
                         | iced::mouse::ScrollDelta::Pixels { y, .. } => y,
                     }))
                 }
-                // The window as a drop target (doc 11 §5 P1) — what the
-                // toolkit actually delivers: winit 0.30 publishes these on
-                // X11 and not on Wayland (see [`Message::FileDropped`]).
-                // The setup screen answers them; everywhere else they fall
-                // through the shelf's own arm to nothing.
                 iced::Event::Window(window::Event::FileDropped(path)) => {
                     Some(Message::FileDropped(path))
                 }
@@ -5482,7 +5839,43 @@ impl App {
                     Some(Message::WindowFocused(false))
                 }
                 _ => None,
-            }),
+            }
+        }
+
+        fn search_event_message(
+            event: iced::Event,
+            status: iced::event::Status,
+            window: window::Id,
+        ) -> Option<Message> {
+            if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
+                &event
+            {
+                // The visible chooser, not the caret, owns its advertised bare
+                // arrow grammar. This is resolved before capture status so a
+                // focused well cannot swallow Left/Right.
+                if let Some(direction) = crate::search::chooser_direction(key, *modifiers) {
+                    return Some(Message::Direction(direction));
+                }
+                // `text_input` captures Escape after blurring itself. Search
+                // owns that first press while its chooser stands, so dismissal
+                // must be heard before the focused-field filter drops it.
+                if key == &keyboard::Key::Named(keyboard::key::Named::Escape) {
+                    return Some(Message::DismissSearch);
+                }
+            }
+            event_message(event, status, window)
+        }
+
+        let events = if matches!(&self.screen, Screen::Shelf(state) if state.search_open) {
+            iced::event::listen_with(search_event_message)
+        } else {
+            iced::event::listen_with(event_message)
+        };
+        let mut subs = vec![
+            // Raw events rather than `keyboard::on_key_press`, because the
+            // capture status is the focus rule: a key a focused text field
+            // consumed is not a shortcut (see `crate::keys`).
+            events,
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
             // The close request, answered by the shell rather than by the
             // toolkit: see `run`'s `exit_on_close_request(false)`.
@@ -5504,16 +5897,23 @@ impl App {
         if self.moving() {
             subs.push(iced::time::every(motion::TICK).map(|_| Message::MotionTick(Instant::now())));
         }
+        if self.volume_wheel_settles.is_some() {
+            subs.push(
+                iced::time::every(Duration::from_millis(40))
+                    .map(|_| Message::VolumeWheelSettled(Instant::now())),
+            );
+        }
         // Now Playing owns the only intentionally continuous visuals in Baz:
         // the turning case and the optional delivered-audio background. The
-        // timer is absent for plain cover art with the spectrum off, and is
-        // always absent while unfocused or without a sounding record.
-        if self.window_focused
-            && self.place == Place::NowPlaying
-            && self.player.now_playing().is_some()
-            && (self.visualization.spectrum
-                || self.visualization.foreground == crate::visualizer::Foreground::JewelCase)
-        {
+        // timer is absent for plain cover/no-object with the spectrum off and
+        // always absent away from this visible place or without a sounding
+        // record. Keyboard focus is deliberately irrelevant: Now Playing is
+        // ambient content meant to remain alive on a second monitor.
+        if visualization_clock(
+            self.place,
+            self.player.now_playing().is_some(),
+            self.visualization,
+        ) {
             subs.push(
                 iced::time::every(crate::jewel_case::TICK)
                     .map(|_| Message::CaseTick(Instant::now())),
@@ -5679,6 +6079,113 @@ fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, iced_image::Handle) {
     )
 }
 
+/// The thumbnail cache with an un-evictable resident tier for what the current
+/// frame can show.
+///
+/// The old single LRU could evict a visible sleeve when lane, playlist or
+/// artist work filled the same 64 slots. Worse, the wall's unchanged-range
+/// guard then declined to request it again. Prepared disk art made the reload
+/// cheap but did not prevent the visible blank. This keeps the 64-entry LRU
+/// for everything off screen and moves current targets into a separate map;
+/// leaving the target returns a handle to the LRU immediately.
+struct ThumbCache {
+    recent: LruCache<u64, iced_image::Handle>,
+    resident: HashMap<u64, iced_image::Handle>,
+    wall: HashSet<u64>,
+    chrome: HashSet<u64>,
+    page: HashSet<u64>,
+}
+
+impl ThumbCache {
+    fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            recent: LruCache::new(capacity),
+            resident: HashMap::new(),
+            wall: HashSet::new(),
+            chrome: HashSet::new(),
+            page: HashSet::new(),
+        }
+    }
+
+    fn peek(&self, id: u64) -> Option<&iced_image::Handle> {
+        self.resident.get(&id).or_else(|| self.recent.peek(&id))
+    }
+
+    fn touch(&mut self, id: u64) -> bool {
+        self.resident.contains_key(&id) || self.recent.get(&id).is_some()
+    }
+
+    fn put(&mut self, id: u64, handle: iced_image::Handle) {
+        if self.is_pinned(id) {
+            self.recent.pop(&id);
+            self.resident.insert(id, handle);
+        } else {
+            self.resident.remove(&id);
+            self.recent.put(id, handle);
+        }
+    }
+
+    fn clear_handles(&mut self) {
+        self.recent.clear();
+        self.resident.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.recent.len() + self.resident.len()
+    }
+
+    fn resident_len(&self) -> usize {
+        self.resident.len()
+    }
+
+    fn focus_wall(&mut self, ids: impl IntoIterator<Item = u64>) {
+        self.wall = ids.into_iter().collect();
+        self.reconcile();
+    }
+
+    fn focus_chrome(&mut self, ids: impl IntoIterator<Item = u64>) {
+        self.chrome = ids.into_iter().collect();
+        self.reconcile();
+    }
+
+    fn focus_page(&mut self, ids: impl IntoIterator<Item = u64>) {
+        self.page = ids.into_iter().collect();
+        self.reconcile();
+    }
+
+    fn is_pinned(&self, id: u64) -> bool {
+        self.wall.contains(&id) || self.chrome.contains(&id) || self.page.contains(&id)
+    }
+
+    fn reconcile(&mut self) {
+        let wanted: HashSet<u64> = self
+            .wall
+            .iter()
+            .chain(&self.chrome)
+            .chain(&self.page)
+            .copied()
+            .collect();
+        let leaving: Vec<u64> = self
+            .resident
+            .keys()
+            .filter(|id| !wanted.contains(id))
+            .copied()
+            .collect();
+        for id in leaving {
+            if let Some(handle) = self.resident.remove(&id) {
+                self.recent.put(id, handle);
+            }
+        }
+        for id in wanted {
+            if !self.resident.contains_key(&id)
+                && let Some(handle) = self.recent.pop(&id)
+            {
+                self.resident.insert(id, handle);
+            }
+        }
+    }
+}
+
 /// The bounded thumbnail work list.
 ///
 /// Foreground requests replace one another: after a fast scroll, covers from
@@ -5762,6 +6269,11 @@ impl ThumbJobs {
 /// Fields the view layer reads are `pub(crate)`; the ones the update loop
 /// owns alone (in-flight decodes, the scan channel, click timing) stay
 /// private — [`crate::views`] draws this state, it never steers it.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the booleans are independent UI facts (scan, hover, lane, and \
+              chooser visibility), not variants of one state machine"
+)]
 pub(crate) struct Shelf {
     /// The open library: the search index the counts and the query run over.
     pub(crate) library: Library,
@@ -5793,35 +6305,41 @@ pub(crate) struct Shelf {
     /// it holds. Contiguous and in wall order, so a shelf is a range rather
     /// than a per-album lookup.
     pub(crate) groups: Vec<GroupVm>,
-    /// Indices into `albums` that survive the current query, in wall order.
+    /// Indices into `albums` drawn by the wall, in wall order. App-bar search
+    /// covers the current place instead of filtering this collection.
     pub(crate) visible: Vec<usize>,
     /// How many of each shelf's albums survived it, in `groups` order — what
     /// [`shelf::Shelves`] lays the wall out from.
     visible_counts: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
-    /// The **Songs** answers for the live query (doc 09 §5): the top
-    /// [`vm::SONGS`] ranked matching tracks, rebuilt with the filter in
-    /// [`Shelf::refilter`] so the section and the wall answer one query.
-    /// Empty while the query is blank — the section is then absent, not
-    /// empty.
+    /// Relevance-ordered track answers for the live app-bar query. The result
+    /// surface virtualizes this complete bounded set instead of truncating it
+    /// to the old Library Songs section.
     pub(crate) songs: Vec<vm::SongVm>,
-    /// Which songs row the pointer is on, if any — the record page's
-    /// [`App::hovered_album_row`] mechanism, for the same toolkit reason:
-    /// the row's reserved `+` is a sibling the row itself cannot style.
-    pub(crate) hovered_song: Option<usize>,
-    /// **The record the wall was last left for**, if any — the tile mark, and
-    /// the whole of what survives `selection.rs`.
-    ///
-    /// It is not a selection. Nothing acts on it, nothing opens because of it,
-    /// and it does not decide what any other surface draws; it is one 2 px rule
-    /// under one wall label, and its entire job is that coming back from a
-    /// record's page lands you looking at the record you came back from
-    /// (ADR-0022). The state machine that used to hold it also held *whether a
-    /// column was on screen*, which is the fact that no longer exists.
+    /// Relevance-ordered album answers for the dropover, as stable wall ids.
+    pub(crate) search_albums: Vec<u64>,
+    /// Whether the non-empty query's dropover is currently exposed.
+    pub(crate) search_open: bool,
+    /// The selected track row's inline action. Albums keep their established
+    /// activation and explicit Open grammar instead.
+    pub(crate) search_action: crate::search::Action,
+    /// Search's own selection/activation clock. It is separate from the place
+    /// underneath so dismissing the dropover exposes that unchanged mark.
+    pub(crate) search_selection: crate::selection::State,
+    /// Absolute offset and measured height of the dropover's sole scroller.
+    pub(crate) search_scroll_offset: f32,
+    pub(crate) search_viewport_h: f32,
+    /// **The record the wall was last left for**, if any. This remains the
+    /// wall's navigation anchor; [`Self::selection`] separately owns the
+    /// visible/actionable selection restored by ADR-0022's 2026-08-12
+    /// amendment. Explicitly opening a record updates both facts, while
+    /// selecting one without opening updates only the latter.
     ///
     /// Session-scoped, like everything else about where the wall is standing.
     pub(crate) opened: Option<u64>,
+    /// The one selection/activation machine shared by playable tiles and rows.
+    pub(crate) selection: crate::selection::State,
     /// Which format of an album the user picked, for albums where they
     /// picked one. Absent = the ranked-best edition (see
     /// [`vm::selected_edition`]).
@@ -5832,8 +6350,10 @@ pub(crate) struct Shelf {
     /// home is a column in the library database anyway. Deferred in
     /// ADR-0007 rather than bolted on here.
     pub(crate) edition_choice: HashMap<u64, vm::EditionKey>,
-    /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
-    pub(crate) thumbs: LruCache<u64, iced_image::Handle>,
+    /// Decoded thumbnails: current-frame residents plus the bounded off-screen
+    /// LRU. Access goes through [`Self::thumb`] so a view cannot accidentally
+    /// bypass the residency guarantee.
+    thumbs: ThumbCache,
     /// Small, bounded cache of local artist portraits visited this session.
     artist_images: LruCache<u64, iced_image::Handle>,
     /// Artist portrait decodes currently running off the UI thread.
@@ -5977,9 +6497,8 @@ pub(crate) struct Shelf {
     /// nothing to subtract but the index rail's lane (see
     /// [`Shelf::grid_width`]).
     ///
-    /// Crate-visible because the Library strip reads it to answer one
-    /// question the strip's *own* width cannot: whether the returns lane can
-    /// hold the search well ([`theme::strip_holds_the_well`]).
+    /// Crate-visible because the view layer resolves the app bar, lane and
+    /// virtualized surfaces from this same measurement.
     pub(crate) window_w: f32,
     /// **Whether the returns lane stands open** (ADR-0030 §3), as the config
     /// remembers it.
@@ -6039,6 +6558,10 @@ impl Shelf {
     /// pragma. `adopt_roots`, `persist_roots` and the scan all sit *after* the
     /// open, so a refused library leaves the config file, the database and the
     /// listener's folders exactly as they were.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "opening the shelf initializes its complete session view model in one auditable place"
+    )]
     fn open(
         roots: Vec<PathBuf>,
         group_key: GroupKey,
@@ -6086,10 +6609,16 @@ impl Shelf {
             visible_counts: Vec::new(),
             query: String::new(),
             songs: Vec::new(),
-            hovered_song: None,
+            search_albums: Vec::new(),
+            search_open: false,
+            search_action: crate::search::Action::Play,
+            search_selection: crate::selection::State::default(),
+            search_scroll_offset: 0.0,
+            search_viewport_h: 0.0,
             opened: None,
+            selection: crate::selection::State::default(),
             edition_choice: HashMap::new(),
-            thumbs: LruCache::new(
+            thumbs: ThumbCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
             ),
             artist_images: LruCache::new(
@@ -6179,16 +6708,23 @@ impl Shelf {
         match message {
             Message::SearchChanged(query) => {
                 self.query = query;
+                self.search_selection.clear();
                 self.refilter();
-                self.scroll_offset = 0.0;
-                Task::batch([
-                    scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-                    self.request_visible_thumbs(),
-                ])
+                self.search_open = !self.query.trim().is_empty();
+                self.search_scroll_offset = 0.0;
+                scrollable::scroll_to(
+                    views::search::scroll_id(),
+                    AbsoluteOffset { x: 0.0, y: 0.0 },
+                )
             }
             // **The `×`, which is `Esc`'s pointer route** — the identical
             // function, so the two cannot drift (ADR-0036 §4).
             Message::ClearSearch => self.clear_query(),
+            Message::SearchScrolled(viewport) => {
+                self.search_scroll_offset = viewport.absolute_offset().y;
+                self.search_viewport_h = viewport.bounds().height;
+                Task::none()
+            }
             // **Type anywhere** has no arm here any more. Its message is
             // answered by the shell (`App::type_anywhere`), which reaches the
             // well — the Library, and the lane opened if the well is in it —
@@ -6266,18 +6802,6 @@ impl Shelf {
                 self.edition_choice.insert(id, key);
                 Task::none()
             }
-            Message::SongRowEntered(row) => {
-                self.hovered_song = Some(row);
-                Task::none()
-            }
-            // Only if it is still the row that left, for the reason the
-            // queue rows' pair is order-independent.
-            Message::SongRowLeft(row) => {
-                if self.hovered_song == Some(row) {
-                    self.hovered_song = None;
-                }
-                Task::none()
-            }
             Message::ThumbLoaded(id, edge, elapsed, decoded) => {
                 self.finish_thumb(id, edge, elapsed, decoded)
             }
@@ -6316,13 +6840,10 @@ impl Shelf {
         }
     }
 
-    /// **<kbd>Enter</kbd>'s album-level fall-through**: the record the wall
-    /// was last left for when no query stands, else the top-ranked matching
-    /// album — reached only when [`Self::enter_drops_needle`] answered
-    /// nothing, which with a query standing means the top song could not be
-    /// resolved onto its record (doc 09 §5 retargeted the with-query case to
-    /// the song; this keeps the with-query album answer as the degradation
-    /// rather than a dead key).
+    /// **<kbd>Enter</kbd>'s defensive album-level fall-through** outside the
+    /// open chooser: the record the wall was last left for when no query
+    /// stands, else the top-ranked matching album. A normal standing query has
+    /// the chooser open and never reaches this older compatibility path.
     ///
     /// The order is ADR-0017 §1.2's table read left to right — *play the
     /// top-ranked match; play the selected album* — and the fall-through is
@@ -6339,8 +6860,8 @@ impl Shelf {
     /// about a search index they cannot see. If the ranked album is somehow
     /// not on the wall, the wall's own first survivor is played instead, which
     /// is the record under the top-left corner of the collection.
-    /// **What <kbd>Enter</kbd> needle-drops** while a query stands: the Songs
-    /// section's own first row — the top-ranked matching track (ADR-0021),
+    /// **What the defensive query fallback needle-drops**: the Songs section's
+    /// own first row — the top-ranked matching track (ADR-0021),
     /// as (its record's wall id, its row in the selected edition) for
     /// [`App::play_track`] to spend (doc 09 §5; ADR-0023 §2's amendment).
     ///
@@ -6359,6 +6880,89 @@ impl Shelf {
         let chosen = self.edition_choice.get(&album.id).copied();
         let row = vm::song_row(album, chosen, song)?;
         Some((album.id, row))
+    }
+
+    /// The selected search row, only while it still belongs to the current
+    /// ranked result set. A query edit may make an old content key stale; Enter
+    /// must never activate a row no longer on screen.
+    fn selected_search_track(&self) -> Option<Content> {
+        let Content::SearchTrack { album, row } = self.search_selection.selected()? else {
+            return None;
+        };
+        self.songs
+            .iter()
+            .any(|song| {
+                if song.album_id != album {
+                    return false;
+                }
+                let Some(record) = self.albums.iter().find(|record| record.id == album) else {
+                    return false;
+                };
+                let chosen = self.edition_choice.get(&album).copied();
+                vm::song_row(record, chosen, song) == Some(row)
+            })
+            .then_some(Content::SearchTrack { album, row })
+    }
+
+    pub(crate) fn search_result_count(&self) -> usize {
+        self.songs.len() + self.search_albums.len()
+    }
+
+    pub(crate) fn search_result_content(&self, index: usize) -> Option<Content> {
+        if let Some(song) = self.songs.get(index) {
+            let album = self.albums.iter().find(|album| album.id == song.album_id)?;
+            let chosen = self.edition_choice.get(&album.id).copied();
+            let row = vm::song_row(album, chosen, song)?;
+            return Some(Content::SearchTrack {
+                album: album.id,
+                row,
+            });
+        }
+        self.search_albums
+            .get(index.checked_sub(self.songs.len())?)
+            .copied()
+            .map(Content::Album)
+    }
+
+    fn search_result_index(&self, content: Content) -> Option<usize> {
+        (0..self.search_result_count())
+            .find(|index| self.search_result_content(*index) == Some(content))
+    }
+
+    fn move_search_selection(&mut self, delta: i32) -> Task<Message> {
+        let selected = self
+            .search_selection
+            .selected()
+            .and_then(|content| self.search_result_index(content));
+        let Some(index) = crate::search::moved_index(selected, self.search_result_count(), delta)
+        else {
+            return Task::none();
+        };
+        let Some(content) = self.search_result_content(index) else {
+            return Task::none();
+        };
+        self.search_selection.select(content);
+        self.search_action = crate::search::Action::Play;
+
+        let top = crate::search::result_top(index, self.songs.len());
+        let bottom = top + crate::search::ROW_H;
+        let viewport = self.search_viewport_h;
+        if viewport <= 0.0 {
+            return blur_search();
+        }
+        let target = if top < self.search_scroll_offset {
+            Some(top)
+        } else if bottom > self.search_scroll_offset + viewport {
+            Some((bottom - viewport).max(0.0))
+        } else {
+            None
+        };
+        Task::batch([
+            blur_search(),
+            target.map_or_else(Task::none, |y| {
+                scrollable::scroll_to(views::search::scroll_id(), AbsoluteOffset { x: 0.0, y })
+            }),
+        ])
     }
 
     fn enter_plays(&self) -> Option<u64> {
@@ -6395,12 +6999,16 @@ impl Shelf {
     /// *field* will handle, continues the word instead of inserting before it.
     fn type_into_query(&mut self, text: &str) -> Task<Message> {
         self.query.push_str(text);
+        self.search_selection.clear();
         self.refilter();
-        self.scroll_offset = 0.0;
+        self.search_open = true;
+        self.search_scroll_offset = 0.0;
         Task::batch([
             text_input::focus(search_id()),
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-            self.request_visible_thumbs(),
+            scrollable::scroll_to(
+                views::search::scroll_id(),
+                AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
         ])
     }
 
@@ -6415,12 +7023,16 @@ impl Shelf {
     /// abandoned a search wants the transport back.
     fn clear_query(&mut self) -> Task<Message> {
         self.query.clear();
+        self.search_selection.clear();
         self.refilter();
-        self.scroll_offset = 0.0;
+        self.search_open = false;
+        self.search_scroll_offset = 0.0;
         Task::batch([
             blur_search(),
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-            self.request_visible_thumbs(),
+            scrollable::scroll_to(
+                views::search::scroll_id(),
+                AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
         ])
     }
 
@@ -6457,7 +7069,7 @@ impl Shelf {
             // A tighter density deliberately decodes fewer pixels. Moving
             // back to a looser one must not stretch those smaller handles;
             // the prepared disk cache makes refilling this bounded LRU cheap.
-            self.thumbs.clear();
+            self.thumbs.clear_handles();
             self.thumb_px.clear();
             self.last_requested = None;
         }
@@ -6851,6 +7463,9 @@ impl Shelf {
         // what.
         self.collection = vm::Collection::count(&self.albums, self.library.len());
         (self.artist_facts, self.artist_also_on) = vm::artist_inventory(&self.albums);
+        // Rebuilding changes the album behind every virtual position even
+        // though app-bar search itself no longer changes the wall.
+        self.forget_requested();
         self.refilter();
         // The album ids survive a re-arrangement (see above), so the fold does
         // too — but a *rescan* can add and remove records, and the lane must
@@ -6946,25 +7561,19 @@ impl Shelf {
         self.rebuild_lane_recent();
     }
 
-    /// Recompute `visible` for the current query (wall order preserved —
-    /// see [`vm::matching_album_ids`] for the track→album mapping), and with
-    /// it how many albums each shelf has left.
-    ///
-    /// The two are computed in one pass from one filter, so the wall's layout
-    /// and its contents cannot disagree about which albums survived.
+    /// Keep the wall's complete projection and rebuild the two relevance-
+    /// ordered app-bar result sets for the current query.
     fn refilter(&mut self) {
-        self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
-        // The range guard names *positions*, and every album behind them has
-        // just moved. Rows 0..24 of a filtered wall are not the rows 0..24 of
-        // the wall before it.
-        self.forget_requested();
-        // The Songs section's rows: the ranked head of the same match set
-        // that filtered the wall (doc 09 §5 — the two sections are one
-        // query's two projections). Rebuilt here rather than per frame so a
-        // redraw costs no corpus scan, and the hover cannot outlive the rows
-        // it pointed into.
-        self.songs = vm::song_hits(&self.library, &self.query, vm::SONGS);
-        self.hovered_song = None;
+        // Search no longer filters or replaces the Library body: the current
+        // place remains unchanged under the app-wide dropover. The wall's
+        // projection is therefore always the complete arranged collection.
+        self.visible = (0..self.albums.len()).collect();
+        // The dropover's two relevance-ordered projections. SEARCH_LIMIT is a
+        // work bound, not an eight-row presentation cap; the view virtualizes
+        // this result set into one scroll surface.
+        self.songs = vm::song_hits(&self.library, &self.query, vm::SEARCH_LIMIT);
+        self.search_albums = vm::album_hits(&self.library, &self.query, vm::SEARCH_LIMIT);
+        self.search_action = crate::search::Action::Play;
         // The shelves are contiguous slices of `albums` and `visible` is in
         // the same order, so each shelf's surviving count is one walk of the
         // two lists together rather than a second filter that could disagree
@@ -7565,13 +8174,18 @@ impl Shelf {
         self.thumb_px.get(&id).copied()
     }
 
+    /// A decoded thumbnail from either the resident tier or the bounded
+    /// off-screen LRU. Views are read-only, so observation never changes
+    /// eviction order; residency is updated from measured viewport events.
+    pub(crate) fn thumb(&self, id: u64) -> Option<&iced_image::Handle> {
+        self.thumbs.peek(id)
+    }
+
     fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
+        self.thumbs.focus_chrome(ids.iter().copied());
         let mut wanted = Vec::new();
         for &id in ids {
-            if self.thumbs.get(&id).is_some()
-                || self.thumb_jobs.contains(id)
-                || self.no_art.contains(&id)
-            {
+            if self.thumbs.touch(id) || self.thumb_jobs.contains(id) || self.no_art.contains(&id) {
                 continue;
             }
             wanted.push(id);
@@ -7595,6 +8209,11 @@ impl Shelf {
             .visible_albums(self.scroll_offset, self.grid_size.height);
         let tiles = self.visible.len();
         let (start, end) = (start.min(tiles), end.min(tiles));
+        let visible_ids: Vec<u64> = self.visible[start..end]
+            .iter()
+            .filter_map(|&album_index| self.albums.get(album_index).map(|album| album.id))
+            .collect();
+        self.thumbs.focus_wall(visible_ids.iter().copied());
         // **Nothing new is on screen, so there is nothing to ask for.**
         //
         // Every resize step delivers *three* of these — `WindowResized` with
@@ -7614,12 +8233,8 @@ impl Shelf {
         }
         self.last_requested = Some((start, end));
         let mut wanted = Vec::new();
-        for &album_index in &self.visible[start..end] {
-            let Some(album) = self.albums.get(album_index) else {
-                continue;
-            };
-            let id = album.id;
-            if self.thumbs.get(&id).is_some()
+        for id in visible_ids {
+            if self.thumbs.touch(id)
                 || self.thumb_jobs.in_flight.contains(&id)
                 || self.no_art.contains(&id)
             {
@@ -7639,9 +8254,10 @@ impl Shelf {
     /// is skipped; the collage cell keeps its gradient, which is the same
     /// honest reading a tile gives art that cannot be decoded.
     fn request_thumbs(&mut self, ids: &[u64]) -> Task<Message> {
+        self.thumbs.focus_page(ids.iter().copied());
         let mut wanted = Vec::new();
         for &id in ids {
-            if self.thumbs.get(&id).is_some()
+            if self.thumbs.touch(id)
                 || self.thumb_jobs.in_flight.contains(&id)
                 || self.no_art.contains(&id)
             {
@@ -7679,9 +8295,10 @@ impl Shelf {
         let task = self.start_queued_thumbs();
         if std::env::var_os("BAZ_PERF_LOG").is_some() {
             println!(
-                "[art] thumb {id} in {:.1} ms; cache={} queued={} in-flight={} completed={} peak={}",
+                "[art] thumb {id} in {:.1} ms; cache={} resident={} queued={} in-flight={} completed={} peak={}",
                 elapsed.as_secs_f64() * 1e3,
                 self.thumbs.len(),
+                self.thumbs.resident_len(),
                 self.thumb_jobs.queued.len(),
                 self.thumb_jobs.in_flight.len(),
                 self.thumb_jobs.completed,
@@ -7703,7 +8320,7 @@ impl Shelf {
             let Some(id) = self.thumb_jobs.pop() else {
                 break;
             };
-            if self.thumbs.peek(&id).is_some() || self.no_art.contains(&id) {
+            if self.thumbs.peek(id).is_some() || self.no_art.contains(&id) {
                 continue;
             }
             let Some(path) = self
@@ -7990,6 +8607,42 @@ fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
 }
 
+/// Remember the radio-like foreground choice on the same view-state footing
+/// as density: its control lives on Now Playing and its result survives it.
+fn persist_visualization_foreground(foreground: crate::visualizer::Foreground) {
+    persist(|config| config.visualization_foreground = foreground);
+}
+
+/// Whether Now Playing owns a continuous redraw clock in this state.
+///
+/// Focus is intentionally not an input. The place being visible, a sounding
+/// record, and a visual that actually changes are the complete cost gate.
+fn visualization_clock(
+    place: Place,
+    sounding: bool,
+    visualization: crate::visualizer::State,
+) -> bool {
+    place == Place::NowPlaying
+        && sounding
+        && (visualization.spectrum || visualization.foreground.draws_case())
+}
+
+/// Which record, if any, currently earns a hero decode.
+///
+/// Album detail always draws one. Elsewhere the sounding record is prefetched
+/// only while the selected Now Playing foreground can actually draw it.
+fn hero_target(
+    place: Place,
+    sounding: Option<u64>,
+    foreground: crate::visualizer::Foreground,
+) -> Option<u64> {
+    match place {
+        Place::Album(id) => Some(id),
+        _ if foreground.draws_art() => sounding,
+        _ => None,
+    }
+}
+
 /// **What `session.toml` should say about the run** — or `None` for *leave the
 /// file exactly as it is*.
 ///
@@ -8243,6 +8896,67 @@ mod tests {
     use crate::player::Availability;
 
     #[test]
+    fn all_six_visual_states_keep_their_independent_costs() {
+        for foreground in [
+            crate::visualizer::Foreground::Cover,
+            crate::visualizer::Foreground::JewelCase,
+            crate::visualizer::Foreground::None,
+        ] {
+            let still = crate::visualizer::State {
+                foreground,
+                spectrum: false,
+            };
+            let spectral = crate::visualizer::State {
+                spectrum: true,
+                ..still
+            };
+            assert_eq!(
+                visualization_clock(Place::NowPlaying, true, still),
+                foreground.draws_case(),
+                "{foreground:?} without spectrum"
+            );
+            assert!(
+                visualization_clock(Place::NowPlaying, true, spectral),
+                "{foreground:?} with spectrum"
+            );
+            assert!(!visualization_clock(Place::Library, true, spectral));
+            assert!(!visualization_clock(Place::NowPlaying, false, spectral));
+        }
+    }
+
+    #[test]
+    fn focus_is_not_part_of_the_visible_visual_clock() {
+        let state = crate::visualizer::State {
+            foreground: crate::visualizer::Foreground::None,
+            spectrum: true,
+        };
+        // There is deliberately no focus argument: a visible Now Playing
+        // remains live while another application owns the keyboard.
+        assert!(visualization_clock(Place::NowPlaying, true, state));
+    }
+
+    #[test]
+    fn none_stops_hero_work_without_costing_album_detail() {
+        use crate::visualizer::Foreground;
+        assert_eq!(
+            hero_target(Place::Library, Some(7), Foreground::Cover),
+            Some(7)
+        );
+        assert_eq!(
+            hero_target(Place::NowPlaying, Some(7), Foreground::JewelCase),
+            Some(7)
+        );
+        assert_eq!(
+            hero_target(Place::NowPlaying, Some(7), Foreground::None),
+            None
+        );
+        assert_eq!(
+            hero_target(Place::Album(9), Some(7), Foreground::None),
+            Some(9)
+        );
+    }
+
+    #[test]
     fn visible_art_replaces_stale_work() {
         let mut jobs = ThumbJobs::default();
         jobs.focus([1, 2, 3]);
@@ -8283,6 +8997,61 @@ mod tests {
         assert_eq!(jobs.pop(), Some(11));
         assert_eq!(jobs.pop(), Some(20));
         assert_eq!(jobs.pop(), Some(21));
+    }
+
+    fn pixel_handle(red: u8) -> iced_image::Handle {
+        iced_image::Handle::from_rgba(1, 1, vec![red, 0, 0, 255])
+    }
+
+    #[test]
+    fn a_loaded_visible_sleeve_cannot_be_evicted_by_cache_churn() {
+        let mut old = LruCache::new(NonZeroUsize::new(2).expect("a cache"));
+        old.put(1, pixel_handle(1));
+        old.put(2, pixel_handle(2));
+        old.put(3, pixel_handle(3));
+        assert!(
+            old.peek(&1).is_none(),
+            "reproduction: the old undifferentiated LRU evicts the visible sleeve"
+        );
+
+        let mut cache = ThumbCache::new(NonZeroUsize::new(2).expect("a cache"));
+        cache.put(1, pixel_handle(1));
+        cache.put(2, pixel_handle(2));
+        cache.focus_wall([1]);
+
+        for id in 3..20 {
+            cache.put(id, pixel_handle(u8::try_from(id).expect("small id")));
+        }
+
+        assert!(cache.peek(1).is_some(), "the visible handle disappeared");
+        assert_eq!(cache.resident_len(), 1);
+        assert_eq!(cache.recent.len(), 2, "off-screen work stays bounded");
+    }
+
+    #[test]
+    fn leaving_the_viewport_returns_a_pin_to_the_bounded_lru() {
+        let mut cache = ThumbCache::new(NonZeroUsize::new(2).expect("a cache"));
+        cache.focus_wall([1]);
+        cache.focus_chrome([1]);
+        cache.put(1, pixel_handle(1));
+
+        cache.focus_wall([]);
+        assert_eq!(
+            cache.resident_len(),
+            1,
+            "another visible surface still quotes it"
+        );
+        cache.focus_chrome([]);
+        assert_eq!(cache.resident_len(), 0);
+        assert!(
+            cache.peek(1).is_some(),
+            "unpinning does not drop the handle"
+        );
+
+        for id in 2..5 {
+            cache.put(id, pixel_handle(u8::try_from(id).expect("small id")));
+        }
+        assert!(cache.peek(1).is_none(), "off-screen art is evictable again");
     }
 
     /// The one non-effect decision on the add-a-folder path (ADR-0025): a
@@ -8450,7 +9219,7 @@ mod tests {
     ///
     /// Type-anywhere (ADR-0017 §1.2) adds four messages to this table and none
     /// of them is keyboard-only: the query has the search well ADR-0017 kept,
-    /// the top match has the record page's `Play album`, the arrangement has
+    /// the chooser confirmation has its selected row/action, the arrangement has
     /// the top bar's row of words, and the zoom has the density marks at the
     /// foot of the index rail's lane (ADR-0028 — the row that once argued
     /// the gesture was its own control).
@@ -8502,7 +9271,11 @@ mod tests {
                 "the needle, pressed inside the entry that is sounding \
                  (ADR-0017 §1.1: the groove's job, at the window's edge)",
             ),
-            ("VolumeStep", "the bottom bar's volume fader"),
+            (
+                "Direction",
+                "the selected row/action in the open search chooser; outside \
+                 search, the bottom bar's needle and volume fader",
+            ),
             ("ToggleMute", "the bottom bar's speaker button"),
             (
                 "ShowNowPlaying",
@@ -8523,9 +9296,8 @@ mod tests {
             ),
             (
                 "PlayFirstMatch",
-                "the Songs section's first row while a query stands \
-                 (doc 09 §5); the record page's `Play album` for the \
-                 fall-through; the well's own Enter sends this too",
+                "the selected app-bar search result while its chooser stands; \
+                 the record page's `Play album` for the fall-through",
             ),
             (
                 "DensityStep",
@@ -8707,7 +9479,9 @@ mod tests {
                 // four-line tail they share so that their one difference stays
                 // their *scope* — which is itself the claim, so it is spelled
                 // rather than papered over.
-                body.contains("self.send_run(") || body.contains("self.start(list)"),
+                body.contains("self.send_run(")
+                    || body.contains("self.start(list)")
+                    || body.contains("self.start_and_show(queue)"),
                 "`{gesture}` starts a run without going through the arranger — \
                  shuffle would apply to some gestures and not others"
             );
@@ -8719,6 +9493,10 @@ mod tests {
         assert!(
             body("start").contains("self.send_run("),
             "the shared tail stopped going through the arranger"
+        );
+        assert!(
+            body("start_and_show").contains("self.send_run("),
+            "the confirmed album-start tail stopped going through the arranger"
         );
 
         // **The arranger sends the run as it was built, and says how to walk
@@ -8926,6 +9704,22 @@ mod tests {
             body.contains("volume_gesture_active()"),
             "a drag must not write config once per pixel"
         );
+        assert!(
+            body.contains("volume_wheel_settles.is_some()"),
+            "a touchpad stroke must settle before writing its confirmed volume"
+        );
+
+        let wheel = code
+            .find("Message::VolumeWheel(steps) =>")
+            .expect("the fader wheel route exists");
+        let wheel = &code[wheel..];
+        let wheel = &wheel[..wheel.find("\n            }").expect("the arm ends")];
+        assert!(wheel.contains("self.player.step_volume(steps)"));
+        assert!(wheel.contains("VOLUME_WHEEL_SETTLE"));
+        assert!(
+            !wheel.contains("toggle_mute") && !wheel.contains("set_muted"),
+            "wheel travel prepares the fader while muted; it never unmutes"
+        );
     }
 
     /// **Step 7 — shift-click queues the record, and nothing sounds
@@ -8935,7 +9729,7 @@ mod tests {
     /// Queue row spends (`append_to_run` — `UpdateQueue`, never a play
     /// gesture), and the press arm consults the hand-kept modifier state
     /// because iced 0.13 reports a `button`'s press without it. The plain
-    /// press still navigates.
+    /// press still enters the shared selection machine.
     #[test]
     fn shift_click_queues_the_record_and_nothing_sounds_unasked() {
         let source = std::fs::read_to_string(
@@ -8965,15 +9759,17 @@ mod tests {
             );
         }
 
-        // The press arm: shift queues, plain opens — resolved against the
-        // hand-kept modifiers, the one instrument a button press leaves.
+        // The content-press arm: shift queues before the selection clock is
+        // touched. Plain presses proceed to select/activate.
         let arm_start = source
-            .find("Message::AlbumClicked(id) => {")
+            .find("fn press_content(&mut self, content: Content)")
             .expect("the tile press arm exists");
-        let arm = &source[arm_start..arm_start + 400];
+        let rest = &source[arm_start..];
+        let arm = &rest[..rest.find("\n    }\n").expect("the press function ends")];
         assert!(arm.contains("self.modifiers.shift()"));
         assert!(arm.contains("self.queue_album(id)"));
-        assert!(arm.contains("self.open_album(id)"));
+        assert!(arm.contains("state.selection.press(content"));
+        assert!(arm.contains("state.search_selection.press(content"));
     }
 
     /// **An undo restores the list, and nothing ever sounds because of it**
@@ -9255,33 +10051,33 @@ mod tests {
         );
     }
 
-    /// A play gesture made on a search answer completes the search and shows
-    /// the thing that just began sounding. The shared messages also occur on
-    /// record and artist pages, so the transition itself must retain its
+    /// A play gesture made on a search answer completes the search at command
+    /// acceptance, but shows Now Playing only after the engine confirms that
+    /// the requested run began. Search is app-wide, so neither half has a
     /// Library-place guard.
     #[test]
-    fn playing_a_search_answer_clears_it_and_opens_now_playing() {
+    fn playing_a_search_answer_clears_then_confirmation_opens_now_playing() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
         let transition = source
-            .split_once("fn finish_search_launch(&mut self)")
-            .expect("the search launch transition exists")
+            .split_once("fn complete_search_launch(&mut self)")
+            .expect("the search completion exists")
             .1;
         let transition = &transition[..transition.find("\n    }\n").expect("the transition ends")];
         assert!(
-            transition.contains("self.place != Place::Library"),
-            "a play on another page must not consume the Library's retained query"
+            !transition.contains("self.place != Place::Library"),
+            "an app-wide search launch is still restricted to Library"
         );
         assert!(
             transition.contains("state.clear_query()"),
             "starting a search answer clears and blurs the query"
         );
         assert!(
-            transition.contains("Destination::NowPlaying"),
-            "the completed search lands on Now playing"
+            !transition.contains("Destination::NowPlaying"),
+            "command acceptance pretends playback has started"
         );
 
         for arm in [
@@ -9291,8 +10087,8 @@ mod tests {
             let routed = source.split_once(arm).expect("the play arm exists").1;
             let routed = &routed[..routed.find("\n            }").expect("the arm ends")];
             assert!(
-                routed.contains("self.finish_search_launch()"),
-                "{arm} bypasses the search launch transition"
+                routed.contains("self.complete_search_launch()"),
+                "{arm} bypasses search completion"
             );
         }
         let enter = source
@@ -9301,9 +10097,28 @@ mod tests {
             .1;
         let enter = &enter[..enter.find("\n    }\n").expect("Enter's route ends")];
         assert_eq!(
-            enter.matches("self.finish_search_launch()").count(),
+            enter.matches("self.complete_search_launch()").count(),
             2,
             "both Enter outcomes complete the search"
+        );
+
+        let confirmed = source
+            .split_once("fn apply_player_event(&mut self, message: PlayerEvent)")
+            .expect("the engine event fold exists")
+            .1;
+        let confirmed = &confirmed[..confirmed.find("\n    }\n").expect("the event fold ends")];
+        assert!(
+            confirmed.contains("Event::TrackStarted")
+                && confirmed.contains("self.show_on_start")
+                && confirmed.contains("paths.contains(path)")
+                && confirmed.contains("Destination::NowPlaying"),
+            "only a matching TrackStarted spends the pending destination"
+        );
+        assert!(
+            confirmed.contains("Event::QueueEnded")
+                && confirmed.contains("PlayerEvent::Closed")
+                && confirmed.matches("self.show_on_start = None;").count() >= 3,
+            "success, an exhausted run and a dead engine all settle the pending destination"
         );
     }
 
@@ -9359,21 +10174,11 @@ mod tests {
         );
     }
 
-    /// **Every road to the query goes through the same two steps**, now that
-    /// the owner has moved the well into the returns lane.
-    ///
-    /// <kbd>/</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd>, the lane's collapsed
-    /// magnifier and the first key of a type-anywhere query all reach
-    /// `reach_the_well` first, and it does exactly two things: **go to the
-    /// Library**, because the well searches the collection and the collection
-    /// is what answers, and **open the lane**, because at `SIDEBAR_RAIL_W`
-    /// there is no field to focus until it does. Source-pinned for
-    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
-    /// reason — there is no `Shelf` to build without a database and a scan
-    /// thread — and the pins are the two calls plus the guard that keeps the
-    /// re-hang off the presses that do not deserve one.
+    /// Every road to the resident query preserves the place underneath it.
+    /// `/`, Ctrl+F and type-anywhere reveal/focus the app-bar control; none
+    /// navigates to Library or changes the returns lane.
     #[test]
-    fn every_road_to_the_query_reaches_the_well_the_same_way() {
+    fn every_road_to_the_query_preserves_the_current_place() {
         let source = include_str!("app.rs").replace("\r\n", "\n");
         let body = |signature: &str| {
             let rest = source
@@ -9383,31 +10188,20 @@ mod tests {
             rest[..rest.find("\n    }\n").expect("a function ends")].to_owned()
         };
 
-        let reach = body("fn reach_the_well(&mut self) -> Task<Message> {");
-        assert!(
-            reach.contains("place.go(crate::lane::Destination::Library)"),
-            "reaching the well no longer puts the wall it filters on screen"
-        );
-        assert!(
-            reach.contains("self.set_lane(true)"),
-            "reaching the well no longer opens the lane it lives in"
-        );
-
-        // The caret is the second step and only the second: `reach_the_well`
-        // stays free of it so that type-anywhere can reach the well and let
-        // the shelf take the caret in its own arm.
         let focus = body("fn focus_the_well(&mut self) -> Task<Message> {");
         assert!(
-            focus.contains("self.reach_the_well()") && focus.contains("text_input::focus"),
-            "`/` and Ctrl+F no longer reach the well before focusing it"
+            focus.contains("text_input::focus(search_id())")
+                && !focus.contains("self.go(")
+                && !focus.contains("set_lane"),
+            "`/` and Ctrl+F must focus search without navigating or re-hanging"
         );
 
         let typed = body("fn type_anywhere(&mut self, text: &str) -> Task<Message> {");
-        let at_reach = typed.find("reach_the_well").expect("the reach");
-        let at_text = typed.find("type_into_query").expect("the text");
         assert!(
-            at_reach < at_text,
-            "type-anywhere appends the text before there is a field to see it in"
+            typed.contains("state.type_into_query(text)")
+                && !typed.contains("self.go(")
+                && !typed.contains("set_lane"),
+            "type-anywhere must reveal results over the current place"
         );
 
         // **And the shelf no longer answers the message at all** — the place
@@ -9422,18 +10216,41 @@ mod tests {
             !source.contains(&old_arm),
             "the shelf still answers type-anywhere on its own"
         );
+    }
 
-        // **The re-hang stays on the presses whose subject is the wall's
-        // width** (ADR-0030 §3): reaching for the well while the lane is
-        // already open must not touch the grid.
-        let set = body("fn set_lane(&mut self, open: bool) -> Task<Message> {");
+    #[test]
+    fn search_waits_for_a_choice_and_adds_to_the_playlist_on_screen() {
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        let body = |signature: &str| {
+            let rest = source
+                .split_once(signature)
+                .unwrap_or_else(|| panic!("`{signature}` exists"))
+                .1;
+            rest[..rest.find("\n    }\n").expect("a function ends")].to_owned()
+        };
+
+        let refilter = body("fn refilter(&mut self) {");
         assert!(
-            set.contains("self.lane_open == open"),
-            "`set_lane` re-hangs the wall for a state it is already in"
+            !refilter.contains("search_result_content(0)")
+                && !refilter.contains("search_selection.select"),
+            "typing a query implicitly selects its first result again"
         );
+
+        let enqueue =
+            body("fn enqueue_search_track(&mut self, album: u64, row: usize) -> Task<Message> {");
         assert!(
-            set.contains("theme::sidebar_can_expand(state.window_w)"),
-            "`set_lane` can expand the lane at a width that cannot hold it"
+            enqueue.contains("if let Place::Playlist(id) = self.place")
+                && enqueue.contains("self.playlists.append(id, entries, &state.library)")
+                && enqueue.contains("self.append_items_to_run(vec![item])"),
+            "search no longer distinguishes the playlist file on screen from the live run"
+        );
+
+        let chooser = include_str!("views/search.rs");
+        assert!(
+            chooser.contains("↑↓ select · ←→ action · Enter confirm")
+                && chooser.contains("\"Add to playlist\"")
+                && chooser.contains("\"Enqueue\""),
+            "the chooser stopped teaching its keys or naming the action's destination"
         );
     }
 
@@ -9459,6 +10276,10 @@ mod tests {
             source.contains("Message::ClearSearch => self.clear_query(),"),
             "the well's `×` no longer resolves to the query's one clear"
         );
+        assert!(
+            source.contains("Message::DismissSearch => match &mut self.screen"),
+            "the app-wide Escape route no longer reaches the shelf clear"
+        );
         let rest = source
             .split_once("fn peel(&mut self) -> Task<Message> {")
             .expect("the shelf's Escape peel")
@@ -9473,19 +10294,14 @@ mod tests {
             "Escape clears a query that is not there, so the `×` it mirrors \
              would be a control with nothing to act on"
         );
-        // And the mark itself is drawn under the same predicate, in both
-        // wells — the lane's above `SIDEBAR_FLOOR` and the strip's below it.
-        for well in [
-            include_str!("views/lane.rs"),
-            include_str!("views/top_bar.rs"),
-        ] {
-            assert!(
-                well.contains("let mark: Element<'_, Message> = if filtering {")
-                    && well.contains("clear_mark(room.recess)"),
-                "a well draws its clear mark on something other than a live \
-                 query, or not at all"
-            );
-        }
+        // And the one resident well draws the mark under that same predicate.
+        let well = include_str!("views/search.rs");
+        assert!(
+            well.contains("let mark: Element<'_, Message> = if filtering {")
+                && well.contains("clear_mark(room.recess)"),
+            "the app-bar well draws its clear mark on something other than a \
+             live query, or not at all"
+        );
     }
 
     /// **The blur is a different id, and that is the whole mechanism.**
@@ -9620,7 +10436,7 @@ mod tests {
         );
     }
 
-    /// **A tile press is navigation, and it re-hangs nothing.**
+    /// **A tile press selects, a double activates, and neither re-hangs.**
     ///
     /// The defect this replaces was caught on camera by the composition audit:
     /// a double-click on the fifth tile of row 0, where the first press opened
@@ -9630,22 +10446,22 @@ mod tests {
     /// play" at the bottom of it. `shelf::GridHold` was the fix: pin the width
     /// in force for the length of the gesture.
     ///
-    /// ADR-0022 deletes the *cause* instead. A press replaces the wall with the
-    /// record's page, so there is no reflow to survive, no second press to
-    /// protect and no clock ticking behind a gesture — the hold, the
-    /// double-click window and the `ColumnHoldTick` subscription all go with
-    /// them. What is pinned here is that pressing a tile is a transition on
-    /// [`Place`] and nothing else, and that the wall's hang is a function of
-    /// the width alone at every width in the shipped band.
+    /// ADR-0022 deleted the reflow cause. Its 2026-08-12 amendment restores
+    /// double-click as one content grammar over a wall whose width is now a
+    /// function of the window alone. What is pinned here is that the first
+    /// press only selects, the second activates the record, and neither state
+    /// enters the grid arithmetic.
     #[test]
-    fn a_tile_press_is_navigation_and_re_hangs_nothing() {
-        // The press is a place change. Repeating it is idempotent: a
-        // double-click must not reinterpret its second event as Back.
-        let place = Place::default().album(7);
-        assert_eq!(place, Place::Album(7));
-        assert_eq!(place.album(7), Place::Album(7));
-        // …and a different sleeve swaps the page rather than stacking one.
-        assert_eq!(place.album(9), Place::Album(9));
+    fn a_tile_press_selects_and_activation_re_hangs_nothing() {
+        let start = Instant::now();
+        let mut selection = crate::selection::State::default();
+        let album = Content::Album(7);
+        assert_eq!(selection.press(album, start), Press::Selected);
+        assert_eq!(selection.selected(), Some(album));
+        assert_eq!(
+            selection.press(album, start + crate::selection::DOUBLE_CLICK),
+            Press::Activated
+        );
 
         // The hang is the same at a width whatever has been pressed, because
         // nothing that can be pressed is in the arithmetic any more. Swept over
@@ -10108,18 +10924,16 @@ mod tests {
         );
     }
 
-    /// **`Resume` is the one play gesture that navigates, and it is the only
-    /// one.**
+    /// **`Resume` navigates an already-held run immediately; a deliberate
+    /// album start navigates only when the engine confirms it.**
     ///
     /// The owner asked for it by name (*"or takes you to now playing"*) and it
-    /// is a deliberate exception, so it is pinned as one: the source of every
-    /// other route into playback is swept for a place change, and only
-    /// [`App::resume_the_run`] may carry it. `Play` on the wall's hover
-    /// options, on a record's page and in a playlist all answer where you are
-    /// standing rather than moving you, and an accidental `self.go(…)` in one
-    /// of them would be the interface taking the wheel.
+    /// is a deliberate exception to the confirmation boundary. A fresh album
+    /// `Play`, however, must not land on an empty Now Playing page when every
+    /// file is refused or the engine is dead. The request path therefore only
+    /// arms a destination; the event fold owns the actual place change.
     #[test]
-    fn resume_is_the_only_play_gesture_that_navigates() {
+    fn deliberate_play_navigates_at_the_right_truth_boundary() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
@@ -10137,10 +10951,29 @@ mod tests {
             "`Resume` starts the run *and* goes to `Now playing`, on both of \
              the two shapes it has — the paused session and the interrupted run"
         );
+        let album = body_of("play_album");
+        assert!(
+            album.contains("self.start_and_show(queue)") && !album.contains("self.go("),
+            "album Play must use the shared confirmed-start route"
+        );
+        let requested = body_of("start_and_show");
+        assert!(
+            requested.contains("self.send_run(queue, None)")
+                && requested.contains("Command::Play")
+                && requested.contains("self.show_on_start = Some(paths)")
+                && !requested.contains("self.go("),
+            "an accepted command arms the destination but does not navigate"
+        );
+        let confirmed = body_of("apply_player_event");
+        assert!(
+            confirmed.contains("Event::TrackStarted")
+                && confirmed.contains("paths.contains(path)")
+                && confirmed.contains(door),
+            "the matching engine confirmation owns fresh-start navigation"
+        );
         // Named rather than discovered, and `body_of` panics on a name that
         // has moved — a sweep that quietly matched nothing would pass forever.
         for elsewhere in [
-            "play_album",
             "play_track",
             "play_playlist",
             "play_playlist_track",
@@ -10148,9 +10981,7 @@ mod tests {
         ] {
             assert!(
                 !body_of(elsewhere).contains("self.go("),
-                "`{elsewhere}` navigates: a play gesture that answers *play \
-                 this* must leave you where you are standing (`views::home`'s \
-                 note on the exception)"
+                "`{elsewhere}` navigates around the deliberate start boundary"
             );
         }
     }

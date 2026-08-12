@@ -83,6 +83,20 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
+        Self::with_config(config())
+    }
+
+    /// Drain at decode speed for assertions whose subject is not wall-clock
+    /// playback. Coverage instrumentation can otherwise turn the deliberately
+    /// paced sink into a scheduler test when this suite runs in parallel.
+    fn unpaced() -> Self {
+        Self::with_config(EngineConfig {
+            consumer_pace: Duration::ZERO,
+            ..config()
+        })
+    }
+
+    fn with_config(config: EngineConfig) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let a = dir.path().join("01 a.wav");
         let b = dir.path().join("02 b.wav");
@@ -92,7 +106,7 @@ impl Rig {
         write_sine_wav(&long, LONG_SECS);
         let ledger_path = dir.path().join("history.tsv");
         let ledger = Arc::new(HistoryLedger::open(&ledger_path).expect("open ledger"));
-        let (engine, events, output) = spawn_offline(config(), SINK_CAPACITY).expect("spawn");
+        let (engine, events, output) = spawn_offline(config, SINK_CAPACITY).expect("spawn");
         engine.set_history(Some(Arc::clone(&ledger)));
         Self {
             _dir: dir,
@@ -400,7 +414,9 @@ fn pausing_adds_nothing_to_what_was_heard() {
 /// state-before-event contract, end to end through a real engine.
 #[test]
 fn the_play_recorded_event_follows_the_line_into_the_file() {
-    let mut rig = Rig::new();
+    // This test is about the writer's state-before-event ordering, not the
+    // consumer clock. Running unpaced removes scheduling load from the proof.
+    let mut rig = Rig::unpaced();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: None,

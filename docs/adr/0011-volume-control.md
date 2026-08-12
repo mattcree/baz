@@ -1,5 +1,15 @@
 # ADR-0011: Volume — a cubic control position, software gain, and an honest readout
 
+> **Direct-manipulation amendment (2026-08-12).** Vertical wheel travel over
+> the live fader now feeds the exact `PlayerState::step_volume` path used by
+> Up/Down. Line deltas are notches; high-resolution pixel travel accumulates at
+> 32 px per step. The fader captures even sub-step/horizontal events so neither
+> page scroll nor Ctrl+density leaks through, while the same event elsewhere is
+> untouched. The mute button is outside the target and mute stays independent:
+> scrolling while muted prepares the restored level without unmuting. Engine
+> confirmation remains truth, with confirmed wheel changes coalesced behind a
+> 240 ms quiet boundary before persistence rather than written per delta.
+
 **Status**: accepted (2026-08-07) · **amends the guarantee stated in [ADR-0009](0009-follow-the-source-rate.md)** (that ADR's decisions all stand; what changes is that "bit-exact" is now the conjunction of two facts instead of one) · resolves the volume entry in `docs/BACKLOG.md` · measurements taken on the maintainer's own machine (Fedora/PipeWire 1.6.7, iFi HD USB DAC)
 
 ## Context

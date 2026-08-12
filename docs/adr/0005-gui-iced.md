@@ -2,6 +2,14 @@
 
 **Status**: accepted (2026-08-07) · decided by Spike A head-to-head (`git show dc13d7e` — spikes/shelf-iced, spikes/shelf-tauri)
 
+> **Amendment (2026-08-12) — a bounded recent cache is not permission to blank
+> current content.** Production keeps the 64-entry density-aware thumbnail LRU
+> for off-screen recent art, but current wall, page and resident-chrome handles
+> are pinned in a separate resident tier. They rejoin the LRU as soon as every
+> current target releases them. An 80-album Artist-page stress run measured the
+> deliberate worst case at about 25.3 MiB of Balanced-density resident RGBA;
+> presentation stability takes precedence over evicting a sleeve still in use.
+
 ## Context
 
 ADR-0003 deferred the GUI choice to an empirical spike: the same 100k-track / 10k-album virtualized shelf with search-as-you-type, built in both iced 0.13 and Tauri 2 + Solid, measured on Linux — the deciding platform per the project's Linux-first-class stance.

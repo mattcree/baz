@@ -165,6 +165,8 @@ pub enum Glyph {
     VisualCover,
     /// A landscape jewel case with its narrow tray hinge.
     VisualCase,
+    /// No foreground album object: the cover frame crossed out.
+    VisualNone,
     /// Uneven frequency bars across the visual field.
     VisualSpectrum,
     /// Queue: three stacked bars, the last one short — a list with more to
@@ -1071,6 +1073,18 @@ const VISUAL_CASE: &[Outline] = &[
     &[(0.22, 0.27), (0.31, 0.27), (0.31, 0.73), (0.22, 0.73)],
 ];
 
+/// No album object: the cover frame with one diagonal cancellation stroke.
+///
+/// This deliberately remains a depiction rather than borrowing Close: the
+/// frame names what is absent, while the diagonal says it has been removed.
+const VISUAL_NONE: &[Outline] = &[
+    &[(0.16, 0.16), (0.84, 0.16), (0.84, 0.24), (0.16, 0.24)],
+    &[(0.16, 0.76), (0.84, 0.76), (0.84, 0.84), (0.16, 0.84)],
+    &[(0.16, 0.24), (0.24, 0.24), (0.24, 0.76), (0.16, 0.76)],
+    &[(0.76, 0.24), (0.84, 0.24), (0.84, 0.76), (0.76, 0.76)],
+    &[(0.19, 0.13), (0.87, 0.81), (0.81, 0.87), (0.13, 0.19)],
+];
+
 /// Spectrum: frequency bins with a deliberately irregular envelope.
 const VISUAL_SPECTRUM: &[Outline] = &[
     &[(0.10, 0.60), (0.20, 0.60), (0.20, 0.84), (0.10, 0.84)],
@@ -1114,11 +1128,12 @@ impl Glyph {
         Self::WindowRestore,
         Self::VisualCover,
         Self::VisualCase,
+        Self::VisualNone,
         Self::VisualSpectrum,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 31;
+    const COUNT: usize = 32;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1154,6 +1169,7 @@ impl Glyph {
             Self::Shuffle => SHUFFLE,
             Self::VisualCover => VISUAL_COVER,
             Self::VisualCase => VISUAL_CASE,
+            Self::VisualNone => VISUAL_NONE,
             Self::VisualSpectrum => VISUAL_SPECTRUM,
         }
     }
@@ -1191,7 +1207,8 @@ impl Glyph {
             Self::WindowRestore => 27,
             Self::VisualCover => 28,
             Self::VisualCase => 29,
-            Self::VisualSpectrum => 30,
+            Self::VisualNone => 30,
+            Self::VisualSpectrum => 31,
         }
     }
 

@@ -64,6 +64,8 @@ mod queue_window;
 mod rail;
 mod replaygain;
 mod scan;
+mod search;
+mod selection;
 mod session;
 mod shelf;
 mod spine;

@@ -320,14 +320,17 @@ pub(crate) fn view<'a>(
         .center(Length::Fill)
         .into();
     };
-    // **The source's own pixels**, which is what bounds the work now that
-    // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
-    // clamps against and the picture the layout draws are the same decode.
-    let work = work(shelf, Some(now));
     // An album source footer already names this exact album. A playlist or
     // assembled run can cross records, so its current track keeps the album
     // line where that distinction is useful.
     let show_album = show_album_line(now.album.as_deref(), source.as_ref());
+    if !visual.foreground.draws_art() {
+        return without_album_object(now, width, height, source, show_album, visual.audio);
+    }
+    // **The source's own pixels**, which is what bounds the work now that
+    // `NOW_PLAYING_MAX` is gone. Resolved only for a foreground that draws it,
+    // so None pays neither hero composition nor jewel-case texture work.
+    let work = work(shelf, Some(now));
     let below = placard_below(show_album);
     let edge = art_edge_with_below(
         width,
@@ -369,6 +372,70 @@ pub(crate) fn view<'a>(
         Space::new(Length::Fill, Length::Fill).into()
     };
     stack![field, spectrum, body].into()
+}
+
+/// The spectrum-led composition: identity in one soft calm pocket, with no
+/// album object and therefore no square stage reserved above it.
+fn without_album_object<'a>(
+    now: &'a crate::player::NowPlaying,
+    width: f32,
+    height: f32,
+    source: Option<Source>,
+    show_album: bool,
+    audio: Option<&baz_core::engine::VisualizationFrame>,
+) -> Element<'a, Message> {
+    let (mask_width, identity_width) = objectless_measures(width);
+    let identity = placard(now, show_album, identity_width);
+    let calm = placard_mask(identity, mask_width);
+    let song = container(calm).center(Length::Fill);
+    let body: Element<'a, Message> = match source {
+        Some(source) => column![song, source_link(source)]
+            .height(Length::Fill)
+            .into(),
+        None => song.into(),
+    };
+    let spectrum: Element<'static, Message> = if let Some(audio) = audio {
+        crate::visualizer::background(audio, width, height)
+    } else {
+        Space::new(Length::Fill, Length::Fill).into()
+    };
+    stack![spectrum, body].into()
+}
+
+/// Stable metadata measures for the objectless state. They depend only on the
+/// viewport, never on a track's title, cover source or decode arrival.
+fn objectless_measures(width: f32) -> (f32, f32) {
+    let available = (width - 2.0 * theme::HANG).max(1.0);
+    let mask = available.min(theme::LIST_MEASURE);
+    (mask, (mask - 4.0 * theme::GAP_XL).max(1.0))
+}
+
+/// A soft horizontal mask under the metadata, rather than an empty artwork
+/// panel. It fades to the room at both edges and spends no space outside the
+/// identity block it protects.
+fn placard_mask(content: Element<'_, Message>, width: f32) -> Element<'_, Message> {
+    let room = theme::active();
+    let clear = iced::Color {
+        a: 0.0,
+        ..room.wall
+    };
+    let calm = iced::Color {
+        a: 0.94,
+        ..room.wall
+    };
+    let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
+        .add_stop(0.0, clear)
+        .add_stop(0.18, calm)
+        .add_stop(0.82, calm)
+        .add_stop(1.0, clear);
+    container(content)
+        .width(Length::Fixed(width))
+        .padding([theme::GAP_LG, 2.0 * theme::GAP_XL])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Gradient(gradient.into())),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 fn rear_insert(shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_case::Insert {
@@ -448,7 +515,7 @@ fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
     let Some(id) = now.and_then(|now| now.album_id) else {
         return Work::bare();
     };
-    match (shelf.thumbs.peek(&id), shelf.thumb_edge(id)) {
+    match (shelf.thumb(id), shelf.thumb_edge(id)) {
         (Some(handle), Some(px)) => Work {
             handle: Some(handle.clone()),
             back: None,
@@ -658,11 +725,30 @@ fn record_column<'a>(
     insert: &crate::jewel_case::Insert,
     visual: Visual<'_>,
 ) -> Element<'a, Message> {
-    let room = theme::active();
     let cover = plain_cover(work, t, edge, insert.album_id);
     let jewel_case = sleeve(work, t, edge, visual.rotation, insert);
     let sleeve = crate::visualizer::foreground(visual.foreground, edge, cover, jewel_case);
 
+    let placard = placard(now, show_album, edge);
+
+    // **No transport here.** The bar is under every place, this one included,
+    // and it already carries play/pause and the two skips — so the page drew
+    // the *same function* a second time, a few hundred pixels above the first
+    // (`bottom_bar::transport`, called from here). The owner: *"now playing
+    // does not need the play pause controls"*, and *"ensure the play next and
+    // previous controls are removed"*. It was a duplicate, not a choice.
+    //
+    // What this surface owes is the work at the size it deserves and who made
+    // it. Progress, timestamps and transport all live in the persistent bar.
+    column![sleeve, placard]
+        .spacing(theme::GAP_XL)
+        .align_x(alignment::Horizontal::Center)
+        .width(Length::Shrink)
+        .into()
+}
+
+fn placard(now: &crate::player::NowPlaying, show_album: bool, width: f32) -> Element<'_, Message> {
+    let room = theme::active();
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
         // label's own order, at the far field's scale.
@@ -685,7 +771,7 @@ fn record_column<'a>(
             .wrapping(text::Wrapping::None),
     ]
     .spacing(theme::GAP_XS)
-    .width(Length::Fixed(edge));
+    .width(Length::Fixed(width));
     if show_album && let Some(album) = &now.album {
         placard = placard.push(
             text(album.clone())
@@ -696,20 +782,7 @@ fn record_column<'a>(
         );
     }
 
-    // **No transport here.** The bar is under every place, this one included,
-    // and it already carries play/pause and the two skips — so the page drew
-    // the *same function* a second time, a few hundred pixels above the first
-    // (`bottom_bar::transport`, called from here). The owner: *"now playing
-    // does not need the play pause controls"*, and *"ensure the play next and
-    // previous controls are removed"*. It was a duplicate, not a choice.
-    //
-    // What this surface owes is the work at the size it deserves and who made
-    // it. Progress, timestamps and transport all live in the persistent bar.
-    column![sleeve, placard]
-        .spacing(theme::GAP_XL)
-        .align_x(alignment::Horizontal::Center)
-        .width(Length::Shrink)
-        .into()
+    placard.into()
 }
 
 /// A quiet full-width footer at the bottom of Now playing, leading to the
@@ -793,6 +866,22 @@ mod tests {
     /// and a source large enough that the viewport is always the binding term
     /// (doc 12 §5.2's list, plus 240 and 3000 for the two ends it omits).
     const SOURCES: [f32; 6] = [120.0, 240.0, 320.0, 500.0, 1024.0, 3000.0];
+
+    #[test]
+    fn the_objectless_state_reserves_metadata_but_no_art_stage() {
+        for width in [320.0, 760.0, 1280.0, 1920.0, 3840.0] {
+            let (mask, identity) = objectless_measures(width);
+            let available = (width - 2.0 * theme::HANG).max(1.0);
+            assert!(mask <= available);
+            assert!(mask <= theme::LIST_MEASURE);
+            assert!(identity > 0.0 && identity <= mask);
+        }
+        assert_eq!(
+            objectless_measures(1920.0),
+            objectless_measures(3840.0),
+            "wide screens grow the spectrum field, not a hidden album pocket"
+        );
+    }
 
     /// **The kiosk is this surface at a larger size**, and it is a property of
     /// the arithmetic rather than a plan: the work's edge grows with the

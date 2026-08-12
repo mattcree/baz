@@ -62,7 +62,8 @@
 //! **a row is a control**, playing the album from there (ADR-0014's `JumpTo`, or
 //! a `SetQueue` first when this album is not what the engine is holding; the
 //! decision is [`PlayerState::play_from`](crate::player::PlayerState::play_from)'s
-//! and this module makes none of it).
+//! and this module makes none of it). One click selects the row; double click
+//! activates it through that path.
 //!
 //! Nothing here marks a row optimistically. The dot follows `TrackStarted`
 //! through [`crate::player`] like every other reading in the interface.
@@ -75,6 +76,7 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
+use crate::selection::Content;
 use crate::views::page::{self, Identity, Page};
 use crate::views::{gradient_block, place_name, section_rule};
 use crate::{theme, vm};
@@ -125,7 +127,7 @@ pub(crate) fn view<'a>(
             },
             aside_tail: aside_tail(album, edition),
             identity: identity(album, edition),
-            rows: track_rows(album, edition, player, collecting, hovered_row),
+            rows: track_rows(shelf, album, edition, player, collecting, hovered_row),
             side_by_side: page::is_two_column(window_width),
             row_spacing: theme::GAP_XS,
             on_scroll: None,
@@ -217,7 +219,7 @@ fn sleeve<'a>(
     let handle = shelf
         .hero(album.id)
         .map(|hero| &hero.handle)
-        .or_else(|| shelf.thumbs.peek(&album.id));
+        .or_else(|| shelf.thumb(album.id));
     let art: Element<'_, Message> = match handle {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(edge))
@@ -256,6 +258,7 @@ fn aside_tail<'a>(
 
 /// **Every track on the record**, in the composition's row slot.
 fn track_rows<'a>(
+    shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
     edition: Option<&'a vm::EditionVm>,
     player: &'a PlayerState,
@@ -286,9 +289,16 @@ fn track_rows<'a>(
                 track,
                 per_track_artists,
                 playing_row == Some(index),
-                interactive.then_some(Message::PlayTrack(album.id, index)),
+                interactive.then_some(Message::ContentPressed(Content::AlbumTrack {
+                    album: album.id,
+                    row: index,
+                })),
                 album.id,
                 index,
+                shelf.selection.is(Content::AlbumTrack {
+                    album: album.id,
+                    row: index,
+                }),
                 collecting,
                 hovered_row == Some(index),
             ));
@@ -538,6 +548,7 @@ fn edition_selector<'a>(
 /// control.
 #[expect(
     clippy::too_many_arguments,
+    clippy::fn_params_excessive_bools,
     reason = "a row is one anatomy with one long fact list; a struct per call \
               site would be the same eight names once removed"
 )]
@@ -548,6 +559,7 @@ fn track_row(
     press: Option<Message>,
     album: u64,
     index: usize,
+    selected: bool,
     collecting: Collecting,
     hovered: bool,
 ) -> Element<'_, Message> {
@@ -579,6 +591,7 @@ fn track_row(
         context: None,
         duration: duration.into(),
         playing,
+        selected,
         press,
     });
     // The row's right press opens its mirror menu (doc 09 §5.2): the same

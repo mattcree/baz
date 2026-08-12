@@ -75,6 +75,7 @@ use iced::{ContentFit, Element, Length};
 
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
+use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::views::{place_header_led, place_name, place_pad};
 use crate::{theme, vm};
@@ -158,6 +159,7 @@ pub(crate) fn view<'a>(
             list,
             shelf.hovered_all_songs,
             crate::views::list_tile::Actions {
+                content: Content::ArtistSongs(artist),
                 play: Message::PlayArtistSongs(artist),
                 open: None,
                 enter: Message::AllSongsHovered(true),

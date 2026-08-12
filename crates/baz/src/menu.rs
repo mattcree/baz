@@ -74,13 +74,13 @@ use crate::theme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     /// A track row with a record identity: the album page's rows and the
-    /// wall's Songs section (both send [`Message::PlayTrack`] and spend the
+    /// app-bar search results (both send [`Message::PlayTrack`] and spend the
     /// same `+`, so they are one menu). `row` is the track's position in the
     /// **selected edition**, exactly what the row's own press carries.
     Track { album: u64, row: usize },
     /// A row of the **Queue** place, by queue position.
     QueueRow { row: usize },
-    /// An album tile on the wall (and the Songs section's record door is a
+    /// An album tile on the wall (and a search album result's Open is a
     /// door, not a tile — it opens no menu of its own).
     Album { album: u64 },
     /// A row of an open **playlist's page**. `missing` is the row's own
@@ -593,13 +593,13 @@ mod tests {
         const CONTROLS: [(&str, &str); 10] = [
             (
                 "PlayTrack",
-                "a track row's own press (album page, Songs section)",
+                "a track row's own press (album page, search result)",
             ),
             ("JumpToQueued", "a queue row's own press"),
             ("PlaylistPlayTrack", "a playlist page row's own press"),
             (
                 "AlbumClicked",
-                "an album tile's press (and the Songs section's record door)",
+                "an album tile's press (and a search album result's Open)",
             ),
             ("PlayAlbum", "the record page's `Play album`"),
             ("AddTrackToPlaylist", "the track row's reserved `+` slot"),

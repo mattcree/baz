@@ -56,13 +56,6 @@ pub const VARIOUS_ARTISTS: &str = "Various Artists";
 /// usefully show, and a query that broad is on its way to more keystrokes.
 pub const SEARCH_LIMIT: usize = 10_000;
 
-/// How many rows the **Songs** section shows
-/// (`docs/design/09-implicit-playlists.md` §5): the ranked head of the match
-/// set, not an exhaustive list — the filtered wall below is the exhaustive
-/// answer, in covers. Eight is the room's own handful — the number of rows a
-/// listener reads without counting.
-pub const SONGS: usize = 8;
-
 /// One album tile on the shelf, owned by the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlbumVm {
@@ -384,7 +377,7 @@ pub struct SongVm {
     pub path: PathBuf,
 }
 
-/// **The Songs section's rows**: the top `cap` ranked matching tracks for
+/// **Search's track rows**: the top `cap` ranked matching tracks for
 /// `query` — [`Library::search`]'s answer (ADR-0021: fit, then field, then
 /// library order), surfaced instead of thrown away at the album fold
 /// (doc 09 §5's finding). Empty for a blank query and for a query nothing
@@ -846,6 +839,7 @@ pub fn selected_edition(album: &AlbumVm, chosen: Option<EditionKey>) -> Option<&
 /// set; the caller filters the existing shelf against the set, so shelf
 /// ordering is preserved (no relevance reordering — the shelf is a place,
 /// not a ranking). Capped at [`SEARCH_LIMIT`] tracks per keystroke.
+#[cfg(test)]
 pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>> {
     let query = query.trim();
     if query.is_empty() {
@@ -863,6 +857,22 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     Some(ids)
 }
 
+/// Relevance-ordered album answers for the search dropover. Unlike the wall's
+/// historical filter this preserves [`Library::search_albums`]'s ranking: the
+/// dropover is an answer list, not an arranged collection.
+#[must_use]
+pub fn album_hits(library: &Library, query: &str, cap: usize) -> Vec<u64> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    library
+        .search_albums(query, cap)
+        .into_iter()
+        .map(|album| album_id(album.artist, album.title))
+        .collect()
+}
+
 /// **The best match for `query`** — the album <kbd>Enter</kbd> plays
 /// (ADR-0017 §1.2, ADR-0021).
 ///
@@ -873,10 +883,9 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
 ///
 /// # Why this asks the library a second question
 ///
-/// [`matching_album_ids`] asks *which* albums match and deliberately throws
-/// the order away, because the wall is a place and not a ranking — a filtered
-/// shelf keeps its shelves, its headers and its alphabet. This asks *which
-/// matched best*, which is a different question with a different answer, and
+/// The wall's former filter asked only *which* albums match and deliberately
+/// threw the order away. This asks *which matched best*, which is a different
+/// question with a different answer, and
 /// [`Library::search_albums`] is ADR-0021's answer to it: ranked by how well
 /// the query fits the field it landed in, then by which field that was, then
 /// by library order, with an album taking its best track's rank and appearing
@@ -1456,6 +1465,7 @@ pub fn format_date(ns: i64) -> Option<String> {
 
 /// Indices into `albums` that survive the current query filter (all of them
 /// for a blank query). This is the shelf's render list.
+#[cfg(test)]
 pub fn visible_indices(albums: &[AlbumVm], library: &Library, query: &str) -> Vec<usize> {
     match matching_album_ids(library, query) {
         None => (0..albums.len()).collect(),
@@ -1623,6 +1633,10 @@ mod tests {
     use baz_core::replaygain::ReplayGainTags;
 
     use super::*;
+
+    /// Historical Library-section cap retained only for the ranking tests.
+    /// App-bar search asks for a much larger set and virtualizes its rows.
+    const SONGS: usize = 8;
 
     fn meta(artist: &str, album: &str, title: &str, track: u32) -> TrackMeta {
         TrackMeta {

@@ -1,5 +1,15 @@
 # 13 — The everyday flow: a home, a returns lane, and putting things somewhere
 
+> **Implementation amendment, 2026-08-12 — the `RECENT` lamp trails.** The
+> owner's live review found that the sounding pip inserted before a row's name
+> reflowed its text. Section 2.6's placement is superseded: every expanded row
+> reserves the same six-pixel trailing lamp slot, and both title and metadata
+> stop at the same 146 px line boundary. Long strings are measured in their
+> actual bundled face and end in an ellipsis. Playback now changes only the
+> slot's ink and the row's established card; sleeve/text origins and the 64 px
+> pitch remain fixed. Collapsed rows still use the card because they have no
+> text lane. ADR-0030 records the binding decision and arithmetic.
+
 > **The owner's first brief**, verbatim (voice-dictated, lightly punctuated):
 >
 > *"the way that playlists work as a sidebar, I don't hate it, but I don't
@@ -1982,4 +1992,3 @@ card, and a wall that would twitch under every pointer crossing it. Whether
 sound from the wall should cost one press is his call, and §4.6 hands him
 the one candidate that fits every constraint the product actually has,
 drawn and priced.
-

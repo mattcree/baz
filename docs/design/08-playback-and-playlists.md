@@ -1,5 +1,20 @@
 # 08 — Playback and playlists: the model, honestly stated
 
+> **Amended 2026-08-12 — deliberate album starts land on playback truth.**
+> Explicit Play and album activation now share `start_and_show`. Command
+> acceptance arms Now Playing; a matching engine `TrackStarted` opens it.
+> Empty/refused/dead or wholly failed runs do not navigate. This changes the
+> destination after the gesture, not the list-and-cursor model below.
+
+> **Amended 2026-08-12 — one content grammar supersedes the click counts in
+> this study.** One click now selects/highlights every playable tile and row;
+> double click activates it. Album/list tiles play, while track rows
+> needle-drop or jump through the paths this document specifies. Explicit
+> labelled Play controls remain direct. The queue/playback model below is
+> unchanged; statements that tile clicks navigate or row single-clicks play
+> describe the implementation studied on 2026-08-09 and are historical after
+> ADR-0022's interaction amendment.
+
 > The owner's questions, in full, because the whole document is an answer to
 > them:
 >
@@ -120,11 +135,11 @@ Every row read off the code, not the docs:
 
 | Gesture | What is sent | Result | Where |
 |---|---|---|---|
-| **Click a tile on the wall** | nothing | Navigation only: `Message::AlbumClicked → open_album`, the place becomes `Album(id)`. Since ADR-0022 the first press navigates, so there is no double-click-to-play. | `app.rs:726, 1035–1042` |
-| **`Play album` on a record's page** | `SetQueue{album's edition, whole, in order}` then `Play` | The record replaces whatever was queued, from track 1. | `app.rs:1403–1428`; the control `views/album.rs:290–320` |
-| **Click a track row on a record's page** | *decision*: engine already holds exactly this list → `JumpTo{row}`; else `SetQueue{album}` then `JumpTo{row}` | **The album is enqueued whole and playback starts at that song.** The decision is `PlayerState::play_from` (`player.rs:1782–1795`), spent by `app.rs:1449–1501`. | |
+| **Click / double-click a tile on the wall** | first click: nothing; double-click: record queue + `Play` | The first click selects/highlights. The second matching click plays the record and opens Now Playing when the engine confirms a track began. `Open` remains an explicit navigation control. | `selection.rs`; `app.rs::activate_content`; `app.rs::start_and_show` |
+| **`Play album` on a record's page** | `SetQueue{album's edition, whole, in order}` then `Play` | The record replaces whatever was queued, from track 1; matching `TrackStarted` opens Now Playing. Failure stays on the record. | `app.rs::play_album`; `app.rs::start_and_show`; the control in `views/album.rs` |
+| **Double-click a track row on a record's page** | *decision*: engine already holds exactly this list → `JumpTo{row}`; else `SetQueue{album}` then `JumpTo{row}` | **The album is enqueued whole and playback starts at that song.** The first click only selects; activation still spends `PlayerState::play_from`. | `selection.rs`; `app.rs::play_track` |
 | **`Enter`** (with a query) | as `Play album`, for the top-ranked match on the wall | ADR-0021's ranking, filtered through what is visible; with no query, the record last opened. | `app.rs:759–760, 2255–2273` |
-| **Click a row in the Queue place** | `JumpTo{row}` | No decision needed: this list *is* what the engine holds. | `app.rs:1634–1647`; `views/queue.rs:307` |
+| **Double-click a row in the Queue place** | `JumpTo{row}` | First click selects; the second jumps. No queue decision is needed because this list *is* what the engine holds. | `selection.rs`; `app.rs::jump_to_queued` |
 | **A queue row's ✕** | `UpdateQueue{list minus that row}` | The music keeps playing (ADR-0014). | `app.rs:1649+`; `views/queue.rs:328–361` |
 | **`Shuffle`** | `SetQueue{drawn records, whole, in whole-album order}` then `Play` | A *finite* queue of `shuffle::SLEEVES` records drawn from the visible pool; the pool is marked on the wall; the run **ends**. No mode, no flag, nothing to turn off. | `app.rs:1517–1574`; `vm::stacked_queue`, `vm.rs:780` |
 | **`Pull`** | **nothing** | One record offered on its page; accepting it is its ordinary `Play album`. | `app.rs:1576–1616` |
@@ -903,21 +918,22 @@ request, mutation without an edit, and any pool the person cannot see.
 
 ## 7. The friction budget, checked
 
-**The budget: intent → sound in one press from anywhere sound can be meant;
-add-to-playlist in two gestures or fewer.** Every flow, counted from where
-the listener already is:
+**Amended interaction budget: explicit commands remain one press; ordinary
+content activation is one double-click (two clicks); add-to-playlist remains
+two gestures or fewer.** Every flow, counted from where the listener already
+is:
 
 | Flow | Presses | Budget | Notes |
 |---|---|---|---|
 | Play a record, from its page | 1 | ✓ | `Play album` |
-| Play a record, from the wall | 2 (open, `Play album`) | **✗, conceded** | ADR-0022's standing concession — *"the friction budget's intent → sound = 1 click is not met from the wall and this ADR does not pretend otherwise"*. Unchanged here; the repair path remains the stack, not a second meaning for a tile press. |
-| Drop the needle on track *n* | 1 from the page | ✓ | §3.1 |
-| Jump within the sounding record | 1 | ✓ | click the row, or the needle |
+| Play a record, from the wall | 2 clicks (one double-click) | ✓ | First click selects; second activates without navigating or moving the wall. |
+| Drop the needle on track *n* | 2 clicks (one double-click) from the page | ✓ | First click selects; second spends §3.1's unchanged path. |
+| Jump within the sounding record | 2 clicks on the row, or 1 on the needle | ✓ | The seek needle remains an explicit direct control. |
 | `Enter` on a query | 1 | ✓ | top match plays |
 | Shuffle the wall | 1 | ✓ | |
 | The pull → sound | 2 (pull, `Play album`) | ✓* | deliberate: the second press *is* the consent (nothing plays until asked) |
 | Queue a record for later | 1 from its page | ✓ | `Queue album`, §3.3 |
-| Play a playlist | 2 from the panel (name → `Play`); 3 cold | **✗, conceded, same clause** | A playlist's `Play` lives on the playlist exactly as a record's lives on the record; the wall's concession is inherited, not new. A panel-row play control was considered and declined: it would be a second control sending the message the page's `Play` sends, which L8.6 forbids — the rule that kept `Queue · 13` from going stale twice. |
+| Play a playlist | 2 clicks (one double-click) from its collection tile; 2 from the panel (`Open` → `Play`) | ✓ | The tile uses the shared content grammar; the page's labelled `Play` remains direct. |
 | Add a record to a playlist | 2 (`Add to playlist` → pick) | ✓ | §5.6 layer 1 |
 | Add a track to a playlist | 2 (row `+` → pick) | ✓ | §5.6 layer 1 |
 | Add *n* tracks, collecting | 2 setup + 1 each | ✓ amortized | §5.6 layer 2 |
@@ -925,9 +941,9 @@ the listener already is:
 | Save the queue as a playlist | 2 | ✓ | §5.2 |
 | Resume yesterday's run | 1 (`Play`) | ✓ | §3.5: restored paused, one press to sound |
 
-Two flows miss the budget and both are the same standing concession ADR-0022
-already made and documented, extended to the playlist for the same reason
-with the same honesty. No flow silently exceeds it.
+The older one-click budget is deliberately superseded for ordinary content by
+the owner's selection-first rule. Direct labelled commands still meet it; no
+flow silently exceeds the amended budget.
 
 ---
 

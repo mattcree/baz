@@ -614,10 +614,12 @@ pub struct EngineHandle {
     visualization: Arc<VisualizationTap>,
 }
 
-/// A lock-free snapshot of the most recently delivered audio block.
+/// A lock-free snapshot of the most recently delivered audio block, sampled
+/// before ReplayGain, volume and mute are applied.
 ///
 /// The engine only updates it while a front end has explicitly enabled the
-/// visualization tap. Samples are mono folds of the delivered stereo stream.
+/// visualization tap. Samples are mono folds of the source stream at the
+/// output rate, so the visual follows the record rather than the fader.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualizationFrame {
     /// Uniformly sampled points from the latest delivered block.
@@ -830,7 +832,7 @@ impl EngineHandle {
         self.replay_gain.snapshot()
     }
 
-    /// Enable or disable the delivered-sample visualization tap.
+    /// Enable or disable the pre-gain visualization tap.
     ///
     /// Disabled is the default and makes the pump perform no sample copy or
     /// level arithmetic. A front end should enable it only while a live audio
@@ -3151,8 +3153,7 @@ impl Session {
             scratch[..split].copy_from_slice(a);
             scratch[split..n].copy_from_slice(b);
             let block = &mut scratch[..n];
-            fader.apply(block, rate);
-            visualization.capture(block, rate);
+            visualize_then_fade(visualization, block, rate, fader);
             sink.write(block);
         }
         chunk.commit_all();
@@ -3362,6 +3363,19 @@ impl Session {
         let done = self.shared.producer_done.load(Ordering::Acquire);
         done && self.audio.slots() == 0
     }
+}
+
+/// Publish the visualization's pre-volume reading, then apply the output
+/// fader in place. One function makes that ordering impossible to reverse by
+/// accident in the non-transparent pump branch.
+fn visualize_then_fade(
+    visualization: &VisualizationTap,
+    block: &mut [f32],
+    rate: u32,
+    fader: &mut Fader,
+) {
+    visualization.capture(block, rate);
+    fader.apply(block, rate);
 }
 
 impl Drop for Session {
@@ -3760,9 +3774,9 @@ mod tests {
     use std::time::Instant;
 
     use super::{
-        Arc, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig, Event,
+        Arc, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig, Event, Fader,
         Instruments, Observable, Path, PathBuf, Sink, VisualizationFrame, VisualizationTap, mpsc,
-        thread,
+        thread, visualize_then_fade,
     };
     use crate::protocol::{ConversionReason, SignalChain};
 
@@ -3789,6 +3803,28 @@ mod tests {
         let frame = tap.snapshot();
         assert_eq!(frame.sample_rate, RATE);
         assert!((frame.samples[0] - 0.125).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn the_visualization_reads_the_file_before_volume_reaches_the_output() {
+        let tap = VisualizationTap::default();
+        tap.set_enabled(true);
+        let mut block = [0.5_f32; 512];
+        let mut fader = Fader::default();
+        fader.jump(0.0);
+
+        visualize_then_fade(&tap, &mut block, RATE, &mut fader);
+
+        assert!(block.iter().all(|sample| *sample == 0.0));
+        let frame = tap.snapshot();
+        assert_eq!(frame.sample_rate, RATE);
+        assert!(
+            frame
+                .samples
+                .iter()
+                .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+            "the spectrum follows source audio, not the volume control"
+        );
     }
     const TIMEOUT: Duration = Duration::from_secs(20);
 
