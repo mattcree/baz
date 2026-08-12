@@ -1351,14 +1351,13 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
 /// therefore an `expect` rather than a fallback: a silent blank in the window's
 /// own chrome would be worse than a build that cannot start.
 static APP_MARK: LazyLock<image::Handle> = LazyLock::new(|| {
-    /// The 32 px rung of the hicolor ladder — the same file the desktop entry,
-    /// the release tarball and the Flatpak install.
-    const BYTES: &[u8] =
-        include_bytes!("../../../packaging/icons/hicolor/32x32/apps/io.github.mattcree.baz.png");
+    /// The canonical red-circle application asset. The hicolor ladder is
+    /// rendered from its SVG sibling by `packaging/icons/render.sh`.
+    const BYTES: &[u8] = include_bytes!("../assets/icons/logo-transparent-circle-red.png");
     // `::image` is the decoder crate; the bare `image` in this module is
     // `iced::widget::image`, whose `Handle` the last line mints.
     let mark = ::image::load_from_memory(BYTES)
-        .expect("baz's own application icon, compiled in from packaging/icons")
+        .expect("baz's own red-circle application icon, compiled in from assets")
         .to_rgba8();
     let (w, h) = mark.dimensions();
     image::Handle::from_rgba(w, h, mark.into_raw())
@@ -2343,5 +2342,12 @@ mod tests {
             );
         }
         assert_ne!(handle(Glyph::Play).id(), handle(Glyph::Pause).id());
+    }
+
+    #[test]
+    fn the_app_mark_is_the_committed_red_circle_raster() {
+        let mark = app_mark();
+        assert_eq!(mark.width(), 64);
+        assert_eq!(mark.height(), 64);
     }
 }

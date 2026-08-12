@@ -26,6 +26,9 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- baz now uses the supplied red transparent-circle mark in its app bar,
+  supported native window icons, Linux install assets, and embedded Windows
+  executable icon.
 - Search now starts without an implicit result selection, teaches and honors
   its arrow-key chooser while the query field is focused, and adds searched
   tracks directly to the saved playlist currently on screen.

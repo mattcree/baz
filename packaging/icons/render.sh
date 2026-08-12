@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render the hicolor PNG ladder from the two committed SVG sources.
+# Render the hicolor PNG ladder from baz's committed red circle source.
 #
 # The PNGs are committed, because a packager should not need a working
 # rasterizer to install baz and a Flatpak build has no network. This script is
@@ -27,17 +27,17 @@ if ! magick -list format | grep -qE '^ *SVG\*? +SVG +rw\+ +(Librsvg|Scalable).*R
   exit 1
 fi
 
+source=../../crates/baz/assets/icons/logo-transparent-circle-red.svg
 master=hicolor/scalable/apps/io.github.mattcree.baz.svg
-small=io.github.mattcree.baz-small.svg
 
-# 16, 24 and 32 come from the simplified source; everything above from the
-# master. The crossover is where the label's second line stops being ink and
-# starts being noise — see README.md.
-for size in 16 24 32; do
-  magick -background none "$small" -resize "${size}x${size}" \
-    "hicolor/${size}x${size}/apps/io.github.mattcree.baz.png"
-done
-for size in 48 64 128 256 512; do
+# Keep the installable scalable icon byte-for-byte aligned with the artwork
+# the app embeds. The SVG remains committed at the hicolor path because
+# Flatpak installs that standard layout directly.
+cmp -s "$source" "$master" || cp "$source" "$master"
+
+# The supplied circle is legible at every supported hicolor rung, so every
+# size comes from the one canonical source.
+for size in 16 24 32 48 64 128 256 512; do
   magick -background none "$master" -resize "${size}x${size}" \
     "hicolor/${size}x${size}/apps/io.github.mattcree.baz.png"
 done

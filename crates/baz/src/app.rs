@@ -233,11 +233,25 @@ fn window_settings() -> window::Settings {
         )),
         ..window::Settings::default()
     };
+    settings.icon = window_icon();
     #[cfg(target_os = "linux")]
     {
         settings.platform_specific.application_id = String::from(mpris::DESKTOP_ENTRY);
     }
     settings
+}
+
+/// Decode baz's canonical red circle for platforms that support a per-window
+/// icon (Windows and X11). Wayland obtains the same mark from the desktop
+/// entry's hicolor icon instead.
+fn window_icon() -> Option<window::Icon> {
+    let rgba = ::image::load_from_memory(include_bytes!(
+        "../assets/icons/logo-transparent-circle-red.png"
+    ))
+    .ok()?
+    .into_rgba8();
+    let (width, height) = rgba.dimensions();
+    window::icon::from_rgba(rgba.into_raw(), width, height).ok()
 }
 
 /// How close two presses on the app bar have to be to count as a double —

@@ -36,5 +36,8 @@ hound = { workspace = true }
 naga = { workspace = true }
 tempfile = { workspace = true }
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1.12"
+
 [lints]
 workspace = true
