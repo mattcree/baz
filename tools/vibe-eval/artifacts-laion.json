@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "candidate": "LAION CLAP HTSAT unfused, Xenova ONNX revision c28f288",
+  "source": "https://huggingface.co/Xenova/clap-htsat-unfused/tree/c28f2883575e590e04d3146ff0713c2448d691ba",
+  "upstream": "https://huggingface.co/laion/clap-htsat-unfused/tree/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a",
+  "license_status": "evaluation_export_of_apache_2_0_upstream_reproduce_export_before_distribution",
+  "notes": [
+    "The official LAION checkpoint model card declares Apache-2.0.",
+    "The Xenova repository identifies that checkpoint as its base but does not repeat a licence field.",
+    "Use these paired quantized artifacts for evaluation; reproduce and document the export from the official checkpoint before Baz redistribution."
+  ],
+  "files": [
+    {
+      "name": "audio_model_quantized.onnx",
+      "bytes": 34301667,
+      "sha256": "3fcff2c8824e7bcb83a983f2a49edab3b60cbcf4872ac70efee517355173bd1f",
+      "role": "audio_graph_and_weights"
+    },
+    {
+      "name": "text_model_quantized.onnx",
+      "bytes": 126603263,
+      "sha256": "1a3df8b197e249816e08415fd040434c44762b2eea7eb7bf8a48a0f0bf3c14e5",
+      "role": "text_graph_and_weights"
+    },
+    {
+      "name": "tokenizer.json",
+      "bytes": 2108774,
+      "sha256": "dc239041d98de27ffc3975473a1a23e3db4c937b23c138c38bbc66588bd247e5",
+      "role": "tokenizer"
+    },
+    {
+      "name": "preprocessor_config.json",
+      "bytes": 541,
+      "sha256": "9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753",
+      "role": "audio_preprocessor"
+    },
+    {
+      "name": "config.json",
+      "bytes": 699,
+      "sha256": "39c6d90fe29cf2cce650dd5c92c38a1e35b130d9ce0bb98585222ad687ad979b",
+      "role": "model_config"
+    },
+    {
+      "name": "tokenizer_config.json",
+      "bytes": 1392,
+      "sha256": "2c964a338683aec3695ea37687271e75b40905233f5d2a5bbb9be8cb40c4d0a0",
+      "role": "tokenizer_config"
+    }
+  ]
+}

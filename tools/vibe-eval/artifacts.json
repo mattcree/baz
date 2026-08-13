@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "candidate": "AudioMuse DCLAP v1",
+  "source": "https://github.com/NeptuneHub/AudioMuse-AI-DCLAP/releases/tag/v1",
+  "license_status": "evaluation_only_pending_weight_and_combined-work_review",
+  "notes": [
+    "The source repository is AGPL-3.0-only; the release does not state a separate weight licence.",
+    "The text encoder is an ONNX export of the original LAION CLAP text tower.",
+    "Do not copy these artifacts into Baz packages or fetch them from the application."
+  ],
+  "files": [
+    {
+      "name": "model_epoch_36.onnx",
+      "bytes": 1243778,
+      "sha256": "17860403f8fc90aff8ac0632a0741eb5e58d8c0b0ad2fce5ced967274b0ea971",
+      "role": "audio_graph"
+    },
+    {
+      "name": "model_epoch_36.onnx.data",
+      "bytes": 21168128,
+      "sha256": "2a735b23c2aad7b12d9ffc85334cebcc659c07696d2ff60e2e378da28b6df657",
+      "role": "audio_weights"
+    },
+    {
+      "name": "clap_text_model.onnx",
+      "bytes": 501445503,
+      "sha256": "200d48f3905ff1f272af5006dd9851f94071a7dde4eafd9c07bc09c5ac65a714",
+      "role": "text_graph_and_weights"
+    },
+    {
+      "name": "tokenizer.json",
+      "bytes": 2108746,
+      "sha256": "77ef92283d67f0d97e1454909a964afcbfa2019f0fb9f18f8e88d5c25c3ba729",
+      "role": "tokenizer",
+      "source": "https://huggingface.co/laion/clap-htsat-unfused/resolve/main/tokenizer.json",
+      "license": "Apache-2.0"
+    }
+  ]
+}
+

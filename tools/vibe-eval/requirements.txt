@@ -1,0 +1,6 @@
+# Evaluation tooling only. These are never imported, downloaded or shipped by Baz.
+librosa==0.11.0
+numpy==2.5.2
+onnxruntime==1.23.2
+tokenizers==0.22.2
+

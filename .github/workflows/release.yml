@@ -151,10 +151,10 @@ jobs:
       # must be built from the dependency set CI proved, not from whatever
       # resolved on the day.
       #
-      # --features device-output: THE shipped feature set. It is non-default
-      # only because building cpal needs platform audio headers that the
-      # primary dev host lacks; a released music player obviously needs audio
-      # output. `baz` has exactly one feature, so this is the whole of it.
+      # --features device-output retains the compatibility spelling for the
+      # shipped player. Default features remain enabled, so this also includes
+      # the offline `vibe-analysis` component; the separate light build uses
+      # `--no-default-features` and is not a release artifact yet.
       - name: Build
         shell: bash
         run: |

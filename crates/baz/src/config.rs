@@ -571,6 +571,13 @@ pub fn library_db_file() -> Option<PathBuf> {
     Some(dirs::data_dir()?.join("baz").join("library.db"))
 }
 
+/// `$XDG_DATA_HOME/baz/vibe.db` — the optional, disposable sonic-analysis
+/// index. It is separate from `library.db` so light builds need not understand
+/// its schema and removing analysis data cannot endanger the music catalogue.
+pub fn vibe_db_file() -> Option<PathBuf> {
+    Some(dirs::data_dir()?.join("baz").join("vibe.db"))
+}
+
 /// Load the config from `path`. A missing, unreadable or unparsable file is
 /// the default config — never an error dialog, and never a lost setting the
 /// file *did* state correctly (module docs).

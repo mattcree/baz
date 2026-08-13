@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 ab_glyph = { workspace = true }
 baz-core = { workspace = true, features = ["device-output"] }
+baz-vibe = { workspace = true, optional = true }
 dirs = { workspace = true }
 iced = { workspace = true }
 image = { workspace = true }
@@ -26,10 +27,14 @@ toml = { workspace = true }
 zbus = { workspace = true }
 
 [features]
+default = ["vibe-analysis"]
 # Compatibility spelling for existing build scripts. Device output is now an
 # unconditional property of the GUI binary; this feature no longer changes
 # the graph, and `--no-default-features` cannot produce a silent GUI build.
 device-output = []
+# The full local sonic-analysis component. A light build can omit it with
+# `--no-default-features`; playback, the library and ordinary playlists remain.
+vibe-analysis = ["dep:baz-vibe"]
 
 [dev-dependencies]
 hound = { workspace = true }

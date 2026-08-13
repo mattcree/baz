@@ -715,9 +715,20 @@ impl AudioSource {
             if packet.track_id() != self.track_id {
                 continue;
             }
+            // A codec-level `DecodeError` rejects this packet, not the whole
+            // stream. Symphonia's own decoding example advances to the next
+            // packet in this case: damaged padding, an unwarmed MP3 bit
+            // reservoir or another isolated frame must cost that frame rather
+            // than an otherwise playable track. Container/I/O/reset failures
+            // still end the source because continuing cannot repair them.
+            //
             // `decoded` is post-trim when the format did gapless trimming
             // (module docs): a fully-trimmed packet yields zero frames.
-            let decoded = self.decoder.decode(&packet)?;
+            let decoded = match self.decoder.decode(&packet) {
+                Ok(decoded) => decoded,
+                Err(error) if recoverable_packet_error(&error) => continue,
+                Err(error) => return Err(error.into()),
+            };
             let frames = decoded.frames() as u64;
             let spec = *decoded.spec();
             let probed = ProbedSpec {
@@ -745,8 +756,9 @@ impl AudioSource {
     ///
     /// # Errors
     ///
-    /// [`PlaybackError::Decode`] on any mid-stream demux or decode failure
-    /// other than a clean end of stream, and
+    /// [`PlaybackError::Decode`] on any non-recoverable mid-stream demux or
+    /// decode failure other than a clean end of stream. A codec-level packet
+    /// decode error skips that packet and continues, and
     /// [`PlaybackError::DecoderPanicked`] when the failure was a panic inside
     /// the decoder rather than an error it returned (`contain_panics`).
     pub fn next_block(&mut self) -> Result<Option<&[f32]>, PlaybackError> {
@@ -860,6 +872,10 @@ impl AudioSource {
     }
 }
 
+fn recoverable_packet_error(error: &SymphoniaError) -> bool {
+    matches!(error, SymphoniaError::DecodeError(_))
+}
+
 /// Feed one metadata revision's tags to a [`ReplayGainReader`].
 ///
 /// The key filter runs first so a value string is only built for the handful
@@ -903,6 +919,14 @@ fn ms_to_secs(ms: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_codec_packet_error_costs_the_packet_not_the_track() {
+        assert!(recoverable_packet_error(&SymphoniaError::DecodeError(
+            "invalid packet"
+        )));
+        assert!(!recoverable_packet_error(&SymphoniaError::ResetRequired));
+    }
 
     /// The containment does what ADR-0040 §2 says: a panic out of a decoder
     /// becomes an error, and an ordinary error is left alone.

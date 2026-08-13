@@ -78,10 +78,12 @@
 >   pieces are 1.0 work, not beta blockers.
 > - **Kiosk mode**, for the same reason and because iced cannot enumerate
 >   monitors.
-> - **Vibe- or prompt-generated playlists** — designed, unmerged, and a whole
->   feature rather than a finish. On 2026-08-12 the owner placed Home/vibe work
->   immediately after the critical-usability tranche; that makes it the next
->   feature area, not a beta blocker ahead of those fixes.
+> - **Vibe- or prompt-generated playlists** — the opt-in conventional sonic
+>   baseline and model-swappable semantic evaluation path are now built, but the
+>   owned listening evaluation and product interaction remain a whole feature
+>   rather than a finish. On 2026-08-12 the owner placed
+>   Home/vibe work immediately after the critical-usability tranche; that makes
+>   it the next feature area, not a beta blocker ahead of those fixes.
 > - **Borderless window chrome and the iced migration.** The direction is now
 >   accepted and iced 0.14 means no fork is required, but the framework upgrade
 >   is platform-foundation work after the usability and Home phases.
@@ -194,12 +196,26 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ### Phase B — Home is the next feature area
 
-13. **Research, design and stage local-first vibe playlists on Home.** Compare
-    deterministic metadata/prompt grammar, lightweight local NLP/ML and local
-    audio features against measured cost and result quality. Then build the
-    smallest approach that wins. Output is always an ordinary editable,
-    listener-requested playlist: no cloud, hidden pool, autoplay or silent
-    regeneration.
+13. **Doing — Build local-first sonic vibe playlists on Home.** The owner
+    rejected the metadata/history grammar as the feature: the product bar is a
+    genuinely impressive offline musical model of the listener's collection.
+    A first end-to-end sonic slice now lives behind the optional
+    `vibe-analysis` build feature: explicit/cancellable incremental audio
+    analysis, a separate versioned/stale-file-aware cache, Calm/Warm/Focus/
+    Bright/Drive controls, sounding-track anchoring, continuity/diversity
+    sequencing and an ordinary silent editable playlist. This is the
+    conventional-feature comparator, **not completion**. The official LAION
+    text/audio towers are now reproducibly exported, pinned and checked against
+    PyTorch, and a fingerprint-locked 72-track private-corpus ballot compares
+    metadata, conventional and semantic lists without revealing identity.
+    The product interaction is now fixed as one Home composer: describe a
+    journey, adjust a visible default energy curve or semantic turns, and press
+    Create; first-use consent continues the same request automatically, the
+    playing track is never an implicit baseline, and the result is a silent
+    editable preview. Next: add the diversity-matched random control, complete
+    the listening gate, and integrate the demonstrated winner behind this
+    model-neutral request. `docs/design/16-local-vibe-
+    playlists.md` is the current research/evaluation record.
 
 ### Phase C — make releases sustainable, then ship
 
@@ -233,10 +249,61 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
+- **Item 13 — local-first sonic vibe playlists on Home.** The conventional
+  audio-feature comparator is implemented and verified end to end. A separate
+  model-swappable blind-evaluation harness now pins both DCLAP and a paired
+  quantized LAION candidate, indexes only an explicit private corpus, exercises
+  negative prompts and arcs, and records package/CPU cost without putting an
+  experimental runtime in the GUI. LAION is the preferred engineering path:
+  its official checkpoint is Apache-2.0, Baz's verified reproducible export is
+  162.7 MB, and its FP32 and quantized towers pass numerical alignment checks.
+  A 72-track, 12-request, three-system anonymous listening set is ready, with a
+  portable exact-corpus fingerprint preventing reused IDs from hiding changed
+  tracks. The listener workflow is now fully specified: one natural request,
+  a visible two-to-four-point energy/semantic journey, automatic work after one
+  consent decision, no implicit current-track seed, and one silent editable
+  preview. It still has to win real blind listening. Keep the item here through
+  that owned-corpus evaluation and semantic runtime integration; the baseline
+  alone does not meet the owner's unique-offline-selling-point bar. The first
+  full-library run also exposed and closed a shared decoder fault: recoverable
+  MP3 packet errors no longer reject a whole track, the exact reported file now
+  analyses, and bounded skip summaries replace raw paths/parser internals in
+  both Home and the canonical event history.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
+- **Prune albums whose files have genuinely been removed.** Recorded
+  2026-08-13 on the side of item 13; do not investigate or implement as part
+  of the vibe work. First establish what the successful scanner currently
+  removes and identify the cases that leave stale albums. Any automatic or
+  confirmed manual pruning must require positive evidence that the owning root
+  completed a successful scan: an offline/unmounted root, GVfs/SMB outage,
+  permission failure or cancelled/incomplete scan is not evidence of deletion.
+  Preview and confirm a manual bulk removal; update the library atomically;
+  never delete audio, playlist files or history; decide how their now-missing
+  references are represented; and reconcile the wall, search, selection,
+  current run/provenance and artwork caches without starting playback.
+- **Delete a saved playlist from the Playlists overview with confirmation.**
+  Recorded 2026-08-13 on the side of item 13; do not implement as part of the
+  vibe work. Give each saved list's overview affordances a Delete action which
+  opens an explicit confirmation naming that list. Cancel is inert; confirm
+  must reuse the existing move-to-trash deletion path, close transient state,
+  remove the overview row and leave a sensible remaining destination selected
+  without playback. Preserve the existing playlist-page action and make both
+  doors invoke one behavior, including for foreign playlists.
+- **Warn when the active signal path resamples.** Recorded 2026-08-13 on the
+  side of item 13; do not implement as part of the vibe work. Settings and the
+  canonical event history should both treat active conversion as a warning,
+  name source/output rates when known and explain the exact device/output or
+  boundary choice that can restore a direct path. Deduplicate a continuing
+  condition and clear it when conversion ends; distinguish Baz's boundary
+  resampler from conversion owned by the operating-system mixer.
+- **Verify when an audio-device picker change takes effect.** Recorded
+  2026-08-13 as an explicitly uninvestigated question; do not probe it during
+  item 13. Later audit selection, persistence, engine reopen/command, signal-
+  path event and visible selected value together, then make immediate, next-
+  track or restart behavior honest and consistent and expose open failures.
 - **Tighten the top and bottom bars' edge composition.** Recorded 2026-08-13.
   The Settings cog still reads too far in from the right, and the application
   mark is both too small and too far from the left edge. The bottom bar's
@@ -294,7 +361,7 @@ its bold title from the numbered item above.
   mask while the spectrum remains full-body. All six states have independent
   clock tests, objectless measures are swept from narrow through 4K, and
   returning to Cover/Case self-heals the hero request and existing dissolve.*
-- **After critical usability, tackle Home through local-first vibe playlist
+- **Doing: after critical usability, tackle Home through local-first vibe playlist
   generation.** This is the owner's explicit ordering from the 2026-08-12 live
   review. Do not spend the Home pass on decorative rearrangement: give it the
   entry point for a listener-requested vibe/prompt and the ordinary editable
@@ -303,8 +370,10 @@ its bold title from the numbered item above.
   regeneration, no cloud/account, and no second playlist species. Run a signal
   spike from cheapest to richest: deterministic metadata/history plus a small
   prompt grammar; lightweight local NLP/classification or embeddings; then
-  incremental local audio features (tempo/energy/timbre) if they beat the
-  simpler baseline. Measure output quality as well as model/binary size, CPU,
+  incremental local audio features (tempo/energy/timbre) and local joint
+  text–audio embeddings. The owner has now set the quality bar: this must be a
+  unique offline selling point, not decorated filtering or nearest-neighbour
+  shuffle. Measure output quality as well as model/binary size, CPU,
   memory, library-analysis time, licensing, offline/cross-platform packaging
   and explainability. *Starts only after the critical-usability tranche. Needs
   then: a precise definition of that tranche, a research corpus/evaluation

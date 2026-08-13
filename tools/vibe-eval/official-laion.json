@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "candidate": "Official LAION CLAP HTSAT unfused revision 8fa0f1c",
+  "source": "https://huggingface.co/laion/clap-htsat-unfused/tree/8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a",
+  "license_status": "apache_2_0_official_checkpoint",
+  "files": [
+    {
+      "name": "README.md",
+      "bytes": 4454,
+      "sha256": "3542c5c4ce25e7868f2c9c97c16229d876bd8d02049e1e0f4d7675da0e5b5db6",
+      "role": "model_card_and_license_declaration"
+    },
+    {
+      "name": "config.json",
+      "bytes": 5390,
+      "sha256": "9efb9557bc804f2ca6e394486af2e45dfed0b18554909735a99c6220b84e4288",
+      "role": "model_config"
+    },
+    {
+      "name": "merges.txt",
+      "bytes": 456356,
+      "sha256": "fe36cab26d4f4421ed725e10a2e9ddb7f799449c603a96e7f29b5a3c82a95862",
+      "role": "tokenizer_merges"
+    },
+    {
+      "name": "preprocessor_config.json",
+      "bytes": 541,
+      "sha256": "9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753",
+      "role": "audio_preprocessor"
+    },
+    {
+      "name": "pytorch_model.bin",
+      "bytes": 614525833,
+      "sha256": "1cd3c601bc4afe0fa87be3de4c13dd2cfadd249fac1e29acf74a9b296c3219bb",
+      "role": "official_model_weights"
+    },
+    {
+      "name": "special_tokens_map.json",
+      "bytes": 280,
+      "sha256": "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f",
+      "role": "tokenizer_special_tokens"
+    },
+    {
+      "name": "tokenizer.json",
+      "bytes": 2108746,
+      "sha256": "77ef92283d67f0d97e1454909a964afcbfa2019f0fb9f18f8e88d5c25c3ba729",
+      "role": "tokenizer"
+    },
+    {
+      "name": "tokenizer_config.json",
+      "bytes": 384,
+      "sha256": "377f91458f7729a4574a84c77bdce67dbc3c58c1a345a29bbf8c4eb1307948a3",
+      "role": "tokenizer_config"
+    },
+    {
+      "name": "vocab.json",
+      "bytes": 798293,
+      "sha256": "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+      "role": "tokenizer_vocabulary"
+    }
+  ]
+}

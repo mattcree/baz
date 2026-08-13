@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::index::{AlbumArtist, Library};
-use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist, PlaylistError};
+use baz_core::playlist::{Entry, ExtInf, Folder, Item, Note, Playlist, PlaylistError};
 
 use crate::vm::{self, QueueItemVm, QueueVm, RunSource, TrackVm};
 
@@ -911,6 +911,65 @@ impl Playlists {
         }
     }
 
+    /// Create a listener-requested sonic playlist. The resulting file is
+    /// deliberately ordinary: the extra comment is provenance for people and
+    /// other tools, never an instruction baz later reads or regenerates from.
+    pub(crate) fn create_generated(
+        &mut self,
+        request: &crate::vibe::Generated,
+        library: &Library,
+    ) -> Option<u64> {
+        if request.items.is_empty() {
+            return None;
+        }
+        let folder = self.folder.as_ref()?;
+        let mut suffix = 1_usize;
+        let name = loop {
+            let name = if suffix == 1 {
+                "Vibe playlist".to_owned()
+            } else {
+                format!("Vibe playlist {suffix}")
+            };
+            if !self.holds(&name) {
+                break name;
+            }
+            suffix = suffix.saturating_add(1);
+        };
+        let mut playlist = match folder.create(&name) {
+            Ok(playlist) => playlist,
+            Err(error) => {
+                println!("[playlists] could not create generated playlist: {error}");
+                return None;
+            }
+        };
+        playlist
+            .items_mut()
+            .push(Item::Note(Note::from_text(&format!(
+                "# made by baz · {} · {}",
+                request.description,
+                request.pool_note().to_lowercase()
+            ))));
+        playlist
+            .items_mut()
+            .extend(request.items.iter().map(entry_for).map(Item::Entry));
+        match playlist.save() {
+            Ok(()) => {
+                let id = playlist_id(playlist.name());
+                println!(
+                    "[playlists] generated {:?} — {}",
+                    playlist.name(),
+                    request.pool_note()
+                );
+                self.refresh(Some(library));
+                Some(id)
+            }
+            Err(error) => {
+                println!("[playlists] could not save generated playlist: {error}");
+                None
+            }
+        }
+    }
+
     /// The queue place's `Save as playlist` was submitted: tonight's run
     /// frozen into a new file, and nothing else — the queue is not linked to
     /// the playlist, and the file is not linked to the run (ADR-0024 §4).
@@ -1720,6 +1779,39 @@ mod tests {
         }
         playlist.save().expect("save");
         playlist_id(name)
+    }
+
+    #[test]
+    fn generated_playlist_is_an_ordinary_file_with_inert_local_provenance() {
+        let (_dir, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let generated = crate::vibe::Generated {
+            description: "Calm · local sonic features".to_owned(),
+            items: vec![item("An Ending", "/m/eno/ascent.flac")],
+            pool_tracks: 1,
+            analyzed_tracks: 1,
+            tempo_span: Some((72.0, 72.0)),
+        };
+        let id = playlists
+            .create_generated(&generated, &library)
+            .expect("a request with tracks creates a playlist");
+        let row = playlists.row(id).expect("the ordinary listing includes it");
+        assert_eq!(row.name, "Vibe playlist");
+        let file = playlists
+            .folder
+            .as_ref()
+            .expect("folder")
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|file| file.name == row.name)
+            .expect("file");
+        let playlist = file.read().expect("read generated file");
+        assert_eq!(playlist.entries().count(), 1);
+        assert!(playlist.items().iter().any(|item| {
+            matches!(item, Item::Note(note) if note.text().contains("Calm · local sonic features"))
+        }));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+huggingface-hub==0.36.2
+numpy==2.5.2
+onnx==1.18.0
+onnxruntime==1.23.2
+tokenizers==0.15.2
+torch==2.8.0+cpu
+transformers==4.36.0

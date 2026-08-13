@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "requests": [
+    {"id": "calm-piano", "kind": "concrete", "query": "calm piano instrumental"},
+    {"id": "bright-rock", "kind": "concrete", "query": "bright energetic guitar rock"},
+    {"id": "gentle-jazz", "kind": "concrete", "query": "gentle acoustic jazz trio"},
+    {"id": "industrial", "kind": "concrete", "query": "aggressive industrial percussion"},
+    {"id": "dream-pop", "kind": "concrete", "query": "dreamy female vocals and soft synthesizers"},
+    {"id": "focus", "kind": "mood", "query": "sparse unobtrusive music for deep focus"},
+    {"id": "wistful", "kind": "subtle_affect", "query": "wistful but not tragic, like remembering somewhere fondly"},
+    {"id": "restless-night", "kind": "subtle_affect", "query": "restless late-night electronic music"},
+    {"id": "warm-not-sweet", "kind": "negative", "query": "warm intimate acoustic music", "avoid": "sentimental or sugary"},
+    {"id": "dark-not-loud", "kind": "negative", "query": "dark tense music", "avoid": "loud aggressive music"},
+    {
+      "id": "slow-burn",
+      "kind": "arc",
+      "query": "a patient nocturnal electronic journey",
+      "arc": [
+        {"at": 0.0, "query": "sparse cold nocturnal electronic ambience"},
+        {"at": 0.65, "query": "driving euphoric electronic music at a peak"},
+        {"at": 1.0, "query": "warm weightless electronic comedown"}
+      ]
+    },
+    {
+      "id": "storm-clears",
+      "kind": "arc",
+      "query": "tension gradually clearing into warmth",
+      "arc": [
+        {"at": 0.0, "query": "uneasy dissonant restrained tension"},
+        {"at": 0.55, "query": "intense dramatic climax"},
+        {"at": 1.0, "query": "open calm hopeful resolution"}
+      ]
+    }
+  ]
+}
+

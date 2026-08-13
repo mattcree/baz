@@ -522,6 +522,26 @@ pub(crate) enum Message {
     /// the picker for `Add to…` (ADR-0031's card at the pointer is not
     /// built), and the key is now its only summons.
     TogglePlaylists,
+    /// Open Home's opt-in local sonic-playlist composer.
+    VibeStart,
+    /// Inspect the selected library editions and begin missing local analysis.
+    VibeAnalyze,
+    /// The persistent sonic cache was checked away from the UI thread.
+    VibePrepared(Result<crate::vibe::Preparation, String>),
+    /// One bounded track-analysis task completed.
+    VibeAnalyzed(crate::vibe::AnalysisResult),
+    /// Stop scheduling analysis after the currently running track returns.
+    VibeAnalysisCancel,
+    /// Choose a controlled sonic target and rebuild the preview.
+    VibePreset(crate::vibe::Preset),
+    /// Anchor the target around the currently sounding analyzed track.
+    VibeUsePlaying,
+    /// Remove the sonic anchor while retaining the selected target.
+    VibeClearSeed,
+    /// Write the previewed, ordinary playlist file and open it without playing.
+    VibeSubmit,
+    /// Put away Home's request composer without writing anything.
+    VibeCancel,
     /// **The returns lane's head, pressed**: go to that destination
     /// (ADR-0030 as the owner amended it). Not a toggle — see [`Place::go`].
     GoTo(crate::lane::Destination),
@@ -1863,6 +1883,7 @@ impl App {
             Self::update_case,
             Self::update_motion,
             Self::update_modified_input,
+            Self::update_vibe,
             Self::update_playlists,
             Self::update_drag,
         ] {
@@ -3281,6 +3302,163 @@ impl App {
         Some(self.request_playlist_art())
     }
 
+    /// Home's opt-in local sonic analyzer and playlist composer.
+    #[allow(clippy::too_many_lines)]
+    fn update_vibe(&mut self, message: &Message) -> Option<Task<Message>> {
+        match message {
+            Message::VibeStart => {
+                let Screen::Shelf(state) = &mut self.screen else {
+                    return Some(Task::none());
+                };
+                if !self.playlists.available() {
+                    return Some(Task::none());
+                }
+                state.vibe.begin();
+                state.vibe.rebuild(&state.albums, &state.edition_choice);
+                Some(Task::none())
+            }
+            Message::VibeAnalyze => {
+                let Some(index) = config::vibe_db_file() else {
+                    if let Screen::Shelf(state) = &mut self.screen {
+                        state.vibe.error = Some(
+                            "This system offers no data folder for the local analysis index."
+                                .to_owned(),
+                        );
+                    }
+                    return Some(Task::none());
+                };
+                let Screen::Shelf(state) = &mut self.screen else {
+                    return Some(Task::none());
+                };
+                let paths = crate::vibe::library_paths(&state.albums, &state.edition_choice);
+                state.vibe.start_preparing();
+                Some(Task::perform(
+                    crate::vibe::prepare(index, paths),
+                    Message::VibePrepared,
+                ))
+            }
+            Message::VibePrepared(result) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.accept_preparation(result.clone());
+                    state.vibe.rebuild(&state.albums, &state.edition_choice);
+                }
+                Some(self.next_vibe_job())
+            }
+            Message::VibeAnalyzed(result) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.accept_analysis(result.clone());
+                    state.vibe.rebuild(&state.albums, &state.edition_choice);
+                    if !state.vibe.analyzing
+                        && state.vibe.failed > 0
+                        && let Some(detail) = state.vibe.failure_note()
+                    {
+                        state.health.record(
+                            crate::health::Level::Warning,
+                            "Sonic analysis skipped tracks",
+                            detail,
+                        );
+                    }
+                }
+                Some(self.next_vibe_job())
+            }
+            Message::VibeAnalysisCancel => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.cancel_analysis();
+                }
+                Some(Task::none())
+            }
+            Message::VibePreset(preset) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state
+                        .vibe
+                        .choose(*preset, &state.albums, &state.edition_choice);
+                }
+                Some(Task::none())
+            }
+            Message::VibeUsePlaying => {
+                let path = self.player.now_playing_path().map(Path::to_owned);
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state
+                        .vibe
+                        .use_seed(path, &state.albums, &state.edition_choice);
+                }
+                Some(Task::none())
+            }
+            Message::VibeClearSeed => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state
+                        .vibe
+                        .use_seed(None, &state.albums, &state.edition_choice);
+                }
+                Some(Task::none())
+            }
+            Message::VibeCancel => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.cancel_analysis();
+                    state.vibe.close();
+                }
+                Some(Task::none())
+            }
+            Message::VibeSubmit => {
+                let result = match &self.screen {
+                    Screen::Shelf(state) if state.vibe.open => state.vibe.preview.clone(),
+                    Screen::Setup(_) | Screen::Blocked(_) | Screen::Shelf(_) => None,
+                }?;
+                if result.items.is_empty() {
+                    return Some(Task::none());
+                }
+                let id = match &self.screen {
+                    Screen::Shelf(state) => {
+                        self.playlists.create_generated(&result, &state.library)
+                    }
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
+                }?;
+                let opened = match &self.screen {
+                    Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => false,
+                };
+                if !opened {
+                    return Some(Task::none());
+                }
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.close();
+                    state.selection.select(Content::Playlist(id));
+                }
+                self.playlist_scroll = 0.0;
+                self.menu = None;
+                let from = self.place;
+                self.place = self.place.playlist(id);
+                self.place_history.visit(self.place);
+                let entering = self.note_place_left(from);
+                Some(Task::batch([
+                    entering,
+                    scrollable::scroll_to(
+                        views::page::scroll_id(),
+                        AbsoluteOffset { x: 0.0, y: 0.0 },
+                    ),
+                    self.request_playlist_art(),
+                ]))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_vibe_job(&mut self) -> Task<Message> {
+        let Some(index) = config::vibe_db_file() else {
+            return Task::none();
+        };
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        let Some((run, path)) = state.vibe.next_job() else {
+            return Task::none();
+        };
+        Task::perform(
+            crate::vibe::analyze(index, run, path),
+            Message::VibeAnalyzed,
+        )
+    }
+
     /// Ask for the playlist artwork belonging to the current place only.
     /// An open playlist needs its header and visible track rows; the unsaved
     /// state needs the same; the collection root needs its tiles. Other places
@@ -4323,6 +4501,13 @@ impl App {
     /// confirmation — takes one press before the place itself leaves.
     fn peel_place_states(&mut self) -> bool {
         match self.place {
+            Place::Home => match &mut self.screen {
+                Screen::Shelf(state) if state.vibe.open => {
+                    state.vibe.close();
+                    true
+                }
+                Screen::Setup(_) | Screen::Blocked(_) | Screen::Shelf(_) => false,
+            },
             Place::Queue => self.playlists.saving_queue.take().is_some(),
             Place::Playlist(_) => {
                 let Some(open) = &mut self.playlists.open else {
@@ -6548,6 +6733,8 @@ pub(crate) struct Shelf {
     /// one sleeve to the next hands the mark over rather than restarting it
     /// (see [`crate::motion::Keyed`]).
     pub(crate) tile_hover: Keyed<u64>,
+    /// Home's explicit, local metadata-playlist request composer.
+    pub(crate) vibe: crate::vibe::State,
     /// **What the Now playing place has committed to drawing of the record** —
     /// the record's id, and its hero when the answer was a picture.
     ///
@@ -6742,6 +6929,7 @@ impl Shelf {
             hovered_album: None,
             hovered_all_songs: false,
             tile_hover: Keyed::new(),
+            vibe: crate::vibe::State::default(),
             art_shown: None,
             art_prior: None,
             art_dissolve: Tween::settled(1.0).with_curve(motion::Curve::Linear),

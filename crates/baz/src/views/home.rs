@@ -149,6 +149,7 @@ pub(crate) fn view<'a>(
 
     let continuing = continue_band(shelf, player, resume, width);
     let everything = all_songs_tile(shelf, player, hang);
+    let request = vibe_playlist(shelf, player, collecting.available);
     let added = recently_added(shelf, player, hang, collecting);
     let counted = collection(shelf);
     let nothing =
@@ -162,6 +163,7 @@ pub(crate) fn view<'a>(
     if let Some(band) = everything {
         body = body.push(band);
     }
+    body = body.push(request);
     if let Some(band) = added {
         body = body.push(band);
     }
@@ -190,6 +192,226 @@ pub(crate) fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// The Home entry for opt-in local sonic analysis and its ordinary playlist.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the Home request composer keeps every visible request/result state together"
+)]
+fn vibe_playlist<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    available: bool,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let state = &shelf.vibe;
+    let lead =
+        column![
+        section_rule("Vibe"),
+        text("Shape a playlist from how your music actually sounds. Analysis stays on this device.")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint),
+    ]
+        .spacing(theme::GAP_SM);
+    if !available {
+        return lead
+            .push(
+                text("Playlist storage is unavailable on this system.")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim),
+            )
+            .into();
+    }
+    if !state.open {
+        return lead
+            .push(
+                button(
+                    container(
+                        text("Make a sonic playlist")
+                            .size(theme::SIZE_META)
+                            .line_height(theme::LEADING_META)
+                            .font(theme::MEDIUM),
+                    )
+                    .height(Length::Fill)
+                    .align_y(alignment::Vertical::Center),
+                )
+                .padding(theme::pad(0.0, theme::GAP_SM))
+                .height(Length::Fixed(theme::TRANSPORT_HIT))
+                .style(move |_theme, status| theme::word_button(room, room.wall, status))
+                .on_press(Message::VibeStart),
+            )
+            .into();
+    }
+    let mut composer = lead;
+    if !cfg!(feature = "vibe-analysis") {
+        return composer
+            .push(
+                text(
+                    "This is the light build. Install the full build to add local sonic analysis.",
+                )
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim),
+            )
+            .push(word_button("Close", Message::VibeCancel))
+            .spacing(theme::GAP_SM)
+            .into();
+    }
+    if !state.has_features() && !state.preparing && !state.analyzing {
+        composer = composer
+            .push(
+                text("Baz will read each selected-edition track once in the background, keep a disposable local index, and never upload audio. You can cancel and resume.")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim),
+            )
+            .push(
+                row![
+                    word_button("Analyse my library", Message::VibeAnalyze),
+                    word_button("Not now", Message::VibeCancel)
+                ]
+                .spacing(theme::GAP_SM),
+            );
+    }
+    if state.preparing {
+        composer = composer.push(
+            text("Checking the local analysis index…")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim),
+        );
+    }
+    if state.analyzing {
+        let current = state
+            .current
+            .as_deref()
+            .map_or("next track", crate::vibe::seed_name);
+        composer = composer
+            .push(
+                text(format!(
+                    "Analysing {} of {} · {} · {} skipped",
+                    state.done.saturating_add(state.failed).saturating_add(1),
+                    state.total,
+                    current,
+                    state.failed
+                ))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim),
+            )
+            .push(word_button("Cancel analysis", Message::VibeAnalysisCancel));
+    }
+    if let Some(error) = state.failure_note() {
+        composer = composer.push(
+            text(error)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.lamp)
+                .width(Length::Fill)
+                .wrapping(text::Wrapping::Word),
+        );
+    }
+    if state.has_features() {
+        let choices = crate::vibe::Preset::ALL.into_iter().fold(
+            row![].spacing(theme::GAP_SM),
+            |choices, preset| {
+                let label = if preset == state.preset {
+                    format!("{} ·", preset.label())
+                } else {
+                    preset.label().to_owned()
+                };
+                choices.push(word_button(&label, Message::VibePreset(preset)))
+            },
+        );
+        composer = composer.push(choices);
+        let seed_controls = if let Some(seed) = state.seed.as_deref() {
+            row![
+                text(format!("Around {}", crate::vibe::seed_name(seed)))
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim),
+                word_button("Remove anchor", Message::VibeClearSeed)
+            ]
+            .spacing(theme::GAP_SM)
+        } else {
+            row![word_button(
+                "Use sounding track as anchor",
+                Message::VibeUsePlaying,
+            )]
+            .spacing(theme::GAP_SM)
+        };
+        if player
+            .now_playing_path()
+            .is_some_and(|path| state.can_seed(path))
+            || state.seed.is_some()
+        {
+            composer = composer.push(seed_controls);
+        }
+        if !state.preparing && !state.analyzing {
+            composer = composer.push(word_button(
+                "Analyse new or changed tracks",
+                Message::VibeAnalyze,
+            ));
+        }
+    }
+    let can_create = state
+        .preview
+        .as_ref()
+        .is_some_and(|preview| !preview.items.is_empty())
+        && !state.preparing
+        && !state.analyzing;
+    if let Some(preview) = &state.preview {
+        let result = if preview.items.is_empty() {
+            format!("{} · no tracks fit this target", preview.pool_note())
+        } else {
+            format!(
+                "{} · {} tracks selected and sequenced for sonic continuity, with album and artist diversity.",
+                preview.pool_note(),
+                preview.items.len()
+            )
+        };
+        composer = composer.push(
+            text(result)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim),
+        );
+    }
+    let create = word_button_maybe("Create playlist", can_create.then_some(Message::VibeSubmit));
+    let cancel = word_button("Close", Message::VibeCancel);
+    composer
+        .push(row![create, cancel].spacing(theme::GAP_SM))
+        .spacing(theme::GAP_SM)
+        .width(Length::Fill)
+        .into()
+}
+
+fn word_button<'a>(label: &str, message: Message) -> iced::widget::Button<'a, Message> {
+    word_button_maybe(label, Some(message))
+}
+
+fn word_button_maybe<'a>(
+    label: &str,
+    message: Option<Message>,
+) -> iced::widget::Button<'a, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(label.to_owned())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press_maybe(message)
 }
 
 /// **What the `CONTINUE` band is a placard for**: the track to carry on with

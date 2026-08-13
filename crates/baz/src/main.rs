@@ -84,6 +84,7 @@ mod shelf;
 mod spine;
 mod theme;
 mod undo;
+mod vibe;
 mod views;
 mod visualizer;
 mod vm;

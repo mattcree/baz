@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "tracks": [
+    {
+      "id": "stable-private-id-1",
+      "path": "/absolute/path/to/track.flac",
+      "title": "Optional title for the metadata control",
+      "artist": "Artist identity used only for diversity",
+      "album": "Album identity used only for diversity",
+      "genre": "Optional verbatim genre",
+      "tags": ["optional", "extra", "terms"]
+    }
+  ]
+}

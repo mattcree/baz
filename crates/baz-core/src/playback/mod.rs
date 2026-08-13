@@ -187,6 +187,7 @@ pub mod device;
 pub mod exclusive;
 
 pub use engine::{BoundaryPolicy, EngineConfig, PlayReport, PrefetchEvidence, run_playlist};
+pub use resample::resample_interleaved;
 pub use sink::{OfflineSink, Sink};
 pub use source::{AudioSource, DecodedAudio};
 
