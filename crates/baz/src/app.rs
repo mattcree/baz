@@ -438,6 +438,8 @@ pub(crate) enum Message {
     ToggleStatus,
     /// Dismiss the application status layer without changing any place.
     CloseStatus,
+    /// Retry the recoverable library-health conditions with one incremental scan.
+    RetryHealth,
     /// Pressing the current-song block in the bottom bar: open its source and,
     /// for a saved playlist, bring the sounding entry into view.
     OpenPlayingSource,
@@ -1959,6 +1961,14 @@ impl App {
                 }
                 self.status_open = !self.status_open;
                 self.menu = None;
+                Task::none()
+            }
+            Message::RetryHealth => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && !state.scanning
+                {
+                    state.start_scan(scan::ScanMode::Incremental);
+                }
                 Task::none()
             }
             Message::CloseStatus => {
@@ -5742,6 +5752,7 @@ impl App {
                 self.place_history.can_forward(),
                 self.window_maximized,
                 owns_chrome(),
+                self.health_summary(),
                 ink,
             ),
             screen
@@ -5758,7 +5769,6 @@ impl App {
                 self.bar_cover(),
                 self.now_playing_source()
                     .map(|_| Message::OpenPlayingSource),
-                self.health_summary(),
             ),
         ]
         .into();
@@ -7898,6 +7908,10 @@ impl Shelf {
 
     /// Take everything the worker has said since the last tick, without
     /// touching the index — the receiving half of [`Shelf::drain_scan`].
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one receiver drain deliberately keeps every scan-worker message's state transition together"
+    )]
     fn collect_scan(&mut self) -> Option<Drained> {
         let rx = self.scan_rx.as_ref()?;
         // Batches are kept per root, because the root is what makes the write
@@ -7915,8 +7929,16 @@ impl Shelf {
                     root,
                     tracks,
                     failed,
+                    failures,
                 }) => {
                     self.files_skipped += failed;
+                    for (path, reason) in failures {
+                        self.health.record(
+                            crate::health::Level::Warning,
+                            "File skipped",
+                            format!("{}\n{reason}", path.display()),
+                        );
+                    }
                     match fresh_tracks.last_mut() {
                         Some((held, batch)) if *held == root => batch.extend(tracks),
                         _ => fresh_tracks.push((root, tracks)),

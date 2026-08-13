@@ -391,7 +391,33 @@ pub(crate) fn area<'a>(
 ) -> Element<'a, Message> {
     Element::new(Area {
         content: content.into(),
-        target,
+        target: Some(target),
+        plain_cursor: false,
+    })
+}
+
+/// As [`area`], but a content-selection target keeps the default cursor. A
+/// selection is not a link: its second press activates playback.
+pub(crate) fn selection_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    target: Target,
+) -> Element<'a, Message> {
+    Element::new(Area {
+        content: content.into(),
+        target: Some(target),
+        plain_cursor: true,
+    })
+}
+
+/// Keep the default cursor over a select-then-activate target without adding
+/// a context-menu route.
+pub(crate) fn selection_cursor<'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    Element::new(Area {
+        content: content.into(),
+        target: None,
+        plain_cursor: true,
     })
 }
 
@@ -400,7 +426,8 @@ pub(crate) fn area<'a>(
 /// carries no position, and the float opens at the pointer.
 struct Area<'a> {
     content: Element<'a, Message>,
-    target: Target,
+    target: Option<Target>,
+    plain_cursor: bool,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
@@ -467,10 +494,14 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
             return event::Status::Captured;
         }
         if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event
+            && self.target.is_some()
             && let Some(at) = cursor.position()
             && layout.bounds().contains(at)
         {
-            shell.publish(Message::OpenMenu(self.target, at));
+            shell.publish(Message::OpenMenu(
+                self.target.expect("right press has a menu target"),
+                at,
+            ));
             return event::Status::Captured;
         }
         event::Status::Ignored
@@ -505,13 +536,17 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        if self.plain_cursor && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::default()
+        } else {
+            self.content.as_widget().mouse_interaction(
+                &tree.children[0],
+                layout,
+                cursor,
+                viewport,
+                renderer,
+            )
+        }
     }
 
     fn overlay<'b>(

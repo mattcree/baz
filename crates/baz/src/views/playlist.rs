@@ -602,7 +602,7 @@ fn entry_row<'a>(
     // The row's right press opens its mirror menu (doc 09 §5.2): play and
     // the transfer verbs, each a press this row's own controls already
     // make. A missing entry's menu offers nothing, exactly as its row does.
-    crate::menu::area(
+    crate::menu::selection_area(
         mouse_area(slots)
             .on_enter(Message::PlaylistRowEntered(index))
             .on_exit(Message::PlaylistRowLeft(index)),

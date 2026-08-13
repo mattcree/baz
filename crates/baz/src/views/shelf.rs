@@ -731,7 +731,7 @@ pub(crate) fn tile<'a>(
     // The tile's right press opens its mirror menu (doc 09 §5.2): open,
     // play, queue, add — every verb a press some visible control also
     // makes.
-    crate::menu::area(
+    crate::menu::selection_area(
         mouse_area(
             button(
                 column![sleeve, label_block]

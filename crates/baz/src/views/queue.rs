@@ -605,7 +605,7 @@ fn queue_row(
     // The row's right press opens its mirror menu (doc 09 §5.2): play,
     // the transfer verbs, remove — each a press this row's own controls
     // already make.
-    crate::menu::area(
+    crate::menu::selection_area(
         mouse_area(slots)
             .on_enter(Message::QueueRowEntered(index))
             .on_exit(Message::QueueRowLeft(index)),

@@ -101,7 +101,18 @@ pub(crate) fn view<'a>(
     // at the edge of it"*. A scrollbar inset by the gutter reads as belonging
     // to the list rather than to the surface, and leaves a dead strip between
     // it and the seam. The rows keep the inset; only the bar reaches the edge.
-    let list = scrollable(body_rows.padding(theme::pad(0.0, theme::GAP_XL)))
+    // `wall_scrollbar` consumes its 4 px from the scrollable's content box.
+    // The rows still need their full 232 px measure, including the Recent
+    // lamp's far-trailing slot, so only the edge-side gutter yields those
+    // pixels. Keeping the leading gutter at 24 preserves the head and row
+    // alignment; shrinking both would merely move the clip to the other side.
+    let list_pad = iced::Padding {
+        top: 0.0,
+        right: theme::GAP_XL - theme::WALL_SCROLLBAR_W,
+        bottom: 0.0,
+        left: theme::GAP_XL,
+    };
+    let list = scrollable(body_rows.padding(list_pad))
         .on_scroll(Message::LaneScrolled)
         .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.recess, status))
@@ -497,21 +508,22 @@ fn lane_row<'a>(
     .style(move |_theme, status| theme::track_row(room, room.recess, status, playing))
     .on_press(press);
     if open {
-        return row_button.into();
+        return crate::menu::selection_cursor(row_button);
     }
     // Collapsed the sleeve is the only identification, so the name is the
     // tooltip — the same clause that names the head's glyphs.
-    iced::widget::tooltip(
-        row_button,
-        text(entry.name.clone())
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Right,
+    crate::menu::selection_cursor(
+        iced::widget::tooltip(
+            row_button,
+            text(entry.name.clone())
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION),
+            iced::widget::tooltip::Position::Right,
+        )
+        .gap(theme::GAP_XS)
+        .padding(theme::GAP_XS)
+        .style(move |_theme| theme::tooltip(room)),
     )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
 }
 
 /// One fixed-height expanded-lane line. When it is long, the prefix and the
@@ -881,6 +893,26 @@ mod tests {
         assert!(
             !row.contains("if playing && open"),
             "playback still changes the expanded row's child geometry"
+        );
+    }
+
+    #[test]
+    fn the_edge_scrollbar_cannot_clip_the_recents_trailing_lamp() {
+        const {
+            assert!(
+                theme::SIDEBAR_W
+                    - theme::WALL_SCROLLBAR_W
+                    - theme::GAP_XL
+                    - (theme::GAP_XL - theme::WALL_SCROLLBAR_W)
+                    == theme::SIDEBAR_MEASURE
+            );
+        }
+        let source = source();
+        let head = source.split("#[cfg(test)]").next().expect("a head");
+        assert!(
+            head.contains("right: theme::GAP_XL - theme::WALL_SCROLLBAR_W")
+                && head.contains("left: theme::GAP_XL"),
+            "the lane's scrollbar has reclaimed the Recent lamp's measured slot"
         );
     }
 

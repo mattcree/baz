@@ -175,10 +175,13 @@ product.
     safe missing-subject fallback and stable disabled states are covered by
     tests. They are explicitly page navigation, not track transport; opening
     or dismissing search creates no entry.
-11. **Move operational health behind the app-bar bell.** One canonical event
-    surface, no bottom-bar duplicate; restrained attention, condition
-    resolution, manual Retry and/or bounded backoff. Include a listener-visible
-    route to skipped-file details rather than terminal-only paths.
+11. **Done 2026-08-13 — Move operational health behind the app-bar bell.**
+    The fixed app-bar bell is the sole health door; it anchors the canonical
+    event panel below the bar, replaces the bottom-bar dot, and acknowledges
+    transient attention on open/close. Recoverable warning/error states expose
+    a safe incremental Retry, while the existing bounded five-minute rescan
+    remains the automatic retry. Every skipped path and scanner reason is now
+    recorded in the listener-visible event history rather than terminal-only.
 12. **Done 2026-08-13 — Fix Windows GUI launch packaging.** Release/package
     builds open only baz, no companion console; debug builds retain the console
     and its diagnostics. `crates/baz/src/main.rs` carries the crate-root gate
@@ -231,7 +234,6 @@ Phase A is complete only when all twelve items are implemented and verified;
 ## Doing
 
 
-10. **Add browser-style place history.** In progress 2026-08-13.
 
 ## Detailed briefs, later work, and genuine unresolved choices
 

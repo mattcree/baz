@@ -177,6 +177,11 @@ use crate::{icon, theme};
 /// is the price of not holding it. Worse, it was false by a further 16 px in
 /// the state that ships, because the row spent a seam on the `Space` that stood
 /// in for them. Both are fixed above; the claim is now the one that is true.
+#[expect(
+    clippy::too_many_arguments,
+    clippy::fn_params_excessive_bools,
+    reason = "the shell owns the app-bar facts and keeping them explicit makes its composition auditable"
+)]
 pub(crate) fn view(
     shelf: &Shelf,
     window_w: f32,
@@ -186,15 +191,20 @@ pub(crate) fn view(
     can_forward: bool,
     maximized: bool,
     owns_chrome: bool,
+    health: crate::health::Summary,
     ink: Ink,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let name = mark();
     let history = history(can_back, can_forward, ink);
     let search = crate::views::search::well(shelf);
-    let furniture = row![marks(density, visualization), gear(ink),]
-        .spacing(theme::GAP_LG)
-        .align_y(iced::Alignment::Center);
+    let furniture = row![
+        marks(density, visualization),
+        crate::views::status::bell(health),
+        gear(ink),
+    ]
+    .spacing(theme::GAP_LG)
+    .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
     // note on `owns_chrome` above.
     //
@@ -874,9 +884,11 @@ mod tests {
             .expect("the view/application cluster")
             .1;
         assert!(
-            furniture.starts_with("marks(density, visualization), gear(ink)"),
-            "the display options no longer stand inside the gear: scope \
-             widens rightward, and this pair is the rule's smallest instance"
+            furniture.contains("marks(density, visualization)")
+                && furniture.contains("crate::views::status::bell(health)")
+                && furniture.contains("gear(ink)"),
+            "the display options, application health, and Settings no longer \
+             stand in the scope-widening order the bar promises"
         );
     }
 }

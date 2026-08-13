@@ -1,26 +1,32 @@
-//! Bottom-right application health pill and its bounded event-history float.
+//! App-bar health bell and its bounded event-history float.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, mouse_area, row, scrollable, stack, text,
-    tooltip,
+    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row,
+    scrollable, stack, text, tooltip,
 };
 use iced::{Color, Element, Length, Size, alignment};
 
 use crate::app::Message;
 use crate::health::{Event, Level, Log, Summary};
-use crate::theme;
+use crate::{icon, theme};
 
 const DOT: f32 = 7.0;
 const PANEL_W: f32 = 440.0;
 const PANEL_H: f32 = 420.0;
 
-pub(crate) fn indicator(summary: Summary) -> Element<'static, Message> {
+pub(crate) fn bell(summary: Summary) -> Element<'static, Message> {
     let room = theme::active();
     let tone = tone(room, summary.level);
-    let mark = container(
+    let mark = container(iced::widget::stack![
+        iced_image(icon::handle(icon::Glyph::Bell))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_ink(true, false, 0.0, false)),
         container(Space::new(Length::Fixed(DOT), Length::Fixed(DOT)))
-            .style(move |_theme| theme::status_dot(tone)),
-    )
+            .style(move |_theme| theme::status_dot(tone))
+            .align_right(Length::Fill)
+            .align_bottom(Length::Fill),
+    ])
     .width(Length::Fill)
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
@@ -32,10 +38,10 @@ pub(crate) fn indicator(summary: Summary) -> Element<'static, Message> {
             .padding(0)
             .style(move |_theme, status| theme::transport(room, room.recess, status))
             .on_press(Message::ToggleStatus),
-        text(format!("{} — open status", summary.label))
+        text(format!("{} — open health", summary.label))
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Top,
+        tooltip::Position::Bottom,
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
@@ -59,7 +65,18 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
         events = events.push(event_row(event));
     }
     let tone = tone(room, summary.level);
-    let head = row![
+    let retry = (matches!(summary.level, Level::Warning | Level::Error)).then(|| {
+        button(
+            text("Retry")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(theme::pad(0.0, theme::GAP_MD))
+        .style(move |_theme, status| theme::word_button(room, room.plinth, status))
+        .on_press(Message::RetryHealth)
+    });
+    let mut head = row![
         column![
             text("STATUS")
                 .size(theme::SIZE_CAPTION)
@@ -90,6 +107,9 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
         .on_press(Message::CloseStatus),
     ]
     .align_y(iced::Alignment::Center);
+    if let Some(retry) = retry {
+        head = head.push(retry);
+    }
     let history = scrollable(
         container(events)
             .width(Length::Fill)
@@ -117,11 +137,11 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Bottom)
+            .align_y(alignment::Vertical::Top)
             .padding(iced::Padding {
-                top: 0.0,
+                top: theme::APP_BAR_H + theme::GAP_MD,
                 right: theme::HANG,
-                bottom: theme::BAR_CONTENT_H + theme::GAP_MD,
+                bottom: 0.0,
                 left: 0.0,
             }),
     ]
@@ -188,6 +208,7 @@ fn tone(room: &theme::Palette, level: Level) -> Color {
     match level {
         Level::Ready => room.paper_muted,
         Level::Working => room.paper_faint,
-        Level::Warning | Level::Error => room.alert,
+        Level::Warning => room.warning,
+        Level::Error => room.alert,
     }
 }

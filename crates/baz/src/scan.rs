@@ -131,8 +131,8 @@ impl ScanMode {
 /// One message from the scan worker to the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanUpdate {
-    /// A batch of progress: tracks read since the last update, plus how many
-    /// files failed in the same window (already counted, not itemized).
+    /// A batch of progress, including the failed paths and reasons the
+    /// listener can inspect from the application's health surface.
     Batch {
         /// The library root these tracks were found under — what makes the
         /// write a `Library::add_tracks_under` rather than an `add_tracks`, and
@@ -142,6 +142,8 @@ pub enum ScanUpdate {
         tracks: Vec<TrackMeta>,
         /// Files/directories the scanner skipped in this window.
         failed: usize,
+        /// Each skipped path with the scanner's reason.
+        failures: Vec<(PathBuf, String)>,
     },
     /// One root's walk finished. Sent per root, before the removal pass.
     RootDone {
@@ -221,6 +223,7 @@ pub struct Batcher {
     root: PathBuf,
     tracks: Vec<TrackMeta>,
     failed: usize,
+    failures: Vec<(PathBuf, String)>,
     last_flush: Instant,
     max_tracks: usize,
     interval: Duration,
@@ -234,6 +237,7 @@ impl Batcher {
             root,
             tracks: Vec::new(),
             failed: 0,
+            failures: Vec::new(),
             last_flush: now,
             max_tracks,
             interval,
@@ -245,7 +249,10 @@ impl Batcher {
     pub fn push(&mut self, entry: ScanEntry, now: Instant) -> Option<ScanUpdate> {
         match entry {
             ScanEntry::Track(meta) => self.tracks.push(meta),
-            ScanEntry::Failed { .. } => self.failed += 1,
+            ScanEntry::Failed { path, reason } => {
+                self.failed += 1;
+                self.failures.push((path, reason.clone()));
+            }
             // Nothing to write: the row already in the index is current.
             // It is counted in `Done`, not carried through a batch — a warm
             // launch should cost the UI no `add_tracks` at all.
@@ -271,6 +278,7 @@ impl Batcher {
             root: self.root.clone(),
             tracks: std::mem::take(&mut self.tracks),
             failed: std::mem::take(&mut self.failed),
+            failures: std::mem::take(&mut self.failures),
         })
     }
 }
@@ -781,6 +789,7 @@ mod tests {
             root,
             tracks,
             failed,
+            ..
         } = update
         else {
             panic!("expected a batch");
@@ -818,7 +827,11 @@ mod tests {
             ScanUpdate::Batch {
                 root: PathBuf::from("/m"),
                 tracks: Vec::new(),
-                failed: 2
+                failed: 2,
+                failures: vec![
+                    (PathBuf::from("/m/bad"), "nope".to_owned()),
+                    (PathBuf::from("/m/bad"), "nope".to_owned()),
+                ],
             }
         );
     }

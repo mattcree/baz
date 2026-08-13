@@ -174,6 +174,8 @@ pub enum Glyph {
     HistoryBack,
     /// Browser-style place history, forward: [`Self::HistoryBack`] mirrored.
     HistoryForward,
+    /// Notification bell: the application's operational-health door.
+    Bell,
     /// Queue: three stacked bars, the last one short — a list with more to
     /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
     Queue,
@@ -1119,6 +1121,24 @@ const HISTORY_BACK: &[Outline] = &[&[
     (0.35, 0.50),
 ]];
 
+/// Notification bell: a dome, clapper and short base at the shared icon stroke.
+const BELL: &[Outline] = &[
+    &[
+        (0.22, 0.68),
+        (0.30, 0.58),
+        (0.30, 0.43),
+        (0.36, 0.25),
+        (0.50, 0.16),
+        (0.64, 0.25),
+        (0.70, 0.43),
+        (0.70, 0.58),
+        (0.78, 0.68),
+        (0.78, 0.76),
+        (0.22, 0.76),
+    ],
+    &[(0.42, 0.80), (0.58, 0.80), (0.55, 0.88), (0.45, 0.88)],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -1156,10 +1176,11 @@ impl Glyph {
         Self::VisualSpectrum,
         Self::HistoryBack,
         Self::HistoryForward,
+        Self::Bell,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 34;
+    const COUNT: usize = 35;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1199,6 +1220,7 @@ impl Glyph {
             Self::VisualSpectrum => VISUAL_SPECTRUM,
             Self::HistoryBack => HISTORY_BACK,
             Self::HistoryForward => HISTORY_FORWARD,
+            Self::Bell => BELL,
         }
     }
 
@@ -1239,6 +1261,7 @@ impl Glyph {
             Self::VisualSpectrum => 31,
             Self::HistoryBack => 32,
             Self::HistoryForward => 33,
+            Self::Bell => 34,
         }
     }
 

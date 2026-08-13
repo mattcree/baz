@@ -598,10 +598,10 @@ fn track_row(
     // verbs the row's own controls speak, at the pointer.
     let target = crate::menu::Target::Track { album, row: index };
     if !collecting.available {
-        return crate::menu::area(body, target);
+        return crate::menu::selection_area(body, target);
     }
     let offered = collecting.panel_open || hovered;
-    crate::menu::area(
+    crate::menu::selection_area(
         mouse_area(
             row![
                 body,

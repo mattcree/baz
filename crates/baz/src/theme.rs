@@ -224,6 +224,9 @@ pub struct Palette {
     pub lamp_ink: Color,
     /// Problems, stated quietly. No alarm klaxon.
     pub alert: Color,
+    /// A recoverable condition requiring attention. Distinct from an error and
+    /// from the playback-only lamp.
+    pub warning: Color,
     /// Success (theme palette slot; nothing renders it directly yet).
     pub success: Color,
     /// The sleeve and popover drop shadow's colour.
@@ -635,6 +638,9 @@ pub const CLOSING_TIME: Palette = Palette {
     lamp_deep: Color::from_rgb(0.780, 0.533, 0.239),
     lamp_ink: Color::from_rgb(0.106, 0.078, 0.043),
     alert: Color::from_rgb(0.851, 0.467, 0.420),
+    // #D2B35E — aged paper marker, deliberately neither the playback lamp nor
+    // the red error state.
+    warning: Color::from_rgb(0.824, 0.702, 0.369),
     success: Color::from_rgb(0.525, 0.663, 0.486),
     shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
     ring_alpha: 0.45,
@@ -684,6 +690,9 @@ pub const READING_ROOM: Palette = Palette {
     lamp_deep: Color::from_rgb(0.537, 0.141, 0.031),
     lamp_ink: Color::from_rgb(0.965, 0.953, 0.925),
     alert: Color::from_rgb(0.608, 0.118, 0.133),
+    // #8A6420 — dark ochre holds against the light room without borrowing its
+    // oxblood playback lamp or danger red.
+    warning: Color::from_rgb(0.541, 0.392, 0.125),
     success: Color::from_rgb(0.208, 0.424, 0.220),
     shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
     // 0.55, not 0.45: see `Palette::ring_alpha`.
@@ -5866,6 +5875,7 @@ mod tests {
                 ("paper_dim", p.paper_dim, TEXT),
                 ("paper_faint", p.paper_faint, TEXT),
                 ("alert", p.alert, TEXT),
+                ("warning", p.warning, MARK),
                 ("paper_muted", p.paper_muted, MARK),
                 ("lamp", p.lamp, MARK),
                 ("lamp_glow", p.lamp_glow(), MARK),
@@ -6582,6 +6592,7 @@ mod tests {
                 (dark.lamp, light.lamp),
                 (dark.lamp_ink, light.lamp_ink),
                 (dark.alert, light.alert),
+                (dark.warning, light.warning),
             ])
         {
             assert_ne!(a, b, "the two rooms share a value");
