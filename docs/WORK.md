@@ -162,8 +162,13 @@ product.
    `Add to playlist` edits the saved file on screen, while other places retain
    live-run `Enqueue`; the chooser starts unselected and visibly teaches its
    now-focus-safe arrow grammar.
-9. **Converge the Playlists root with Library.** Use one collection scaffold,
-   including the right rail; define honest rail buckets for each ordering.
+9. **Done 2026-08-13 — Converge the Playlists root with Library.** Library and
+   Playlists now draw through one collection scaffold: the same right-hand
+   rail stack, edge scrollbar, rail lane, grid/density geometry and tile
+   selection grammar. The playlist rail projects `A–Z` under alphabetical
+   order and elapsed `Date created` / `Played` buckets under chronological
+   orders, with unavailable creation dates and never-played lists stated
+   separately and inert absent buckets retained.
 10. **Add browser-style place history.** Visible Back/Forward arrows, normal
     branch semantics and stable disabled states; never confuse them with track
     transport. Search-dropover open/dismiss does not create history.
@@ -211,12 +216,40 @@ Phase A is complete only when all twelve items are implemented and verified;
 18. **Continue the remaining briefs below and `BACKLOG.md` functional-first.**
     Defects and data correctness precede interface polish; do not silently drop
     an ask merely because it is not named in phases A–D.
+19. **Tighten the app and bottom-bar edge composition.** Re-measure and reduce
+    their gutters without compromising hit targets or the rail/scrollbar law;
+    enlarge and correctly hang the app mark, and equalize the bottom-left
+    artwork block's x/y padding.
+20. **Make all visible artwork resident.** A visible target with available art
+    must hold an image handle through cache churn; simplify toward visible
+    residency plus the existing bounded off-screen LRU, rather than adding
+    another cache policy or speculative prefetcher.
 
 ## Doing
 
-None. Item 12 is complete; the owner asked to stop after this task.
+10. **Add browser-style place history.** In progress 2026-08-13.
 
 ## Detailed briefs, later work, and genuine unresolved choices
+
+- **Tighten the top and bottom bars' edge composition.** Recorded 2026-08-13.
+  The Settings cog still reads too far in from the right, and the application
+  mark is both too small and too far from the left edge. The bottom bar's
+  left-hand artwork also has unequal padding: its x inset visibly exceeds its
+  y inset. Treat these as one measured edge-composition pass, not three local
+  nudges: preserve control hit targets, the app bar's conditional window
+  controls, and the wall rail/scrollbar relationship. The resulting bar
+  gutters should be deliberately shared or deliberately different with the
+  reason and measurements recorded; the artwork block must have equal x/y
+  padding. See item 19 and ADR-0040's existing gutter amendment.
+- **Make visible artwork unconditionally resident.** Recorded 2026-08-13. The
+  current cache sometimes leaves a sleeve blank or unloads it while it remains
+  on screen, likely from earlier memory optimisation. Re-establish the simple
+  product guarantee: if a visible target has art, it has a loaded handle. Audit
+  the visible-target collection and cache handoff across wall, page, chrome and
+  lane consumers; retain only the current bounded LRU for off-screen recent
+  artwork. Reproduce around 500 and 800 albums, including Windows: it is mild
+  at 393 albums on the owner's Linux machine and reportedly worse near 800 on
+  a friend's Windows machine. See item 20.
 
 This section preserves the evidence and acceptance detail behind `## Next`,
 plus lower-priority and truly owner-blocked work. It is **not execution order**
