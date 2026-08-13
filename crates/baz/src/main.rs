@@ -1,5 +1,18 @@
 //! The baz application: the iced shelf GUI over `baz-core` (ADR-0005).
 //!
+//! ## Windows subsystem
+//!
+//! Release/package Windows builds link as a GUI application so a normal launch
+//! creates only the baz window, never a companion console (the Windows console
+//! defect in the backlog). Debug builds keep the console, where the `[scan]`,
+//! `[playback]`, `[mpris]` and other stdout/stderr diagnostics remain useful.
+//! This is safe because nothing a listener must know is console-only:
+//! user-facing failures flow through the canonical health/event surface
+//! (`crate::health`), and release diagnostics that remain necessary use an
+//! intentional path rather than the console. Other platforms are untouched by
+//! the `windows` gate.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+//!
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
 //! virtualized album shelf with lazy artwork, search-as-you-type, a dismissible
 //! album inspector beside it, an **Queue** popover anchored to the

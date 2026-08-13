@@ -26,6 +26,10 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **Packaged Windows builds now open only the baz window, never a companion
+  command line.** Release/package builds link for the GUI subsystem; debug
+  builds keep the console and its diagnostics. User-facing failures continue
+  through the app's health/event surface.
 - baz now uses the supplied red transparent-circle mark in its app bar,
   supported native window icons, Linux install assets, and embedded Windows
   executable icon.

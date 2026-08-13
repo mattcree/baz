@@ -171,9 +171,12 @@ product.
     surface, no bottom-bar duplicate; restrained attention, condition
     resolution, manual Retry and/or bounded backoff. Include a listener-visible
     route to skipped-file details rather than terminal-only paths.
-12. **Fix Windows GUI launch packaging.** Release/package builds open only baz,
-    no companion console; debug builds retain diagnostics and the packaged
-    `.exe` is exercised on Windows.
+12. **Done 2026-08-13 — Fix Windows GUI launch packaging.** Release/package
+    builds open only baz, no companion console; debug builds retain the console
+    and its diagnostics. `crates/baz/src/main.rs` carries the crate-root gate
+    `#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem =
+    "windows")]`. The final acceptance launch of the actual packaged `.exe` on
+    Windows is the owner's.
 
 Phase A is complete only when all twelve items are implemented and verified;
 “critical usability” does not need to be redefined in a future conversation.
@@ -211,8 +214,7 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-None. Item 8's search/playlist follow-up is complete; the owner asked to stop
-after this task.
+None. Item 12 is complete; the owner asked to stop after this task.
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
@@ -623,6 +625,18 @@ its bold title from the numbered item above.
 
 ## Recently done
 
+- **The packaged Windows app no longer opens a companion command window.**
+  Item 12. `crates/baz/src/main.rs` carries the crate-root gate
+  `#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem =
+  "windows")]`, so release/package builds link as a GUI application and a
+  normal launch from Explorer or the Start menu creates only the baz window.
+  Debug builds keep the console, where the `[scan]`, `[playback]` and `[mpris]`
+  diagnostics remain useful. Nothing a listener must know is console-only:
+  user-facing failures already flow through the canonical health/event surface,
+  so no release file/Windows-logging sink was added — the decided answer, and
+  the skipped-file readout remains item 11's. Other platforms are untouched.
+  The final acceptance launch of the actual packaged `.exe` on Windows is the
+  owner's.
 - **The release dependency gate is green again.** A newly published
   RUSTSEC-2026-0253 advisory made the existing `lru 0.16.4` fail `cargo deny`;
   baz now requires the fixed 0.18.2 release. The API is unchanged, and the
