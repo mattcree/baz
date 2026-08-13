@@ -518,6 +518,32 @@ thing the platform is definitely better at.
 
 **Forking iced for `drag_resize`.** Moot: it is upstream in 0.14 (§6).
 
+## 2026-08-13 amendment — browser-style place history
+
+The owner asked for Spotify-like top-left Back and Forward arrows. They are a
+sixth app-bar tenant because their subject is the window's current place in
+every screen, not any one record, list or transport run. They sit between the
+application mark and the resident search well: identity, place navigation,
+search, drag handle, view, application, window.
+
+The arrows always reserve their two 32 px boxes. At either end of history the
+respective arrow is visibly disabled rather than removed, so the search well
+and the title-bar drag surface never move. Their chevrons are distinct from the
+bottom bar's Previous/Next skip marks: these replace `Place`; those command the
+engine.
+
+`place::History` retains only `Place` identities for the running session.
+Surface-owned query and scroll state remain surface-owned; there is no second
+persistence model. Normal browser rules apply: visiting a new place after Back
+clears Forward, and revisiting the current identity adds nothing. A historical
+record, artist or playlist that no longer resolves falls back through the same
+safe restoration route used at launch, while the history cursor still advances
+so an unavailable subject cannot trap navigation. Search remains an overlay on
+the unchanged place, hence open/clear/dismiss never records history. Esc keeps
+its established peel-then-Library behaviour; normal doors, breadcrumbs and
+resident destinations record visits. Alt+Left and Alt+Right accelerate the
+visible arrows.
+
 ## What the owner still has to answer
 
 **One question: do we take iced 0.13 → 0.14?** It is the only thing between

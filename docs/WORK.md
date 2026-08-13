@@ -169,9 +169,12 @@ product.
    order and elapsed `Date created` / `Played` buckets under chronological
    orders, with unavailable creation dates and never-played lists stated
    separately and inert absent buckets retained.
-10. **Add browser-style place history.** Visible Back/Forward arrows, normal
-    branch semantics and stable disabled states; never confuse them with track
-    transport. Search-dropover open/dismiss does not create history.
+10. **Done 2026-08-13 — Add browser-style place history.** Top-left Back and
+    Forward arrows, with Alt+Left/Right accelerators, walk an in-session
+    `Place`-identity history; normal branch semantics, duplicate suppression,
+    safe missing-subject fallback and stable disabled states are covered by
+    tests. They are explicitly page navigation, not track transport; opening
+    or dismissing search creates no entry.
 11. **Move operational health behind the app-bar bell.** One canonical event
     surface, no bottom-bar duplicate; restrained attention, condition
     resolution, manual Retry and/or bounded backoff. Include a listener-visible
@@ -226,6 +229,7 @@ Phase A is complete only when all twelve items are implemented and verified;
     another cache policy or speculative prefetcher.
 
 ## Doing
+
 
 10. **Add browser-style place history.** In progress 2026-08-13.
 

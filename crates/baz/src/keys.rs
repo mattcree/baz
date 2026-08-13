@@ -377,6 +377,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
     let bare = modifiers.is_empty();
     let shift = modifiers == Modifiers::SHIFT;
     let command = modifiers == Modifiers::COMMAND;
+    let alt = modifiers == Modifiers::ALT;
     // The zoom pair alone tolerates Shift, because `+` *is* Shift+`=` on most
     // layouts and `_` is Shift+`-` (module docs). No other binding does.
     let zoom = command || modifiers == Modifiers::COMMAND | Modifiers::SHIFT;
@@ -394,6 +395,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // (module docs).
         Key::Named(key::Named::ArrowRight) if command => Some(Message::NextTrack),
         Key::Named(key::Named::ArrowLeft) if command => Some(Message::PreviousTrack),
+
+        // Browser-style place history, deliberately on Alt rather than the
+        // transport's command-modified arrows. These accelerate the visible
+        // app-bar arrows and never change the playing track.
+        Key::Named(key::Named::ArrowRight) if alt => Some(Message::HistoryForward),
+        Key::Named(key::Named::ArrowLeft) if alt => Some(Message::HistoryBack),
 
         // Seeking. Shift widens the step; nothing else may ride along.
         Key::Named(key::Named::ArrowRight) if bare => {
@@ -818,7 +825,7 @@ mod tests {
         );
         assert_eq!(
             bind(&named(key::Named::ArrowLeft), Modifiers::ALT),
-            None,
+            Some("HistoryBack".to_owned()),
             "Alt+Left is the browser's Back, not baz's Previous"
         );
     }
@@ -1199,8 +1206,6 @@ mod tests {
             (named(key::Named::Space), Modifiers::ALT),
             (named(key::Named::Space), Modifiers::SHIFT),
             (named(key::Named::Space), Modifiers::LOGO),
-            (named(key::Named::ArrowRight), Modifiers::ALT),
-            (named(key::Named::ArrowLeft), Modifiers::ALT),
             (
                 named(key::Named::ArrowRight),
                 Modifiers::COMMAND | Modifiers::SHIFT,

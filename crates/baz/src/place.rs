@@ -52,20 +52,17 @@
 //!   door for one precise subject: an unsaved list needs somewhere to be
 //!   inspected and saved, and `All songs` now materializes as one.
 //!
-//! # Why an enum and not a stack
+//! # Places replace; history revisits
 //!
-//! Because places still **replace** each other; two are never on screen
-//! together, and there is no history to walk. [`Place::back`] is a total
-//! function with no argument and no `Option`, and <kbd>Esc</kbd>'s rule is one
-//! line rather than one line per layer.
+//! Places still **replace** each other; two are never on screen together.
+//! [`History`] is the separate browser-style record of the places a listener
+//! deliberately visited. It is not a second surface or a stack of views:
+//! Back/Forward replace the current place with an earlier/later identity.
 //!
-//! The one thing a stack would buy — *back to the album I was looking at
-//! before this one* — is deliberately not offered. Every route into an
-//! `Album` place starts on the wall (a tile) or from the bar (what is
-//! sounding), and the wall is what `back` returns to, with its scroll, its
-//! query and its arrangement untouched. A history that could land you
-//! somewhere you did not navigate from is the thing ADR-0016's rail was, in a
-//! different shape.
+//! The history cannot land a listener somewhere they did not navigate from:
+//! it records only explicit place transitions, while each surface keeps its
+//! own query, scroll and arrangement state. It therefore pays the comparison
+//! trip without recreating ADR-0016's resident rail in another shape.
 //!
 //! # The cost this model has that the last one did not
 //!
@@ -148,6 +145,67 @@ pub enum Place {
     /// Everything that is a standing decision: today ReplayGain (ADR-0013),
     /// and the shape every setting after it takes.
     Settings,
+}
+
+/// Browser-style history of visited places.
+///
+/// It deliberately stores only [`Place`] identities. Query, scroll and other
+/// local state already belong to their owning surfaces and remain there; a
+/// history press must not manufacture a second persistence model for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct History {
+    entries: Vec<Place>,
+    current: usize,
+}
+
+impl History {
+    #[must_use]
+    pub(crate) fn new(place: Place) -> Self {
+        Self {
+            entries: vec![place],
+            current: 0,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn can_back(&self) -> bool {
+        self.current > 0
+    }
+
+    #[must_use]
+    pub(crate) fn can_forward(&self) -> bool {
+        self.current + 1 < self.entries.len()
+    }
+
+    /// Records a genuinely new navigation. Repeated navigation to the current
+    /// place is inert; navigating after Back drops the forward branch.
+    pub(crate) fn visit(&mut self, place: Place) -> bool {
+        if self.entries[self.current] == place {
+            return false;
+        }
+        self.entries.truncate(self.current + 1);
+        self.entries.push(place);
+        self.current += 1;
+        true
+    }
+
+    #[must_use]
+    pub(crate) fn back(&mut self) -> Option<Place> {
+        if !self.can_back() {
+            return None;
+        }
+        self.current -= 1;
+        Some(self.entries[self.current])
+    }
+
+    #[must_use]
+    pub(crate) fn forward(&mut self) -> Option<Place> {
+        if !self.can_forward() {
+            return None;
+        }
+        self.current += 1;
+        Some(self.entries[self.current])
+    }
 }
 
 impl Place {
@@ -622,5 +680,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn history_walks_both_directions_and_replaces_the_forward_branch() {
+        let mut history = History::new(Place::Library);
+        assert!(!history.can_back());
+        assert!(!history.can_forward());
+        assert!(history.visit(Place::Album(7)));
+        assert!(history.visit(Place::Artist(3)));
+        assert_eq!(history.back(), Some(Place::Album(7)));
+        assert!(history.can_forward());
+        assert!(history.visit(Place::Playlist(9)));
+        assert!(
+            !history.can_forward(),
+            "a new visit clears the forward branch"
+        );
+        assert_eq!(history.back(), Some(Place::Album(7)));
+        assert_eq!(history.back(), Some(Place::Library));
+        assert_eq!(history.back(), None);
+        assert_eq!(history.forward(), Some(Place::Album(7)));
+        assert_eq!(history.forward(), Some(Place::Playlist(9)));
+        assert_eq!(history.forward(), None);
+    }
+
+    #[test]
+    fn history_never_records_a_duplicate_current_place() {
+        let mut history = History::new(Place::Library);
+        assert!(!history.visit(Place::Library));
+        assert!(!history.can_back());
+        assert!(history.visit(Place::Album(7)));
+        assert!(!history.visit(Place::Album(7)));
+        assert_eq!(history.back(), Some(Place::Library));
+        assert_eq!(history.forward(), Some(Place::Album(7)));
     }
 }

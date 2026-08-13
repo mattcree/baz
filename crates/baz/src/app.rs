@@ -52,7 +52,7 @@ use lru::LruCache;
 
 use crate::motion::{Control, Ink, Keyed, Tween};
 use crate::mpris::Mpris;
-use crate::place::Place;
+use crate::place::{History as PlaceHistory, Place};
 use crate::playback::{OutputChoice, Playback, PlayerEvent};
 use crate::player::PlayerState;
 use crate::scan::ScanUpdate;
@@ -411,6 +411,9 @@ pub(crate) enum Message {
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
     /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
+    /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
+    HistoryBack,
+    HistoryForward,
     /// **The returns lane's Now playing row, and <kbd>Ctrl</kbd>+<kbd>U</kbd>**:
     /// go to `Now playing`.
     ///
@@ -1083,6 +1086,10 @@ struct App {
     /// enum, which is what makes <kbd>Esc</kbd> one line rather than one line
     /// per layer.
     place: Place,
+    /// The visited-place cursor behind the resident app-bar Back/Forward
+    /// arrows. This is deliberately separate from [`Self::place`]: one says
+    /// what is on screen; the other remembers the route that got here.
+    place_history: PlaceHistory,
     /// Which row of the **Queue** place the pointer is on, if any.
     ///
     /// The rows offer their removal ✕ on hover only, and iced 0.13
@@ -1650,6 +1657,7 @@ impl App {
             first_frame_logged: false,
             screen,
             place: Place::default(),
+            place_history: PlaceHistory::new(Place::default()),
             hovered_queue_row: None,
             queue_scroll: 0.0,
             lane_scroll: 0.0,
@@ -1722,6 +1730,7 @@ impl App {
             app.playlists.refresh(Some(&state.library));
         }
         app.restore_place(saved_place);
+        app.place_history = PlaceHistory::new(app.place);
         let artist_image = match app.place {
             Place::Artist(id) => app.request_artist_image(id),
             _ => Task::none(),
@@ -1869,6 +1878,8 @@ impl App {
         }
         match message {
             Message::EscapePressed => self.escape(),
+            Message::HistoryBack => self.travel_history(true),
+            Message::HistoryForward => self.travel_history(false),
             Message::DismissSearch => match &mut self.screen {
                 Screen::Shelf(state) => state.clear_query(),
                 Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
@@ -2969,6 +2980,7 @@ impl App {
                 self.drag = None;
                 let from = self.place;
                 self.place = Place::Playlist(id);
+                self.place_history.visit(self.place);
                 let entering = self.note_place_left(from);
                 match offset {
                     Some(y) => {
@@ -3037,6 +3049,7 @@ impl App {
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
+                    self.place_history.visit(self.place);
                     let entering = self.note_place_left(from);
                     return Some(Task::batch([
                         entering,
@@ -3152,6 +3165,7 @@ impl App {
                     // hashed, so a rename mints a new one.
                     let from = self.place;
                     self.place = Place::Playlist(renamed);
+                    self.place_history.visit(self.place);
                     // A playlist door, or the Library after a delete —
                     // never `Now playing`, so the only task this can answer
                     // with is `Task::none()`, and the machine this arm lives
@@ -3189,6 +3203,7 @@ impl App {
                     // is the honest answer.
                     let from = self.place;
                     self.place = Place::Playlists;
+                    self.place_history.visit(self.place);
                     // A playlist door, or the Library after a delete —
                     // never `Now playing`, so the only task this can answer
                     // with is `Task::none()`, and the machine this arm lives
@@ -4194,12 +4209,45 @@ impl App {
             state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
+            self.place_history.visit(self.place);
             if self.place == Place::Playlists && from != Place::Playlists {
                 self.playlists_scroll = 0.0;
             }
             return self.note_place_left(from);
         }
         Task::none()
+    }
+
+    /// Walk the existing history cursor without recording a new visit.
+    ///
+    /// A vanished subject is resolved through the same safe fallback as a
+    /// restored session. The cursor still moves — otherwise an old album that
+    /// was deleted during a scan could trap the listener between two arrows.
+    fn travel_history(&mut self, backward: bool) -> Task<Message> {
+        let target = if backward {
+            self.place_history.back()
+        } else {
+            self.place_history.forward()
+        };
+        let Some(target) = target else {
+            return Task::none();
+        };
+        self.menu = None;
+        self.status_open = false;
+        self.drag = None;
+        {
+            let Screen::Shelf(state) = &mut self.screen else {
+                return Task::none();
+            };
+            state.hovered_album = None;
+            state.hovered_all_songs = false;
+        }
+        let from = self.place;
+        self.restore_place(target);
+        if self.place == Place::Playlists && from != Place::Playlists {
+            self.playlists_scroll = 0.0;
+        }
+        self.note_place_left(from)
     }
 
     /// **Open a record's page** — an explicit Open control, or source
@@ -4229,6 +4277,7 @@ impl App {
         self.drag = None;
         let from = self.place;
         self.place = self.place.album(id);
+        self.place_history.visit(self.place);
         // A record's page, never `Now playing` — the task is `Task::none()`
         // by construction, and returning it keeps that true if the door ever
         // changes where it lands.
@@ -4245,9 +4294,8 @@ impl App {
         self.status_open = false;
         self.drag = None;
         let from = self.place;
-        // `back()` can reach `Now playing` from a record's page opened out of
-        // the run, so this one genuinely has a follow to answer with — it is
-        // batched at the end of the function with the rest of `leave`'s work.
+        self.place = Place::Library;
+        self.place_history.visit(self.place);
         let entering = self.note_place_left(from);
         // A place's transient fields do not outlive the place: a rename
         // field left standing behind a navigation would greet the next
@@ -5690,6 +5738,8 @@ impl App {
                 self.window.width,
                 hangs_works,
                 visualization,
+                self.place_history.can_back(),
+                self.place_history.can_forward(),
                 self.window_maximized,
                 owns_chrome(),
                 ink,
@@ -9264,7 +9314,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 21] = [
+        const CONTROLS: [(&str, &str); 23] = [
             (
                 "ToggleLane",
                 "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
@@ -9310,6 +9360,8 @@ mod tests {
                 "the returns lane's labelled `Now playing` row",
             ),
             ("ToggleSettings", "the top bar's Settings control"),
+            ("HistoryBack", "the app bar's visible Back arrow"),
+            ("HistoryForward", "the app bar's visible Forward arrow"),
             ("FocusSearch", "the top bar's search well"),
             (
                 "EscapePressed",

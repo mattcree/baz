@@ -169,6 +169,11 @@ pub enum Glyph {
     VisualNone,
     /// Uneven frequency bars across the visual field.
     VisualSpectrum,
+    /// Browser-style place history, backward. This is a chevron, not the
+    /// transport's `Previous`: it changes the window's place, never a track.
+    HistoryBack,
+    /// Browser-style place history, forward: [`Self::HistoryBack`] mirrored.
+    HistoryForward,
     /// Queue: three stacked bars, the last one short — a list with more to
     /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
     Queue,
@@ -1095,6 +1100,25 @@ const VISUAL_SPECTRUM: &[Outline] = &[
     &[(0.80, 0.67), (0.90, 0.67), (0.90, 0.84), (0.80, 0.84)],
 ];
 
+/// A compact disclosure chevron. The unfilled shape distinguishes place
+/// navigation from transport's filled skip marks at the same 16 px size.
+const HISTORY_FORWARD: &[Outline] = &[&[
+    (0.35, 0.16),
+    (0.45, 0.16),
+    (0.75, 0.50),
+    (0.45, 0.84),
+    (0.35, 0.84),
+    (0.65, 0.50),
+]];
+const HISTORY_BACK: &[Outline] = &[&[
+    (0.65, 0.16),
+    (0.55, 0.16),
+    (0.25, 0.50),
+    (0.55, 0.84),
+    (0.65, 0.84),
+    (0.35, 0.50),
+]];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -1130,10 +1154,12 @@ impl Glyph {
         Self::VisualCase,
         Self::VisualNone,
         Self::VisualSpectrum,
+        Self::HistoryBack,
+        Self::HistoryForward,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 32;
+    const COUNT: usize = 34;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1171,6 +1197,8 @@ impl Glyph {
             Self::VisualCase => VISUAL_CASE,
             Self::VisualNone => VISUAL_NONE,
             Self::VisualSpectrum => VISUAL_SPECTRUM,
+            Self::HistoryBack => HISTORY_BACK,
+            Self::HistoryForward => HISTORY_FORWARD,
         }
     }
 
@@ -1209,6 +1237,8 @@ impl Glyph {
             Self::VisualCase => 29,
             Self::VisualNone => 30,
             Self::VisualSpectrum => 31,
+            Self::HistoryBack => 32,
+            Self::HistoryForward => 33,
         }
     }
 

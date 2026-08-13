@@ -420,6 +420,10 @@ pub enum Control {
     /// The app bar's gear — the door to the Settings place (doc 10 §3.4),
     /// resident in every place since ADR-0040 rather than only the Library.
     Settings,
+    /// The app bar's browser-style place-history arrows.
+    HistoryBack,
+    /// The app bar's browser-style place-history arrows.
+    HistoryForward,
     /// The bottom bar's crossed arrows — the player's shuffle property
     /// (2026-08-10, the owner).
     Shuffle,
