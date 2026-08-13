@@ -208,13 +208,6 @@ fn owns_chrome() -> bool {
 /// — the same string MPRIS advertises as `DesktopEntry`, which is why
 /// [`mpris::DESKTOP_ENTRY`] is the single place it is spelled.
 fn window_settings() -> window::Settings {
-    #[cfg_attr(
-        not(target_os = "linux"),
-        expect(
-            unused_mut,
-            reason = "only the Linux window settings carry an application id"
-        )
-    )]
     let mut settings = window::Settings {
         size: WINDOW,
         decorations: !owns_chrome(),
