@@ -88,6 +88,7 @@ mod vibe;
 mod views;
 mod visualizer;
 mod vm;
+mod window_frame;
 
 /// **The window presents without waiting for the vertical blank, unless the
 /// listener says otherwise.**

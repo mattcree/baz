@@ -62,7 +62,7 @@
 
 use std::borrow::Cow;
 
-use iced::widget::{Space, button, container, mouse_area, row, text, text_input};
+use iced::widget::{Space, button, container, mouse_area, row, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -76,8 +76,8 @@ use crate::{icon, theme, vm};
 
 /// The rename field's id, so the caret can land in it the moment `Rename` is
 /// pressed.
-pub(crate) fn rename_id() -> text_input::Id {
-    text_input::Id::new("baz-playlist-rename")
+pub(crate) fn rename_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-playlist-rename")
 }
 
 /// A durable list's data and capabilities, handed to the one playlist page.
@@ -252,7 +252,7 @@ fn entry_rows<'a>(
     // arithmetic here.
     let rows_scroll = layout.rows_scroll(scroll);
     let win = row_window(open.rows.len(), rows_scroll, window.height);
-    let mut rows: Vec<Element<'a, Message>> = vec![Space::with_height(win.top).into()];
+    let mut rows: Vec<Element<'a, Message>> = vec![Space::new().height(win.top).into()];
     for index in win.first..win.end {
         let page_row = &open.rows[index];
         let playing =
@@ -281,7 +281,7 @@ fn entry_rows<'a>(
             .into(),
         );
     }
-    rows.push(Space::with_height(win.bottom).into());
+    rows.push(Space::new().height(win.bottom).into());
     rows
 }
 

@@ -83,8 +83,7 @@ use iced::advanced::text::{self, Paragraph, Text};
 use iced::advanced::widget::Tree;
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{
-    Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Theme, alignment, event, mouse,
-    touch,
+    Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Theme, alignment, mouse, touch,
 };
 
 use crate::{rail, theme};
@@ -307,8 +306,12 @@ fn label_text<Content>(
         size: Pixels(size),
         line_height: text::LineHeight::Relative(theme::LEADING_HEADING),
         font,
-        horizontal_alignment: horizontal,
-        vertical_alignment: alignment::Vertical::Center,
+        align_x: match horizontal {
+            alignment::Horizontal::Left => text::Alignment::Left,
+            alignment::Horizontal::Center => text::Alignment::Center,
+            alignment::Horizontal::Right => text::Alignment::Right,
+        },
+        align_y: alignment::Vertical::Center,
         shaping: text::Shaping::Basic,
         wrapping: text::Wrapping::None,
     }
@@ -323,7 +326,7 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         _tree: &mut Tree,
         _renderer: &Renderer,
         limits: &layout::Limits,
@@ -331,17 +334,17 @@ where
         layout::atomic(limits, Length::Fixed(theme::INDEX_LANE_W), Length::Fill)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         _tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         | Event::Touch(touch::Event::FingerPressed { .. }) = event
         {
@@ -349,10 +352,9 @@ where
             let shown = self.visible(bounds.height);
             if let Some((_, shelf)) = target_at(self, &shown, bounds, cursor) {
                 shell.publish((self.jump)(shelf));
-                return event::Status::Captured;
+                shell.capture_event();
             }
         }
-        event::Status::Ignored
     }
 
     fn mouse_interaction(
@@ -507,6 +509,7 @@ mod tests {
     use iced::advanced::widget::tree;
 
     use super::*;
+    use iced::event;
 
     /// The one thing a spine can say.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -587,9 +590,9 @@ mod tests {
         fn press(&mut self, cursor: mouse::Cursor) -> (event::Status, Vec<Msg>) {
             let mut messages = Vec::new();
             let mut shell = Shell::new(&mut messages);
-            let status = self.spine.on_event(
+            self.spine.update(
                 &mut self.tree,
-                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
                 Layout::new(&self.node),
                 cursor,
                 &(),
@@ -597,6 +600,11 @@ mod tests {
                 &mut shell,
                 &Rectangle::with_size(Size::new(1280.0, 860.0)),
             );
+            let status = if shell.is_event_captured() {
+                event::Status::Captured
+            } else {
+                event::Status::Ignored
+            };
             (status, messages)
         }
 
@@ -791,7 +799,17 @@ mod tests {
         fn end_layer(&mut self) {}
         fn start_transformation(&mut self, _transformation: iced::Transformation) {}
         fn end_transformation(&mut self) {}
-        fn clear(&mut self) {}
+        fn reset(&mut self, _new_bounds: Rectangle) {}
+        fn allocate_image(
+            &mut self,
+            _handle: &iced::advanced::image::Handle,
+            callback: impl FnOnce(
+                Result<iced::advanced::image::Allocation, iced::advanced::image::Error>,
+            ) + Send
+            + 'static,
+        ) {
+            callback(Err(iced::advanced::image::Error::Unsupported));
+        }
         fn fill_quad(&mut self, quad: renderer::Quad, background: impl Into<iced::Background>) {
             let color = match background.into() {
                 iced::Background::Color(color) => color,
@@ -809,6 +827,11 @@ mod tests {
         const ICON_FONT: Font = Font::DEFAULT;
         const CHECKMARK_ICON: char = '0';
         const ARROW_DOWN_ICON: char = '0';
+        const SCROLL_UP_ICON: char = '0';
+        const SCROLL_DOWN_ICON: char = '0';
+        const SCROLL_LEFT_ICON: char = '0';
+        const SCROLL_RIGHT_ICON: char = '0';
+        const ICED_LOGO: char = '0';
 
         fn default_font(&self) -> Font {
             Font::default()

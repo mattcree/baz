@@ -58,7 +58,7 @@
 //! `baz-event-bridge` thread owns it: it blocks on `recv()` and forwards
 //! every event into a `futures` unbounded channel, whose receiving half is
 //! a proper `Stream` that [`Playback::subscription`] hands to
-//! `Subscription::run_with_id`. When `recv()` disconnects (engine shut
+//! `Subscription::run_with`. When `recv()` disconnects (engine shut
 //! down) the bridge emits one final [`PlayerEvent::Closed`] and exits; if
 //! the UI side is dropped first, the failed forward exits the thread. The
 //! stream itself is take-once out of a shared slot — iced instantiates a
@@ -152,6 +152,28 @@ mod imp {
     const INITIAL_SAMPLE_RATE: u32 = 44_100;
     /// Device ring capacity in frames (~0.19 s at 44.1 kHz; module docs).
     const DEVICE_RING_FRAMES: usize = 8192;
+
+    #[derive(Clone)]
+    struct StreamSlot(Arc<Mutex<Option<UnboundedReceiver<PlayerEvent>>>>);
+
+    impl std::hash::Hash for StreamSlot {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            "baz-playback-events".hash(state);
+        }
+    }
+
+    fn events(slot: &StreamSlot) -> iced::futures::stream::BoxStream<'static, PlayerEvent> {
+        let slot = Arc::clone(&slot.0);
+        stream::once(async move {
+            let taken = slot.lock().ok().and_then(|mut slot| slot.take());
+            match taken {
+                Some(rx) => rx.boxed(),
+                None => stream::empty().boxed(),
+            }
+        })
+        .flatten()
+        .boxed()
+    }
 
     /// The GUI's connection to the playback engine.
     pub struct Playback {
@@ -296,16 +318,7 @@ mod imp {
             if self.handle.is_none() {
                 return Subscription::none();
             }
-            let slot = Arc::clone(&self.events);
-            let events = stream::once(async move {
-                let taken = slot.lock().ok().and_then(|mut slot| slot.take());
-                match taken {
-                    Some(rx) => rx.boxed(),
-                    None => stream::empty().boxed(),
-                }
-            })
-            .flatten();
-            Subscription::run_with_id("baz-playback-events", events)
+            Subscription::run_with(StreamSlot(Arc::clone(&self.events)), events)
         }
     }
 }

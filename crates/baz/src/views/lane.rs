@@ -54,7 +54,7 @@ use std::sync::LazyLock;
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, row, scrollable, text,
+    Space, button, column, container, image as iced_image, row, rule, scrollable, text,
 };
 use iced::{Element, Length, alignment};
 
@@ -132,7 +132,7 @@ pub(crate) fn view<'a>(
         // second rule: a heading names a section, a rule cuts the surface, and
         // there is one cut here because there are two parts — the frame's
         // concerns, and yours.
-        container(horizontal_rule(1).style(move |_theme| theme::hairline(room, room.recess)))
+        container(rule::horizontal(1).style(move |_theme| theme::hairline(room, room.recess)))
             .padding(theme::pad(theme::GAP_MD, theme::GAP_XL)),
         list,
         flanked(marks(shelf.lane_open, theme::sidebar_can_expand(window_w))),
@@ -160,7 +160,7 @@ pub(crate) fn view<'a>(
         // The hairline on the right edge, in the lane's own width. Drawn as a
         // sibling rather than as a border because iced 0.13's `Border` is
         // four-sided, which is why every single line in the product is a rule.
-        container(Space::new(Length::Fixed(1.0), Length::Fill))
+        container(Space::new().width(Length::Fixed(1.0)).height(Length::Fill))
             .height(Length::Fill)
             .style(move |_theme| theme::lane_seam(room)),
     ]
@@ -296,10 +296,11 @@ fn destination_row(
 /// place being on screen.
 fn lamp_dot() -> Element<'static, Message> {
     let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
+    container(
+        Space::new()
+            .width(Length::Fixed(theme::DOT))
+            .height(Length::Fixed(theme::DOT)),
+    )
     .style(move |_theme| theme::lamp_dot(room))
     .into()
 }
@@ -359,7 +360,7 @@ fn sections<'a>(
 fn heading(word: &'static str, open: bool) -> Element<'static, Message> {
     let room = theme::active();
     if !open {
-        return Space::with_height(Length::Fixed(theme::GAP_SM)).into();
+        return Space::new().height(Length::Fixed(theme::GAP_SM)).into();
     }
     container(
         text(theme::tracked(word))
@@ -442,11 +443,10 @@ fn lane_row<'a>(
     let lamp: Element<'static, Message> = if playing {
         lamp_dot()
     } else {
-        Space::new(
-            Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W),
-            Length::Fixed(theme::DOT),
-        )
-        .into()
+        Space::new()
+            .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
+            .height(Length::Fixed(theme::DOT))
+            .into()
     };
     let lamp_slot = container(lamp)
         .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
@@ -570,7 +570,7 @@ fn lane_line<'a>(
         .clip(true)
         .into()
     } else {
-        Space::with_width(Length::Fixed(0.0)).into()
+        Space::new().width(Length::Fixed(0.0)).into()
     };
 
     container(row![prefix, ending])

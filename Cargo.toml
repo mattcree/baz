@@ -23,20 +23,20 @@ dirs = "6"          # XDG config/data dir lookup for config + library DB (MIT OR
 # because neither `slider` nor `mouse_area` can express its pointer
 # affordances (evidence in crates/baz/src/seek.rs). All three are feature
 # flags on a dependency already here — no new crates. (MIT)
-iced = { version = "0.13", features = ["advanced", "image", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "image", "tokio"] }
 ab_glyph = "0.2.32" # rasterise cached generated jewel-case inserts (MIT OR Apache-2.0)
 # Thumbnail decode + downscale; jpeg/png only — the two formats cover art
 # ships in practice (see crates/baz/src/art.rs). (MIT OR Apache-2.0)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"      # tag reading (MIT OR Apache-2.0)
 # Bounded album-art thumbnail cache (MIT). >= 0.18.2 for the
-# RUSTSEC-2026-0253 panic-safety fix; iced_glyphon still pins a 0.12 copy
+# RUSTSEC-2026-0253 panic-safety fix; iced 0.14 still carries a 0.16.4 copy
 # (see deny.toml).
 lru = "0.18.2"
 # WGPU's own shader parser, named directly only in tests so an invalid jewel-
 # case WGSL module fails before the Now Playing view constructs it. Already in
 # the release graph through wgpu; this adds no crate or shipped code. (MIT OR Apache-2.0)
-naga = { version = "0.19.2", features = ["wgsl-in"] }
+naga = { version = "27", features = ["wgsl-in"] }
 memchr = "2"        # SIMD substring scan for the search hot path (Unlicense OR MIT)
 # Durable library store (MIT; libsqlite3-sys MIT, SQLite itself public
 # domain). `bundled` compiles SQLite from source so no system library or
@@ -98,12 +98,9 @@ trash = "5.2.6"
 toml = { version = "1.1.4", default-features = false, features = ["parse", "display", "serde", "std"] }
 # D-Bus for MPRIS2 desktop integration on Linux (MIT). Pure Rust — no C, no
 # system library, no pkg-config — so the Linux build stays system-dep-free.
-# Deliberately major 4 rather than the current 5: zbus 4.4 is *already* linked
-# into every Linux baz binary (iced_core -> dark-light asks the desktop portal
-# for the system theme over D-Bus), so depending on it directly adds zero new
-# crates and no duplicate D-Bus stack. Move to 5 when iced's transitive copy
-# does. Rationale in full: crates/baz/src/mpris/mod.rs.
-zbus = "4.4"
+# Major 5 matches iced 0.14's Linux accessibility stack, so MPRIS adds no
+# duplicate D-Bus generation. Rationale in full: crates/baz/src/mpris/mod.rs.
+zbus = "5.19"
 # Native directory picker (MIT). On Linux the `xdg-portal` backend speaks the
 # desktop portal over D-Bus — the same mechanism a Flatpak would be forced to
 # use, and the GNOME/KDE-native dialog for free — with **no** gtk-sys and no

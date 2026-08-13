@@ -23,8 +23,8 @@ fn rows(count: usize) -> f32 {
     count as f32 * ROW_H
 }
 
-pub(crate) fn scroll_id() -> scrollable::Id {
-    scrollable::Id::new("baz-search-results")
+pub(crate) fn scroll_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-search-results")
 }
 
 /// The one full search well, resident in the app bar at every width/place.
@@ -110,8 +110,8 @@ pub(crate) fn layer<'a>(
     let width = DROPOVER_W.min((window.width - left - theme::HANG).max(320.0));
     let height = DROPOVER_H
         .min((window.height - theme::APP_BAR_H - theme::BAR_CONTENT_H - theme::HANG).max(160.0));
-    let backdrop =
-        mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::DismissSearch);
+    let backdrop = mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+        .on_press(Message::DismissSearch);
     let card = opaque(
         container(results(shelf, player, adding_to_playlist))
             .width(Length::Fixed(width))
@@ -121,7 +121,7 @@ pub(crate) fn layer<'a>(
     column![
         // `Space` captures nothing, so events still reach the resident well
         // in the app bar beneath this layer.
-        Space::with_height(Length::Fixed(theme::APP_BAR_H)),
+        Space::new().height(Length::Fixed(theme::APP_BAR_H)),
         stack![
             backdrop,
             container(card)
@@ -175,11 +175,11 @@ fn results<'a>(
         SECTION_H,
         tracks,
     );
-    list = list.push(Space::with_height(Length::Fixed(rows(first_track))));
+    list = list.push(Space::new().height(Length::Fixed(rows(first_track))));
     for index in first_track..end_track {
         list = list.push(track_row(shelf, player, index, adding_to_playlist));
     }
-    list = list.push(Space::with_height(Length::Fixed(rows(tracks - end_track))));
+    list = list.push(Space::new().height(Length::Fixed(rows(tracks - end_track))));
     list = list.push(section("Albums", albums, false));
 
     let album_origin = SECTION_H + rows(tracks) + SECTION_H;
@@ -189,11 +189,11 @@ fn results<'a>(
         album_origin,
         albums,
     );
-    list = list.push(Space::with_height(Length::Fixed(rows(first_album))));
+    list = list.push(Space::new().height(Length::Fixed(rows(first_album))));
     for index in first_album..end_album {
         list = list.push(album_row(shelf, player, index));
     }
-    list = list.push(Space::with_height(Length::Fixed(rows(albums - end_album))));
+    list = list.push(Space::new().height(Length::Fixed(rows(albums - end_album))));
 
     scrollable(list)
         .id(scroll_id())
@@ -235,7 +235,7 @@ fn section(label: &str, count: usize, show_guide: bool) -> Element<'_, Message> 
             .color(room.paper_faint)
             .into()
     } else {
-        Space::with_width(Length::Shrink).into()
+        Space::new().width(Length::Shrink).into()
     };
     container(
         row![
@@ -244,7 +244,7 @@ fn section(label: &str, count: usize, show_guide: bool) -> Element<'_, Message> 
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
                 .color(room.paper_dim),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             guide,
             text(count.to_string())
                 .size(theme::SIZE_META)
@@ -270,7 +270,7 @@ fn track_row<'a>(
     let song = &shelf.songs[index];
     let Some(Content::SearchTrack { album, row: track }) = shelf.search_result_content(index)
     else {
-        return Space::with_height(Length::Fixed(ROW_H)).into();
+        return Space::new().height(Length::Fixed(ROW_H)).into();
     };
     let content = Content::SearchTrack { album, row: track };
     let selected = shelf.search_selection.is(content);
@@ -341,7 +341,7 @@ fn album_row<'a>(shelf: &'a Shelf, player: &'a PlayerState, index: usize) -> Ele
     let room = theme::active();
     let id = shelf.search_albums[index];
     let Some(album) = shelf.album(id) else {
-        return Space::with_height(Length::Fixed(ROW_H)).into();
+        return Space::new().height(Length::Fixed(ROW_H)).into();
     };
     let content = Content::Album(id);
     let selected = shelf.search_selection.is(content);

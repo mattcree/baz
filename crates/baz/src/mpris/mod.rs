@@ -150,29 +150,20 @@
 //!
 //! # The dependency
 //!
-//! `zbus` 4, the pure-Rust D-Bus implementation (MIT), declared as a
+//! `zbus` 5, the pure-Rust D-Bus implementation (MIT), declared as a
 //! Linux-only target dependency. Two things made it the choice over
 //! `mpris-server`, which wraps it:
 //!
-//! 1. **It adds nothing.** zbus 4.4 is *already* linked into every Linux baz
-//!    binary — `iced_core` depends on `dark-light`, which asks the desktop
-//!    portal over D-Bus what the system theme is. Depending on it directly
-//!    unifies with that copy and pulls in zero new crates, zero new
+//! 1. **It adds nothing.** zbus 5 is already linked into every Linux baz
+//!    binary by iced 0.14's Linux accessibility stack. Depending on it directly
+//!    unifies with that copy and pulls in zero duplicate crates, zero new
 //!    licenses, and no C or system library (the whole stack — zvariant,
 //!    `zbus_names`, `enumflags2`, `async-io` — is pure Rust; baz's Linux build
 //!    stays free of system dependencies as ADR-0005 intends).
-//! 2. **`mpris-server` would cost a second D-Bus stack.** Its current
-//!    release needs zbus 5, which would put zbus 4 *and* 5 (plus two
-//!    `zvariant`s and two `zbus_names`) in the binary — the duplicate-major
-//!    situation `docs/ENGINEERING.md` and `deny.toml` both push back on. Its
-//!    last zbus-4 release is two years stale, and pinning a stale version to
-//!    dodge a duplicate is not a better trade. What it would have saved is a
+//! 2. **`mpris-server` still buys little here.** What it would save is a
 //!    typed metadata builder and the trait skeleton — perhaps eighty lines,
 //!    against two interfaces whose entire surface is a few properties and
 //!    eight methods.
-//!
-//! When iced's transitive zbus moves to 5, this moves with it; the direct
-//! dependency is on the major already in the graph on purpose.
 
 #[cfg_attr(
     not(target_os = "linux"),

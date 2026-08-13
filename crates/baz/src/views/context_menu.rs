@@ -52,7 +52,7 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center);
         if let Some(accelerator) = item.accelerator {
-            inks = inks.push(Space::new(Length::Fill, Length::Fixed(0.0)));
+            inks = inks.push(Space::new().width(Length::Fill).height(Length::Fixed(0.0)));
             inks = inks.push(
                 text(accelerator)
                     .size(theme::SIZE_CAPTION)
@@ -87,7 +87,8 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
         // falls through to the rows below, whose own `menu::area` replaces
         // this menu (one at a time, by construction). Wheel travel is not
         // the backdrop's either; it passes through to the place.
-        mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::CloseMenu),
+        mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+            .on_press(Message::CloseMenu),
         // The card, opaque, at the anchored point. The padding places it;
         // `anchor` has already kept the whole card inside the window, so
         // the fill container never squeezes it.

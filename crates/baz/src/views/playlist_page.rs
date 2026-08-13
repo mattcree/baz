@@ -113,11 +113,11 @@ pub(crate) fn view<'a>(
             sleeve: playlist_sleeve(shelf, &art, &name, theme::ALBUM_SLEEVE),
             // A run has no command that creates the playback truth it already
             // carries. Keep the slot rather than collapsing the aside.
-            commitment: Some(
-                commitment.unwrap_or_else(|| {
-                    Space::with_height(Length::Fixed(theme::TRANSPORT_HIT)).into()
-                }),
-            ),
+            commitment: Some(commitment.unwrap_or_else(|| {
+                Space::new()
+                    .height(Length::Fixed(theme::TRANSPORT_HIT))
+                    .into()
+            })),
             acts,
             aside_tail: Vec::new(),
             identity,
@@ -145,7 +145,10 @@ pub(crate) fn row_art(shelf: &Shelf, album_id: Option<u64>) -> Element<'static, 
                     .into()
             },
         ),
-        None => Space::new(Length::Fixed(edge), Length::Fixed(edge)).into(),
+        None => Space::new()
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .into(),
     }
 }
 

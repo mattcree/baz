@@ -360,159 +360,179 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    #[expect(
+        clippy::too_many_lines,
+        reason = "iced 0.14 moved capture onto Shell; keeping the armed/dragging routing in one event transaction makes its precedence auditable"
+    )]
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
-        let bounds = layout.bounds();
-        let phase = tree.state.downcast_mut::<Phase>();
-        if let Some(wires) = &self.wires {
-            match &event {
-                // The press is the wrapper's before it is the content's —
-                // the one inversion of `menu::area`'s order, so a drag's
-                // release can never double as the click that plays the row
-                // (module docs).
-                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                    if let Some(position) = cursor.position()
-                        && bounds.contains(position)
-                    {
-                        *phase = Phase::Armed(position);
-                        return event::Status::Captured;
+    ) {
+        let status = (|| {
+            let bounds = layout.bounds();
+            let phase = tree.state.downcast_mut::<Phase>();
+            if let Some(wires) = &self.wires {
+                match event {
+                    // The press is the wrapper's before it is the content's —
+                    // the one inversion of `menu::area`'s order, so a drag's
+                    // release can never double as the click that plays the row
+                    // (module docs).
+                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                    | Event::Touch(touch::Event::FingerPressed { .. }) => {
+                        if let Some(position) = cursor.position()
+                            && bounds.contains(position)
+                        {
+                            *phase = Phase::Armed(position);
+                            return event::Status::Captured;
+                        }
                     }
-                }
-                Event::Mouse(mouse::Event::CursorMoved { .. })
-                | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                    if let Some(position) = cursor.position() {
-                        match *phase {
-                            Phase::Armed(origin) if position.distance(origin) >= THRESHOLD_PX => {
-                                *phase = Phase::Dragging;
-                                shell.publish((wires.lift)(position));
-                                if let Some(over) = &self.observe
-                                    && bounds.contains(position)
+                    Event::Mouse(mouse::Event::CursorMoved { .. })
+                    | Event::Touch(touch::Event::FingerMoved { .. }) => {
+                        if let Some(position) = cursor.position() {
+                            match *phase {
+                                Phase::Armed(origin)
+                                    if position.distance(origin) >= THRESHOLD_PX =>
                                 {
-                                    shell.publish(over(before_mid(position, bounds)));
+                                    *phase = Phase::Dragging;
+                                    shell.publish((wires.lift)(position));
+                                    if let Some(over) = &self.observe
+                                        && bounds.contains(position)
+                                    {
+                                        shell.publish(over(before_mid(position, bounds)));
+                                    }
+                                    // Broadcast, not captured: the sibling rows
+                                    // measure this same move (module docs).
+                                    return event::Status::Ignored;
                                 }
-                                // Broadcast, not captured: the sibling rows
-                                // measure this same move (module docs).
-                                return event::Status::Ignored;
-                            }
-                            Phase::Dragging => {
-                                shell.publish((wires.moved)(position));
-                                if let Some(over) = &self.observe
-                                    && bounds.contains(position)
-                                {
-                                    shell.publish(over(before_mid(position, bounds)));
+                                Phase::Dragging => {
+                                    shell.publish((wires.moved)(position));
+                                    if let Some(over) = &self.observe
+                                        && bounds.contains(position)
+                                    {
+                                        shell.publish(over(before_mid(position, bounds)));
+                                    }
+                                    return event::Status::Ignored;
                                 }
-                                return event::Status::Ignored;
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
+                    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                    | Event::Touch(
+                        touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. },
+                    ) => match std::mem::take(phase) {
+                        Phase::Armed(_) => {
+                            // A row may contain a release-only named route (the
+                            // playlist's artist and album labels). The wrapper
+                            // owned the press so a drag could start anywhere, but
+                            // a release over that child belongs to the child and
+                            // must not also spend the row's Play click.
+                            let mut child_messages = Vec::new();
+                            let mut child_shell = Shell::new(&mut child_messages);
+                            self.content.as_widget_mut().update(
+                                &mut tree.children[0],
+                                event,
+                                layout,
+                                cursor,
+                                renderer,
+                                clipboard,
+                                &mut child_shell,
+                                viewport,
+                            );
+                            let child_acted = !child_shell.is_empty();
+                            shell.merge(child_shell, std::convert::identity);
+                            if child_acted || shell.is_event_captured() {
+                                return event::Status::Captured;
+                            }
+                            // Sub-threshold: the row's ordinary click, made on
+                            // the row's behalf.
+                            if let Some(click) = &wires.click {
+                                shell.publish(click.clone());
+                            }
+                            return event::Status::Captured;
+                        }
+                        Phase::Dragging => {
+                            shell.publish(wires.dropped.clone());
+                            return event::Status::Captured;
+                        }
+                        Phase::Idle => {}
+                    },
+                    // The pointer is no longer demonstrably ours: a drag commits
+                    // where the line was (the groove's law), an armed press
+                    // disarms silently (a click that plays music must not be
+                    // made by an alt-tab — module docs). Never captured: losing
+                    // the pointer is a broadcast fact.
+                    Event::Mouse(mouse::Event::CursorLeft)
+                    | Event::Window(window::Event::Unfocused) => match std::mem::take(phase) {
+                        Phase::Dragging => shell.publish(wires.dropped.clone()),
+                        Phase::Armed(_) | Phase::Idle => {}
+                    },
+                    _ => {}
                 }
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-                | Event::Touch(
-                    touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. },
-                ) => match std::mem::take(phase) {
-                    Phase::Armed(_) => {
-                        // A row may contain a release-only named route (the
-                        // playlist's artist and album labels). The wrapper
-                        // owned the press so a drag could start anywhere, but
-                        // a release over that child belongs to the child and
-                        // must not also spend the row's Play click.
-                        let child = self.content.as_widget_mut().on_event(
-                            &mut tree.children[0],
-                            event.clone(),
-                            layout,
-                            cursor,
-                            renderer,
-                            clipboard,
-                            shell,
-                            viewport,
-                        );
-                        if child == event::Status::Captured {
-                            return child;
-                        }
-                        // Sub-threshold: the row's ordinary click, made on
-                        // the row's behalf.
-                        if let Some(click) = &wires.click {
-                            shell.publish(click.clone());
-                        }
-                        return event::Status::Captured;
-                    }
-                    Phase::Dragging => {
-                        shell.publish(wires.dropped.clone());
-                        return event::Status::Captured;
-                    }
-                    Phase::Idle => {}
-                },
-                // The pointer is no longer demonstrably ours: a drag commits
-                // where the line was (the groove's law), an armed press
-                // disarms silently (a click that plays music must not be
-                // made by an alt-tab — module docs). Never captured: losing
-                // the pointer is a broadcast fact.
-                Event::Mouse(mouse::Event::CursorLeft)
-                | Event::Window(window::Event::Unfocused) => match std::mem::take(phase) {
-                    Phase::Dragging => shell.publish(wires.dropped.clone()),
-                    Phase::Armed(_) | Phase::Idle => {}
-                },
-                _ => {}
             }
-        }
-        // A drag in flight somewhere else in this list: measure the pointer
-        // against this row's own bounds — exact geometry, no estimate, and
-        // the reason the moves above are broadcast.
-        if matches!(*phase, Phase::Idle)
-            && let Some(over) = &self.observe
-            && matches!(
+            // A drag in flight somewhere else in this list: measure the pointer
+            // against this row's own bounds — exact geometry, no estimate, and
+            // the reason the moves above are broadcast.
+            if matches!(*phase, Phase::Idle)
+                && let Some(over) = &self.observe
+                && matches!(
+                    event,
+                    Event::Mouse(mouse::Event::CursorMoved { .. })
+                        | Event::Touch(touch::Event::FingerMoved { .. })
+                )
+                && let Some(position) = cursor.position()
+                && bounds.contains(position)
+            {
+                shell.publish(over(before_mid(position, bounds)));
+            }
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
                 event,
-                Event::Mouse(mouse::Event::CursorMoved { .. })
-                    | Event::Touch(touch::Event::FingerMoved { .. })
-            )
-            && let Some(position) = cursor.position()
-            && bounds.contains(position)
-        {
-            shell.publish(over(before_mid(position, bounds)));
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+            if shell.is_event_captured() {
+                event::Status::Captured
+            } else {
+                event::Status::Ignored
+            }
+        })();
+        if status == event::Status::Captured {
+            shell.capture_event();
         }
-        self.content.as_widget_mut().on_event(
-            &mut tree.children[0],
-            event,
-            layout,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        )
     }
 
     fn draw(
@@ -580,13 +600,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: iced::Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
@@ -636,7 +661,17 @@ mod tests {
         fn start_transformation(&mut self, _transformation: Transformation) {}
         fn end_transformation(&mut self) {}
         fn fill_quad(&mut self, _quad: renderer::Quad, _background: impl Into<Background>) {}
-        fn clear(&mut self) {}
+        fn reset(&mut self, _new_bounds: Rectangle) {}
+        fn allocate_image(
+            &mut self,
+            _handle: &iced::advanced::image::Handle,
+            callback: impl FnOnce(
+                Result<iced::advanced::image::Allocation, iced::advanced::image::Error>,
+            ) + Send
+            + 'static,
+        ) {
+            callback(Err(iced::advanced::image::Error::Unsupported));
+        }
     }
 
     /// The row under test, away from the origin so a report measured
@@ -686,7 +721,9 @@ mod tests {
         fn wired() -> Self {
             Self::build(
                 Source::new(
-                    Space::new(Length::Fixed(W), Length::Fixed(H)),
+                    Space::new()
+                        .width(Length::Fixed(W))
+                        .height(Length::Fixed(H)),
                     &theme::CLOSING_TIME,
                 )
                 .wires(Wires::new(
@@ -703,8 +740,12 @@ mod tests {
         fn linked() -> Self {
             Self::build(
                 Source::new(
-                    mouse_area(Space::new(Length::Fixed(W), Length::Fixed(H)))
-                        .on_release(Msg::Link),
+                    mouse_area(
+                        Space::new()
+                            .width(Length::Fixed(W))
+                            .height(Length::Fixed(H)),
+                    )
+                    .on_release(Msg::Link),
                     &theme::CLOSING_TIME,
                 )
                 .wires(Wires::new(
@@ -720,7 +761,9 @@ mod tests {
         fn observer() -> Self {
             Self::build(
                 Source::new(
-                    Space::new(Length::Fixed(W), Length::Fixed(H)),
+                    Space::new()
+                        .width(Length::Fixed(W))
+                        .height(Length::Fixed(H)),
                     &theme::CLOSING_TIME,
                 )
                 .observe(Msg::Over),
@@ -730,17 +773,23 @@ mod tests {
         /// An inert row — no wires, no observation.
         fn inert() -> Self {
             Self::build(Source::new(
-                Space::new(Length::Fixed(W), Length::Fixed(H)),
+                Space::new()
+                    .width(Length::Fixed(W))
+                    .height(Length::Fixed(H)),
                 &theme::CLOSING_TIME,
             ))
         }
 
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "test helper accepts constructed iced events at call sites"
+        )]
         fn feed(&mut self, event: Event, cursor: mouse::Cursor) -> (event::Status, Vec<Msg>) {
             let mut messages = Vec::new();
             let mut shell = Shell::new(&mut messages);
-            let status = self.source.on_event(
+            self.source.update(
                 &mut self.tree,
-                event,
+                &event,
                 Layout::new(&self.node),
                 cursor,
                 &self.renderer,
@@ -748,6 +797,11 @@ mod tests {
                 &mut shell,
                 &Rectangle::with_size(Size::new(1400.0, 1000.0)),
             );
+            let status = if shell.is_event_captured() {
+                event::Status::Captured
+            } else {
+                event::Status::Ignored
+            };
             (status, messages)
         }
 

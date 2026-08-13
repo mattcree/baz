@@ -99,9 +99,7 @@ pub(crate) mod shelf;
 pub(crate) mod status;
 pub(crate) mod top_bar;
 
-use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, row, text,
-};
+use iced::widget::{Space, button, column, container, image as iced_image, row, rule, text};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -152,12 +150,16 @@ pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'s
     let gradient = iced::gradient::Linear::new(iced::Radians(2.4))
         .add_stop(0.0, to_color(c1))
         .add_stop(1.0, to_color(c2));
-    container(Space::new(Length::Fixed(size), Length::Fixed(size)))
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Gradient(gradient.into())),
-            ..container::Style::default()
-        })
-        .into()
+    container(
+        Space::new()
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size)),
+    )
+    .style(move |_theme| container::Style {
+        background: Some(iced::Background::Gradient(gradient.into())),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// **A playlist's sleeve** (ADR-0024 §A1): a collage of quotations from the
@@ -438,7 +440,7 @@ pub(crate) fn place_header_led(
     ]
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
-    strip = strip.push(Space::with_width(Length::Fill));
+    strip = strip.push(Space::new().width(Length::Fill));
     if let Some(note) = note {
         strip = strip.push(
             text(note)
@@ -450,7 +452,7 @@ pub(crate) fn place_header_led(
     }
     column![
         container(strip).padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
 }
@@ -488,7 +490,7 @@ pub(crate) fn place_pad() -> iced::Padding {
 pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
     let room = theme::active();
     column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
         text(theme::tracked(&name.to_uppercase()))
             .size(theme::SIZE_HEADING)
             .line_height(theme::LEADING_HEADING)

@@ -228,9 +228,9 @@ pub(crate) fn view(blocked: &Blocked) -> Element<'_, Message> {
 
     container(
         column![
-            Space::with_height(Length::FillPortion(ABOVE)),
+            Space::new().height(Length::FillPortion(ABOVE)),
             content.width(Length::Fixed(MEASURE)),
-            Space::with_height(Length::FillPortion(BELOW)),
+            Space::new().height(Length::FillPortion(BELOW)),
         ]
         .align_x(iced::Alignment::Center),
     )

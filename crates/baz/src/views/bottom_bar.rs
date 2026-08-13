@@ -48,8 +48,8 @@
 //! move the title under it.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,
-    text, tooltip,
+    Space, button, column, container, image as iced_image, mouse_area, row, rule, stack, text,
+    tooltip,
 };
 use iced::{Color, Element, Length, alignment};
 
@@ -157,7 +157,7 @@ pub(crate) fn view(
             // which is much easier to acquire than a line against the bottom
             // edge of the window without stealing a control's hit box.
             needle_line(line),
-            horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+            rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
             // **One centre line, one window gutter.** The band is
             // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's
             // centre line by construction ([`theme::BAR_LEAD`]), so every zone
@@ -216,7 +216,7 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
     let mut lane = row![];
     if let Some(preview) = preview {
         let offset = player::preview_offset(&preview, theme::NEEDLE_TIP_W);
-        lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
+        lane = lane.push(Space::new().width(Length::Fixed(offset))).push(
             container(
                 text(preview.label)
                     .size(theme::SIZE_CAPTION)
@@ -309,11 +309,10 @@ fn stamp(
     align: alignment::Horizontal,
 ) -> Element<'static, Message> {
     let content: Element<'static, Message> = match value {
-        None => Space::new(
-            Length::Fixed(theme::STAMP_W),
-            Length::Fixed(theme::LINE_META),
-        )
-        .into(),
+        None => Space::new()
+            .width(Length::Fixed(theme::STAMP_W))
+            .height(Length::Fixed(theme::LINE_META))
+            .into(),
         Some(value) => text(value)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
@@ -490,7 +489,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
                     .color(room.paper_dim)
                     .wrapping(text::Wrapping::None),
             ),
-            None => Space::with_height(Length::Fixed(theme::LINE_META)).into(),
+            None => Space::new().height(Length::Fixed(theme::LINE_META)).into(),
         })
         .height(Length::Fixed(theme::LINE_META)),
         continuation_lane(player),
@@ -513,7 +512,9 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
 /// transport (asserted in [`theme`] and below).
 fn continuation_lane(player: &PlayerState) -> Element<'_, Message> {
     let Some(note) = player.continuation_note() else {
-        return Space::with_height(Length::Fixed(theme::CONTINUATION_H)).into();
+        return Space::new()
+            .height(Length::Fixed(theme::CONTINUATION_H))
+            .into();
     };
     container(
         text(note)
@@ -547,7 +548,7 @@ fn continuation_lane(player: &PlayerState) -> Element<'_, Message> {
 fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     let room = theme::active();
     let Some(note) = player.signal_note() else {
-        return Space::with_width(Length::Fixed(theme::SIGNAL_W)).into();
+        return Space::new().width(Length::Fixed(theme::SIGNAL_W)).into();
     };
     let label = container(
         text(note.label)
@@ -923,7 +924,7 @@ fn preview_lane(
     let mut lane = row![];
     if let Some(preview) = preview {
         let offset = player::preview_offset(&preview, tip_width);
-        lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
+        lane = lane.push(Space::new().width(Length::Fixed(offset))).push(
             container(
                 text(preview.label)
                     .size(theme::SIZE_CAPTION)

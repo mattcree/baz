@@ -84,9 +84,8 @@
 >   rather than a finish. On 2026-08-12 the owner placed
 >   Home/vibe work immediately after the critical-usability tranche; that makes
 >   it the next feature area, not a beta blocker ahead of those fixes.
-> - **Borderless window chrome and the iced migration.** The direction is now
->   accepted and iced 0.14 means no fork is required, but the framework upgrade
->   is platform-foundation work after the usability and Home phases.
+> - **Borderless window chrome and the iced migration.** This was deliberately
+>   ordered after usability and Home, and shipped as item 16 on 2026-08-14.
 > - **Opus.** Closed rather than deferred: the owner's library was scanned on
 >   2026-08-10 and holds **zero** `.opus`, `.ogg` or `.oga` files across
 >   `~/Music` and both NAS shares. The refusal in *Known gaps* stands on its
@@ -230,9 +229,10 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ### Phase D — accepted follow-on work
 
-16. **Upgrade to iced 0.14 and make baz's app bar the default window chrome.**
-    Use upstream eight-way drag-resize; retain native-feeling resize, drag,
-    maximise, system menu and cross-platform builds.
+16. **Done 2026-08-14 — Upgrade to iced 0.14 and make baz's app bar the
+    default window chrome.** A six-logical-pixel inside-edge band dispatches
+    all eight upstream resize directions; drag, maximise, system menu and
+    window controls remain, with `BAZ_NATIVE_CHROME=1` as a diagnostic escape.
 17. **Ship built-in and JSON custom themes.** Four polarity rooms, versioned
     schema/examples/import/export, runtime accessibility validation and safe
     fallback; no executable theme content.
@@ -702,34 +702,23 @@ its bold title from the numbered item above.
   returns lane already does without performing. The other two are a frame
   question (one band line or two) and the tile-size one below. *Needs: one
   sentence each.*
-- **Borderless window chrome — accepted for later prioritisation.**
-  The app bar shipped (ADR-0040): it is resident in all eight places, it moves
-  and maximises and closes the window, and it holds the display options, the
-  gear and the three window buttons. What is not done is `decorations: false`,
-  so the platform still draws its title bar *above* baz's own.
-  - **The fork is off the table, and that is the news.** `BACKLOG.md` priced
-    this as a ~30-line patch to a forked iced. It is no longer a fork:
-    **iced 0.14.0 ships `window::drag_resize(id, Direction)` upstream**
-    (`iced_runtime-0.14.0/src/window.rs:304`, serviced at
-    `iced_winit-0.14.0/src/lib.rs:1438`). Re-verified against the pinned 0.13
-    sources too — there is genuinely nothing there, and winit's own frame
-    gives its resize edges up when decorations go, so there is no platform
-    fallback either.
-  - The owner answered **yes** on 2026-08-12: *"I would really like it if we
-    could get rid of the native window chrome"*. Take iced 0.13 → 0.14 and
-    deliver borderless chrome without sacrificing ordinary edge/corner resize.
-    The migration is measured
-    in ADR-0040 §"What the owner still has to answer": ~130–170 edited lines
-    across 12–14 files, all five hand-built `Widget`s touched, wgpu 0.19 → 27
-    and cosmic-text 0.12 → 0.15 in the graph, ~15–25 new Flatpak pins — and,
-    on the other side, **both RUSTSEC ignores in `deny.toml` can be deleted**,
-    because cosmic-text 0.15 completes the fontations migration they are
-    waiting on.
-  - `BAZ_BORDERLESS=1` previews it today, but must not become the default on
-    iced 0.13 because it loses pointer resize edges. *Needs later: priority,
-    the iced 0.14 migration, eight-way resize hit testing, cross-platform CI,
-    and hands-on Wayland/X11 validation before `decorations: false` becomes the
-    default.*
+- **Done 2026-08-14 — borderless window chrome and iced 0.14.** The app bar
+  now owns the window by default, including its minimise/maximise/close
+  controls. A six-logical-pixel band inside every edge and corner spends
+  upstream `window::drag_resize` in all eight directions and is disabled while
+  maximised; the rest of the band retains drag, double-press maximise and the
+  desktop system menu. `BAZ_NATIVE_CHROME=1` restores platform decorations for
+  comparison and diagnostics. All five custom widgets, the jewel-case shader,
+  boot/subscription APIs and the Linux zbus stack moved with iced 0.14; the
+  obsolete `rustybuzz` advisory ignore is gone. iced still retains
+  `ttf-parser` and `lru 0.16.4`, so the former's narrowly documented transitive
+  ignore and the latter's audit note remain while Baz's own cache stays on
+  fixed `lru 0.18.2`. Unit tests cover direction/boundary routing and the
+  changed child-release capture semantics. A release build rendered cleanly
+  under isolated X11/Xvfb with no platform frame and the expected Baz
+  controls; an isolated live Wayland launch reached the interactive window
+  normally. Item 15 remains at its
+  explicit public-release boundary; this work did not publish anything.
 - **Is the `Dense` display-option mark legible enough?** He said *"the way they
   appear for the library is nice"* and the four marks moved into the app bar
   unchanged on the strength of it. The fourth is a 4 × 4 whose cells minify to

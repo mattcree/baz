@@ -579,7 +579,7 @@ fn continue_band<'a>(
         );
     }
     placard = placard
-        .push(Space::with_height(Length::Fixed(theme::GAP_SM)))
+        .push(Space::new().height(Length::Fixed(theme::GAP_SM)))
         .push(needle(elapsed, total, edge))
         .push(resume_line(player, track, elapsed, total));
 
@@ -613,12 +613,16 @@ pub(crate) fn needle(elapsed_ms: u64, total_ms: u64, width: f32) -> Element<'sta
     let room = theme::active();
     let (filled, rest) = needle_runs(elapsed_ms, total_ms, width);
     let lane = |w: f32, colour: iced::Color, h: f32| {
-        container(Space::new(Length::Fixed(w), Length::Fixed(h)))
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(colour)),
-                ..container::Style::default()
-            })
-            .into()
+        container(
+            Space::new()
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(h)),
+        )
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(colour)),
+            ..container::Style::default()
+        })
+        .into()
     };
     let mut parts: Vec<Element<'static, Message>> = Vec::new();
     if filled > 0.0 {

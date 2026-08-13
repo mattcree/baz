@@ -68,8 +68,8 @@ pub(crate) const PANEL_W: f32 = 340.0;
 
 /// The `New playlist` field's id, so `app.rs` can put the caret in it the
 /// moment the row becomes a field.
-pub(crate) fn new_name_id() -> text_input::Id {
-    text_input::Id::new("baz-playlist-new")
+pub(crate) fn new_name_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-playlist-new")
 }
 
 /// The panel, ready to be stacked over whichever place is standing.
@@ -109,7 +109,7 @@ pub(crate) fn view<'a>(
                 .size(theme::SIZE_EMPHASIS)
                 .line_height(theme::LEADING_EMPHASIS)
                 .font(theme::MEDIUM),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             text("Esc closes")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
@@ -179,7 +179,7 @@ pub(crate) fn view<'a>(
     // wall it floats over — the surface step does the rest; a shadow is
     // refused (a standing rule of the product).
     row![
-        container(Space::with_width(Length::Fixed(1.0)))
+        container(Space::new().width(Length::Fixed(1.0)))
             .width(Length::Fixed(1.0))
             .height(Length::Fill)
             .style(move |_theme| theme::panel_seam(room)),

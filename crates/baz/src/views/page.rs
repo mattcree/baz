@@ -110,8 +110,8 @@ use crate::{icon, theme};
 
 /// The shared album/playlist document scroller. Source navigation uses this
 /// identity to bring the sounding row into view after opening its page.
-pub(crate) fn scroll_id() -> scrollable::Id {
-    scrollable::Id::new("baz-subject-page")
+pub(crate) fn scroll_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-subject-page")
 }
 
 /// Whether the shared subject page uses its desktop table composition.
@@ -172,7 +172,7 @@ pub(crate) struct Identity<'a> {
 pub(crate) struct NameEdit<'a> {
     pub(crate) value: &'a str,
     pub(crate) error: Option<&'a str>,
-    pub(crate) id: text_input::Id,
+    pub(crate) id: iced::widget::Id,
     pub(crate) on_input: fn(String) -> Message,
     pub(crate) on_submit: Message,
 }
@@ -724,11 +724,12 @@ fn metadata_label(
         // ordinary click without sacrificing drag initiation. Rich text
         // underlines a linked span exactly while the pointer is over it, so
         // the affordance appears only on the words that own the route.
-        let linked_label = rich_text([span(label).link(message.clone())])
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None);
+        let linked_label: iced::widget::text::Rich<'_, Message, Message> =
+            rich_text([span(label).link(message.clone())])
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim)
+                .wrapping(text::Wrapping::None);
         mouse_area(linked_label)
             .on_release(message)
             .interaction(mouse::Interaction::Pointer)
@@ -766,7 +767,7 @@ pub(crate) fn icon_slot(
 ) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+        return Space::new().width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
     let mark = container(
         iced_image(icon::handle(glyph))
@@ -820,10 +821,11 @@ pub(crate) fn transfer_slot(offered: bool, message: Message) -> Element<'static,
 /// wall puts beside the playing record and the run column beside its row.
 pub(crate) fn lamp_dot() -> Element<'static, Message> {
     let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
+    container(
+        Space::new()
+            .width(Length::Fixed(theme::DOT))
+            .height(Length::Fixed(theme::DOT)),
+    )
     .style(move |_theme| theme::lamp_dot(room))
     .into()
 }

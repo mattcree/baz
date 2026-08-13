@@ -1,8 +1,8 @@
 //! App-bar health bell and its bounded event-history float.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row,
-    scrollable, stack, text, tooltip,
+    Space, button, column, container, image as iced_image, mouse_area, row, rule, scrollable,
+    stack, text, tooltip,
 };
 use iced::{Color, Element, Length, Size, alignment};
 
@@ -22,10 +22,14 @@ pub(crate) fn bell(summary: Summary) -> Element<'static, Message> {
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
             .opacity(theme::glyph_ink(true, false, 0.0, false)),
-        container(Space::new(Length::Fixed(DOT), Length::Fixed(DOT)))
-            .style(move |_theme| theme::status_dot(tone))
-            .align_right(Length::Fill)
-            .align_bottom(Length::Fill),
+        container(
+            Space::new()
+                .width(Length::Fixed(DOT))
+                .height(Length::Fixed(DOT))
+        )
+        .style(move |_theme| theme::status_dot(tone))
+        .align_right(Length::Fill)
+        .align_bottom(Length::Fill),
     ])
     .width(Length::Fill)
     .height(Length::Fill)
@@ -60,7 +64,7 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
     for (index, event) in log.newest().enumerate() {
         if index > 0 {
             events = events
-                .push(horizontal_rule(1).style(move |_theme| theme::hairline(room, room.plinth)));
+                .push(rule::horizontal(1).style(move |_theme| theme::hairline(room, room.plinth)));
         }
         events = events.push(event_row(event));
     }
@@ -84,8 +88,12 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
                 .font(theme::MEDIUM)
                 .color(room.paper_faint),
             row![
-                container(Space::new(Length::Fixed(DOT), Length::Fixed(DOT)))
-                    .style(move |_theme| theme::status_dot(tone)),
+                container(
+                    Space::new()
+                        .width(Length::Fixed(DOT))
+                        .height(Length::Fixed(DOT))
+                )
+                .style(move |_theme| theme::status_dot(tone)),
                 text(summary.label)
                     .size(theme::SIZE_HEADING)
                     .line_height(theme::LEADING_HEADING)
@@ -95,7 +103,7 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
             .align_y(iced::Alignment::Center),
         ]
         .spacing(theme::GAP_XS),
-        Space::new(Length::Fill, Length::Fixed(0.0)),
+        Space::new().width(Length::Fill).height(Length::Fixed(0.0)),
         button(
             text("Close")
                 .size(theme::SIZE_META)
@@ -124,7 +132,7 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
     .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()));
     let card = container(column![
         container(head).width(Length::Fill).padding(theme::GAP_LG),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.plinth)),
+        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.plinth)),
         history,
     ])
     .width(Length::Fixed(width))
@@ -132,7 +140,8 @@ pub(crate) fn layer(log: &Log, summary: Summary, window: Size) -> Element<'stati
     .style(move |_theme| theme::menu(room));
 
     stack![
-        mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::CloseStatus),
+        mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+            .on_press(Message::CloseStatus),
         container(iced::widget::opaque(card))
             .width(Length::Fill)
             .height(Length::Fill)
@@ -152,7 +161,7 @@ fn event_row(event: &Event) -> Element<'static, Message> {
     let room = theme::active();
     let tone = tone(room, event.level);
     let detail: Element<'static, Message> = if event.detail.is_empty() {
-        Space::with_height(Length::Fixed(0.0)).into()
+        Space::new().height(Length::Fixed(0.0)).into()
     } else {
         text(event.detail.clone())
             .size(theme::SIZE_META)
@@ -165,8 +174,12 @@ fn event_row(event: &Event) -> Element<'static, Message> {
         column![
             row![
                 row![
-                    container(Space::new(Length::Fixed(DOT), Length::Fixed(DOT)))
-                        .style(move |_theme| theme::status_dot(tone)),
+                    container(
+                        Space::new()
+                            .width(Length::Fixed(DOT))
+                            .height(Length::Fixed(DOT))
+                    )
+                    .style(move |_theme| theme::status_dot(tone)),
                     text(level_label(event.level))
                         .size(theme::SIZE_CAPTION)
                         .line_height(theme::LEADING_CAPTION)
@@ -175,7 +188,7 @@ fn event_row(event: &Event) -> Element<'static, Message> {
                 ]
                 .spacing(theme::GAP_SM)
                 .align_y(iced::Alignment::Center),
-                Space::new(Length::Fill, Length::Fixed(0.0)),
+                Space::new().width(Length::Fill).height(Length::Fixed(0.0)),
                 text(event.age())
                     .size(theme::SIZE_CAPTION)
                     .line_height(theme::LEADING_CAPTION)

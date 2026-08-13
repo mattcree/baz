@@ -164,9 +164,9 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
     // or it reads as having sunk.
     container(
         column![
-            Space::with_height(Length::FillPortion(ABOVE)),
+            Space::new().height(Length::FillPortion(ABOVE)),
             content.width(Length::Fixed(SETUP_INPUT_W)),
-            Space::with_height(Length::FillPortion(BELOW)),
+            Space::new().height(Length::FillPortion(BELOW)),
         ]
         .align_x(iced::Alignment::Center),
     )

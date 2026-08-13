@@ -210,18 +210,22 @@ pub(crate) fn background(
             a: 0.18,
             ..room.lamp
         };
-        let bar = container(Space::new(Length::Fill, Length::Fixed(bar_h)))
-            .width(Length::FillPortion(1))
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(ink)),
-                border: iced::Border {
-                    radius: 1.0.into(),
-                    ..iced::Border::default()
-                },
-                ..container::Style::default()
-            });
+        let bar = container(
+            Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(bar_h)),
+        )
+        .width(Length::FillPortion(1))
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(ink)),
+            border: iced::Border {
+                radius: 1.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
         bars = bars.push(
-            column![Space::with_height(Length::Fill), bar]
+            column![Space::new().height(Length::Fill), bar]
                 .width(Length::FillPortion(1))
                 .height(Length::Fill),
         );

@@ -70,8 +70,8 @@
 use std::path::PathBuf;
 
 use iced::widget::{
-    Column, Space, button, checkbox, column, container, horizontal_rule, image as iced_image,
-    pick_list, row, scrollable, text, text_input, tooltip,
+    Column, Space, button, checkbox, column, container, image as iced_image, pick_list, row, rule,
+    scrollable, text, text_input, tooltip,
 };
 use iced::{Element, Length, alignment};
 
@@ -431,7 +431,8 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             // stands the full `TRANSPORT_HIT` so the tick sits on the same line
             // rhythm as the stepper rows above it.
             container(
-                checkbox("Keep peaks below full scale", state.prevent_clipping())
+                checkbox(state.prevent_clipping())
+                    .label("Keep peaks below full scale")
                     .size(theme::STEPPER_HIT)
                     .text_size(theme::SIZE_META)
                     .text_line_height(theme::LEADING_META)
@@ -500,7 +501,7 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
     }
 
     section = section
-        .push(Space::with_height(Length::Fixed(theme::GAP_MD)))
+        .push(Space::new().height(Length::Fixed(theme::GAP_MD)))
         .push(section_heading(
             "Force sync",
             "Re-reads every file, including the ones nothing has touched.",
@@ -592,7 +593,7 @@ fn folder_block(
                     .line_height(theme::LEADING_BODY)
                     .color(room.paper)
                     .wrapping(text::Wrapping::None),
-                Space::with_width(Length::Fill),
+                Space::new().width(Length::Fill),
                 controls,
             ]
             .spacing(theme::GAP_SM)
@@ -666,7 +667,7 @@ fn force_sync_row(scanning: bool) -> Element<'static, Message> {
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_dim),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             word_control("Force sync", !scanning, Message::ForceSync),
         ]
         .spacing(theme::GAP_SM)
@@ -819,7 +820,7 @@ fn section_heading(name: &'static str, sentence: &'static str) -> Element<'stati
 fn readout_block(lines: Vec<(String, iced::Color)>) -> Element<'static, Message> {
     let room = theme::active();
     let mut block =
-        column![horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall))]
+        column![rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall))]
             .spacing(theme::GAP_SM);
     let mut readings = column![].spacing(theme::GAP_XXS);
     for (line, ink) in lines {
@@ -894,7 +895,7 @@ fn stepper_row(
                 .line_height(theme::LEADING_META)
                 .color(room.paper_dim)
                 .wrapping(text::Wrapping::None),
-            Space::with_width(Length::Fill),
+            Space::new().width(Length::Fill),
             container(
                 text(value)
                     .size(theme::SIZE_META)

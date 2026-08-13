@@ -60,7 +60,7 @@ pub(crate) fn view<'a>(
     let ordered = playlists.ordered_rows();
     let total_rows = hang.rows(ordered.len());
     let (first, end) = hang.visible_rows(scroll_offset, shelf.grid_size.height, total_rows);
-    let mut tiles = column![Space::with_height(Length::Fixed(hang.spacer_height(first)))];
+    let mut tiles = column![Space::new().height(Length::Fixed(hang.spacer_height(first)))];
     for row_index in first..end {
         let item_first = row_index * hang.columns;
         let item_end = (item_first + hang.columns).min(ordered.len());
@@ -80,9 +80,7 @@ pub(crate) fn view<'a>(
                 .align_y(alignment::Vertical::Top),
         );
     }
-    tiles = tiles.push(Space::with_height(Length::Fixed(
-        hang.spacer_height(total_rows - end),
-    )));
+    tiles = tiles.push(Space::new().height(Length::Fixed(hang.spacer_height(total_rows - end))));
 
     let body = tiles.width(Length::Fixed(hang.block_width()));
     let wall: Element<'a, Message> = column![
@@ -114,8 +112,8 @@ pub(crate) fn view<'a>(
 /// The saved-playlist collection's scroll identity. It is separate from the
 /// record wall's identity because either place must retain its position while
 /// the other is visited.
-pub(crate) fn scroll_id() -> scrollable::Id {
-    scrollable::Id::new("baz-playlists")
+pub(crate) fn scroll_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-playlists")
 }
 
 /// Project the active playlist ordering into the common index-rail vocabulary.

@@ -46,7 +46,7 @@ use baz_core::traversal::Traversal;
 use baz_core::volume::Volume;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
-use iced::widget::{column, image as iced_image, row, scrollable, text_input};
+use iced::widget::{column, image as iced_image, row, scrollable};
 use iced::{Element, Point, Size, Subscription, Task, window};
 use lru::LruCache;
 
@@ -91,19 +91,19 @@ const VOLUME_WHEEL_SETTLE: Duration = Duration::from_millis(240);
 
 /// The shelf scrollable's id — the update loop scrolls it back to the top
 /// when the query changes, and [`crate::views::shelf`] attaches it.
-pub(crate) fn scroll_id() -> scrollable::Id {
-    scrollable::Id::new("baz-shelf")
+pub(crate) fn scroll_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-shelf")
 }
 
 /// The search field's id — the update loop focuses it, and
 /// [`crate::views::top_bar`] attaches it.
-pub(crate) fn search_id() -> text_input::Id {
-    text_input::Id::new("baz-search")
+pub(crate) fn search_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-search")
 }
 
 /// An id no widget in the tree carries, used to **blur** the search well.
 ///
-/// iced 0.13 publishes `text_input::focus` and no `unfocus`, but its focus
+/// iced 0.13 publishes `iced::widget::operation::focus` and no `unfocus`, but its focus
 /// operation is defined over the whole tree: it focuses the widget whose id
 /// matches and **unfocuses every other focusable it walks past**
 /// (`iced_core::widget::operation::focusable::focus`). Focusing an id nothing
@@ -112,13 +112,13 @@ pub(crate) fn search_id() -> text_input::Id {
 ///
 /// It is a named constant with a test holding it apart from [`search_id`],
 /// because the entire mechanism is that the two strings differ.
-fn nothing_id() -> text_input::Id {
-    text_input::Id::new("baz-nothing")
+fn nothing_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-nothing")
 }
 
 /// Take the caret out of the search well (see [`nothing_id`]).
 fn blur_search<T: Send + 'static>() -> Task<T> {
-    text_input::focus(nothing_id())
+    iced::widget::operation::focus(nothing_id())
 }
 
 /// Run the application. `started` is process start, for the
@@ -137,22 +137,38 @@ fn blur_search<T: Send + 'static>() -> Task<T> {
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     let room = theme::install();
     println!("[startup] room: {}", room.name);
-    let mut app = iced::application("baz", App::update, App::view)
-        .subscription(App::subscription)
-        // **baz closes itself.** iced 0.13 would close the window on the
-        // compositor's request before the update loop saw it, and the one
-        // thing that has to happen on the way out is writing where the run
-        // got to (ADR-0023 §6). The request becomes `Message::Quit` — the
-        // same message the desktop's own Quit sends, so there is one exit
-        // path and it cannot drift.
-        .exit_on_close_request(false)
-        .theme(|_| theme::theme())
-        .default_font(theme::SANS)
-        .window(window_settings());
+    let mut app = iced::application(
+        move || App::new(started, cli_dir.clone()),
+        App::update,
+        App::view,
+    )
+    .title("baz")
+    .subscription(App::subscription)
+    // **baz closes itself.** iced 0.13 would close the window on the
+    // compositor's request before the update loop saw it, and the one
+    // thing that has to happen on the way out is writing where the run
+    // got to (ADR-0023 §6). The request becomes `Message::Quit` — the
+    // same message the desktop's own Quit sends, so there is one exit
+    // path and it cannot drift.
+    .exit_on_close_request(false)
+    .theme(app_theme)
+    .default_font(theme::SANS)
+    .window(window_settings());
     for face in font::FACES {
         app = app.font(face);
     }
-    app.run_with(move || App::new(started, cli_dir))
+    app.run()
+}
+
+fn app_theme(_app: &App) -> iced::Theme {
+    theme::theme()
+}
+
+/// Run an action against baz's sole application window, if it still exists.
+fn latest_window<T: Send + 'static>(
+    action: impl Fn(window::Id) -> Task<T> + Send + 'static,
+) -> Task<T> {
+    window::latest().then(move |id| id.map_or_else(Task::none, &action))
 }
 
 /// **Whether baz draws the window's chrome itself.**
@@ -166,42 +182,25 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
 ///
 /// So the buttons are not *removed*; they are **conditional on baz owning the
 /// chrome**, which is the honest rule and the one that needs no second edit
-/// when `BAZ_BORDERLESS` becomes the default. The bar keeps its drag and its
+/// now that borderless ownership is the default. The bar keeps its drag and its
 /// double-press to maximise either way: those *add* a way to move a window
 /// that already had one, where a second close button subtracts clarity from a
 /// window that already had one of those too.
 fn owns_chrome() -> bool {
-    std::env::var_os("BAZ_BORDERLESS").is_some()
+    std::env::var_os("BAZ_NATIVE_CHROME").is_none()
 }
 
-/// The window's settings: its size, on Linux the application id, and — behind
-/// an environment switch — whether the platform draws its title bar.
+/// The window's settings: its size, on Linux the application id, and Baz-owned
+/// chrome by default.
 ///
-/// # `BAZ_BORDERLESS=1`
+/// # `BAZ_NATIVE_CHROME=1`
 ///
-/// Turns the platform's decorations **off**, which is the last step of
-/// ADR-0040 and the one step that is not taken by default. With it set, baz's
-/// own app bar is the window's only chrome; without it, the app bar is drawn
-/// underneath the system's title bar, which is the state this ships in.
+/// Restores the platform title bar for comparison and diagnostics. Ordinarily
+/// `decorations` is false, the app bar draws the window controls, and
+/// [`crate::window_frame`] spends iced 0.14's `window::drag_resize` across a
+/// six-pixel eight-way edge/corner band. Maximized windows disable that band.
 ///
-/// **It is a switch rather than a default because of one missing API.** iced
-/// 0.13 exposes no edge-drag resize: the whole `window::Action` enum is
-/// `iced_runtime-0.13.2/src/window.rs:24–161` and it has no resize-direction
-/// variant, and winit's own frame gives its resize edges up entirely when
-/// decorations go (`sctk-adwaita`'s hidden frame drops the decoration
-/// subsurfaces, so the pointer has nothing to grab). So `decorations: false`
-/// today buys the clean top edge and **loses pointer resizing**, and that is
-/// not a trade to make silently for a window whose whole job is to be sized
-/// to the wall you want. iced **0.14** has the missing call
-/// (`window::drag_resize`, `iced_runtime-0.14.0/src/window.rs:304`); moving to
-/// it is a dependency decision, priced in ADR-0040 §6 and waiting on the
-/// owner's answer.
-///
-/// Until then the switch is how the finished bar can be *looked at* borderless
-/// without anybody committing to the trade — including by the capture harness,
-/// which photographs both states.
-///
-/// iced 0.13 leaves the Wayland `app_id` / X11 `WM_CLASS` empty by default,
+/// iced leaves the Wayland `app_id` / X11 `WM_CLASS` empty by default,
 /// which is what makes a launcher show a running window as an unrelated
 /// "unknown" entry beside its own icon. Setting it to the basename of
 /// `packaging/io.github.mattcree.baz.desktop` is the whole of the association
@@ -841,6 +840,9 @@ pub(crate) enum Message {
     /// it. One control and one message, because `window::toggle_maximize` is
     /// one action — the button's *drawing* is what carries the state.
     WindowMaximiseToggled,
+    /// Begin the compositor's native resize gesture from one window edge or
+    /// corner. Emitted only by the borderless frame's narrow hit band.
+    WindowResize(window::Direction),
     /// **A press anywhere in the app bar that no control took**: move the
     /// window, or — if it is the second press inside
     /// [`BAR_DOUBLE_CLICK`] — maximise or restore it.
@@ -2055,7 +2057,7 @@ impl App {
                         } else {
                             self.queue_scroll = y;
                         }
-                        let restore = scrollable::scroll_to(
+                        let restore = iced::widget::operation::scroll_to(
                             views::page::scroll_id(),
                             AbsoluteOffset { x: 0.0, y },
                         );
@@ -2071,9 +2073,7 @@ impl App {
                 Task::batch([
                     laid_out,
                     restore_playlist,
-                    window::get_latest()
-                        .and_then(window::get_maximized)
-                        .map(Message::WindowMaximizedChanged),
+                    latest_window(window::is_maximized).map(Message::WindowMaximizedChanged),
                 ])
             }
             Message::FirstFrame => self.log_first_frame(),
@@ -2139,11 +2139,10 @@ impl App {
             // action, spent through iced's own task — baz does not
             // reimplement any of them, which is the whole argument for
             // drawing the bar rather than the behaviour.
-            Message::WindowMinimised => {
-                window::get_latest().and_then(|id| window::minimize(id, true))
-            }
-            Message::WindowMaximiseToggled => {
-                window::get_latest().and_then(window::toggle_maximize)
+            Message::WindowMinimised => latest_window(|id| window::minimize(id, true)),
+            Message::WindowMaximiseToggled => latest_window(window::toggle_maximize),
+            Message::WindowResize(direction) => {
+                latest_window(move |id| window::drag_resize(id, direction))
             }
             // **Move, or maximise on the second press.** The gesture a title
             // bar makes: press and travel moves the window, press twice in
@@ -2162,19 +2161,19 @@ impl App {
                 // and one single, rather than two overlapping doubles.
                 self.last_bar_press = (!doubled).then_some(now);
                 if doubled {
-                    window::get_latest().and_then(window::toggle_maximize)
+                    latest_window(window::toggle_maximize)
                 } else {
-                    window::get_latest().and_then(window::drag)
+                    latest_window(window::drag)
                 }
             }
-            Message::WindowMenuRequested => window::get_latest().and_then(window::show_system_menu),
+            Message::WindowMenuRequested => latest_window(window::show_system_menu),
             Message::WindowMaximizedChanged(maximized) => {
                 self.window_maximized = maximized;
                 Task::none()
             }
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
-            Message::Raise => window::get_latest().and_then(window::gain_focus),
+            Message::Raise => latest_window(window::gain_focus),
             Message::Undo => self.undo_edit(),
             message @ Message::Scrolled(_) => {
                 // The page is about to admit a new row of thumbnails. Ask the
@@ -3018,7 +3017,7 @@ impl App {
                         self.playlist_scroll = y;
                         Task::batch([
                             entering,
-                            scrollable::scroll_to(
+                            iced::widget::operation::scroll_to(
                                 views::page::scroll_id(),
                                 AbsoluteOffset { x: 0.0, y },
                             ),
@@ -3084,7 +3083,7 @@ impl App {
                     let entering = self.note_place_left(from);
                     return Some(Task::batch([
                         entering,
-                        scrollable::scroll_to(
+                        iced::widget::operation::scroll_to(
                             views::page::scroll_id(),
                             AbsoluteOffset { x: 0.0, y: 0.0 },
                         ),
@@ -3111,7 +3110,7 @@ impl App {
                 let target = hang.spacer_height(row);
                 self.playlists_scroll = target;
                 return Some(Task::batch([
-                    scrollable::scroll_to(
+                    iced::widget::operation::scroll_to(
                         views::playlists::scroll_id(),
                         AbsoluteOffset { x: 0.0, y: target },
                     ),
@@ -3136,7 +3135,9 @@ impl App {
             }
             Message::NewPlaylistStart => {
                 self.playlists.naming = Some(crate::playlists::NameEntry::default());
-                return Some(text_input::focus(views::playlist_panel::new_name_id()));
+                return Some(iced::widget::operation::focus(
+                    views::playlist_panel::new_name_id(),
+                ));
             }
             Message::NewPlaylistInput(text) => {
                 if let Some(naming) = &mut self.playlists.naming {
@@ -3173,7 +3174,7 @@ impl App {
                         text: seeded,
                         error: None,
                     });
-                    return Some(text_input::focus(views::playlist::rename_id()));
+                    return Some(iced::widget::operation::focus(views::playlist::rename_id()));
                 }
             }
             Message::PlaylistRenameInput(text) => {
@@ -3248,7 +3249,7 @@ impl App {
                     text: views::queue::unsaved_name(self.player.queue_origin()),
                     error: None,
                 });
-                return Some(text_input::focus(views::queue::save_name_id()));
+                return Some(iced::widget::operation::focus(views::queue::save_name_id()));
             }
             Message::SaveQueueInput(text) => {
                 if let Some(saving) = &mut self.playlists.saving_queue {
@@ -3432,7 +3433,7 @@ impl App {
                 let entering = self.note_place_left(from);
                 Some(Task::batch([
                     entering,
-                    scrollable::scroll_to(
+                    iced::widget::operation::scroll_to(
                         views::page::scroll_id(),
                         AbsoluteOffset { x: 0.0, y: 0.0 },
                     ),
@@ -4347,7 +4348,7 @@ impl App {
         }
         self.menu = None;
         self.status_open = false;
-        text_input::focus(search_id())
+        iced::widget::operation::focus(search_id())
     }
 
     /// **Type anywhere** (ADR-0017 §1.2): append into the resident app-bar
@@ -5697,8 +5698,18 @@ impl App {
             // the bar's display options need a wall and its gear opens a place
             // inside a library that has not opened, and a bar with two dead
             // zones states less than no bar (`views::blocked`'s own docs).
-            (Screen::Setup(setup), _) => return views::setup::view(setup),
-            (Screen::Blocked(blocked), _) => return views::blocked::view(blocked),
+            (Screen::Setup(setup), _) => {
+                return crate::window_frame::resize_frame(
+                    views::setup::view(setup),
+                    owns_chrome() && !self.window_maximized,
+                );
+            }
+            (Screen::Blocked(blocked), _) => {
+                return crate::window_frame::resize_frame(
+                    views::blocked::view(blocked),
+                    owns_chrome() && !self.window_maximized,
+                );
+            }
             (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
             (Screen::Shelf(state), Place::Playlists) => views::playlists::view(
                 state,
@@ -6014,9 +6025,12 @@ impl App {
         // ghost froze at the lift point.)
         let ghost: Element<'_, Message> = match &self.drag {
             Some(drag) => views::drag_ghost::layer(drag, self.window),
-            None => iced::widget::Space::new(0.0, 0.0).into(),
+            None => iced::widget::Space::new().width(0.0).height(0.0).into(),
         };
-        iced::widget::stack![whole, ghost].into()
+        crate::window_frame::resize_frame(
+            iced::widget::stack![whole, ghost],
+            owns_chrome() && !self.window_maximized,
+        )
     }
 
     /// **The width a place's body gets**: the window, less the returns lane
@@ -6988,7 +7002,7 @@ impl Shelf {
                 self.refilter();
                 self.search_open = !self.query.trim().is_empty();
                 self.search_scroll_offset = 0.0;
-                scrollable::scroll_to(
+                iced::widget::operation::scroll_to(
                     views::search::scroll_id(),
                     AbsoluteOffset { x: 0.0, y: 0.0 },
                 )
@@ -7236,7 +7250,10 @@ impl Shelf {
         Task::batch([
             blur_search(),
             target.map_or_else(Task::none, |y| {
-                scrollable::scroll_to(views::search::scroll_id(), AbsoluteOffset { x: 0.0, y })
+                iced::widget::operation::scroll_to(
+                    views::search::scroll_id(),
+                    AbsoluteOffset { x: 0.0, y },
+                )
             }),
         ])
     }
@@ -7280,8 +7297,8 @@ impl Shelf {
         self.search_open = true;
         self.search_scroll_offset = 0.0;
         Task::batch([
-            text_input::focus(search_id()),
-            scrollable::scroll_to(
+            iced::widget::operation::focus(search_id()),
+            iced::widget::operation::scroll_to(
                 views::search::scroll_id(),
                 AbsoluteOffset { x: 0.0, y: 0.0 },
             ),
@@ -7305,7 +7322,7 @@ impl Shelf {
         self.search_scroll_offset = 0.0;
         Task::batch([
             blur_search(),
-            scrollable::scroll_to(
+            iced::widget::operation::scroll_to(
                 views::search::scroll_id(),
                 AbsoluteOffset { x: 0.0, y: 0.0 },
             ),
@@ -7358,7 +7375,7 @@ impl Shelf {
         self.scroll_offset = anchored;
         persist_density(density);
         Task::batch([
-            scrollable::scroll_to(
+            iced::widget::operation::scroll_to(
                 scroll_id(),
                 AbsoluteOffset {
                     x: 0.0,
@@ -7415,7 +7432,7 @@ impl Shelf {
         self.scroll_offset = 0.0;
         persist_group_key(key);
         Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            iced::widget::operation::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
     }
@@ -7483,7 +7500,7 @@ impl Shelf {
         };
         self.scroll_offset = target.top;
         Task::batch([
-            scrollable::scroll_to(
+            iced::widget::operation::scroll_to(
                 scroll_id(),
                 AbsoluteOffset {
                     x: 0.0,
@@ -7518,7 +7535,7 @@ impl Shelf {
         // Above the first shelf — the top of the wall stays the top.
         self.scroll_offset = 0.0;
         Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            iced::widget::operation::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
     }
@@ -10175,7 +10192,7 @@ mod tests {
             "Escape clears the query but leaves the caret in the well"
         );
         assert!(
-            !clear.contains("text_input::focus(search_id())"),
+            !clear.contains("iced::widget::operation::focus(search_id())"),
             "Escape re-focuses the well it just emptied"
         );
     }
@@ -10480,7 +10497,7 @@ mod tests {
 
         let focus = body("fn focus_the_well(&mut self) -> Task<Message> {");
         assert!(
-            focus.contains("text_input::focus(search_id())")
+            focus.contains("iced::widget::operation::focus(search_id())")
                 && !focus.contains("self.go(")
                 && !focus.contains("set_lane"),
             "`/` and Ctrl+F must focus search without navigating or re-hanging"
@@ -10608,7 +10625,7 @@ mod tests {
             format!("{:?}", nothing_id()),
             "the blur would focus the search well instead of leaving it"
         );
-        // And the well is the only `text_input::Id` the tree hands out, so
+        // And the well is the only `iced::widget::Id` the tree hands out, so
         // there is nothing else the sentinel could collide with.
         assert_eq!(format!("{:?}", search_id()), format!("{:?}", search_id()));
     }

@@ -139,8 +139,7 @@
 //! window.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, text,
-    tooltip,
+    Space, button, column, container, image as iced_image, mouse_area, row, rule, text, tooltip,
 };
 use iced::{Element, Length, alignment};
 
@@ -221,15 +220,16 @@ pub(crate) fn view(
     // The bar's one flexible region. It is a plain `Space` and **not** a
     // handle of its own: the whole bar is the handle (see below), so a second
     // one here would be two answers to one gesture.
-    let gap = Space::with_width(Length::Fill);
+    let gap = Space::new().width(Length::Fill);
     // **Zones 1…7, in that order, at every width and in every place.** One
     // arrangement rather than a mirrored pair: the owner's *"as long as we
     // have a sensible consistent pattern"* is better served by one layout
     // everywhere than by two that are each correct on one platform.
-    let line = row![name, history, search, gap, furniture]
-        .push_maybe(buttons)
-        .spacing(theme::GAP_LG)
-        .align_y(iced::Alignment::Center);
+    let mut line = row![name, history, search, gap, furniture];
+    if let Some(buttons) = buttons {
+        line = line.push(buttons);
+    }
+    let line = line.spacing(theme::GAP_LG).align_y(iced::Alignment::Center);
     // **The whole bar is the title bar's own gesture surface.** One
     // `mouse_area` around the band, not around the gap between its clusters:
     // iced 0.13's `mouse_area` runs its *content's* handler first and returns
@@ -278,7 +278,7 @@ pub(crate) fn view(
     .on_right_press(Message::WindowMenuRequested);
     column![
         band,
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
 }
@@ -424,7 +424,10 @@ fn marks(
     let inner: Element<'static, Message> = match (density, visualization) {
         (Some(current), None) => crate::views::density_marks(current),
         (None, Some(current)) => crate::visualizer::marks(current),
-        (None, None) => Space::new(Length::Fixed(theme::APP_BAR_MARKS_W), Length::Shrink).into(),
+        (None, None) => Space::new()
+            .width(Length::Fixed(theme::APP_BAR_MARKS_W))
+            .height(Length::Shrink)
+            .into(),
         (Some(_), Some(_)) => {
             unreachable!("a place cannot have density and visualization controls")
         }
@@ -655,11 +658,12 @@ mod tests {
         // on 2026-08-10. `push_maybe(None)` pushes nothing
         // (`iced_widget-0.13.4/src/row.rs:148`).
         assert!(
-            src.contains(".push_maybe(buttons)"),
+            src.contains("if let Some(buttons) = buttons")
+                && src.contains("line = line.push(buttons)"),
             "the buttons are no longer pushed conditionally into the row"
         );
         assert!(
-            !src.contains("Space::with_width(Length::Shrink)"),
+            !src.contains("Space::new().width(Length::Shrink)"),
             "a zero-width placeholder is back in the bar's row, and it takes a \
              GAP_LG seam with it — the trailing control no longer stands on \
              the window's gutter"
@@ -844,7 +848,8 @@ mod tests {
             .1;
         let body = &rest[..rest.find("\n}\n").expect("a function ends")];
         assert!(
-            body.contains("None => Space::new(Length::Fixed(theme::APP_BAR_MARKS_W)"),
+            body.contains("None => Space::new()")
+                && body.contains(".width(Length::Fixed(theme::APP_BAR_MARKS_W))"),
             "the empty slot no longer holds its width, so the bar's right \
              cluster moves between places"
         );
@@ -867,8 +872,8 @@ mod tests {
         let source = source();
         let code = source.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            code.contains("let line = row![name, history, search, gap, furniture]")
-                && code.contains(".push_maybe(buttons)"),
+            code.contains("let mut line = row![name, history, search, gap, furniture]")
+                && code.contains("line = line.push(buttons)"),
             "the bar's zones are no longer in the order the pattern states"
         );
         assert!(

@@ -31,7 +31,7 @@ use iced::Subscription;
 use iced::futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use iced::futures::stream::{self, StreamExt as _};
 use zbus::blocking::Connection;
-use zbus::object_server::SignalContext;
+use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::{fdo, interface};
 
@@ -91,16 +91,29 @@ impl Mpris {
 
     /// D-Bus method calls, as an iced subscription.
     pub(crate) fn subscription(&self) -> Subscription<Request> {
-        let slot = Arc::clone(&self.requests);
-        let requests = stream::once(async move {
-            let taken = slot.lock().ok().and_then(|mut slot| slot.take());
-            match taken {
-                Some(rx) => rx.boxed(),
-                None => stream::empty().boxed(),
+        #[derive(Clone)]
+        struct StreamSlot(Arc<Mutex<Option<UnboundedReceiver<Request>>>>);
+
+        impl std::hash::Hash for StreamSlot {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                "baz-mpris-requests".hash(state);
             }
-        })
-        .flatten();
-        Subscription::run_with_id("baz-mpris-requests", requests)
+        }
+
+        fn requests(slot: &StreamSlot) -> iced::futures::stream::BoxStream<'static, Request> {
+            let slot = Arc::clone(&slot.0);
+            stream::once(async move {
+                let taken = slot.lock().ok().and_then(|mut slot| slot.take());
+                match taken {
+                    Some(rx) => rx.boxed(),
+                    None => stream::empty().boxed(),
+                }
+            })
+            .flatten()
+            .boxed()
+        }
+
+        Subscription::run_with(StreamSlot(Arc::clone(&self.requests)), requests)
     }
 }
 
@@ -135,7 +148,7 @@ fn serve(updates: &Receiver<Update>, requests: UnboundedSender<Request>) {
             return;
         }
     };
-    let context = interface.signal_context().clone();
+    let context = interface.signal_emitter().clone();
 
     // Ends when the app drops its sender — i.e. when baz exits, which drops
     // the connection and releases the name.
@@ -190,7 +203,7 @@ struct Changed {
 
 /// Emit `PropertiesChanged` for each property that moved. A failed emission
 /// means the bus went away; the next `recv` will end the loop.
-fn emit(player: &Player, context: &SignalContext<'static>, changed: &Changed) {
+fn emit(player: &Player, context: &SignalEmitter<'static>, changed: &Changed) {
     if changed.status {
         let _ = zbus::block_on(player.playback_status_changed(context));
     }
@@ -376,7 +389,7 @@ impl Player {
     /// Emitted when the engine confirms a seek — the one position change a
     /// polling client could not have predicted.
     #[zbus(signal)]
-    async fn seeked(context: &SignalContext<'_>, position: i64) -> zbus::Result<()>;
+    async fn seeked(context: &SignalEmitter<'_>, position: i64) -> zbus::Result<()>;
 
     #[zbus(property)]
     fn playback_status(&self) -> String {

@@ -356,7 +356,7 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         _tree: &mut Tree,
         _renderer: &Renderer,
         limits: &layout::Limits,
@@ -364,17 +364,17 @@ where
         layout::atomic(limits, self.width, Length::Fixed(self.height))
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         // A groove's hit band **is** its layout box: it reserves
         // [`theme::RAIL_HIT`] of height and draws a 4 px rail centred in it,
         // so the pointer aims at the whole reservation. (The needle cannot do
@@ -385,21 +385,25 @@ where
             && let Some(wheel) = &self.wheel
             && cursor.is_over(bounds)
         {
-            let steps = state.wheel.push(delta);
+            let steps = state.wheel.push(*delta);
             if steps != 0 {
                 shell.publish(wheel(steps));
             }
-            return event::Status::Captured;
+            shell.capture_event();
+            return;
         }
-        pointer::handle(
+        let status = pointer::handle(
             &mut state.pointer,
             self.pointers.as_ref(),
-            &event,
+            event,
             bounds,
             bounds,
             cursor,
             shell,
-        )
+        );
+        if status == event::Status::Captured {
+            shell.capture_event();
+        }
     }
 
     fn mouse_interaction(
@@ -553,7 +557,17 @@ mod tests {
         fn start_transformation(&mut self, _transformation: Transformation) {}
         fn end_transformation(&mut self) {}
         fn fill_quad(&mut self, _quad: renderer::Quad, _background: impl Into<Background>) {}
-        fn clear(&mut self) {}
+        fn reset(&mut self, _new_bounds: Rectangle) {}
+        fn allocate_image(
+            &mut self,
+            _handle: &iced::advanced::image::Handle,
+            callback: impl FnOnce(
+                Result<iced::advanced::image::Allocation, iced::advanced::image::Error>,
+            ) + Send
+            + 'static,
+        ) {
+            callback(Err(iced::advanced::image::Error::Unsupported));
+        }
     }
 
     /// Where the bar under test is laid out — deliberately away from the
@@ -635,12 +649,16 @@ mod tests {
         }
 
         /// Deliver one event with the pointer at `cursor`.
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "test helper accepts constructed iced events at call sites"
+        )]
         fn feed(&mut self, event: Event, cursor: mouse::Cursor) -> (event::Status, Vec<Msg>) {
             let mut messages = Vec::new();
             let mut shell = Shell::new(&mut messages);
-            let status = self.groove.on_event(
+            self.groove.update(
                 &mut self.tree,
-                event,
+                &event,
                 Layout::new(&self.node),
                 cursor,
                 &self.renderer,
@@ -648,6 +666,11 @@ mod tests {
                 &mut shell,
                 &Rectangle::with_size(Size::new(1000.0, 1000.0)),
             );
+            let status = if shell.is_event_captured() {
+                event::Status::Captured
+            } else {
+                event::Status::Ignored
+            };
             (status, messages)
         }
 

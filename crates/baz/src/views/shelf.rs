@@ -108,7 +108,7 @@ pub(crate) fn view<'a>(
     let spacer = |grid: iced::widget::Column<'a, Message>, to: f32, drawn: &mut f32| {
         let gap = (to - *drawn).max(0.0);
         *drawn = to;
-        grid.push(Space::with_height(Length::Fixed(gap)))
+        grid.push(Space::new().height(Length::Fixed(gap)))
     };
     for run in &runs[first_run..end_run] {
         grid = spacer(grid, run.top, &mut drawn);
@@ -294,7 +294,10 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
     let room = theme::active();
     let body: Element<'_, Message> = match run {
         Some(run) => header_band(shelf, hang, run, block),
-        None => Space::new(Length::Fixed(block), Length::Fixed(0.0)).into(),
+        None => Space::new()
+            .width(Length::Fixed(block))
+            .height(Length::Fixed(0.0))
+            .into(),
     };
     container(body)
         .width(Length::Fill)
@@ -784,10 +787,14 @@ pub(crate) fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'st
     let room = theme::active();
     let thickness = theme::tile_rule_h(hovered, selected);
     container(
-        container(Space::new(Length::Fill, Length::Fixed(thickness)))
-            .width(Length::Fill)
-            .height(Length::Fixed(thickness))
-            .style(move |_theme| theme::tile_rule(room, hovered, selected)),
+        container(
+            Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(thickness)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(thickness))
+        .style(move |_theme| theme::tile_rule(room, hovered, selected)),
     )
     .width(Length::Fixed(edge))
     .height(Length::Fixed(theme::SELECTION_EDGE))
@@ -978,10 +985,11 @@ pub(crate) fn veil<'a>(
 /// power light.
 fn lamp_dot() -> Element<'static, Message> {
     let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
+    container(
+        Space::new()
+            .width(Length::Fixed(theme::DOT))
+            .height(Length::Fixed(theme::DOT)),
+    )
     .style(move |_theme| theme::lamp_dot(room))
     .into()
 }

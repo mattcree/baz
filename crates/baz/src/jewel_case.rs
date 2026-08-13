@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
 use iced::mouse;
 use iced::widget::image::Handle;
-use iced::widget::shader::{self, Shader, Viewport, wgpu};
-use iced::{Element, Length, Point, Rectangle};
+use iced::widget::shader::{self, Shader, Viewport};
+use iced::{Element, Length, Point, Rectangle, wgpu};
 use lru::LruCache;
 
 use crate::app::Message;
@@ -167,45 +167,42 @@ impl shader::Program<Message> for Case {
     fn update(
         &self,
         _state: &mut Self::State,
-        event: shader::Event,
+        event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-        _shell: &mut iced::advanced::Shell<'_, Message>,
-    ) -> (iced::event::Status, Option<Message>) {
-        use iced::event::Status;
+    ) -> Option<shader::Action<Message>> {
+        let capture = |message| Some(shader::Action::publish(message).and_capture());
         match event {
-            shader::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor.is_over(bounds) =>
             {
-                let Some(at) = cursor.position() else {
-                    return (Status::Ignored, None);
-                };
-                (Status::Captured, Some(Message::CasePressed(at)))
+                let at = cursor.position()?;
+                capture(Message::CasePressed(at))
             }
-            shader::Event::Mouse(mouse::Event::CursorMoved { position })
+            iced::Event::Mouse(mouse::Event::CursorMoved { position })
                 if self.rotation.dragging() =>
             {
-                (Status::Captured, Some(Message::CaseDragged(position)))
+                capture(Message::CaseDragged(*position))
             }
-            shader::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                 if self.rotation.dragging() =>
             {
-                (Status::Captured, Some(Message::CaseReleased))
+                capture(Message::CaseReleased)
             }
-            shader::Event::Touch(iced::touch::Event::FingerPressed { position, .. })
-                if bounds.contains(position) =>
+            iced::Event::Touch(iced::touch::Event::FingerPressed { position, .. })
+                if bounds.contains(*position) =>
             {
-                (Status::Captured, Some(Message::CasePressed(position)))
+                capture(Message::CasePressed(*position))
             }
-            shader::Event::Touch(iced::touch::Event::FingerMoved { position, .. })
+            iced::Event::Touch(iced::touch::Event::FingerMoved { position, .. })
                 if self.rotation.dragging() =>
             {
-                (Status::Captured, Some(Message::CaseDragged(position)))
+                capture(Message::CaseDragged(*position))
             }
-            shader::Event::Touch(
+            iced::Event::Touch(
                 iced::touch::Event::FingerLifted { .. } | iced::touch::Event::FingerLost { .. },
-            ) if self.rotation.dragging() => (Status::Captured, Some(Message::CaseReleased)),
-            _ => (Status::Ignored, None),
+            ) if self.rotation.dragging() => capture(Message::CaseReleased),
+            _ => None,
         }
     }
 
@@ -248,21 +245,16 @@ struct Primitive {
 }
 
 impl shader::Primitive for Primitive {
+    type Pipeline = Pipeline;
+
     fn prepare(
         &self,
+        pipeline: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        storage: &mut shader::Storage,
         _bounds: &Rectangle,
         viewport: &Viewport,
     ) {
-        if !storage.has::<Pipeline>() {
-            storage.store(Pipeline::new(device, queue, format, &self.textures));
-        }
-        let Some(pipeline) = storage.get_mut::<Pipeline>() else {
-            return;
-        };
         pipeline.update(
             device,
             queue,
@@ -278,14 +270,11 @@ impl shader::Primitive for Primitive {
 
     fn render(
         &self,
+        pipeline: &Self::Pipeline,
         encoder: &mut wgpu::CommandEncoder,
-        storage: &shader::Storage,
         target: &wgpu::TextureView,
         clip_bounds: &Rectangle<u32>,
     ) {
-        let Some(pipeline) = storage.get::<Pipeline>() else {
-            return;
-        };
         pipeline.render(encoder, target, *clip_bounds);
     }
 }
@@ -301,7 +290,7 @@ struct Pipeline {
 }
 
 impl Pipeline {
-    fn new(
+    fn build(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -363,8 +352,9 @@ impl Pipeline {
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
@@ -374,14 +364,16 @@ impl Pipeline {
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             multiview: None,
+            cache: None,
         });
         let (gpu_textures, bind_group) = make_bind_group(
             device,
@@ -454,6 +446,7 @@ impl Pipeline {
             label: Some("baz jewel case pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -468,6 +461,19 @@ impl Pipeline {
         pass.set_pipeline(&self.program);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..36, 0..1);
+    }
+}
+
+impl shader::Pipeline for Pipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        let blank = Handle::from_rgba(1, 1, vec![0, 0, 0, 255]);
+        let textures = Textures {
+            front: blank.clone(),
+            from: blank.clone(),
+            rear: blank.clone(),
+            spine: blank,
+        };
+        Self::build(device, queue, format, &textures)
     }
 }
 

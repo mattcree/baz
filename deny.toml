@@ -22,25 +22,17 @@ ignore = [
   # has no vulnerability and no drop-in replacement upstream has adopted yet.
   # Revisit when lofty migrates (tracked upstream); remove this when it does.
   "RUSTSEC-2024-0436",
-  # `ttf-parser` is unmaintained (no vulnerability). It is load-bearing in
-  # iced 0.13's entire text stack (cosmic-text/rustybuzz) and in winit's
-  # decoration fallback (sctk-adwaita → ab_glyph); there is no upgrade we can
-  # make from this workspace — the fix is upstream's migration to the
-  # fontations/skrifa crates. Font parsing here only ever reads fonts we ship
-  # or the OS provides, not hostile input from the library. Remove when iced
-  # (or an iced upgrade we take) drops ttf-parser.
+  # iced 0.14's cosmic-text/fontdb and winit/sctk-adwaita paths retain
+  # ttf-parser 0.25.1. It is unmaintained, not presently vulnerable, and no
+  # compatible upstream release removes it. Baz's generated-jewel rasterizer
+  # also uses ab_glyph, which reaches the same parser. Revisit with iced/fontdb.
   "RUSTSEC-2026-0192",
-  # `rustybuzz` (harfbuzz port) is unmaintained (no vulnerability) — the same
-  # upstream situation as ttf-parser above: it IS iced 0.13's text shaping via
-  # cosmic-text, shapes only shipped/OS fonts, and the fix is upstream's
-  # migration (harfrust/fontations). Remove together with RUSTSEC-2026-0192.
-  "RUSTSEC-2026-0206",
 ]
-# Note on RUSTSEC-2026-0002 (lru < 0.16.3 IterMut unsoundness): our own `lru`
-# is pinned >= 0.16.3 (fixed). iced_glyphon still carries a 0.12.x copy;
-# cargo-deny currently reports the advisory as satisfied for the graph, so no
-# ignore is present — if a future advisory-db/deny pairing flags the glyphon
-# copy, resolve it there rather than silencing it here blindly.
+# RUSTSEC-2026-0253: cryoglyph (iced_wgpu 0.14) pins lru 0.16.4, while Baz's
+# own cache is fixed at 0.18.2. cargo-deny currently considers the advisory
+# satisfied when the fixed direct copy is present and reports no matching
+# advisory to ignore. The affected path also requires a panicking key Drop plus
+# catch_unwind, which iced's glyph keys do not provide. Revisit with cryoglyph.
 
 [licenses]
 version = 2

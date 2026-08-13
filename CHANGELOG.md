@@ -26,6 +26,11 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **Baz's app bar now owns the window chrome by default.** The iced 0.14
+  migration supplies native eight-way edge and corner resizing around the
+  borderless frame while retaining window drag, double-click maximise, the
+  system menu, and minimise/maximise/close controls. `BAZ_NATIVE_CHROME=1`
+  restores platform decorations for comparison and diagnostics.
 - **Packaged Windows builds now open only the baz window, never a companion
   command line.** Release/package builds link for the GUI subsystem; debug
   builds keep the console and its diagnostics. User-facing failures continue
@@ -252,10 +257,6 @@ Every release is built from a tag by CI, gated on the full test suite — see
   change (ADR-0040's amendment §2).
 - Three glyphs on the icon sheet: minimise, maximise and restore, on the set's
   own stroke band.
-- `BAZ_BORDERLESS=1` turns the platform's title bar off, so the app bar is the
-  window's only chrome. **Not the default**: iced 0.13 exposes no edge-drag
-  resize, so going borderless today loses the pointer resize edges — see
-  ADR-0040 §6 for the price of the iced 0.14 upgrade that would fix it.
 - `crates/baz-core/tests/hostile_media.rs` — every hostile input the fuzzer has
   found, run on `push` through both `open_bytes` and a real file on disk under
   every scanned extension. The fuzz job is not a gate a tag passes through, so

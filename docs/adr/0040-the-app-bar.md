@@ -405,10 +405,11 @@ the other three. `docs/design/impl/app-bar/12-marks-4x-*.png` puts all four
 side by side, magnified with a point filter so the question is not answered by
 blurring it. A larger sprite for that one mark is small work if he wants it.
 
-### 6. The one field that is not flipped, and why
+### 6. Historical implementation boundary before iced 0.14
 
-`window::Settings { decorations: false }` is **wired and not defaulted**.
-`BAZ_BORDERLESS=1` turns it on.
+At the time this section was written, `window::Settings { decorations: false }`
+was wired but not defaulted, and `BAZ_BORDERLESS=1` enabled the preview. The
+2026-08-14 outcome below supersedes that state.
 
 **The blocker is resize, and it was re-verified against the pinned sources
 rather than trusted.** `iced_runtime-0.13.2/src/window.rs`'s whole `Action`
@@ -544,11 +545,40 @@ its established peel-then-Library behaviour; normal doors, breadcrumbs and
 resident destinations record visits. Alt+Left and Alt+Right accelerate the
 visible arrows.
 
-## What the owner still has to answer
+## 2026-08-14 outcome — iced 0.14 and owned chrome shipped
 
-**One question: do we take iced 0.13 → 0.14?** It is the only thing between
-this branch and the window he described. Measured, against the vendored 0.14.0
-sources:
+The owner answered yes. Baz now uses iced 0.14 and sets platform decorations
+off by default. `window_frame.rs` wraps every normal and early application
+surface with a six-logical-pixel inside-edge hit band, maps it to N/S/E/W and
+all four corner directions, publishes `window::drag_resize`, and stands down
+while maximised. The interior remains the app bar's existing drag,
+double-press-maximise and native-system-menu surface. The conditional
+minimise/maximise/close controls are therefore present by default.
+
+`BAZ_NATIVE_CHROME=1` restores platform decorations and suppresses Baz's
+duplicate window controls. It is a diagnostics/comparison escape hatch, not a
+second product mode.
+
+All five custom widgets, application boot and subscription APIs, and the
+jewel-case WGPU shader migrated. iced 0.14's `mouse_area` release publishes
+without capture, so the drag wrapper now routes its child through a local
+`Shell`: named child releases win without also emitting the row click. A
+regression test locks that behavior. Frame tests cover every direction,
+interior pass-through and exact band boundaries. The Linux dependency stack
+now shares zbus 5 with iced. The forecast that both font ignores and duplicate
+`lru` would disappear was only half right: `rustybuzz` is gone, but cosmic-text
+still reaches unmaintained `ttf-parser`; cryoglyph pins `lru 0.16.4`, now
+covered by RUSTSEC-2026-0253. Baz's own cache remains fixed on 0.18.2; the
+`ttf-parser` exception and the separate `lru` audit note are narrowly recorded
+in `deny.toml`. Flatpak sources were regenerated. A release build rendered
+cleanly in an isolated X11/Xvfb session with decorations absent and Baz's
+controls present; an isolated launch on the live Wayland session reached its
+interactive window normally.
+
+The estimates below are retained as the decision record made before the work:
+
+**Historical estimate: iced 0.13 → 0.14.** This was the measured price of the
+window he described, against the vendored 0.14.0 sources:
 
 - **~130–170 edited lines across 12–14 files**, roughly half production and
   half test. The five hand-built `Widget` impls all move (`on_event` → `update`
@@ -573,7 +603,4 @@ sources:
   `dark-light`, so that comment must be rewritten and the zbus 4-vs-5 choice
   reopened. It is a net *reduction* in crates.
 
-If the answer is yes, the flip is `decorations: false` plus an eight-way hit
-band spending `window::drag_resize`, and baz has the window he asked for. If it
-is no, `BAZ_BORDERLESS=1` shows what it looks like and the platform keeps
-drawing the bar above ours.
+The implemented flip is `decorations: false` plus that eight-way hit band.

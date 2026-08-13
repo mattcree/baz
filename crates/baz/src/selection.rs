@@ -7,9 +7,9 @@
 
 use std::time::{Duration, Instant};
 
-/// iced 0.13 does not expose the platform double-click setting. This matches
-/// the app bar's existing desktop-like interval; iced 0.14 can replace both
-/// with the toolkit/platform click count.
+/// This matches the app bar's desktop-like interval. Baz keeps the shared
+/// state machine because selection-then-activation spans custom tiles and rows,
+/// rather than mapping directly to a stock widget's double-click message.
 pub(crate) const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// A playable object that can be selected and activated.

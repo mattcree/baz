@@ -308,7 +308,7 @@ pub(crate) fn view<'a>(
         // The condition is the engine's own — a transport command awaiting its
         // confirming event — so nothing here has to know which press sent it.
         if player.transport_pending() {
-            return Space::new(Length::Fill, Length::Fill).into();
+            return Space::new().width(Length::Fill).height(Length::Fill).into();
         }
         let room = theme::active();
         return container(
@@ -369,7 +369,7 @@ pub(crate) fn view<'a>(
     let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
         crate::visualizer::background(audio, width, height)
     } else {
-        Space::new(Length::Fill, Length::Fill).into()
+        Space::new().width(Length::Fill).height(Length::Fill).into()
     };
     stack![field, spectrum, body].into()
 }
@@ -397,7 +397,7 @@ fn without_album_object<'a>(
     let spectrum: Element<'static, Message> = if let Some(audio) = audio {
         crate::visualizer::background(audio, width, height)
     } else {
-        Space::new(Length::Fill, Length::Fill).into()
+        Space::new().width(Length::Fill).height(Length::Fill).into()
     };
     stack![spectrum, body].into()
 }
@@ -703,9 +703,9 @@ fn field_layer(
 ) -> Element<'static, Message> {
     let room = theme::active();
     let Some(gradient) = field::dissolve(from, to, t, room) else {
-        return Space::new(Length::Fill, Length::Fill).into();
+        return Space::new().width(Length::Fill).height(Length::Fill).into();
     };
-    container(Space::new(Length::Fill, Length::Fill))
+    container(Space::new().width(Length::Fill).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_theme| container::Style {

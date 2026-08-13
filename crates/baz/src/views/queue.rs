@@ -73,7 +73,7 @@
 
 use std::borrow::Cow;
 
-use iced::widget::{Space, button, container, mouse_area, row, text, text_input};
+use iced::widget::{Space, button, container, mouse_area, row, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -86,8 +86,8 @@ use crate::{icon, theme};
 
 /// The `Save as playlist` field's id, so the caret can land in it the moment
 /// the word becomes a field.
-pub(crate) fn save_name_id() -> text_input::Id {
-    text_input::Id::new("baz-queue-save")
+pub(crate) fn save_name_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-queue-save")
 }
 
 /// The unsaved playlist as a full place: its standard header and the retained
@@ -240,7 +240,7 @@ fn queue_rows<'a>(
     let live = player.engine_ready();
     let win =
         super::playlist::row_window(list.rows.len(), layout.rows_scroll(scroll), window.height);
-    let mut rows = vec![Space::with_height(win.top).into()];
+    let mut rows = vec![Space::new().height(win.top).into()];
     for index in win.first..win.end {
         let row_state = list.rows[index].clone();
         let item = &queue.items[index];
@@ -265,7 +265,7 @@ fn queue_rows<'a>(
             .into(),
         );
     }
-    rows.push(Space::with_height(win.bottom).into());
+    rows.push(Space::new().height(win.bottom).into());
     rows
 }
 
@@ -278,7 +278,7 @@ fn queue_rows<'a>(
 /// on playback — nothing sounds because of it.
 fn undo_control(offered: bool) -> Element<'static, Message> {
     if !offered {
-        return Space::with_width(Length::Fixed(0.0)).into();
+        return Space::new().width(Length::Fixed(0.0)).into();
     }
     let room = theme::active();
     button(
@@ -388,7 +388,9 @@ fn save_control(offered: bool, origin: RunOrigin<'_>) -> Element<'static, Messag
         RunOrigin::Assembled => "Save as playlist".to_owned(),
         // A list that already exists says nothing, and holds its height.
         RunOrigin::Fixed => {
-            return Space::with_height(Length::Fixed(theme::TRANSPORT_HIT)).into();
+            return Space::new()
+                .height(Length::Fixed(theme::TRANSPORT_HIT))
+                .into();
         }
         RunOrigin::Saved(name) => return readout(format!("Saved as “{name}”")),
         RunOrigin::Diverged(name) => return readout(format!("From “{name}”")),
@@ -624,10 +626,11 @@ fn queue_row(
 /// ink carries the difference (it is not lit yet).
 fn next_ring() -> Element<'static, Message> {
     let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
+    container(
+        Space::new()
+            .width(Length::Fixed(theme::DOT))
+            .height(Length::Fixed(theme::DOT)),
+    )
     .style(move |_theme| iced::widget::container::Style {
         border: iced::Border {
             color: room.paper_dim,
@@ -705,8 +708,8 @@ mod tests {
             "only the window's slice is built"
         );
         assert!(
-            source.contains("Space::with_height(win.top)")
-                && source.contains("Space::with_height(win.bottom)"),
+            source.contains("Space::new().height(win.top)")
+                && source.contains("Space::new().height(win.bottom)"),
             "everything off screen is two spacers"
         );
         assert!(
@@ -741,7 +744,7 @@ mod tests {
         .expect("the shared composition's source")
         .replace("\r\n", "\n");
         assert!(
-            shared.contains("Space::with_width(Length::Fixed(theme::STEPPER_HIT))"),
+            shared.contains("Space::new().width(Length::Fixed(theme::STEPPER_HIT))"),
             "an unoffered slot is a space of exactly the control's width"
         );
         assert!(
@@ -813,7 +816,8 @@ mod tests {
             .expect("the fixed arm");
         let fixed = &fixed[..fixed.find("\n        }").unwrap_or(fixed.len())];
         assert!(
-            fixed.contains("Space::with_height(Length::Fixed(theme::TRANSPORT_HIT))"),
+            fixed.contains("Space::new()")
+                && fixed.contains(".height(Length::Fixed(theme::TRANSPORT_HIT))"),
             "a fixed run's slot stopped reserving the strip's height"
         );
         assert!(

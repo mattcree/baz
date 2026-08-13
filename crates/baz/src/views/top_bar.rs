@@ -23,7 +23,7 @@
 //! not a better arrangement of its tenants but two fewer of them.
 //!
 use baz_core::index::GroupKey;
-use iced::widget::{Space, column, container, horizontal_rule, row, text};
+use iced::widget::{Space, column, container, row, rule, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -95,12 +95,12 @@ pub(crate) fn view(shelf: &Shelf, _strip_width: f32) -> Element<'_, Message> {
     }
     column![
         container(
-            row![keys, Space::with_width(Length::Fill), status]
+            row![keys, Space::new().width(Length::Fill), status]
                 .spacing(theme::GAP_SM)
                 .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
 }

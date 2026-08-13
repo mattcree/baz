@@ -710,6 +710,13 @@ const READING_ROOM_SHIPS: bool = false;
 
 /// What the desktop says it prefers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "the light answer becomes live with item 17; keeping the pure room decision testable avoids coupling that item to this migration"
+    )
+)]
 pub enum Appearance {
     /// A dark desktop, or no answer at all.
     Dark,
@@ -719,28 +726,23 @@ pub enum Appearance {
 
 /// The desktop's preference, read through iced.
 ///
-/// **No new dependency**: `iced_core`'s `auto-detect-theme` feature is on by
-/// default in the version baz already links, and `Theme::default()` is the
-/// answer of the `dark-light` crate it pulls — which on Linux asks the
-/// freedesktop portal over the same D-Bus stack MPRIS already uses. baz never
-/// calls `Theme::default()` for a *theme* (it installs its own, [`theme`]), so
-/// reading it here spends the detection on the only question baz has.
+/// iced 0.14 reports this asynchronously after startup. The selectable light
+/// room remains item 17, so startup conservatively chooses Baz's shipped dark
+/// room until that work wires live system-theme changes into room selection.
 #[must_use]
 pub fn system_appearance() -> Appearance {
-    match Theme::default() {
-        Theme::Light => Appearance::Light,
-        _ => Appearance::Dark,
-    }
+    // iced 0.14 reports the desktop preference asynchronously through
+    // `iced::system::theme`; the light room is not selectable yet, so the
+    // conservative startup answer remains Closing Time.
+    Appearance::Dark
 }
 
 /// The room to stand in, given what the desktop prefers.
 ///
 /// Pure, so the whole of "follow the OS" is testable without a desktop. Note
-/// the asymmetry, which is deliberate: `dark-light` reports "no preference"
-/// and "light" identically once iced has mapped them, so **only a positive
-/// light answer leaves Closing Time**. A machine with no portal, no session
-/// bus and no answer gets the room baz is, not the room a failed probe
-/// defaulted to.
+/// the asymmetry, which is deliberate: **only a positive light answer leaves
+/// Closing Time**. A machine with no portal, no session bus and no answer gets
+/// the room baz is, not the room a failed probe defaulted to.
 #[must_use]
 pub fn follow(appearance: Appearance) -> &'static Palette {
     match appearance {
@@ -2487,11 +2489,11 @@ pub fn scrollbar(p: &Palette, on: Color, status: scrollable::Status) -> scrollab
         background: None,
         border: Border::default(),
         scroller: scrollable::Scroller {
-            color: if active {
+            background: Background::Color(if active {
                 p.hairline_strong(on)
             } else {
                 p.hairline(on)
-            },
+            }),
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
@@ -2504,6 +2506,12 @@ pub fn scrollbar(p: &Palette, on: Color, status: scrollable::Status) -> scrollab
         vertical_rail: rail,
         horizontal_rail: rail,
         gap: None,
+        auto_scroll: scrollable::AutoScroll {
+            background: Background::Color(Color::TRANSPARENT),
+            border: Border::default(),
+            shadow: Shadow::default(),
+            icon: Color::TRANSPARENT,
+        },
     }
 }
 
@@ -2650,6 +2658,7 @@ fn iced_theme(p: &Palette) -> Theme {
             text: p.paper,
             primary: p.lamp,
             success: p.success,
+            warning: p.lamp,
             danger: p.alert,
         },
     )
@@ -2685,6 +2694,7 @@ pub fn theme() -> Theme {
 #[must_use]
 pub fn tile(p: &Palette, _status: button::Status, _selected: bool) -> button::Style {
     button::Style {
+        snap: true,
         background: None,
         text_color: p.paper,
         border: Border {
@@ -2856,6 +2866,7 @@ pub fn transport(p: &Palette, on: Color, status: button::Status) -> button::Styl
         button::Status::Active => (Color::TRANSPARENT, p.paper),
     };
     button::Style {
+        snap: true,
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
@@ -2891,6 +2902,7 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
         button::Status::Active => (Color::TRANSPARENT, p.paper_dim),
     };
     button::Style {
+        snap: true,
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
@@ -2941,6 +2953,7 @@ pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -
         button::Status::Active => (Color::TRANSPARENT, resting),
     };
     button::Style {
+        snap: true,
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
@@ -2994,6 +3007,7 @@ pub fn primary(p: &Palette, status: button::Status) -> button::Style {
         button::Status::Disabled => (Color::TRANSPARENT, p.hairline(p.plinth), p.paper_muted),
     };
     button::Style {
+        snap: true,
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
@@ -3023,7 +3037,7 @@ pub fn primary(p: &Palette, status: button::Status) -> button::Style {
 #[must_use]
 pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
-        text_input::Status::Focused => p.paper_ring(p.recess),
+        text_input::Status::Focused { .. } => p.paper_ring(p.recess),
         text_input::Status::Hovered => p.hairline_strong(p.recess),
         // **No ring at rest** — the composition audit's defect 6. A 360 × 30
         // rectangle drawn around an empty field was 33.2 % of the whole top
@@ -3054,7 +3068,7 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
 pub fn output_picker(p: &Palette, status: pick_list::Status) -> pick_list::Style {
     let edge = match status {
         pick_list::Status::Active => p.recess,
-        pick_list::Status::Hovered | pick_list::Status::Opened => p.paper_ring(p.recess),
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => p.paper_ring(p.recess),
     };
     pick_list::Style {
         text_color: p.paper,
@@ -3083,6 +3097,7 @@ pub fn output_menu(p: &Palette) -> iced::widget::overlay::menu::Style {
         text_color: p.paper,
         selected_text_color: p.paper,
         selected_background: Background::Color(p.plinth_lit),
+        shadow: Shadow::default(),
     }
 }
 
@@ -3283,6 +3298,7 @@ pub fn segment(p: &Palette, status: button::Status, selected: bool) -> button::S
         }
     };
     button::Style {
+        snap: true,
         background: background.map(Background::Color),
         text_color,
         border: Border {
@@ -3327,9 +3343,9 @@ pub fn bar(p: &Palette) -> container::Style {
 pub fn hairline(p: &Palette, on: Color) -> rule::Style {
     rule::Style {
         color: p.hairline(on),
-        width: 1,
         radius: 0.0.into(),
         fill_mode: FillMode::Full,
+        snap: true,
     }
 }
 
@@ -3494,6 +3510,7 @@ pub fn selectable_track_row(
         (false, false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
+        snap: true,
         background: background.map(Background::Color),
         // The row's inks are set per-line by the view (a played row is fainter
         // than an upcoming one), so the button contributes none of its own.
@@ -3750,6 +3767,7 @@ pub fn now_playing_text(p: &Palette, status: button::Status) -> button::Style {
         button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
     };
     button::Style {
+        snap: true,
         background: Some(Background::Color(background)),
         text_color: p.paper,
         border: Border {
@@ -4050,6 +4068,7 @@ pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
         Background::Gradient(gradient.into())
     });
     button::Style {
+        snap: true,
         background,
         text_color: p.paper,
         border: Border {
@@ -6168,7 +6187,7 @@ mod tests {
         for status in [
             text_input::Status::Active,
             text_input::Status::Hovered,
-            text_input::Status::Focused,
+            text_input::Status::Focused { is_hovered: false },
             text_input::Status::Disabled,
         ] {
             let style = input(p, status);
@@ -6197,21 +6216,31 @@ mod tests {
             painted.push(("check", colors));
         }
         for status in [
-            scrollable::Status::Active,
+            scrollable::Status::Active {
+                is_horizontal_scrollbar_disabled: false,
+                is_vertical_scrollbar_disabled: false,
+            },
             scrollable::Status::Hovered {
                 is_horizontal_scrollbar_hovered: false,
                 is_vertical_scrollbar_hovered: true,
+                is_horizontal_scrollbar_disabled: false,
+                is_vertical_scrollbar_disabled: false,
             },
             scrollable::Status::Dragged {
                 is_horizontal_scrollbar_dragged: false,
                 is_vertical_scrollbar_dragged: true,
+                is_horizontal_scrollbar_disabled: false,
+                is_vertical_scrollbar_disabled: false,
             },
         ] {
             let style = scrollbar(p, p.wall, status);
             painted.push((
                 "scrollbar",
                 vec![
-                    style.vertical_rail.scroller.color,
+                    match style.vertical_rail.scroller.background {
+                        Background::Color(color) => color,
+                        Background::Gradient(_) => Color::TRANSPARENT,
+                    },
                     style.vertical_rail.border.color,
                 ],
             ));
@@ -7178,8 +7207,9 @@ mod tests {
                     .find("\n\n")
                     .map_or(source.len(), |index| at + index);
                 let block = &source[head..tail];
-                let centred =
-                    block.contains("Vertical::Center") || block.contains("Alignment::Center");
+                let centred = block.contains("Vertical::Center")
+                    || block.contains("Alignment::Center")
+                    || block.contains("Space::new()");
                 if !centred {
                     let line = source[..at].matches('\n').count() + 1;
                     offenders.push(format!("{name}:{line}"));

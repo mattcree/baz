@@ -203,7 +203,7 @@ the only copy.
 ## How baz draws, and how to make it draw differently
 
 **baz is GPU-accelerated already, and it falls back on its own.** The shell is
-iced 0.13 with both renderers compiled in — `wgpu` (Vulkan, Metal, DX12 or GL)
+iced 0.14 with both renderers compiled in — `wgpu` (Vulkan, Metal, DX12 or GL)
 and `tiny-skia` (CPU) — and iced's fallback compositor tries the GPU first and
 the software path second when no usable adapter answers
 (`iced_renderer-0.13.0/src/fallback.rs:214–262`). There is nothing to switch on.

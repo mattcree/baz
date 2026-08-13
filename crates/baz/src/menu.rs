@@ -60,7 +60,7 @@
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Operation, Tree};
 use iced::advanced::{Clipboard, Shell, Widget, overlay, renderer};
-use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, Vector, event, mouse};
+use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, Vector, mouse};
 
 use crate::app::Message;
 use crate::theme;
@@ -444,54 +444,54 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         // The content first — a child that captures the event owns it
         // (`mouse_area` forwards in exactly this order). No child takes a
         // right press today, so the order is future-proofing, not routing.
-        if self.content.as_widget_mut().on_event(
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
-            event.clone(),
+            event,
             layout,
             cursor,
             renderer,
             clipboard,
             shell,
             viewport,
-        ) == event::Status::Captured
-        {
-            return event::Status::Captured;
+        );
+        if shell.is_event_captured() {
+            return;
         }
         if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event
             && self.target.is_some()
@@ -502,9 +502,8 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
                 self.target.expect("right press has a menu target"),
                 at,
             ));
-            return event::Status::Captured;
+            shell.capture_event();
         }
-        event::Status::Ignored
     }
 
     fn draw(
@@ -552,13 +551,18 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &iced::Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
