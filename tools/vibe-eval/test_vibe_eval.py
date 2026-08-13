@@ -97,15 +97,44 @@ class HarnessTests(unittest.TestCase):
         ranking = vibe_eval.metadata_ranking(tracks, {"query": "gentle jazz"}, 2)
         self.assertEqual(ranking, ["one", "three"])
 
+    def test_random_control_is_reproducible_and_diversity_matched(self) -> None:
+        tracks = [
+            {"id": "one", "artist": "A", "album": "First"},
+            {"id": "two", "artist": "A", "album": "Second"},
+            {"id": "three", "artist": "A", "album": "Third"},
+            {"id": "four", "artist": "B", "album": "First"},
+            {"id": "five", "artist": "B", "album": "Fourth"},
+            {"id": "six", "artist": "C", "album": "Fifth"},
+        ]
+        first = vibe_eval.random_diverse_ranking(tracks, 6, 42)
+        self.assertEqual(first, vibe_eval.random_diverse_ranking(tracks, 6, 42))
+        selected = [next(track for track in tracks if track["id"] == track_id) for track_id in first]
+        self.assertTrue(all(left["artist"] != right["artist"] for left, right in zip(selected, selected[1:])))
+        self.assertLessEqual(sum(track["artist"] == "A" for track in selected), 2)
+        # Fresh albums win whenever they remain eligible under the artist rules.
+        self.assertEqual(len({track["album"] for track in selected[:4]}), 4)
+
+    def test_random_control_seed_changes_by_request_without_reading_the_request(self) -> None:
+        self.assertEqual(vibe_eval.request_seed(7, "one"), vibe_eval.request_seed(7, "one"))
+        self.assertNotEqual(vibe_eval.request_seed(7, "one"), vibe_eval.request_seed(7, "two"))
+
     def test_scoring_restores_system_identity(self) -> None:
+        ratings = {
+            "relevance": 2,
+            "coherence": 2,
+            "transitions": 2,
+            "diversity": 2,
+            "rediscovery": 2,
+            "replay": 2,
+        }
         ballot = {
             "schema": 1,
             "items": [{
                 "id": "one",
                 "preferred": "B",
                 "candidates": [
-                    {"code": "A", "ratings": {"relevance": 2}},
-                    {"code": "B", "ratings": {"relevance": 5}},
+                    {"code": "A", "ratings": ratings},
+                    {"code": "B", "ratings": {**ratings, "relevance": 5}},
                 ],
             }],
         }
@@ -119,6 +148,34 @@ class HarnessTests(unittest.TestCase):
         score = vibe_eval.score_ballot(ballot, key)
         self.assertEqual(score["systems"]["semantic"]["preferred"], 1)
         self.assertEqual(score["systems"]["semantic"]["means"]["relevance"], 5)
+
+    def test_scoring_refuses_an_incomplete_ballot(self) -> None:
+        ballot = {
+            "schema": 1,
+            "items": [{
+                "id": "one",
+                "preferred": None,
+                "candidates": [{"code": "A", "ratings": {name: None for name in vibe_eval.RATING_DIMENSIONS}}],
+            }],
+        }
+        key = {"schema": 1, "items": [{"id": "one", "mapping": [{"code": "A", "system": "baseline"}]}]}
+        with self.assertRaisesRegex(ValueError, "preferred candidate"):
+            vibe_eval.score_ballot(ballot, key)
+
+    def test_scoring_refuses_a_missing_rating(self) -> None:
+        ratings = {name: 3 for name in vibe_eval.RATING_DIMENSIONS}
+        ratings["replay"] = None
+        ballot = {
+            "schema": 1,
+            "items": [{
+                "id": "one",
+                "preferred": "A",
+                "candidates": [{"code": "A", "ratings": ratings}],
+            }],
+        }
+        key = {"schema": 1, "items": [{"id": "one", "mapping": [{"code": "A", "system": "baseline"}]}]}
+        with self.assertRaisesRegex(ValueError, "replay: rating is required"):
+            vibe_eval.score_ballot(ballot, key)
 
     def test_materialized_playlists_keep_system_identity_out(self) -> None:
         ballot = {

@@ -196,15 +196,15 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ### Phase B — Home is the next feature area
 
-13. **Doing — Build local-first sonic vibe playlists on Home.** The owner
+13. **Done 2026-08-13 — Build local-first sonic vibe playlists on Home.** The owner
     rejected the metadata/history grammar as the feature: the product bar is a
     genuinely impressive offline musical model of the listener's collection.
     A first end-to-end sonic slice now lives behind the optional
     `vibe-analysis` build feature: explicit/cancellable incremental audio
     analysis, a separate versioned/stale-file-aware cache, Calm/Warm/Focus/
     Bright/Drive controls, sounding-track anchoring, continuity/diversity
-    sequencing and an ordinary silent editable playlist. This is the
-    conventional-feature comparator, **not completion**. The official LAION
+    sequencing and an ordinary silent editable playlist. The owner accepted
+    this transparent local feature after using it. The official LAION
     text/audio towers are now reproducibly exported, pinned and checked against
     PyTorch, and a fingerprint-locked 72-track private-corpus ballot compares
     metadata, conventional and semantic lists without revealing identity.
@@ -212,18 +212,18 @@ Phase A is complete only when all twelve items are implemented and verified;
     journey, adjust a visible default energy curve or semantic turns, and press
     Create; first-use consent continues the same request automatically, the
     playing track is never an implicit baseline, and the result is a silent
-    editable preview. Next: add the diversity-matched random control, complete
-    the listening gate, and integrate the demonstrated winner behind this
-    model-neutral request. `docs/design/16-local-vibe-
+    editable preview. Semantic research remains separate and may be integrated
+    later only after it is chosen and demonstrated useful. Baz is one product;
+    its normal build includes the local controls. `docs/design/16-local-vibe-
     playlists.md` is the current research/evaluation record.
 
 ### Phase C — make releases sustainable, then ship
 
-14. **Choose and implement distribution-aware updates.** Flatpak is optional.
-    Managed installs hand off; direct installs need signed discovery,
-    verification, staged replacement, restart and rollback. A GitHub link alone
-    is not completion.
-15. **Ship the public beta through the chosen channel(s).** Re-run the corrected
+14. **Done 2026-08-13 — Choose the beta distribution/update policy.** The owner
+    chose the existing GitHub Release archives. Baz stays offline; discovery,
+    download, checksum verification, replacement and rollback are explicit
+    user actions. Automatic signed updating and managed stores are deferred.
+15. **Doing — Ship the public beta through GitHub Releases.** Re-run the corrected
     GitHub release rehearsal and all three platform builds. Do not assume a
     Flathub submission if the distribution research chose otherwise.
 
@@ -249,26 +249,23 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- **Item 13 — local-first sonic vibe playlists on Home.** The conventional
-  audio-feature comparator is implemented and verified end to end. A separate
-  model-swappable blind-evaluation harness now pins both DCLAP and a paired
-  quantized LAION candidate, indexes only an explicit private corpus, exercises
-  negative prompts and arcs, and records package/CPU cost without putting an
-  experimental runtime in the GUI. LAION is the preferred engineering path:
-  its official checkpoint is Apache-2.0, Baz's verified reproducible export is
-  162.7 MB, and its FP32 and quantized towers pass numerical alignment checks.
-  A 72-track, 12-request, three-system anonymous listening set is ready, with a
-  portable exact-corpus fingerprint preventing reused IDs from hiding changed
-  tracks. The listener workflow is now fully specified: one natural request,
-  a visible two-to-four-point energy/semantic journey, automatic work after one
-  consent decision, no implicit current-track seed, and one silent editable
-  preview. It still has to win real blind listening. Keep the item here through
-  that owned-corpus evaluation and semantic runtime integration; the baseline
-  alone does not meet the owner's unique-offline-selling-point bar. The first
-  full-library run also exposed and closed a shared decoder fault: recoverable
-  MP3 packet errors no longer reject a whole track, the exact reported file now
-  analyses, and bounded skip summaries replace raw paths/parser internals in
-  both Home and the canonical event history.
+- **Item 15 — GitHub public beta.** Item 14 chose GitHub Release
+  archives only for the beta. Updates are manual and user-initiated: Baz never
+  contacts a service, checks, downloads, overwrites itself or replaces its own
+  files. A listener explicitly downloads the new Baz archive, verifies its
+  published SHA-256 checksum, quits Baz, replaces the application files, and
+  relaunches; config, library data and playlists remain in their existing data
+  directories. Re-run the corrected locked CI release rehearsal and all three
+  platform builds. The 2026-08-13 local gate is green: warnings-denied clippy,
+  all workspace tests (including 775 Baz tests), rustdoc, cargo-deny, packaging
+  validation, the 14-test Vibe evaluator harness and the explicit-feature Linux
+  release build all pass. Its staged 0.1.0 archive is 13 MB, contains the
+  expected desktop assets and verifies against its generated SHA-256. Next:
+  commit/push this tree and dispatch the non-publishing GitHub Actions release
+  rehearsal so Windows, macOS and Linux artifacts are exercised together.
+  Publishing a tag or release remains the owner's external boundary. Flathub,
+  MSIX/App Installer, Sparkle, signing identities and a self-updater are
+  deferred rather than implied.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices
@@ -400,9 +397,12 @@ its bold title from the numbered item above.
   derived-token policy; and malformed, unreadable, missing-selected-theme and
   round-trip tests.*
 - **Users need a safe, distribution-aware path to new baz releases; Flatpak is
-  optional.** Recorded from the owner's live review on 2026-08-12. The current
-  release pipeline already creates direct Linux, Windows and macOS archives;
-  they are unsigned and have no installer/update mechanism. Do not let the
+  optional.** Recorded from the owner's live review on 2026-08-12; amended
+  2026-08-13: the beta distributes only through GitHub Release archives. Baz
+  remains offline and has no updater; the listener chooses when to download a
+  new Baz archive and replace the prior one after checking its published
+  SHA-256. The current release pipeline already creates direct Linux, Windows
+  and macOS archives. Do not let the
   existing Flatpak manifest choose the distribution strategy by inertia.
   Compare a first-class direct installer/updater and Linux formats such as
   AppImage or native packages with Flatpak/store channels. Split release
@@ -416,10 +416,10 @@ its bold title from the numbered item above.
   spike choosing supported formats, install-origin detection, stable/prerelease
   channels, metadata/cadence/consent, signing and platform installers,
   package-manager handoff, rollback/restart, and database downgrade safety.
-  The spike must produce the complete post-check mechanism too: manager handoff
-  for managed installs, or signed download → verification → staged external
-  updater → app exit → atomic replacement → relaunch/rollback for direct
-  installs. A notification or GitHub link alone does not complete the task.*
+  The beta deliberately stops at manual replacement. Any later automatic
+  update path requires a separately approved signed external-updater design;
+  a notification or GitHub link alone must not be described as automatic
+  update support.*
 - **The packaged Windows app must not open a companion command window.**
   Recorded from the owner's live review on 2026-08-12. `crates/baz/src/main.rs`
   currently declares no Windows GUI subsystem, so the executable is linked as

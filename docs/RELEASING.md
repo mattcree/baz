@@ -30,7 +30,7 @@ gate ─────┘         └──> publish (SHA256SUMS + draft GitHub Re
   gate]`, so there is no path from a tag to an artifact that skips it. It is
   the same workflow file PRs are held to, called rather than copied, so the two
   definitions of "green" cannot drift apart.
-- **`build`** produces one archive per platform.
+- **`build`** produces one Baz archive per platform.
 - **`publish`** computes every SHA-256 in one place, verifies the sums file
   against the files it describes, and creates the release **as a draft** —
   ENGINEERING's "a human owns the trunk" applies at least as much to what
@@ -53,6 +53,10 @@ Device output is part of every GUI build. Building `cpal` needs platform audio
 headers, which the primary development host lacks outside its toolbox. The
 Linux runner installs `libasound2-dev`, the same package and the same reason as
 CI's test job.
+
+Vibe is explicitly selected in the Flatpak and release build commands alongside
+device output. The dependency-minimal `--no-default-features` build is only a
+CI/development boundary check and is never emitted by a release workflow.
 
 **A consequence worth stating before you try it**: the release build command
 does not run on the maintainer's own machine. Fedora Silverblue has no
@@ -88,10 +92,12 @@ Not reproducible, and not claimed to be:
   Treat `SHA256SUMS` as "this is the file that CI produced", published beside
   the public log of the run that produced it — not as "you can rebuild this
   byte for byte".
-- **The artifacts are not signed.** No GPG signature, no macOS notarization, no
-  Windows Authenticode. Certificates and notarization are a cost and an
-  identity decision the project has not made, and pretending otherwise would be
-  worse than saying so. `docs/INSTALL.md` tells users exactly this.
+- **The current archives are not signed.** The beta distributes these GitHub
+  Release archives directly, with published SHA-256 checksums. Baz has no
+  automatic updater: listeners manually verify, replace and relaunch. This is
+  not a claim of signature-backed authenticity; adding an automatic updater or
+  presenting stronger provenance requires a separately approved signing and
+  distribution design.
 
 ## Rehearsing it locally, before any of the above
 

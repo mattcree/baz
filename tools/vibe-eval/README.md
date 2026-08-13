@@ -132,6 +132,17 @@ toolbox run -c baz-dev python3 tools/vibe-eval/vibe_eval.py metadata \
   tools/vibe-eval/local/corpus.json tools/vibe-eval/local/metadata.json
 ```
 
+The required floor is a separate diversity-matched random control. It never
+reads request text, metadata or audio, but uses the same two-track artist cap,
+no adjacent artist repeat and fresh-album preference as the other controls.
+The seed is recorded and deterministically expanded per request, so a ballot
+can be reproduced without making every request share one random ordering:
+
+```sh
+toolbox run -c baz-dev python3 tools/vibe-eval/vibe_eval.py random \
+  tools/vibe-eval/local/corpus.json tools/vibe-eval/local/random.json
+```
+
 The shipped conventional-feature comparator is exported by the workspace
 binary. It shares `baz-vibe`'s decoder, cache, tempo/timbre vectors and
 diversity policy; its deliberately small adjective map exposes only the two
@@ -150,7 +161,8 @@ finished:
 
 ```sh
 toolbox run -c baz-dev python3 tools/vibe-eval/vibe_eval.py blind \
-  tools/vibe-eval/local/metadata.json tools/vibe-eval/local/conventional.json \
+  tools/vibe-eval/local/random.json tools/vibe-eval/local/metadata.json \
+  tools/vibe-eval/local/conventional.json \
   tools/vibe-eval/local/laion.json tools/vibe-eval/local/dclap.json \
   --ballot tools/vibe-eval/local/ballot.json \
   --key tools/vibe-eval/local/key.json
@@ -175,8 +187,9 @@ Each request directory contains `A.m3u8`, `B.m3u8`, and so on, plus one
 identity-free `listening.json` index. The separate key remains the only file
 which knows which system produced a letter.
 
-For each candidate list, fill every 1–5 rating and its `preferred` code. Score
-only after the ballot is complete:
+For each candidate list, fill every 1–5 rating and its `preferred` code. The
+scorer refuses a missing preference or rating, so score only after the ballot
+is complete:
 
 ```sh
 toolbox run -c baz-dev python3 tools/vibe-eval/vibe_eval.py score \

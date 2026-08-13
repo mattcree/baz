@@ -1,10 +1,10 @@
 # Local sonic vibe playlists
 
-> **Status: product interaction fixed; semantic integration and listening gate
-> active, 2026-08-13.** The conventional comparator, reproducible LAION export
-> and identity-blind real-library ballot are built. The listener workflow below
-> replaces the comparator UI; none of the technical paths is the promised
-> feature until the semantic path wins listening and ships through that flow.
+> **Status: local Vibe playlists shipped; semantic integration deferred,
+> 2026-08-13.** The owner accepted the conventional local controls after using
+> them. The reproducible LAION export and identity-blind ballot remain research
+> tooling; semantic integration resumes only if it is chosen and demonstrated
+> useful.
 
 ## Product bar
 
@@ -209,14 +209,18 @@ the library or model changes.
 - Generation and preview cost no playback interruption. Indexing stays below
   playback work in scheduling priority.
 
-### Full and light editions
+### Build boundary
 
-The full offline edition includes the verified model/runtime payload but keeps
-analysis opt-in as above. It performs no first-run download. The light edition
-contains no analyser, model, tokenizer or embedding index and omits Make a mix
-from Home and track menus rather than drawing a dead or promotional panel.
-Settings/About names the installed edition and documentation explains the
-choice. Both editions read, edit and play generated `.m3u8` files identically.
+The normal Baz build includes the opt-in conventional analyser and performs no
+first-run download. `--no-default-features` contains no analyser, model,
+tokenizer or embedding index and exists as an internal dependency-boundary
+check, not a separately named product. It omits Vibe from Home. Both builds
+read, edit and play generated `.m3u8` files identically.
+
+A future semantic integration may bundle an audited model/runtime payload. It
+must not download a model after installation unless a later signed model
+discovery, verification, staged replacement and removal design explicitly
+permits that.
 
 ### Responsive and accessible behavior
 
@@ -374,11 +378,12 @@ multiple languages, live/electronic/acoustic material, repeated artists and
 editions. Keep private audio out of the repository; commit only corpus
 manifests, prompts and anonymous judgements.
 
-Compare at least three systems blind:
+Compare at least four systems blind:
 
-1. metadata/history/random-diversity control;
-2. the built conventional-feature baseline;
-3. the audited joint text–audio embedding candidate, alone and hybridized with
+1. diversity-matched random control;
+2. deliberately simple metadata/history control;
+3. the built conventional-feature baseline;
+4. the audited joint text–audio embedding candidate, alone and hybridized with
    conventional tempo/energy constraints.
 
 The prompt set must cover controlled moods, instruments/genre, subtle affect,
@@ -386,7 +391,9 @@ seed similarity, negative anchors and temporal arcs. Record prompt relevance,
 within-list coherence, adjacent transitions, diversity, rediscovery value and
 whether the listener would replay the list. Also record cold/warm generation
 latency, tracks/hour, peak RAM, index bytes/track, shipped/model size, CPU
-support, licences and Windows/macOS/Linux packaging.
+support, licences and Windows/macOS/Linux packaging. The scorer must refuse an
+incomplete ballot: every candidate needs every rating and each request needs
+one forced preference before identities are restored.
 
 Advance only if the richer system repeatedly wins blind listener preference,
 not merely vector-retrieval metrics. If it does not feel impressive, the item
@@ -404,11 +411,12 @@ Candidate selection changes model, manifest and recorded system identity
 together, preventing an audio tower from being silently queried with the
 wrong text tower.
 
-The harness produces three compatible run formats:
+The harness produces four compatible run formats:
 
-1. a deliberately weak metadata token-overlap control;
-2. `vibe-baseline`, which exports the shipped Bliss axes/cache/diversity path;
-3. model-swappable LAION or DCLAP audio/text retrieval, either full-overlap or
+1. a diversity-matched seeded-random control;
+2. a deliberately weak metadata token-overlap control;
+3. `vibe-baseline`, which exports the shipped Bliss axes/cache/diversity path;
+4. model-swappable LAION or DCLAP audio/text retrieval, either full-overlap or
    an explicitly labelled evenly sampled window policy.
 
 Indexing constructs only the audio session; querying constructs only the text
@@ -468,7 +476,9 @@ Its six-window LAION pass indexed 432 windows in 85.81 s on the CPU above:
 conventional and sampled-LAION runs all contain 12 twenty-track rankings and
 the same exact-corpus fingerprint. The resulting 36 ordinary M3U8 candidates
 are materialized under ignored `local/`; listener ratings remain intentionally
-unfilled and the separate identity key stays closed.
+unfilled and the separate identity key stays closed. The harness now also has
+a deterministic diversity-matched random control; regenerate this pre-control
+ballot with it before collecting ratings.
 
 The same corpus's full-overlap reference used 3,930 windows and took 453.10 s.
 Six-window embeddings retained 0.9837 mean and 0.9871 median cosine to that
@@ -479,7 +489,7 @@ candidate; those agreement figures do not establish musical quality.
 
 ## Next implementation spike
 
-1. **Done for evaluation:** keep the standalone harness and its three controls
+1. **Done for evaluation:** keep the standalone harness and its four controls
    outside the GUI; CI runs its dependency-free protocol tests.
 2. **Done for evaluation:** reproduce and pin both towers from the official
    Apache-2.0 LAION checkpoint, including attention-mask-correct text inference

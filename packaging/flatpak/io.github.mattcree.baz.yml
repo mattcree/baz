@@ -72,10 +72,10 @@ modules:
       # --offline: no network in a Flathub build, by policy and by sandbox.
       # --locked: the committed Cargo.lock is the dependency set, the same one
       #   the CI gate and the release binaries were built from.
-      # --features device-output: a music player without audio output is not
-      #   the product. The feature is non-default only because building cpal
-      #   needs ALSA headers, which the freedesktop SDK has.
-      - cargo --offline build --release --locked -p baz --features device-output
+      # --features device-output,vibe-analysis: the Baz release includes both
+      # playback and Vibe. State both explicitly so changing a Cargo default
+      # cannot silently change the Flatpak's capabilities.
+      - cargo --offline build --release --locked -p baz --features device-output,vibe-analysis
       - install -Dm755 target/release/baz /app/bin/baz
       # The desktop entry, the AppStream metadata and the icons are installed
       # from the repository's own `packaging/` tree — the copies CI validates.

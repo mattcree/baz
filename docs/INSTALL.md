@@ -60,6 +60,13 @@ somewhere on real disk.
 
 ## Release binaries
 
+GitHub Release archives are the supported beta distribution path. Baz has no
+network client or automatic updater: when you choose to update, download the
+new archive and its `SHA256SUMS`, verify it, quit Baz, replace the old
+application files and relaunch. Your configuration, library database and
+playlists live outside the archive and are preserved. Keep the previous archive
+until the new one has opened successfully if you want a simple manual rollback.
+
 Each tagged release attaches these to its GitHub release page, together with a
 `SHA256SUMS` file:
 

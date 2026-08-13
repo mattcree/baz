@@ -25,6 +25,7 @@ RATE = 48_000
 SEGMENT_SAMPLES = RATE * 10
 HOP_SAMPLES = SEGMENT_SAMPLES // 2
 EMBEDDING_DIMENSIONS = 512
+RATING_DIMENSIONS = ("relevance", "coherence", "transitions", "diversity", "rediscovery", "replay")
 
 
 def artifact_manifest(candidate: str, explicit: Path | None) -> Path:
@@ -567,6 +568,46 @@ def metadata_ranking(tracks: list[dict[str, Any]], request: dict[str, Any], limi
     return [tracks[index]["id"] for index in chosen]
 
 
+def random_diverse_ranking(tracks: list[dict[str, Any]], limit: int, seed: int) -> list[str]:
+    """Choose a reproducible random list under the shared diversity rules.
+
+    This deliberately does not read request text or audio features. It is the
+    preference-gate floor: each result has the same two-track artist cap, no
+    adjacent artist repeat, and one album before an album repeat whenever the
+    remaining pool permits it.
+    """
+    rng = random.Random(seed)
+    remaining = list(range(len(tracks)))
+    chosen: list[int] = []
+    artist_counts: dict[str, int] = {}
+    albums: set[str] = set()
+    while remaining and len(chosen) < limit:
+        eligible = [
+            index
+            for index in remaining
+            if artist_counts.get(tracks[index].get("artist", ""), 0) < 2
+            and (not chosen or tracks[index].get("artist", "") != tracks[chosen[-1]].get("artist", ""))
+        ]
+        fresh = [index for index in eligible if tracks[index].get("album", tracks[index]["id"]) not in albums]
+        if fresh:
+            eligible = fresh
+        if not eligible:
+            break
+        selected = rng.choice(eligible)
+        remaining.remove(selected)
+        chosen.append(selected)
+        artist = tracks[selected].get("artist", "")
+        artist_counts[artist] = artist_counts.get(artist, 0) + 1
+        albums.add(tracks[selected].get("album", tracks[selected]["id"]))
+    return [tracks[index]["id"] for index in chosen]
+
+
+def request_seed(seed: int, request_id: str) -> int:
+    """Derive a stable per-request random-control seed without Python hashing."""
+    material = f"baz-vibe-random-v1:{seed}:{request_id}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
+
+
 def command_metadata(args: argparse.Namespace) -> None:
     corpus = read_json(args.corpus)
     requests = read_json(args.requests)["requests"]
@@ -584,6 +625,35 @@ def command_metadata(args: argparse.Namespace) -> None:
         {
             "schema": SCHEMA,
             "system": "metadata-token-overlap-v1",
+            "corpus_ids": [track["id"] for track in corpus["tracks"]],
+            "corpus_fingerprint": corpus_fingerprint(corpus["tracks"]),
+            "results": results,
+        },
+    )
+
+
+def command_random(args: argparse.Namespace) -> None:
+    corpus = read_json(args.corpus)
+    requests = read_json(args.requests)["requests"]
+    results = [
+        {
+            "id": request["id"],
+            "kind": request["kind"],
+            "request": request,
+            "ranking": random_diverse_ranking(
+                corpus["tracks"],
+                min(args.limit, len(corpus["tracks"])),
+                request_seed(args.seed, request["id"]),
+            ),
+        }
+        for request in requests
+    ]
+    write_json(
+        args.output,
+        {
+            "schema": SCHEMA,
+            "system": "random-diversity-v1",
+            "seed": args.seed,
             "corpus_ids": [track["id"] for track in corpus["tracks"]],
             "corpus_fingerprint": corpus_fingerprint(corpus["tracks"]),
             "results": results,
@@ -618,7 +688,7 @@ def make_blind(runs: list[dict[str, Any]], seed: int, limit: int) -> tuple[dict[
             candidates.append({
                 "code": code,
                 "ranking": result["ranking"][:limit],
-                "ratings": {name: None for name in ["relevance", "coherence", "transitions", "diversity", "rediscovery", "replay"]},
+                "ratings": {name: None for name in RATING_DIMENSIONS},
             })
             mappings.append({"code": code, "system": runs[run_index]["system"]})
         exemplar = by_run[0][request_id]
@@ -639,19 +709,31 @@ def score_ballot(ballot: dict[str, Any], key: dict[str, Any]) -> dict[str, Any]:
     values: dict[str, dict[str, list[float]]] = {}
     wins: dict[str, int] = {}
     for item in ballot["items"]:
-        mapping = mappings[item["id"]]
-        if item.get("preferred"):
-            system = mapping[item["preferred"]]
-            wins[system] = wins.get(system, 0) + 1
+        try:
+            mapping = mappings[item["id"]]
+        except KeyError as error:
+            raise ValueError(f"{item['id']}: missing identity mapping") from error
+        preferred = item.get("preferred")
+        if preferred not in mapping:
+            raise ValueError(f"{item['id']}: choose one preferred candidate before scoring")
+        wins[mapping[preferred]] = wins.get(mapping[preferred], 0) + 1
         for candidate in item["candidates"]:
-            system = mapping[candidate["code"]]
+            try:
+                system = mapping[candidate["code"]]
+            except KeyError as error:
+                raise ValueError(f"{item['id']} {candidate['code']}: missing identity mapping") from error
             bucket = values.setdefault(system, {})
-            for dimension, rating in candidate["ratings"].items():
-                if rating is not None:
-                    numeric = float(rating)
-                    if not 1.0 <= numeric <= 5.0:
-                        raise ValueError(f"{item['id']} {candidate['code']} {dimension}: rating must be 1–5")
-                    bucket.setdefault(dimension, []).append(numeric)
+            ratings = candidate.get("ratings", {})
+            if set(ratings) != set(RATING_DIMENSIONS):
+                raise ValueError(f"{item['id']} {candidate['code']}: every rating dimension is required")
+            for dimension in RATING_DIMENSIONS:
+                rating = ratings[dimension]
+                if rating is None:
+                    raise ValueError(f"{item['id']} {candidate['code']} {dimension}: rating is required")
+                numeric = float(rating)
+                if not 1.0 <= numeric <= 5.0:
+                    raise ValueError(f"{item['id']} {candidate['code']} {dimension}: rating must be 1–5")
+                bucket.setdefault(dimension, []).append(numeric)
     systems = {}
     for system, dimensions in values.items():
         means = {name: statistics.fmean(ratings) for name, ratings in dimensions.items() if ratings}
@@ -742,6 +824,16 @@ def parser() -> argparse.ArgumentParser:
     metadata.add_argument("--requests", type=Path, default=root / "requests.json")
     metadata.add_argument("--limit", type=int, default=20)
     metadata.set_defaults(function=command_metadata)
+    random_control = subcommands.add_parser(
+        "random",
+        help="create a diversity-matched random control run",
+    )
+    random_control.add_argument("corpus", type=Path)
+    random_control.add_argument("output", type=Path)
+    random_control.add_argument("--requests", type=Path, default=root / "requests.json")
+    random_control.add_argument("--limit", type=int, default=20)
+    random_control.add_argument("--seed", type=int, default=20260813)
+    random_control.set_defaults(function=command_random)
     blind = subcommands.add_parser("blind", help="randomize system identities into a ballot and separate key")
     blind.add_argument("runs", type=Path, nargs="+")
     blind.add_argument("--ballot", type=Path, required=True)

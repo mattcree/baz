@@ -151,17 +151,16 @@ jobs:
       # must be built from the dependency set CI proved, not from whatever
       # resolved on the day.
       #
-      # --features device-output retains the compatibility spelling for the
-      # shipped player. Default features remain enabled, so this also includes
-      # the offline `vibe-analysis` component; the separate light build uses
-      # `--no-default-features` and is not a release artifact yet.
+      # The Baz release includes Vibe. State its required capability explicitly
+      # rather than relying on Cargo defaults; `--no-default-features` is only
+      # an internal dependency-boundary check and is never a release artifact.
       - name: Build
         shell: bash
         run: |
           set -euo pipefail
           for target in ${{ matrix.targets }}; do
             cargo build --release --locked --target "$target" \
-                        -p baz --features device-output
+                        -p baz --features device-output,vibe-analysis
           done
 
       - name: Stage the archive contents

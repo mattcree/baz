@@ -3,6 +3,11 @@
 Files a distribution or an installer needs, kept in the repository so they are
 reviewed like code rather than invented per-packager.
 
+The normal Baz build includes Vibe and its local audio analysis. The
+`--no-default-features` build exists only as a development check that the
+optional analysis dependency remains isolated; it is not a separately named or
+distributed product.
+
 ## `flatpak/`
 
 The Flatpak manifest and the AppStream metadata, plus the submission path to

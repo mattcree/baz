@@ -149,11 +149,15 @@ pub(crate) fn view<'a>(
 
     let continuing = continue_band(shelf, player, resume, width);
     let everything = all_songs_tile(shelf, player, hang);
-    let request = vibe_playlist(shelf, player, collecting.available);
+    let request =
+        cfg!(feature = "vibe-analysis").then(|| vibe_playlist(shelf, player, collecting.available));
     let added = recently_added(shelf, player, hang, collecting);
     let counted = collection(shelf);
-    let nothing =
-        continuing.is_none() && everything.is_none() && added.is_none() && counted.is_none();
+    let nothing = continuing.is_none()
+        && everything.is_none()
+        && request.is_none()
+        && added.is_none()
+        && counted.is_none();
     if let Some(band) = continuing {
         body = body.push(band);
     }
@@ -163,7 +167,9 @@ pub(crate) fn view<'a>(
     if let Some(band) = everything {
         body = body.push(band);
     }
-    body = body.push(request);
+    if let Some(section) = request {
+        body = body.push(section);
+    }
     if let Some(band) = added {
         body = body.push(band);
     }

@@ -7,6 +7,7 @@ RUN dnf install -y \
       alsa-lib-devel flac \
       libxkbcommon-devel libxkbcommon-x11 \
       xorg-x11-server-Xvfb ImageMagick \
+      python3-pyyaml desktop-file-utils appstream \
     && dnf clean all
 
 # Rust via rustup (pinned by rust-toolchain.toml once the workspace exists)
