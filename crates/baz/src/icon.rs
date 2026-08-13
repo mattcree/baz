@@ -2347,7 +2347,10 @@ mod tests {
     #[test]
     fn the_app_mark_is_the_committed_red_circle_raster() {
         let mark = app_mark();
-        assert_eq!(mark.width(), 64);
-        assert_eq!(mark.height(), 64);
+        let image::Handle::Rgba { width, height, .. } = mark else {
+            panic!("app mark must be a decoded RGBA raster");
+        };
+        assert_eq!(width, 64);
+        assert_eq!(height, 64);
     }
 }
