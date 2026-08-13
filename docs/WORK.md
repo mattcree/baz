@@ -247,6 +247,10 @@ Phase A is complete only when all twelve items are implemented and verified;
     must hold an image handle through cache churn; simplify toward visible
     residency plus the existing bounded off-screen LRU, rather than adding
     another cache policy or speculative prefetcher.
+21. **Contain scrolling artwork beneath the resident chrome.** Reproduce and
+    repair the shared clipping/paint-order fault that lets album or playlist
+    sleeves cross over the app bar or bottom transport; off-viewport content
+    must neither draw nor receive input through either bar.
 
 ## Doing
 
@@ -276,6 +280,19 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
+- **Scrolling artwork escapes over the app and bottom bars.** Recorded
+  2026-08-14 from the owner's live use and queued as item 21. Treat “z-index”
+  as the observed effect, not a predetermined implementation: first establish
+  whether the shared collection viewport fails to clip, whether nested scroll
+  content is painted after resident chrome, or whether a renderer-specific
+  layer escapes its bounds. Cover every scrolling surface that can draw album
+  or playlist sleeves, fast/inertial movement, all density and responsive
+  breakpoints, and both native-titlebar and Baz-owned-chrome arrangements.
+  Content outside the viewport between the two bars must not paint or accept
+  pointer input through them. Fix the shared viewport/chrome composition rather
+  than hiding the symptom with tile padding. Acceptance is same-frame evidence
+  at the top and bottom boundaries plus a structural regression check that the
+  clip and resident paint order remain intact across supported renderers.
 - **Prune albums whose files have genuinely been removed.** Recorded
   2026-08-13 on the side of item 13; do not investigate or implement as part
   of the vibe work. First establish what the successful scanner currently
