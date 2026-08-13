@@ -686,6 +686,11 @@ pub(crate) enum Message {
     /// the wall. Carries the run's index, not a pixel — the rail knows which
     /// shelf it points at and nothing about where the shelf is.
     RailJumped(usize),
+    /// An entry in the saved-playlist collection's index rail was clicked.
+    /// Carries the first tile in the active ordering, not a pixel; the shared
+    /// collection scaffold owns the rail, while each collection owns its
+    /// content geometry.
+    PlaylistRailJumped(usize),
     /// An explicit record-opening route: the veil/menu's labelled `Open`, a
     /// record link or source navigation. Ordinary tile presses instead send
     /// [`Self::ContentPressed`] and use the shared select/double-click grammar.
@@ -3053,6 +3058,22 @@ impl App {
                 }
             }
             Message::PlaylistOrderSelected(order) => self.playlists.order = *order,
+            Message::PlaylistRailJumped(first) => {
+                let hang = match &self.screen {
+                    Screen::Shelf(state) => state.grid(),
+                    Screen::Setup(_) | Screen::Blocked(_) => return Some(Task::none()),
+                };
+                let row = first / hang.columns;
+                let target = hang.spacer_height(row);
+                self.playlists_scroll = target;
+                return Some(Task::batch([
+                    scrollable::scroll_to(
+                        views::playlists::scroll_id(),
+                        AbsoluteOffset { x: 0.0, y: target },
+                    ),
+                    self.request_playlist_art(),
+                ]));
+            }
             Message::PlaylistTileEntered(id) => self.playlists.hovered = Some(*id),
             Message::PlaylistTileLeft(id) => {
                 if self.playlists.hovered == Some(*id) {

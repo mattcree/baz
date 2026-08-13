@@ -172,8 +172,18 @@ pub(crate) fn view<'a>(
     // at the same x it occupied as a `row!` sibling — see this function's docs
     // for why it is under rather than over, and what the 4 px it yields to the
     // bar cost.
+    collection_scaffold(body, index_rail(shelf, &shelves))
+}
+
+/// The common collection frame: a right-hand index rail under a full-width
+/// scroll body. Library and Playlists deliberately share this stack, its lane
+/// geometry and its pointer ordering; only their item projections differ.
+pub(crate) fn collection_scaffold<'a>(
+    body: Element<'a, Message>,
+    index: Element<'a, Message>,
+) -> Element<'a, Message> {
     stack![
-        container(index_rail(shelf, &shelves))
+        container(index)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(alignment::Horizontal::Right),
@@ -182,6 +192,28 @@ pub(crate) fn view<'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
+}
+
+/// Draw the shared index-rail anatomy from an already-derived projection.
+/// Collections retain ownership of what a rail label means and where it
+/// jumps; the scaffold retains the rail's physical place.
+pub(crate) fn index_rail_from<'a>(
+    entries: Vec<rail::RailEntry>,
+    current: Option<usize>,
+    jump: impl Fn(usize) -> Message + 'a,
+) -> Element<'a, Message> {
+    let slots: Vec<Slot> = entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| Slot {
+            label: entry.label,
+            shelf: entry.shelf,
+            current: Some(index) == current,
+        })
+        .collect();
+    container(Spine::new(slots, current, theme::active(), jump))
+        .width(Length::Fixed(theme::INDEX_LANE_W))
+        .into()
 }
 
 /// One row of works, at the block's width so a partial last row stays
@@ -459,23 +491,7 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
             .iter()
             .rposition(|entry| entry.present() && entry.shelf <= Some(run))
     });
-    let slots: Vec<Slot> = entries
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| Slot {
-            label: entry.label.clone(),
-            shelf: entry.shelf,
-            current: Some(index) == current,
-        })
-        .collect();
-    container(Spine::new(
-        slots,
-        current,
-        theme::active(),
-        Message::RailJumped,
-    ))
-    .width(Length::Fixed(theme::INDEX_LANE_W))
-    .into()
+    index_rail_from(entries, current, Message::RailJumped)
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of
@@ -1137,11 +1153,15 @@ mod tests {
             "the wall's bar no longer reserves the rail's lane, so it is not \
              on the window's edge"
         );
+        assert!(
+            view.contains("collection_scaffold(body, index_rail(shelf, &shelves))"),
+            "the Library no longer uses the shared collection scaffold"
+        );
         // The stack's first child is the rail; the body is pushed over it.
-        let stack = view
-            .split_once("stack![\n        container(index_rail(")
+        let stack = source
+            .split_once("pub(crate) fn collection_scaffold")
             .map(|(_, rest)| rest)
-            .expect("the rail is the layer under the body");
+            .expect("the shared collection scaffold exists");
         let stack = &stack[..stack.find("\n    ]").expect("the stack ends")];
         assert!(
             stack.contains("alignment::Horizontal::Right"),

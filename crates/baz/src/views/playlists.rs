@@ -6,6 +6,10 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Element, Length, alignment};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use baz_core::history::Recency;
+use baz_core::index::{AlbumArtist, GroupKey, Initial};
 
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
@@ -14,6 +18,7 @@ use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::theme;
 use crate::views::{arrangement_key, place_header_led, place_pad, playlist_sleeve};
+use crate::vm::GroupHeaderVm;
 
 /// Draw every saved playlist in the shelf's shared work grid.
 pub(crate) fn view<'a>(
@@ -80,7 +85,7 @@ pub(crate) fn view<'a>(
     )));
 
     let body = tiles.width(Length::Fixed(hang.block_width()));
-    column![
+    let wall: Element<'a, Message> = column![
         header,
         scrollable(
             container(body)
@@ -88,13 +93,105 @@ pub(crate) fn view<'a>(
                 .padding(place_pad())
                 .align_x(alignment::Horizontal::Center)
         )
+        .id(scroll_id())
         .on_scroll(Message::PlaylistsScrolled)
-        .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
+        // The body spans the window edge while reserving the rail's lane, just
+        // like Library: the bar remains at the outer edge and tiles can never
+        // slide beneath the index.
+        .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
         .width(Length::Fill)
         .height(Length::Fill)
     ]
-    .into()
+    .into();
+    let (entries, current) = rail(&ordered, playlists, hang, scroll_offset);
+    crate::views::shelf::collection_scaffold(
+        wall,
+        crate::views::shelf::index_rail_from(entries, current, Message::PlaylistRailJumped),
+    )
+}
+
+/// The saved-playlist collection's scroll identity. It is separate from the
+/// record wall's identity because either place must retain its position while
+/// the other is visited.
+pub(crate) fn scroll_id() -> scrollable::Id {
+    scrollable::Id::new("baz-playlists")
+}
+
+/// Project the active playlist ordering into the common index-rail vocabulary.
+/// Alphabetical order gets initials; chronological orders get the same elapsed
+/// buckets the Library uses. Labels therefore always describe the row they
+/// jump to — an A–Z rail is never painted over a date-sorted collection.
+fn rail(
+    ordered: &[&PanelRow],
+    playlists: &Playlists,
+    hang: Grid,
+    scroll_offset: f32,
+) -> (Vec<crate::rail::RailEntry>, Option<usize>) {
+    let mut headers = Vec::new();
+    let mut firsts = Vec::new();
+    for (index, playlist) in ordered.iter().enumerate() {
+        let header = match playlists.order {
+            PlaylistOrder::Alphabetical => {
+                GroupHeaderVm::Initial(Initial::of(AlbumArtist::Named(&playlist.name)))
+            }
+            PlaylistOrder::Created => {
+                GroupHeaderVm::Recency(recency(playlist.created_unix_s, true))
+            }
+            PlaylistOrder::Played => {
+                GroupHeaderVm::Recency(recency(playlists.played_at(playlist.id), false))
+            }
+        };
+        if headers.last() != Some(&header) {
+            headers.push(header);
+            firsts.push(index);
+        }
+    }
+    let key = match playlists.order {
+        PlaylistOrder::Alphabetical => GroupKey::Alphabet,
+        PlaylistOrder::Created => GroupKey::Added,
+        PlaylistOrder::Played => GroupKey::Played,
+    };
+    let mut entries = crate::rail::entries(key, &headers);
+    for entry in &mut entries {
+        entry.shelf = entry.shelf.and_then(|group| firsts.get(group).copied());
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a non-negative viewport row index is bounded by the in-memory collection"
+    )]
+    let first_visible = (scroll_offset / hang.row_h).floor().max(0.0) as usize * hang.columns;
+    let current = entries
+        .iter()
+        .rposition(|entry| entry.shelf.is_some_and(|first| first <= first_visible));
+    (entries, current)
+}
+
+/// Map a filesystem or session timestamp to the Library's honest age buckets.
+/// `Unrecorded` describes an unavailable creation stamp; `Never` describes a
+/// playlist that has not been played in this run. They are deliberately not
+/// collapsed into the same quiet label.
+fn recency(timestamp: Option<u64>, created: bool) -> Recency {
+    let Some(timestamp) = timestamp else {
+        return if created {
+            Recency::Unrecorded
+        } else {
+            Recency::Never
+        };
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = now.saturating_sub(timestamp) / 86_400;
+    match days {
+        0 => Recency::Today,
+        1..=6 => Recency::ThisWeek,
+        7..=30 => Recency::ThisMonth,
+        31..=364 => Recency::MonthsAgo(u32::try_from((days / 30).max(1)).unwrap_or(u32::MAX)),
+        _ => Recency::YearsAgo(u32::try_from((days / 365).max(1)).unwrap_or(u32::MAX)),
+    }
 }
 
 fn tile<'a>(
@@ -178,4 +275,24 @@ fn tile<'a>(
     .on_enter(Message::PlaylistTileEntered(playlist.id))
     .on_exit(Message::PlaylistTileLeft(playlist.id))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_timestamps_keep_created_and_played_honest() {
+        assert_eq!(recency(None, true), Recency::Unrecorded);
+        assert_eq!(recency(None, false), Recency::Never);
+    }
+
+    #[test]
+    fn a_current_timestamp_is_a_current_bucket() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        assert_eq!(recency(Some(now), true), Recency::Today);
+    }
 }

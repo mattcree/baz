@@ -582,6 +582,14 @@ impl Playlists {
         rows
     }
 
+    /// The timestamp that defines the active `Played` ordering. Kept beside
+    /// the ordering rather than inferred from the file's mtime: playback is a
+    /// session fact and must not pretend an edit was a listen.
+    #[must_use]
+    pub(crate) fn played_at(&self, id: u64) -> Option<u64> {
+        self.played.get(&id).copied()
+    }
+
     /// The counter the returns lane watches: see [`Self::stamp`]'s field.
     #[must_use]
     pub(crate) fn stamp(&self) -> u64 {
