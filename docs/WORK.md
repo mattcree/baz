@@ -252,6 +252,10 @@ Phase A is complete only when all twelve items are implemented and verified;
     invalidation, clipping or paint-order fault that lets sleeves cross over
     the app bar or bottom transport. Off-viewport content must neither draw nor
     receive input through either bar.
+22. **Align sticky section headers with their grouped content.** Remove the
+    excess left inset in the shared sticky bar without changing its full-width
+    field; its visible heading edge must stay aligned before and after it sticks
+    across Artists and every other consumer.
 
 ## Doing
 
@@ -281,6 +285,17 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
+- **Sticky section bars sit too far right.** Recorded 2026-08-14 from the
+  owner's live use and queued as item 22. Measure the shared sticky-header
+  component's visible heading edge against the content it labels rather than
+  assuming the container edge is the ink edge. Audit Artists and every other
+  grouped wall using it at all density and responsive breakpoints, in both its
+  ordinary and stuck positions; scrolling into the sticky state must not create
+  a horizontal jump. Preserve the intended full-width background, clipping and
+  interaction geometry. Fix the shared alignment token/composition rather than
+  introducing a page-specific negative margin. Acceptance is same-viewport
+  captures with measured content and heading edges for every consumer in both
+  states.
 - **Scrolling artwork escapes over the app and bottom bars.** Recorded
   2026-08-14 from the owner's live use and queued as item 21. Treat “z-index”
   as the observed effect, not a predetermined implementation: first establish
