@@ -63,7 +63,7 @@ impl Model {
         let session = |name: &str| {
             let builder = Session::builder()
                 .map_err(|error| format!("could not start local Vibe model: {error}"))?;
-            let mut builder = builder
+            let builder = builder
                 .with_intra_threads(2)
                 .map_err(|error| format!("could not configure local Vibe model: {error}"))?;
             builder

@@ -39,7 +39,7 @@ lru = "0.18.2"
 naga = { version = "27", features = ["wgsl-in"] }
 memchr = "2"        # SIMD substring scan for the search hot path (Unlicense OR MIT)
 ndarray = "0.17"    # shaped tensors for the local CLAP towers (MIT OR Apache-2.0)
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["copy-dylibs", "download-binaries", "ndarray", "std", "tls-rustls"] } # local ONNX Runtime inference (MIT OR Apache-2.0)
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["copy-dylibs", "download-binaries", "ndarray", "std"] } # local ONNX Runtime inference (MIT OR Apache-2.0)
 rustfft = "6.4"     # local CLAP mel-spectrogram preprocessing (MIT OR Apache-2.0)
 # Durable library store (MIT; libsqlite3-sys MIT, SQLite itself public
 # domain). `bundled` compiles SQLite from source so no system library or

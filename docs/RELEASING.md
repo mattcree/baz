@@ -57,6 +57,11 @@ CI's test job.
 Vibe is explicitly selected in the Flatpak and release build commands alongside
 device output. The dependency-minimal `--no-default-features` build is only a
 CI/development boundary check and is never emitted by a release workflow.
+`ort` is pinned to 2.0.0-rc.10 because its ONNX Runtime 1.22 distribution is
+the last verified release that supplies both Intel and Apple Silicon macOS
+binaries. Its native-TLS dependency is confined to the build-time downloader;
+the Baz binary does not link OpenSSL. Revisit that pin when a rustls-backed
+release again covers both slices of the universal archive.
 
 **A consequence worth stating before you try it**: the release build command
 does not run on the maintainer's own machine. Fedora Silverblue has no

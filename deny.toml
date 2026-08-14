@@ -81,8 +81,13 @@ wildcards = "deny"
 # Rejected outright in ADR-0003 / research: proprietary or unsuitable audio deps.
 deny = [
   { crate = "bass", reason = "proprietary license, rejected in docs/research/04-tech-stack.md" },
-  { crate = "openssl-sys", reason = "prefer rustls; native TLS adds platform build pain for no benefit" },
 ]
+
+# `ort-sys` rc.10's verified, build-time-only runtime downloader uses native
+# TLS. It is pinned because it is the last release with both Intel and Apple
+# Silicon macOS binaries; no OpenSSL code is linked into Baz itself. Keep the
+# exception explicit here and in docs/RELEASING.md until a rustls-backed ort
+# release restores that universal target matrix.
 
 [sources]
 unknown-registry = "deny"
