@@ -5,6 +5,8 @@
 
 use iced::keyboard::{Key, Modifiers, key};
 
+use crate::theme;
+
 /// The two actions a selected track exposes, in their visual/keyboard order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Action {
@@ -80,7 +82,7 @@ pub(crate) fn chooser_direction(key: &Key, modifiers: Modifiers) -> Option<Direc
 
 /// Fixed geometry makes the one long result list cheaply virtualizable and
 /// lets keyboard movement reveal its selection without measuring widgets.
-pub(crate) const ROW_H: f32 = 40.0;
+pub(crate) const ROW_H: f32 = theme::LINE_BODY + theme::LINE_META + 2.0 * theme::GAP_XS;
 pub(crate) const SECTION_H: f32 = 32.0;
 pub(crate) const OVERSCAN_ROWS: usize = 3;
 

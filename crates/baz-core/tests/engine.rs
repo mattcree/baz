@@ -4051,6 +4051,53 @@ fn a_shuffled_pass_plays_every_entry_once_and_then_ends() {
     engine.shutdown();
 }
 
+/// Repeat One overrides only natural completion. Explicit Next still follows
+/// the active traversal and the newly selected entry becomes the repeated one.
+#[test]
+fn repeat_one_restarts_natural_ends_but_explicit_next_still_navigates() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() * 3 + f.b_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+            origin: None,
+        })
+        .expect("send");
+    engine
+        .send(Command::SetRepeatOne { enabled: true })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::RepeatOneChanged { enabled: true }
+    );
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    engine
+        .send(Command::SetRepeatOne { enabled: false })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::RepeatOneChanged { enabled: false }
+    );
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+
+    let out = collect(output);
+    assert_samples_eq(&out[..f.a_ref.len()], &f.a_ref, "first natural pass");
+    assert_samples_eq(
+        &out[f.a_ref.len()..2 * f.a_ref.len()],
+        &f.a_ref,
+        "natural repeat",
+    );
+    assert_samples_eq(&out[out.len() - f.b_ref.len()..], &f.b_ref, "explicit next");
+}
+
 /// **`Next` and `Previous` step along the bag, not down the list.**
 ///
 /// The pair that would betray a traversal implemented only in the producer: a

@@ -348,9 +348,97 @@ Phase A is complete only when all twelve items are implemented and verified;
     to current renderer hits. Balanced/Spacious and the 800-album synthetic
     ceilings are recorded in the implementation evidence.
 
+### Phase E — playlist creation and the 2026-08-14 UX review
+
+31. **Done 2026-08-14 — Make New playlist the home of Manual and Vibe creation.** Add a
+    canonical New playlist door to the Playlists root and one resumable draft
+    flow whose first choice is Manual or Vibe. Move the existing local Vibe
+    composer, consent/progress and silent preview out of Home; retain a compact
+    Home shortcut into the Vibe branch. Both routes converge on the same review
+    and ordinary `.m3u8` save boundary. A Vibe prompt supplies a visible,
+    editable default name before save. Add progressive example prompts,
+    discrete energy shapes and semantic waypoints without replacing free text
+    or exposing model machinery. Full interaction and state contract:
+    `docs/design/17-playlist-creation-and-ux-review.md`.
+    Playlists now owns the navigable, resumable creation place and its visible
+    unsaved draft. Manual accepts app-bar search additions with reorder/remove;
+    Vibe retains local consent, progress and silent review while adding prompt
+    examples, discrete energy shapes and up to three semantic waypoints. Home
+    carries only the discovery shortcut. Prompt-derived collision-safe naming
+    is editable before the one ordinary-file Save boundary; neither route
+    starts playback. The panel's contextual New row enters the same Manual
+    draft with the held tracks rather than minting an empty file.
+32. **Done 2026-08-14 — Add the built-in Favourites playlist and track hearts.** Persist
+    membership as durable library data with explicit move/missing-root
+    semantics; pin the non-renamable/non-deletable built-in in Playlists and
+    add one shared outline/filled heart action to every track-row consumer.
+    Toggling never starts playback or edits the list currently on screen.
+    Favourites is now pinned ahead of every saved list and opens as its own
+    non-renamable, non-deletable playlist page. Schema v10 stores a stable
+    song identity derived from musical tags while retaining missing members;
+    moved or remounted songs reattach, alternate editions de-duplicate, and
+    wholly untagged files deliberately fall back to their native path. One
+    shared named heart control appears on album, search, queue, saved-list,
+    Manual-draft, Vibe-review and Favourites rows, plus the sounding library
+    track's title line on Now Playing. A same-named imported file remains
+    untouched on disk but cannot replace or duplicate the built-in.
+33. **Done 2026-08-14 — Add Repeat current track as a player property.** Natural track
+    end restarts the current queue entry; explicit Previous, Next and direct
+    selection still act. Repeat and Shuffle may coexist, with Repeat winning
+    only at natural end. Persist the standing mode and place its lit toggle
+    beside Shuffle.
+    The engine now owns an independent `SetRepeatOne` property: it limits
+    decode-ahead to the current entry and restarts that entry only after its
+    naturally completed tail drains. Next, Previous, a seek beyond the end and
+    direct row selection remain explicit navigation; the newly selected entry
+    then becomes the repeated one. The property round-trips through config,
+    coexists with the traversal unchanged, and has a named repeat-one glyph
+    beside Shuffle with the same confirmed/lit grammar.
+34. **Done 2026-08-14 — Make playlist/search/cover interactions state their scope.** Give
+    Playlists the Library's basic section-header hierarchy; strengthen the
+    hovered album-cover action; add Left/Right `Play | Open` selection for
+    album search results; rename live-run insertion to `Add next | Add to end`;
+    derive two-line search height from its typography; and give artist/album
+    links on playlist rows the correct cursor, focus and activation grammar.
+    Playlists now introduces its collection with the shared section-rule
+    hierarchy beneath the common place strip. Selected album sleeves expose a
+    clamped Play/Queue/Open keyboard axis whose selected veil row gains a
+    persistent field and rule; album search similarly exposes Play/Open and
+    Enter spends the visible choice. Live-run search verbs now say `Add next`
+    and `Add to end`, its row height is exactly body line + metadata line +
+    vertical padding, and playlist artist/album facts are focusable buttons
+    with link cursors whose bounds do not steal the surrounding row. The
+    shared flexible title/artist stack now has a physical clip, so no-wrap
+    names or nested metadata buttons cannot paint into the fixed Album column
+    or trailing controls while a playlist narrows.
+35. **Done 2026-08-14 — Recompose the bottom bar and resident left axes.** Right-justify
+    all bottom-bar controls in one trailing cluster and group `elapsed / total`
+    beside transport instead of floating two stamps in track metadata. Hold
+    the app mark and expanded/collapsed lane glyphs to one immutable centre,
+    and replace the app bar's bare history chevrons with unmistakable browser
+    arrows. Preserve hit targets and narrow-width priority.
+    The bottom band now has one trailing cluster in relationship order:
+    `elapsed / total`, Previous/Play/Next, Repeat/Shuffle, signal status, mute
+    and volume. Track identity alone consumes the flexible leading space; the
+    paired tabular time readout has one fixed measure beside transport. The
+    app mark and expanded/collapsed lane glyphs now resolve to the same global
+    40 px optical centre, with collapse removing only label width to its right.
+    History glyphs gained short shafts and arrowheads while keeping their
+    boxes, disabled state and Alt+Left/Right behavior.
+36. **Done 2026-08-14 — Expand optional Now Playing visualizers.** The
+    independent audio-field mark now cycles Off, Spectrum, a 32-frame rolling
+    Waveform and a 32 × 24-cell Spectrogram. History is a fixed 3,200-byte ring;
+    sampling, transforms and the continuous clock remain gated by visible Now
+    Playing, a sounding record and an active mode. The displays are direct
+    signal readings with no autonomous transition motion. A stereo-vector
+    Oscilloscope was prototyped against the feed and rejected: the established
+    engine handoff is mono, so drawing stereo phase from it would be false.
+    VU, particles and fake vinyl remain excluded. Evidence:
+    `docs/design/impl/now-playing-visualizers/`.
+
 ## Doing
 
-- Nothing active.
+- Nothing active — ordered items 31–36 are complete.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

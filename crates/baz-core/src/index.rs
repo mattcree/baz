@@ -140,6 +140,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -166,7 +167,7 @@ use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 /// reason ADR-0041's `Newer baz` state had to land first: this number moving is
 /// not a defect, and the state that says so is what keeps it from reading like
 /// one.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -421,6 +422,19 @@ const SCHEMA_V9: &str = "
     ) STRICT;
 ";
 
+/// Version 10: durable song-level Favourites. `identity` is derived from the
+/// stable musical facts in the index, so a path move or a preferred-edition
+/// change keeps membership. `last_path` is retained only to name a currently
+/// missing item; it is not the membership key.
+const SCHEMA_V10: &str = "
+    CREATE TABLE favourites (
+        identity  TEXT PRIMARY KEY,
+        last_path BLOB NOT NULL
+    ) STRICT;
+";
+
+const SELECT_FAVOURITES: &str = "SELECT identity FROM favourites";
+
 /// Tombstone every row **recorded under a root** on the way to deleting them
 /// (schema v9) — the root-scale half of forgetting.
 ///
@@ -656,6 +670,9 @@ pub struct Library {
     /// bounded by the rows that just left `tracks`, which is the population it
     /// replaces rather than an addition to it.
     forgotten: HashMap<PathBuf, i64>,
+    /// Song identities explicitly hearted by the listener. Rows outlive the
+    /// indexed file, so an offline root does not silently clear membership.
+    favourites: HashSet<String>,
 }
 
 impl Library {
@@ -735,6 +752,7 @@ impl Library {
             index: SearchIndex::default(),
             roots: HashMap::new(),
             forgotten: HashMap::new(),
+            favourites: HashSet::new(),
         };
         library.sweep_forgotten()?;
         library.hydrate()?;
@@ -780,7 +798,81 @@ impl Library {
         self.index.rebuild_order();
         self.hydrate_roots()?;
         self.hydrate_forgotten()?;
+        self.hydrate_favourites()?;
         Ok(())
+    }
+
+    fn hydrate_favourites(&mut self) -> Result<(), IndexError> {
+        self.favourites.clear();
+        let mut stmt = self.conn.prepare(SELECT_FAVOURITES)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for identity in rows {
+            self.favourites.insert(identity?);
+        }
+        Ok(())
+    }
+
+    /// Whether the indexed file belongs to a favourite song.
+    #[must_use]
+    pub fn is_favourite(&self, path: &Path) -> bool {
+        self.index
+            .by_path
+            .get(path)
+            .and_then(|index| self.index.tracks.get(*index))
+            .map(|track| &track.meta)
+            .is_some_and(|track| self.favourites.contains(&favourite_identity(track)))
+    }
+
+    /// Toggle one indexed song's durable membership. Returns its new state;
+    /// an unknown path is inert and returns `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IndexError::Sqlite`] when the durable membership write fails;
+    /// the in-memory mirror is then left unchanged.
+    pub fn toggle_favourite(&mut self, path: &Path) -> Result<bool, IndexError> {
+        let Some(track) = self
+            .index
+            .by_path
+            .get(path)
+            .and_then(|index| self.index.tracks.get(*index))
+            .map(|track| &track.meta)
+        else {
+            return Ok(false);
+        };
+        let identity = favourite_identity(track);
+        if self.favourites.contains(&identity) {
+            self.conn
+                .execute("DELETE FROM favourites WHERE identity = ?1", [&identity])?;
+            self.favourites.remove(&identity);
+            return Ok(false);
+        }
+        self.conn.execute(
+            "INSERT INTO favourites (identity, last_path) VALUES (?1, ?2)",
+            params![identity, path_to_blob(path)],
+        )?;
+        self.favourites.insert(identity);
+        Ok(true)
+    }
+
+    /// Available favourite songs, once each in library order. Several owned
+    /// editions of one song resolve to the first preferred library row.
+    pub fn favourite_tracks(&self) -> Vec<&TrackMeta> {
+        let mut seen = HashSet::new();
+        self.tracks()
+            .filter(|track| {
+                let identity = favourite_identity(track);
+                self.favourites.contains(&identity) && seen.insert(identity)
+            })
+            .collect()
+    }
+
+    /// Membership rows whose song is not currently indexed. They remain
+    /// durable through an offline or removed root and reattach on rescan.
+    #[must_use]
+    pub fn missing_favourites(&self) -> usize {
+        let present: HashSet<String> = self.tracks().map(favourite_identity).collect();
+        self.favourites.difference(&present).count()
     }
 
     /// Load the `forgotten` table into RAM, replacing its contents.
@@ -3686,6 +3778,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             6 => migrate_v6_to_v7(conn)?,
             7 => migrate_v7_to_v8(conn)?,
             8 => migrate_v8_to_v9(conn)?,
+            9 => migrate_v9_to_v10(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -3945,6 +4038,14 @@ fn migrate_v8_to_v9(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+fn migrate_v9_to_v10(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V10)?;
+    tx.pragma_update(None, "user_version", 10)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Fill `format` for existing rows from the file extension, where the
 /// extension settles the question by itself.
 ///
@@ -4169,6 +4270,39 @@ fn duration_to_nanos(meta: &TrackMeta) -> Result<Option<i64>, IndexError> {
 fn path_to_blob(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt;
     path.as_os_str().as_bytes().to_vec()
+}
+
+/// Stable song identity for Favourites. It deliberately ignores codec and
+/// path so a moved file or another owned edition remains the same song. A
+/// wholly untagged file has no musical identity to follow, so it falls back
+/// to its exact platform-native path rather than guessing two anonymous files
+/// are one.
+fn favourite_identity(meta: &TrackMeta) -> String {
+    let filed_under = meta.album_artist.as_deref().or(meta.artist.as_deref());
+    if meta.title.is_some() || meta.album.is_some() {
+        return format!(
+            "song\0{}\0{}\0{}\0{}\0{}\0{}",
+            filed_under.unwrap_or_default().trim().to_lowercase(),
+            meta.album
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            meta.disc.unwrap_or(0),
+            meta.track.unwrap_or(0),
+            meta.title
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            meta.duration.map_or(0, |duration| duration.as_nanos()),
+        );
+    }
+    let mut identity = String::from("path\0");
+    for byte in path_to_blob(&meta.path) {
+        let _ = write!(identity, "{byte:02x}");
+    }
+    identity
 }
 
 /// Encode a path for the `path BLOB` column — the platform-native lossless

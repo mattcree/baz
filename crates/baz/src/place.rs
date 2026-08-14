@@ -84,6 +84,10 @@ pub enum Place {
     Library,
     /// Every saved playlist, arranged as a collection of playlist sleeves.
     Playlists,
+    /// The resumable, unsaved Manual/Vibe playlist creation flow.
+    NewPlaylist,
+    /// The pinned built-in Favourites playlist.
+    Favourites,
     /// **Home**: the interrupted run, and what is new (ADR-0030 §9.4 as the
     /// owner chose it).
     ///
@@ -220,6 +224,8 @@ impl Place {
         match self {
             Self::Library => "library".to_owned(),
             Self::Playlists => "playlists".to_owned(),
+            Self::NewPlaylist => "new-playlist".to_owned(),
+            Self::Favourites => "favourites".to_owned(),
             Self::Home => "home".to_owned(),
             Self::NowPlaying => "now-playing".to_owned(),
             Self::Queue => "queue".to_owned(),
@@ -237,6 +243,8 @@ impl Place {
         match code {
             "library" => Some(Self::Library),
             "playlists" => Some(Self::Playlists),
+            "new-playlist" => Some(Self::NewPlaylist),
+            "favourites" => Some(Self::Favourites),
             "home" => Some(Self::Home),
             "now-playing" => Some(Self::NowPlaying),
             "queue" => Some(Self::Queue),
@@ -440,6 +448,8 @@ mod tests {
         for place in [
             Place::Library,
             Place::Playlists,
+            Place::NewPlaylist,
+            Place::Favourites,
             Place::Home,
             Place::NowPlaying,
             Place::Queue,
@@ -485,6 +495,8 @@ mod tests {
                 Place::Artist(5),
                 Place::Queue,
                 Place::Playlist(3),
+                Place::NewPlaylist,
+                Place::Favourites,
                 Place::Settings,
             ] {
                 assert_eq!(from.go(to), arrived);
@@ -501,6 +513,8 @@ mod tests {
             Place::Artist(5),
             Place::Queue,
             Place::Playlist(3),
+            Place::NewPlaylist,
+            Place::Favourites,
             Place::Settings,
         ] {
             assert_eq!(place.destination(), None, "{place:?}");
@@ -519,6 +533,8 @@ mod tests {
             Place::Album(7),
             Place::Artist(5),
             Place::Playlist(3),
+            Place::NewPlaylist,
+            Place::Favourites,
         ] {
             assert!(place.wears_lane(), "{place:?}");
         }
@@ -584,6 +600,8 @@ mod tests {
             Place::Library,
             Place::Home,
             Place::Playlists,
+            Place::NewPlaylist,
+            Place::Favourites,
             Place::NowPlaying,
             Place::Album(7),
             Place::Artist(5),
@@ -669,6 +687,8 @@ mod tests {
                             let showing = usize::from(place.is_library())
                                 + usize::from(place == Place::Home)
                                 + usize::from(place == Place::Playlists)
+                                + usize::from(place == Place::NewPlaylist)
+                                + usize::from(place == Place::Favourites)
                                 + usize::from(place == Place::NowPlaying)
                                 + usize::from(place == Place::Settings)
                                 + usize::from(place.showing_album().is_some())

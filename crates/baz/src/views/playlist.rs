@@ -562,6 +562,16 @@ fn entry_row<'a>(
     let offered = hovered;
     let mut slots = row![
         body,
+        if page_row.missing {
+            iced::widget::Space::new()
+                .width(Length::Fixed(theme::STEPPER_HIT))
+                .into()
+        } else {
+            page::favourite_slot(
+                &page_row.path,
+                crate::app::is_favourite(shelf, &page_row.path),
+            )
+        },
         // The reorder pair and the removal cross — the three slots a durable
         // artefact earns over a record's rows, in the composition's one slot
         // anatomy ([`page::icon_slot`]).

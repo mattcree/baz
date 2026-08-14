@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn the_app_bars_zone_one_holds_the_enlarged_mark() {
         assert!(
-            (theme::APP_BAR_NAME_W - theme::APP_MARK_PX - theme::GAP_SM).abs() < f32::EPSILON,
+            (theme::APP_BAR_NAME_W - theme::APP_MARK_PX - theme::GAP_MD).abs() < f32::EPSILON,
             "zone 1's slot is no longer the mark's lane plus its separation \
              from the fill beside it"
         );

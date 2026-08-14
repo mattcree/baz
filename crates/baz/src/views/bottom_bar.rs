@@ -51,7 +51,7 @@ use iced::widget::{
     Space, button, column, container, image as iced_image, mouse_area, row, rule, stack, text,
     tooltip,
 };
-use iced::{Color, Element, Length, alignment};
+use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::motion::{Control, Ink};
@@ -126,17 +126,20 @@ pub(crate) fn view(
         );
     }
     status = status.push(signal_path(player)).push(volume(player, ink));
+    let controls = row![
+        time_readout(player),
+        transport_row(player, ink),
+        repeat_one_toggle(player, ink),
+        shuffle_toggle(player, ink),
+        status,
+    ]
+    .spacing(theme::GAP_LG)
+    .align_y(iced::Alignment::Center);
     let bar = row![
         container(now_playing_block(player, cover, source))
             .width(Length::Fill)
             .clip(true),
-        transport_row(player, ink),
-        // **The properties zone.** Shuffle stands at its head, in a fixed slot
-        // *outside* the right-aligned status row, so that nothing the status
-        // says — a skipped-tracks note, a signal path arriving — can move it.
-        // The row grows leftward into the slack between the two.
-        container(row![shuffle_toggle(player, ink), status].spacing(theme::GAP_LG))
-            .width(Length::Fill)
+        container(controls)
             .align_x(alignment::Horizontal::Right)
             .clip(true),
     ]
@@ -265,63 +268,32 @@ fn now_playing_block(
     cover: Option<Cover>,
     source: Option<Message>,
 ) -> Element<'_, Message> {
-    let stamps = player.stamps();
-    let room = theme::active();
-    let elapsed_color = if stamps.as_ref().is_some_and(|stamps| stamps.pending) {
-        room.lamp
-    } else {
-        room.paper_faint
-    };
-    row![
-        container(back_to_source(player, cover, source))
-            .width(Length::Fill)
-            .clip(true),
-        stamp(
-            stamps.as_ref().map(|stamps| stamps.elapsed.clone()),
-            elapsed_color,
-            alignment::Horizontal::Right,
-        ),
-        stamp(
-            stamps.as_ref().map(|stamps| stamps.total.clone()),
-            room.paper_faint,
-            alignment::Horizontal::Left,
-        ),
-    ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
-    .into()
+    container(back_to_source(player, cover, source))
+        .width(Length::Fill)
+        .clip(true)
+        .into()
 }
 
-/// One of the two timestamps: a [`theme::STAMP_W`] slot, one line of tabular
-/// figures, and nothing when there is nothing to say.
-///
-/// The digits are tabular — a property of the bundled Sans rather than of a
-/// second face — and the slot is fixed, so they cannot shuffle anything
-/// sideways as they tick or when a track crosses the hour.
-///
-/// It is one line box tall and centred in the row, so its **ink** lands on the
-/// bar's one centre line rather than its block landing anywhere (law L4).
-fn stamp(
-    value: Option<String>,
-    color: Color,
-    align: alignment::Horizontal,
-) -> Element<'static, Message> {
-    let content: Element<'static, Message> = match value {
-        None => Space::new()
-            .width(Length::Fixed(theme::STAMP_W))
-            .height(Length::Fixed(theme::LINE_META))
-            .into(),
-        Some(value) => text(value)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(color)
-            .wrapping(text::Wrapping::None)
-            .into(),
-    };
+fn time_readout(player: &PlayerState) -> Element<'static, Message> {
+    let room = theme::active();
+    let stamps = player.stamps();
+    let pending = stamps.as_ref().is_some_and(|stamps| stamps.pending);
+    let label = stamps.map(|stamps| format!("{} / {}", stamps.elapsed, stamps.total));
+    let content: Element<'static, Message> = label.map_or_else(
+        || Space::new().height(Length::Fixed(theme::LINE_META)).into(),
+        |label| {
+            text(label)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(if pending { room.lamp } else { room.paper_faint })
+                .wrapping(text::Wrapping::None)
+                .into()
+        },
+    );
     container(content)
-        .width(Length::Fixed(theme::STAMP_W))
+        .width(Length::Fixed(2.0 * theme::STAMP_W + theme::GAP_XS))
         .height(Length::Fixed(theme::LINE_META))
-        .align_x(align)
+        .align_x(alignment::Horizontal::Right)
         .align_y(alignment::Vertical::Center)
         .into()
 }
@@ -813,6 +785,57 @@ fn shuffle_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
     mouse_area(named)
         .on_enter(Message::ControlEntered(Control::Shuffle))
         .on_exit(Message::ControlLeft(Control::Shuffle))
+        .into()
+}
+
+fn repeat_one_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
+    let room = theme::active();
+    let on = player.repeat_one();
+    let mark = container(
+        iced_image(icon::inked(
+            icon::Glyph::RepeatOne,
+            if on { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if on {
+            1.0
+        } else {
+            theme::glyph_ink(
+                true,
+                false,
+                ink.hover(Control::RepeatOne),
+                ink.pressed(Control::RepeatOne),
+            )
+        }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::TRANSPORT_HIT))
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleRepeatOne);
+    let named = tooltip(
+        control,
+        text(if on {
+            "Repeat current track is on — turn it off to continue at natural end"
+        } else {
+            "Repeat current track is off — turn it on to restart at natural end"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named)
+        .on_enter(Message::ControlEntered(Control::RepeatOne))
+        .on_exit(Message::ControlLeft(Control::RepeatOne))
         .into()
 }
 

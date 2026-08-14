@@ -325,6 +325,34 @@ fn note_message(message: &Message) {
 ///
 /// Crate-visible because [`crate::views`] emits them: a view function's whole
 /// output is an [`Element`] parameterised by this type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum CoverAction {
+    #[default]
+    Play,
+    Queue,
+    Open,
+}
+
+impl CoverAction {
+    fn moved(self, delta: i32, engine: bool) -> Self {
+        let actions: &[Self] = if engine {
+            &[Self::Play, Self::Queue, Self::Open]
+        } else {
+            &[Self::Open]
+        };
+        let current = actions
+            .iter()
+            .position(|action| *action == self)
+            .unwrap_or(0);
+        let target = if delta < 0 {
+            current.saturating_sub(1)
+        } else {
+            current.saturating_add(1).min(actions.len() - 1)
+        };
+        actions[target]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     /// Setup screen: the folder text input changed.
@@ -366,8 +394,6 @@ pub(crate) enum Message {
     SearchConfirmed,
     /// A pointer press on one of a search row's explicit actions.
     SearchAction(crate::selection::Content, crate::search::Action),
-    /// The album result's explicit navigation action.
-    SearchOpenAlbum(u64),
     /// The one result scroll surface reporting its viewport.
     SearchScrolled(scrollable::Viewport),
     /// **Type anywhere**: a bare printable character was pressed with nothing
@@ -485,6 +511,7 @@ pub(crate) enum Message {
     /// A saved playlist's track table scrolled; retained so the page builds
     /// only the visible row window and requests artwork for that window.
     PlaylistScrolled(Viewport),
+    FavouritesScrolled(Viewport),
     /// The saved-playlist collection scrolled; retained for tile
     /// virtualisation and viewport-scoped collage requests.
     PlaylistsScrolled(Viewport),
@@ -550,6 +577,24 @@ pub(crate) enum Message {
     VibeSubmit,
     /// Cancel first-use consent/analysis while retaining the request controls.
     VibeCancel,
+    /// Open the canonical playlist-creation place at its chooser.
+    NewPlaylistOpen,
+    /// Open the creation place with Vibe already chosen (Home shortcut).
+    NewPlaylistOpenVibe,
+    PlaylistCreationMode(crate::playlists::CreationMode),
+    PlaylistCreationBack,
+    PlaylistCreationName(String),
+    PlaylistCreationExample(&'static str),
+    PlaylistCreationToggleShape,
+    PlaylistCreationEnergy(crate::playlists::EnergyShape),
+    PlaylistCreationWaypoint(usize, String),
+    PlaylistCreationRemove(usize),
+    PlaylistCreationShift(usize, i32),
+    PlaylistCreationSave,
+    /// Toggle durable song-level Favourites membership without selecting or playing.
+    ToggleFavourite(PathBuf),
+    FavouritesPlay,
+    FavouritesPlayTrack(usize),
     /// **The returns lane's head, pressed**: go to that destination
     /// (ADR-0030 as the owner amended it). Not a toggle — see [`Place::go`].
     GoTo(crate::lane::Destination),
@@ -817,6 +862,8 @@ pub(crate) enum Message {
     /// sounding track plays to its end and what follows is re-planned
     /// (`baz_core::traversal`). See [`App::toggle_shuffle`].
     ToggleShuffle,
+    /// Turn Repeat current track on or off.
+    ToggleRepeatOne,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
     /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
@@ -912,8 +959,8 @@ pub(crate) enum Message {
     CaseReleased,
     /// Choose which record object stands in the Now Playing foreground.
     VisualizationForeground(crate::visualizer::Foreground),
-    /// Show or hide the spectrum behind the Now Playing composition.
-    ToggleSpectrum,
+    /// Advance through Off, Spectrum, Waveform and Spectrogram.
+    NextVisualization,
     /// Show or hide the local one-line fact feed.
     ToggleFacts,
     /// Advance the sounding record's fixed fact cycle (timer or press).
@@ -1276,6 +1323,8 @@ struct App {
     case_rotation: crate::jewel_case::Rotation,
     /// The foreground object and independent audio background in Now Playing.
     visualization: crate::visualizer::State,
+    /// Fixed ring storage for history-based Now Playing visualizers.
+    visualization_history: crate::visualizer::History,
     /// Position in the sounding record's fixed local-fact cycle.
     fact_index: usize,
     /// The engine connection (or its documented absence) — spawned once at
@@ -1428,6 +1477,12 @@ enum Screen {
     /// question — see [`Blocked`].
     Blocked(Blocked),
     Shelf(Box<Shelf>),
+}
+
+/// Shared read for every track-row heart. Keeping it here prevents views from
+/// inventing their own membership cache beside the durable library truth.
+pub(crate) fn is_favourite(shelf: &Shelf, path: &Path) -> bool {
+    shelf.library.is_favourite(path)
 }
 
 /// The minimal first-run screen: "Where's your music?".
@@ -1731,6 +1786,11 @@ impl App {
             });
         }
         player.seed_traversal(standing);
+        let repeat_one = stored.as_ref().is_some_and(|config| config.repeat_one);
+        if repeat_one {
+            playback.send(Command::SetRepeatOne { enabled: true });
+        }
+        player.seed_repeat_one(repeat_one);
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -1807,6 +1867,7 @@ impl App {
                     .is_none_or(|config| config.now_playing_facts),
                 ..crate::visualizer::State::default()
             },
+            visualization_history: crate::visualizer::History::default(),
             fact_index: 0,
             playback,
             output_choices,
@@ -2019,13 +2080,6 @@ impl App {
             Message::Direction(direction) => self.direction(direction),
             Message::SearchConfirmed => self.confirm_search(),
             Message::SearchAction(content, action) => self.search_action(content, action),
-            Message::SearchOpenAlbum(id) => {
-                let clear = match &mut self.screen {
-                    Screen::Shelf(state) => state.clear_query(),
-                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
-                };
-                Task::batch([clear, self.open_album(id)])
-            }
             // **The doors, and the one way back.** Every one of them is
             // navigation and nothing else: no panel opens, no width changes,
             // and the Library's own state — scroll, query, arrangement — is
@@ -2140,6 +2194,78 @@ impl App {
                 persist(move |config| config.vibe_workers = workers);
                 Task::none()
             }
+            Message::NewPlaylistOpen => self.open_playlist_creation(None),
+            Message::NewPlaylistOpenVibe => {
+                self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
+            }
+            Message::PlaylistCreationMode(mode) => {
+                self.playlists.creation.mode = Some(mode);
+                self.playlists.creation.error = None;
+                if mode == crate::playlists::CreationMode::Manual
+                    && self.playlists.creation.name.is_empty()
+                {
+                    self.playlists.creation.name_is_suggested = false;
+                }
+                if mode == crate::playlists::CreationMode::Vibe {
+                    let prompt = match &self.screen {
+                        Screen::Shelf(state) => state.vibe.prompt.clone(),
+                        Screen::Setup(_) | Screen::Blocked(_) => String::new(),
+                    };
+                    self.playlists.suggest_creation_name(&prompt);
+                }
+                Task::none()
+            }
+            Message::PlaylistCreationBack => {
+                self.playlists.creation.mode = None;
+                Task::none()
+            }
+            Message::PlaylistCreationName(name) => {
+                self.playlists.creation.name = name.chars().take(96).collect();
+                self.playlists.creation.name_is_suggested = false;
+                self.playlists.creation.error = None;
+                Task::none()
+            }
+            Message::PlaylistCreationExample(example) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.set_prompt(example);
+                }
+                self.playlists.suggest_creation_name(example);
+                Task::none()
+            }
+            Message::PlaylistCreationToggleShape => {
+                self.playlists.creation.shape_open = !self.playlists.creation.shape_open;
+                Task::none()
+            }
+            Message::PlaylistCreationEnergy(shape) => {
+                self.playlists.creation.energy = shape;
+                Task::none()
+            }
+            Message::PlaylistCreationWaypoint(index, text) => {
+                if let Some(waypoint) = self.playlists.creation.waypoints.get_mut(index) {
+                    *waypoint = text.chars().take(120).collect();
+                }
+                Task::none()
+            }
+            Message::PlaylistCreationRemove(index) => {
+                if index < self.playlists.creation.items.len() {
+                    self.playlists.creation.items.remove(index);
+                }
+                Task::none()
+            }
+            Message::PlaylistCreationShift(index, delta) => {
+                let neighbour = match delta {
+                    value if value < 0 => index.checked_sub(1),
+                    value if value > 0 => index.checked_add(1),
+                    _ => None,
+                };
+                if let Some(neighbour) =
+                    neighbour.filter(|neighbour| *neighbour < self.playlists.creation.items.len())
+                {
+                    self.playlists.creation.items.swap(index, neighbour);
+                }
+                Task::none()
+            }
+            Message::PlaylistCreationSave => self.save_playlist_creation(),
             Message::ThemeSelected(selection) => {
                 persist(move |config| selection.clone_into(&mut config.theme));
                 self.theme_notice = Some(format!(
@@ -2255,6 +2381,31 @@ impl App {
                     Task::none()
                 }
             }
+            Message::ToggleFavourite(path) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    if let Err(error) = state.library.toggle_favourite(&path) {
+                        state.health.record(
+                            crate::health::Level::Error,
+                            "Could not update Favourites",
+                            error.to_string(),
+                        );
+                    }
+                    self.playlists.refresh(Some(&state.library));
+                }
+                self.request_playlist_art()
+            }
+            Message::FavouritesPlay => {
+                self.play_favourites(None);
+                Task::none()
+            }
+            Message::FavouritesPlayTrack(row) => {
+                self.play_favourites(Some(row));
+                Task::none()
+            }
+            Message::FavouritesScrolled(viewport) => {
+                self.playlist_scroll = viewport.absolute_offset().y;
+                self.request_playlist_art()
+            }
             Message::ShowAllSongs => {
                 // The panel closes with the press, exactly as picking a
                 // destination closes it: a panel that stayed open over the
@@ -2264,6 +2415,10 @@ impl App {
             }
             Message::ToggleShuffle => {
                 self.toggle_shuffle();
+                Task::none()
+            }
+            Message::ToggleRepeatOne => {
+                self.toggle_repeat_one();
                 Task::none()
             }
             Message::PlayEverything => {
@@ -2627,6 +2782,9 @@ impl App {
                 if is_search_result && matches!(content, Content::SearchTrack { .. }) {
                     state.search_action = crate::search::Action::Play;
                 }
+                if !is_search_result && matches!(content, Content::Album(_)) {
+                    state.cover_action = CoverAction::Play;
+                }
                 if is_search_result {
                     state.search_selection.press(content, Instant::now())
                 } else {
@@ -2646,13 +2804,21 @@ impl App {
     fn activate_content(&mut self, content: Content) -> Task<Message> {
         match content {
             Content::Album(id) => {
-                if self.play_album(id) {
-                    self.complete_search_launch()
-                } else {
-                    Task::none()
+                let action = match &self.screen {
+                    Screen::Shelf(state) => state.cover_action,
+                    Screen::Setup(_) | Screen::Blocked(_) => CoverAction::Play,
+                };
+                match action {
+                    CoverAction::Play if self.play_album(id) => self.complete_search_launch(),
+                    CoverAction::Play => Task::none(),
+                    CoverAction::Queue => self.queue_album(id),
+                    CoverAction::Open => self.open_album(id),
                 }
             }
             Content::Playlist(id) => {
+                if id == crate::playlists::FAVOURITES_ID {
+                    return self.go(|_| Place::Favourites);
+                }
                 let opened = match &self.screen {
                     Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
                     Screen::Setup(_) | Screen::Blocked(_) => false,
@@ -2728,7 +2894,20 @@ impl App {
             Screen::Setup(_) | Screen::Blocked(_) => None,
         };
         if let Some(item) = item {
-            if let Place::Playlist(id) = self.place {
+            if self.place == Place::NewPlaylist
+                && self.playlists.creation.mode == Some(crate::playlists::CreationMode::Manual)
+            {
+                if !self
+                    .playlists
+                    .creation
+                    .items
+                    .iter()
+                    .any(|held| held.path == item.path)
+                {
+                    self.playlists.creation.items.push(item);
+                }
+                self.enqueue_next.clear();
+            } else if let Place::Playlist(id) = self.place {
                 if let Screen::Shelf(state) = &self.screen {
                     let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
                     self.playlists.append(id, entries, &state.library);
@@ -2753,6 +2932,20 @@ impl App {
                 Content::SearchTrack { album, row },
                 crate::search::Action::Next | crate::search::Action::End,
             ) => self.enqueue_search_track(album, row, action),
+            (Content::Album(id), crate::search::Action::End) => {
+                let clear = match &mut self.screen {
+                    Screen::Shelf(state) => state.clear_query(),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                };
+                Task::batch([clear, self.open_album(id)])
+            }
+            (Content::Album(id), crate::search::Action::Play) => {
+                if self.play_album(id) {
+                    self.complete_search_launch()
+                } else {
+                    Task::none()
+                }
+            }
             (_, crate::search::Action::Play) => self.activate_content(content),
             (_, crate::search::Action::Next | crate::search::Action::End) => Task::none(),
         }
@@ -2789,24 +2982,42 @@ impl App {
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
                 },
                 crate::search::Direction::Left | crate::search::Direction::Right => {
-                    if let Screen::Shelf(state) = &mut self.screen
-                        && matches!(
-                            state.search_selection.selected(),
-                            Some(Content::SearchTrack { .. })
-                        )
-                    {
+                    if let Screen::Shelf(state) = &mut self.screen {
                         let delta = if direction == crate::search::Direction::Left {
                             -1
                         } else {
                             1
                         };
-                        let split =
-                            !matches!(self.place, Place::Playlist(_)) && self.player.queued() > 0;
-                        state.search_action = state.search_action.moved(delta, split);
+                        match state.search_selection.selected() {
+                            Some(Content::SearchTrack { .. }) => {
+                                let split = !matches!(self.place, Place::Playlist(_))
+                                    && self.player.queued() > 0;
+                                state.search_action = state.search_action.moved(delta, split);
+                            }
+                            Some(Content::Album(_)) => {
+                                state.search_action = state.search_action.moved(delta, false);
+                            }
+                            _ => {}
+                        }
                     }
                     blur_search()
                 }
             };
+        }
+        if let Screen::Shelf(state) = &mut self.screen
+            && matches!(state.selection.selected(), Some(Content::Album(_)))
+            && matches!(
+                direction,
+                crate::search::Direction::Left | crate::search::Direction::Right
+            )
+        {
+            let delta = if direction == crate::search::Direction::Left {
+                -1
+            } else {
+                1
+            };
+            state.cover_action = state.cover_action.moved(delta, self.player.engine_ready());
+            return Task::none();
         }
         match direction {
             crate::search::Direction::Up => {
@@ -2942,6 +3153,11 @@ impl App {
                 if self.place == Place::NowPlaying && self.visualization.foreground.draws_case() {
                     self.case_rotation.tick(now);
                 }
+                if self.place == Place::NowPlaying && self.visualization.mode.records_history() {
+                    let audio = self.playback.visualization();
+                    self.visualization_history
+                        .capture(self.visualization.mode, &audio);
+                }
             }
             Message::CasePressed(at)
                 if self.place == Place::NowPlaying
@@ -2968,8 +3184,9 @@ impl App {
                 }
                 self.case_rotation.release();
             }
-            Message::ToggleSpectrum if self.place == Place::NowPlaying => {
-                self.visualization.spectrum = !self.visualization.spectrum;
+            Message::NextVisualization if self.place == Place::NowPlaying => {
+                self.visualization.mode = self.visualization.mode.next();
+                self.visualization_history = crate::visualizer::History::default();
             }
             Message::ToggleFacts if self.place == Place::NowPlaying => {
                 self.visualization.facts = !self.visualization.facts;
@@ -2982,7 +3199,7 @@ impl App {
             | Message::CaseDragged(_)
             | Message::CaseReleased
             | Message::VisualizationForeground(_)
-            | Message::ToggleSpectrum
+            | Message::NextVisualization
             | Message::ToggleFacts
             | Message::AdvanceFact => {}
             _ => return None,
@@ -2995,7 +3212,7 @@ impl App {
         self.playback.set_visualization_enabled(
             self.place == Place::NowPlaying
                 && self.player.now_playing().is_some()
-                && self.visualization.spectrum,
+                && self.visualization.mode.active(),
         );
     }
 
@@ -3259,6 +3476,9 @@ impl App {
                 }
             }
             Message::OpenPlaylist(id) => {
+                if *id == crate::playlists::FAVOURITES_ID {
+                    return Some(self.go(|_| Place::Favourites));
+                }
                 // Repeating an explicit Open must not reread, reset or leave
                 // the page; opening a subject is not a disguised Back action.
                 if self.place == Place::Playlist(*id) {
@@ -3289,6 +3509,10 @@ impl App {
                 }
             }
             Message::PlayPlaylist(id) => {
+                if *id == crate::playlists::FAVOURITES_ID {
+                    self.play_favourites(None);
+                    return Some(Task::none());
+                }
                 let opened = match &self.screen {
                     Screen::Shelf(state) => self.playlists.open_page(*id, &state.library),
                     Screen::Setup(_) | Screen::Blocked(_) => false,
@@ -3360,10 +3584,28 @@ impl App {
                 }
             }
             Message::NewPlaylistStart => {
-                self.playlists.naming = Some(crate::playlists::NameEntry::default());
-                return Some(iced::widget::operation::focus(
-                    views::playlist_panel::new_name_id(),
-                ));
+                let held = self
+                    .playlists
+                    .pending
+                    .take()
+                    .map(|pending| pending.items)
+                    .unwrap_or_default();
+                self.playlists.panel_open = false;
+                self.playlists.naming = None;
+                self.playlists.begin_creation();
+                self.playlists.creation.mode = Some(crate::playlists::CreationMode::Manual);
+                for item in held {
+                    if !self
+                        .playlists
+                        .creation
+                        .items
+                        .iter()
+                        .any(|existing| existing.path == item.path)
+                    {
+                        self.playlists.creation.items.push(item);
+                    }
+                }
+                return Some(self.go(|_| Place::NewPlaylist));
             }
             Message::NewPlaylistInput(text) => {
                 if let Some(naming) = &mut self.playlists.naming {
@@ -3537,6 +3779,7 @@ impl App {
     fn update_vibe(&mut self, message: &Message) -> Option<Task<Message>> {
         match message {
             Message::VibeCreate => {
+                let journey = self.playlists.creation.journey_instruction();
                 let Screen::Shelf(state) = &mut self.screen else {
                     return Some(Task::none());
                 };
@@ -3546,6 +3789,7 @@ impl App {
                 if state.vibe.prompt.trim().is_empty() || state.vibe.preparing {
                     return Some(Task::none());
                 }
+                state.vibe.set_journey(journey);
                 state.vibe.begin_request();
                 if state.vibe.has_features() {
                     state.vibe.create(
@@ -3631,6 +3875,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_prompt(prompt);
                 }
+                self.playlists.suggest_creation_name(prompt);
                 Some(Task::none())
             }
             Message::VibeLength(length) => {
@@ -3689,46 +3934,7 @@ impl App {
                 self.publish_mpris(false);
                 Some(Task::none())
             }
-            Message::VibeSubmit => {
-                let result = match &self.screen {
-                    Screen::Shelf(state) if state.vibe.open => state.vibe.preview.clone(),
-                    Screen::Setup(_) | Screen::Blocked(_) | Screen::Shelf(_) => None,
-                }?;
-                if result.items.is_empty() {
-                    return Some(Task::none());
-                }
-                let id = match &self.screen {
-                    Screen::Shelf(state) => {
-                        self.playlists.create_generated(&result, &state.library)
-                    }
-                    Screen::Setup(_) | Screen::Blocked(_) => None,
-                }?;
-                let opened = match &self.screen {
-                    Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
-                    Screen::Setup(_) | Screen::Blocked(_) => false,
-                };
-                if !opened {
-                    return Some(Task::none());
-                }
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.close();
-                    state.selection.select(Content::Playlist(id));
-                }
-                self.playlist_scroll = 0.0;
-                self.menu = None;
-                let from = self.place;
-                self.place = self.place.playlist(id);
-                self.place_history.visit(self.place);
-                let entering = self.note_place_left(from);
-                Some(Task::batch([
-                    entering,
-                    iced::widget::operation::scroll_to(
-                        views::page::scroll_id(),
-                        AbsoluteOffset { x: 0.0, y: 0.0 },
-                    ),
-                    self.request_playlist_art(),
-                ]))
-            }
+            Message::VibeSubmit => Some(self.save_playlist_creation()),
             _ => None,
         }
     }
@@ -3800,6 +4006,33 @@ impl App {
                             .iter()
                             .filter_map(|row| row.album_id),
                     );
+                }
+            }
+            Place::Favourites => {
+                if let Screen::Shelf(state) = &self.screen {
+                    wanted.extend(self.playlists.favourite.art.iter().copied());
+                    let queue = views::favourites::queue(state);
+                    let window = views::playlist::row_window(
+                        queue.items.len(),
+                        self.playlist_scroll,
+                        self.body_height(),
+                    );
+                    for item in &queue.items[window.first..window.end] {
+                        let filed_under = item
+                            .album_artist
+                            .as_deref()
+                            .unwrap_or(queue.artist.as_str());
+                        wanted.extend(item.album.as_deref().and_then(|title| {
+                            state
+                                .albums
+                                .iter()
+                                .find(|album| {
+                                    album.title.as_deref() == Some(title)
+                                        && album.artist.label() == filed_under
+                                })
+                                .map(|album| album.id)
+                        }));
+                    }
                 }
             }
             Place::Queue => {
@@ -3975,6 +4208,28 @@ impl App {
         // clause is amended to say so: the file is still verbatim, and what the
         // mode re-orders is the run, never the list.
         if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
+    /// Play the available members of the built-in Favourites list. Missing
+    /// members remain durable library data but never become engine rows.
+    fn play_favourites(&mut self, lead: Option<usize>) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let queue = views::favourites::queue(state);
+        if queue.is_empty() || lead.is_some_and(|row| row >= queue.items.len()) {
+            return;
+        }
+        let Some(position) = self.send_run(queue, lead) else {
+            return;
+        };
+        let command = lead.map_or(Command::Play, |_| Command::JumpTo { position });
+        if self.playback.send(command) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -4202,7 +4457,11 @@ impl App {
         // last usable preference when the library did not open, instead of
         // replacing it with the latent `Library` value behind either screen.
         if matches!(self.screen, Screen::Shelf(_)) {
-            let place = self.place;
+            let place = if self.place == Place::NewPlaylist {
+                Place::Playlists
+            } else {
+                self.place
+            };
             persist(|config| config.last_place = place);
         }
         iced::exit()
@@ -4229,6 +4488,7 @@ impl App {
                     Place::Playlists
                 }
             }
+            Place::NewPlaylist => Place::Playlists,
             Place::Album(_) | Place::Artist(_) => Place::Library,
             place => place,
         };
@@ -4778,6 +5038,57 @@ impl App {
             return self.note_place_left(from);
         }
         Task::none()
+    }
+
+    fn open_playlist_creation(
+        &mut self,
+        mode: Option<crate::playlists::CreationMode>,
+    ) -> Task<Message> {
+        self.playlists.begin_creation();
+        if let Some(mode) = mode {
+            self.playlists.creation.mode = Some(mode);
+            if mode == crate::playlists::CreationMode::Vibe {
+                let prompt = match &self.screen {
+                    Screen::Shelf(state) => state.vibe.prompt.clone(),
+                    Screen::Setup(_) | Screen::Blocked(_) => String::new(),
+                };
+                self.playlists.suggest_creation_name(&prompt);
+            }
+        }
+        self.go(|_| Place::NewPlaylist)
+    }
+
+    fn save_playlist_creation(&mut self) -> Task<Message> {
+        let generated = match self.playlists.creation.mode {
+            Some(crate::playlists::CreationMode::Manual) => None,
+            Some(crate::playlists::CreationMode::Vibe) => match &self.screen {
+                Screen::Shelf(state) => state.vibe.preview.clone(),
+                Screen::Setup(_) | Screen::Blocked(_) => None,
+            },
+            None => return Task::none(),
+        };
+        let id = match &self.screen {
+            Screen::Shelf(state) => self
+                .playlists
+                .save_creation(generated.as_ref(), &state.library),
+            Screen::Setup(_) | Screen::Blocked(_) => None,
+        };
+        let Some(id) = id else {
+            return Task::none();
+        };
+        let opened = match &self.screen {
+            Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
+            Screen::Setup(_) | Screen::Blocked(_) => false,
+        };
+        if !opened {
+            return Task::none();
+        }
+        if let Screen::Shelf(state) = &mut self.screen {
+            state.vibe.close();
+            state.selection.select(Content::Playlist(id));
+        }
+        self.playlist_scroll = 0.0;
+        self.go(|place| place.playlist(id))
     }
 
     /// Walk the existing history cursor without recording a new visit.
@@ -5648,6 +5959,19 @@ impl App {
         self.publish_mpris(false);
     }
 
+    fn toggle_repeat_one(&mut self) {
+        let enabled = !self.player.repeat_one();
+        if !self.playback.send(Command::SetRepeatOne { enabled }) {
+            self.player.engine_closed();
+            return;
+        }
+        // Mirror immediately, as shuffle does, so the resident control answers
+        // the accepted press without waiting a frame for its confirmation.
+        self.player.seed_repeat_one(enabled);
+        persist(|config| config.repeat_one = enabled);
+        self.publish_mpris(false);
+    }
+
     /// **Play everything you own** — Home's `All songs` tile (the owner,
     /// 2026-08-10: *"again I wanted the Play all, to be more like a tile on the
     /// home screen, a special 'playlist'"*).
@@ -6125,6 +6449,12 @@ impl App {
                 state.grid(),
                 self.playlists_scroll,
             ),
+            (Screen::Shelf(state), Place::NewPlaylist) => {
+                views::new_playlist::view(state, &self.playlists, &self.player, self.body_width())
+            }
+            (Screen::Shelf(state), Place::Favourites) => {
+                views::favourites::view(state, &self.player, self.body_width())
+            }
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,
@@ -6210,7 +6540,8 @@ impl App {
                 // Cover-only and jewel-case-only frames do no sample reads.
                 let audio = self
                     .visualization
-                    .spectrum
+                    .mode
+                    .active()
                     .then(|| self.playback.visualization());
                 let fact = self
                     .visualization
@@ -6228,7 +6559,15 @@ impl App {
                     views::now_playing::Visual {
                         rotation: self.case_rotation,
                         foreground: self.visualization.foreground,
+                        mode: self.visualization.mode,
                         audio: audio.as_ref(),
+                        history: &self.visualization_history,
+                        favourite: self
+                            .player
+                            .now_playing()
+                            .filter(|now| now.album_id.is_some())
+                            .and_then(|_| self.player.now_playing_path())
+                            .map(|path| (path, is_favourite(state, path))),
                     },
                     fact.as_ref(),
                 )
@@ -6413,7 +6752,7 @@ impl App {
                     state,
                     &self.player,
                     self.window,
-                    matches!(self.place, Place::Playlist(_)),
+                    matches!(self.place, Place::Playlist(_) | Place::NewPlaylist),
                 ),
             ]
             .into(),
@@ -6510,7 +6849,7 @@ impl App {
     fn panel_on_screen(&self) -> bool {
         matches!(self.screen, Screen::Shelf(_))
             && self.playlists.panel_open
-            && self.place != Place::Settings
+            && !matches!(self.place, Place::Settings | Place::NewPlaylist)
     }
 
     /// What every icon button needs to know to ink itself: which one the
@@ -7098,6 +7437,8 @@ pub(crate) struct Shelf {
     /// The selected track row's inline action. Albums keep their established
     /// activation and explicit Open grammar instead.
     pub(crate) search_action: crate::search::Action,
+    /// Keyboard-selected action on the selected album cover.
+    pub(crate) cover_action: CoverAction,
     /// Search's own selection/activation clock. It is separate from the place
     /// underneath so dismissing the dropover exposes that unchanged mark.
     pub(crate) search_selection: crate::selection::State,
@@ -7402,6 +7743,7 @@ impl Shelf {
             search_albums: Vec::new(),
             search_open: false,
             search_action: crate::search::Action::Play,
+            cover_action: CoverAction::Play,
             search_selection: crate::selection::State::default(),
             search_scroll_offset: 0.0,
             search_viewport_h: 0.0,
@@ -9610,7 +9952,7 @@ fn visualization_clock(
 ) -> bool {
     place == Place::NowPlaying
         && sounding
-        && (visualization.spectrum || visualization.foreground.draws_case())
+        && (visualization.mode.active() || visualization.foreground.draws_case())
 }
 
 /// Whether the 20-second fact-feed clock exists. It is absent everywhere the
@@ -9904,11 +10246,11 @@ mod tests {
         ] {
             let still = crate::visualizer::State {
                 foreground,
-                spectrum: false,
+                mode: crate::visualizer::Mode::Off,
                 facts: false,
             };
             let spectral = crate::visualizer::State {
-                spectrum: true,
+                mode: crate::visualizer::Mode::Spectrum,
                 ..still
             };
             assert_eq!(
@@ -9929,7 +10271,7 @@ mod tests {
     fn focus_is_not_part_of_the_visible_visual_clock() {
         let state = crate::visualizer::State {
             foreground: crate::visualizer::Foreground::None,
-            spectrum: true,
+            mode: crate::visualizer::Mode::Waveform,
             facts: false,
         };
         // There is deliberately no focus argument: a visible Now Playing

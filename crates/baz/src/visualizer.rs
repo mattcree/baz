@@ -11,6 +11,7 @@ use crate::theme;
 
 const BANDS: usize = 24;
 const BAR_GAP: f32 = 4.0;
+const HISTORY_FRAMES: usize = 32;
 
 /// The record object shown above the current track's identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,11 +61,107 @@ impl Foreground {
     }
 }
 
-/// The two independent decisions represented by the app-bar controls.
+/// The optional audio-truthful field behind the independent foreground.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Mode {
+    #[default]
+    Off,
+    Spectrum,
+    Waveform,
+    Spectrogram,
+}
+
+impl Mode {
+    pub(crate) const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Spectrum,
+            Self::Spectrum => Self::Waveform,
+            Self::Waveform => Self::Spectrogram,
+            Self::Spectrogram => Self::Off,
+        }
+    }
+
+    pub(crate) const fn active(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    pub(crate) const fn records_history(self) -> bool {
+        matches!(self, Self::Waveform | Self::Spectrogram)
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Audio visualization off",
+            Self::Spectrum => "Spectrum",
+            Self::Waveform => "Rolling waveform",
+            Self::Spectrogram => "Spectrogram",
+        }
+    }
+}
+
+/// Fixed storage shared by the two history-based modes. Capturing and drawing
+/// are both bounded by constants, and the owner drops this whole clock away
+/// from visible Now Playing.
+#[derive(Debug, Clone)]
+pub(crate) struct History {
+    amplitudes: [f32; HISTORY_FRAMES],
+    spectra: [[f32; BANDS]; HISTORY_FRAMES],
+    cursor: usize,
+    len: usize,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            amplitudes: [0.0; HISTORY_FRAMES],
+            spectra: [[0.0; BANDS]; HISTORY_FRAMES],
+            cursor: 0,
+            len: 0,
+        }
+    }
+}
+
+impl History {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the fixed 256-sample divisor is exactly representable in f32"
+    )]
+    pub(crate) fn capture(&mut self, mode: Mode, audio: &VisualizationFrame) {
+        match mode {
+            Mode::Waveform => {
+                let mean_square = audio
+                    .samples
+                    .iter()
+                    .map(|sample| sample * sample)
+                    .sum::<f32>()
+                    / VISUAL_SAMPLE_COUNT as f32;
+                self.amplitudes[self.cursor] = amplitude_height(mean_square.sqrt());
+            }
+            Mode::Spectrogram => self.spectra[self.cursor] = frequency_bands(audio),
+            Mode::Off | Mode::Spectrum => return,
+        }
+        self.cursor = (self.cursor + 1) % HISTORY_FRAMES;
+        self.len = (self.len + 1).min(HISTORY_FRAMES);
+    }
+
+    fn ordered_index(&self, position: usize) -> usize {
+        (self.cursor + HISTORY_FRAMES - self.len + position) % HISTORY_FRAMES
+    }
+
+    fn amplitude(&self, position: usize) -> f32 {
+        self.amplitudes[self.ordered_index(position)]
+    }
+
+    fn spectrum(&self, position: usize) -> &[f32; BANDS] {
+        &self.spectra[self.ordered_index(position)]
+    }
+}
+
+/// The independent decisions represented by the app-bar controls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct State {
     pub(crate) foreground: Foreground,
-    pub(crate) spectrum: bool,
+    pub(crate) mode: Mode,
     pub(crate) facts: bool,
 }
 
@@ -72,7 +169,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             foreground: Foreground::JewelCase,
-            spectrum: false,
+            mode: Mode::Off,
             facts: true,
         }
     }
@@ -104,11 +201,11 @@ pub(crate) fn foreground(
         .into()
 }
 
-/// Three radio-like foreground marks followed by one independent spectrum
+/// Three radio-like foreground marks followed by one independent visualizer
 /// toggle, all in the app bar's existing display-options slot.
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
     row(Foreground::ALL.map(|choice| foreground_button(choice, state.foreground)))
-        .push(spectrum_button(state.spectrum))
+        .push(mode_button(state.mode))
         .push(facts_button(state.facts))
         .into()
 }
@@ -195,16 +292,24 @@ fn foreground_button(choice: Foreground, selected: Foreground) -> Element<'stati
     .into()
 }
 
-fn spectrum_button(on: bool) -> Element<'static, Message> {
+fn mode_button(mode: Mode) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(crate::icon::inked(
             crate::icon::Glyph::VisualSpectrum,
-            if on { room.lamp } else { room.glyph() },
+            if mode.active() {
+                room.lamp
+            } else {
+                room.glyph()
+            },
         ))
         .width(Length::Fixed(theme::ICON_PX))
         .height(Length::Fixed(theme::ICON_PX))
-        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+        .opacity(if mode.active() {
+            1.0
+        } else {
+            theme::GLYPH_OPACITY
+        }),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -215,16 +320,13 @@ fn spectrum_button(on: bool) -> Element<'static, Message> {
         .height(Length::Fixed(theme::STEPPER_HIT))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press(Message::ToggleSpectrum);
+        .on_press(Message::NextVisualization);
+    let next = mode.next();
     tooltip(
         control,
-        text(if on {
-            "Spectrum is on — hide the audio background"
-        } else {
-            "Spectrum is off — show the audio background"
-        })
-        .size(theme::SIZE_CAPTION)
-        .line_height(theme::LEADING_CAPTION),
+        text(format!("{} — choose {}", mode.label(), next.label()))
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Bottom,
     )
     .gap(theme::GAP_XS)
@@ -233,14 +335,25 @@ fn spectrum_button(on: bool) -> Element<'static, Message> {
     .into()
 }
 
-/// Draw the spectrum across the whole Now Playing body. It has no ground of
+/// Draw the chosen audio field across the whole Now Playing body. It has no ground of
 /// its own: the artwork-derived field remains visible through and around the
 /// bars, while the cover or jewel case is composed independently above it.
 pub(crate) fn background(
+    mode: Mode,
     audio: &VisualizationFrame,
+    history: &History,
     width: f32,
     height: f32,
 ) -> Element<'static, Message> {
+    match mode {
+        Mode::Off => Space::new().width(Length::Fill).height(Length::Fill).into(),
+        Mode::Spectrum => spectrum(audio, width, height),
+        Mode::Waveform => waveform(history, width, height),
+        Mode::Spectrogram => spectrogram(history, width, height),
+    }
+}
+
+fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'static, Message> {
     let room = theme::active();
     let bands = frequency_bands(audio);
     let usable_h = height.max(1.0);
@@ -272,6 +385,64 @@ pub(crate) fn background(
         );
     }
     container(bars)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .into()
+}
+
+fn waveform(history: &History, width: f32, height: f32) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut trace = row![].spacing(2.0).align_y(iced::Alignment::Center);
+    for position in 0..history.len {
+        let line_h = (height * history.amplitude(position) * 0.72).max(2.0);
+        let ink = iced::Color {
+            a: 0.28,
+            ..room.lamp
+        };
+        trace = trace.push(
+            container(Space::new())
+                .width(Length::FillPortion(1))
+                .height(Length::Fixed(line_h))
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(ink)),
+                    border: iced::Border {
+                        radius: 1.0.into(),
+                        ..iced::Border::default()
+                    },
+                    ..container::Style::default()
+                }),
+        );
+    }
+    container(trace)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .center_y(Length::Fill)
+        .into()
+}
+
+fn spectrogram(history: &History, width: f32, height: f32) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut texture = row![].spacing(1.0);
+    for position in 0..history.len {
+        let mut slice = column![].spacing(1.0);
+        for level in history.spectrum(position).iter().rev() {
+            let ink = iced::Color {
+                a: 0.04 + 0.34 * level,
+                ..room.lamp
+            };
+            slice = slice.push(
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::FillPortion(1))
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(ink)),
+                        ..container::Style::default()
+                    }),
+            );
+        }
+        texture = texture.push(slice.width(Length::FillPortion(1)).height(Length::Fill));
+    }
+    container(texture)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
         .into()
@@ -330,19 +501,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_foreground_choice_and_spectrum_toggle_are_independent() {
+    fn the_foreground_choice_and_visualizer_are_independent() {
         let mut state = State::default();
         assert_eq!(state.foreground, Foreground::JewelCase);
-        assert!(!state.spectrum);
+        assert_eq!(state.mode, Mode::Off);
 
-        state.spectrum = true;
+        state.mode = Mode::Spectrum;
         assert_eq!(state.foreground, Foreground::JewelCase);
         state.foreground = Foreground::Cover;
-        assert!(state.spectrum);
+        assert_eq!(state.mode, Mode::Spectrum);
         state.foreground = Foreground::None;
-        assert!(state.spectrum);
-        state.spectrum = false;
+        assert_eq!(state.mode, Mode::Spectrum);
+        state.mode = Mode::Off;
         assert_eq!(state.foreground, Foreground::None);
+    }
+
+    #[test]
+    fn modes_cycle_from_off_and_back_to_off() {
+        let mut mode = Mode::Off;
+        for expected in [Mode::Spectrum, Mode::Waveform, Mode::Spectrogram, Mode::Off] {
+            mode = mode.next();
+            assert_eq!(mode, expected);
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the fixed test range is far below f32's exact integer limit"
+    )]
+    fn history_is_a_fixed_ring_with_oldest_to_newest_reads() {
+        let mut history = History::default();
+        for value in 1..=HISTORY_FRAMES + 3 {
+            let mut frame = VisualizationFrame::default();
+            frame.samples.fill(value as f32 / 100.0);
+            history.capture(Mode::Waveform, &frame);
+        }
+        assert_eq!(history.len, HISTORY_FRAMES);
+        assert!(history.amplitude(0) < history.amplitude(HISTORY_FRAMES - 1));
     }
 
     #[test]

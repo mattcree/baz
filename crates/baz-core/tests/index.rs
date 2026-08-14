@@ -1922,7 +1922,7 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -2135,7 +2135,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -2660,7 +2660,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -3016,7 +3016,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -3263,7 +3263,7 @@ fn a_v5_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -3694,7 +3694,7 @@ fn a_v6_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -4650,7 +4650,7 @@ fn a_v7_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -5522,7 +5522,7 @@ fn a_v8_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 9);
+    assert_eq!(version, baz_core::index::SCHEMA_VERSION);
 
     let by_path = |needle: &str| {
         library
@@ -5778,4 +5778,43 @@ fn forgetting_and_restoring_a_folder_leaves_the_play_ledger_alone() {
         ["This evening", "Never played"],
         "the ledger is another store and the round trip never touched it",
     );
+}
+#[test]
+fn favourites_survive_restart_missing_roots_and_path_moves_by_song_identity() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let old = PathBuf::from("/music/Low/Things We Lost/01 Sunflower.flac");
+    let moved = PathBuf::from("/archive/Low/Things We Lost/01 Sunflower.flac");
+    {
+        let mut library = Library::open(&db).expect("open");
+        library
+            .add_tracks([track(
+                old.to_str().expect("fixture path"),
+                "Low",
+                "Things We Lost in the Fire",
+                "Sunflower",
+                1,
+            )])
+            .expect("add");
+        assert!(library.toggle_favourite(&old).expect("heart"));
+        assert!(library.is_favourite(&old));
+    }
+    let mut library = Library::open(&db).expect("reopen");
+    assert!(library.is_favourite(&old), "membership is durable");
+    library.remove_tracks([&old]).expect("temporarily missing");
+    assert_eq!(library.missing_favourites(), 1);
+    assert!(library.favourite_tracks().is_empty());
+    library
+        .add_tracks([track(
+            moved.to_str().expect("fixture path"),
+            "Low",
+            "Things We Lost in the Fire",
+            "Sunflower",
+            1,
+        )])
+        .expect("moved file returns");
+    assert!(library.is_favourite(&moved));
+    assert_eq!(library.missing_favourites(), 0);
+    assert_eq!(library.favourite_tracks()[0].path, moved);
+    assert!(!library.toggle_favourite(&moved).expect("unheart"));
 }

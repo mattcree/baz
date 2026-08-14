@@ -81,6 +81,47 @@ pub(crate) fn playlist_id(name: &str) -> u64 {
     hash
 }
 
+/// Reserved identity for the built-in list. It is not derived from a
+/// filename because no listener-owned file exists behind it.
+pub(crate) const FAVOURITES_ID: u64 = 0xFABA_0000_0000_0001;
+
+fn empty_favourites_row() -> PanelRow {
+    PanelRow {
+        id: FAVOURITES_ID,
+        name: "Favourites".to_owned(),
+        entries: 0,
+        seconds: None,
+        playable: 0,
+        created_unix_s: None,
+        touched_unix_s: None,
+        art: Vec::new(),
+    }
+}
+
+fn favourites_row(library: Option<&Library>) -> PanelRow {
+    let Some(library) = library else {
+        return empty_favourites_row();
+    };
+    let tracks = library.favourite_tracks();
+    let mut row = empty_favourites_row();
+    row.entries = tracks.len() + library.missing_favourites();
+    row.playable = tracks.len();
+    let mut seconds = 0_u64;
+    let mut timed = false;
+    for meta in tracks {
+        if let Some(duration) = meta.duration {
+            seconds = seconds.saturating_add(duration.as_secs());
+            timed = true;
+        }
+        let album = vm::album_id(AlbumArtist::of(meta), library.record_title(meta));
+        if row.art.len() < 4 && !row.art.contains(&album) {
+            row.art.push(album);
+        }
+    }
+    row.seconds = timed.then_some(seconds);
+    row
+}
+
 /// One playlist as the panel lists it: identity, name, and the two facts a
 /// row states (`12 · 42:10`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,6 +374,144 @@ impl OpenPlaylist {
     }
 }
 
+/// How the initial entries of an unsaved playlist draft are supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreationMode {
+    Manual,
+    Vibe,
+}
+
+/// A small, discrete journey shape. These are listener-facing composition
+/// choices, not model controls; generation receives their textual reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum EnergyShape {
+    #[default]
+    Steady,
+    Build,
+    PeakAndSettle,
+    CoolDown,
+}
+
+impl EnergyShape {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Steady,
+        Self::Build,
+        Self::PeakAndSettle,
+        Self::CoolDown,
+    ];
+
+    #[must_use]
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Steady => "Steady",
+            Self::Build => "Build",
+            Self::PeakAndSettle => "Peak & settle",
+            Self::CoolDown => "Cool down",
+        }
+    }
+}
+
+impl CreationDraft {
+    #[must_use]
+    pub(crate) fn journey_instruction(&self) -> String {
+        let mut parts = vec![format!("energy shape: {}", self.energy.label())];
+        let points: Vec<_> = self
+            .waypoints
+            .iter()
+            .map(|point| point.trim())
+            .filter(|point| !point.is_empty())
+            .collect();
+        if !points.is_empty() {
+            parts.push(format!("journey: {}", points.join(" then ")));
+        }
+        parts.join("; ")
+    }
+}
+
+/// Session-only state for the shallow, resumable creation flow.
+#[derive(Debug)]
+pub(crate) struct CreationDraft {
+    pub(crate) mode: Option<CreationMode>,
+    pub(crate) name: String,
+    pub(crate) name_is_suggested: bool,
+    pub(crate) shape_open: bool,
+    pub(crate) energy: EnergyShape,
+    pub(crate) waypoints: [String; 3],
+    pub(crate) items: Vec<QueueItemVm>,
+    pub(crate) error: Option<String>,
+    pub(crate) saved: bool,
+}
+
+impl Default for CreationDraft {
+    fn default() -> Self {
+        Self {
+            mode: None,
+            name: String::new(),
+            name_is_suggested: true,
+            shape_open: false,
+            energy: EnergyShape::default(),
+            waypoints: [String::new(), String::new(), String::new()],
+            items: Vec::new(),
+            error: None,
+            saved: false,
+        }
+    }
+}
+
+/// A deterministic, visible starting name derived from the listener's first
+/// semantic phrase. Storage validation and collision suffixing still happen
+/// before Save, in the editable field.
+#[must_use]
+pub(crate) fn suggested_name(prompt: &str) -> String {
+    let first = prompt
+        .split([',', ';', '\n'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    let structural = ["start with ", "start ", "begin with ", "begin "];
+    let mut phrase = first;
+    let lower = first.to_lowercase();
+    for prefix in structural {
+        if lower.starts_with(prefix) {
+            phrase = first.get(prefix.len()..).unwrap_or(first).trim();
+            break;
+        }
+    }
+    let clean: String = phrase
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.is_empty() {
+        return "Vibe playlist".to_owned();
+    }
+    if clean.chars().count() <= 48 {
+        return clean;
+    }
+    let mut short = String::new();
+    for word in clean.split_whitespace() {
+        let extra = usize::from(!short.is_empty()) + word.chars().count();
+        if short.chars().count() + extra > 48 {
+            break;
+        }
+        if !short.is_empty() {
+            short.push(' ');
+        }
+        short.push_str(word);
+    }
+    if short.is_empty() {
+        "Vibe playlist".to_owned()
+    } else {
+        short
+    }
+}
+
 /// The playlist surfaces' whole state, held by the shell beside the player.
 #[derive(Debug)]
 pub(crate) struct Playlists {
@@ -341,6 +520,8 @@ pub(crate) struct Playlists {
     folder: Option<Folder>,
     /// The panel's index: every playlist, sorted as the folder lists them.
     pub(crate) rows: Vec<PanelRow>,
+    /// The pinned built-in row, refreshed from durable library membership.
+    pub(crate) favourite: PanelRow,
     /// The full Playlists place's session ordering.
     pub(crate) order: PlaylistOrder,
     /// The saved-playlist tile currently under the pointer.
@@ -357,6 +538,9 @@ pub(crate) struct Playlists {
     pub(crate) naming: Option<NameEntry>,
     /// The queue place's `Save as playlist` field, while it is a field.
     pub(crate) saving_queue: Option<NameEntry>,
+    /// The resumable, unsaved draft behind the canonical `New playlist`
+    /// place. No file exists until its explicit Save action succeeds.
+    pub(crate) creation: CreationDraft,
     /// The playlist whose page is open, if one is.
     pub(crate) open: Option<OpenPlaylist>,
     /// The open page's edit history: whole-item-list snapshots, newest last
@@ -413,6 +597,7 @@ impl Playlists {
         let mut playlists = Self {
             folder,
             rows: Vec::new(),
+            favourite: empty_favourites_row(),
             order: PlaylistOrder::default(),
             hovered: None,
             confirming_overview_delete: None,
@@ -420,6 +605,7 @@ impl Playlists {
             pending: None,
             naming: None,
             saving_queue: None,
+            creation: CreationDraft::default(),
             open: None,
             undo: crate::undo::History::new(),
             undo_for: None,
@@ -431,6 +617,103 @@ impl Playlists {
         playlists
     }
 
+    /// Start (or resume) the canonical creation flow at its chooser.
+    pub(crate) fn begin_creation(&mut self) {
+        if self.creation.saved {
+            self.creation = CreationDraft::default();
+        }
+        self.creation.saved = false;
+    }
+
+    /// Put a collision-safe prompt suggestion into the visible name field,
+    /// unless the listener has already replaced that suggestion themselves.
+    pub(crate) fn suggest_creation_name(&mut self, prompt: &str) {
+        if !self.creation.name_is_suggested {
+            return;
+        }
+        let base = suggested_name(prompt);
+        let mut candidate = base.clone();
+        let mut suffix = 2_usize;
+        while self.holds(&candidate) {
+            candidate = format!("{base} {suffix}");
+            suffix = suffix.saturating_add(1);
+        }
+        self.creation.name = candidate;
+        self.creation.error = None;
+    }
+
+    /// The storage-layer refusal for the visible draft name.
+    #[must_use]
+    pub(crate) fn creation_refusal(&self) -> Option<String> {
+        if let Some(error) = &self.creation.error {
+            return Some(error.clone());
+        }
+        let name = self.creation.name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        if let Err(error) = baz_core::playlist::validate_name(name) {
+            return Some(error.to_string());
+        }
+        self.holds(name)
+            .then(|| format!("There is already a playlist called {name:?}."))
+    }
+
+    #[must_use]
+    pub(crate) fn creation_can_save(&self, has_items: bool) -> bool {
+        self.creation.mode.is_some()
+            && !self.creation.name.trim().is_empty()
+            && self.creation_refusal().is_none()
+            && (self.creation.mode == Some(CreationMode::Manual) || has_items)
+    }
+
+    /// Save the current draft as one ordinary playlist. Manual and Vibe
+    /// differ only in how their initial entries arrived; the resulting file
+    /// has the same format and lifecycle.
+    pub(crate) fn save_creation(
+        &mut self,
+        generated: Option<&crate::vibe::Generated>,
+        library: &Library,
+    ) -> Option<u64> {
+        let has_items = generated.is_some_and(|draft| !draft.items.is_empty());
+        if !self.creation_can_save(has_items) {
+            return None;
+        }
+        let name = self.creation.name.trim().to_owned();
+        let folder = self.folder.as_ref()?;
+        let mut playlist = match folder.create(&name) {
+            Ok(playlist) => playlist,
+            Err(error) => {
+                self.creation.error = Some(error.to_string());
+                return None;
+            }
+        };
+        if let Some(request) = generated {
+            playlist
+                .items_mut()
+                .push(Item::Note(Note::from_text(&format!(
+                    "# made by baz · {} · {}",
+                    request.description,
+                    request.pool_note().to_lowercase()
+                ))));
+            playlist
+                .items_mut()
+                .extend(request.items.iter().map(entry_for).map(Item::Entry));
+        } else {
+            playlist
+                .items_mut()
+                .extend(self.creation.items.iter().map(entry_for).map(Item::Entry));
+        }
+        if let Err(error) = playlist.save() {
+            self.creation.error = Some(error.to_string());
+            return None;
+        }
+        let id = playlist_id(playlist.name());
+        self.creation.saved = true;
+        self.refresh(Some(library));
+        Some(id)
+    }
+
     /// A surfaces value over an explicit folder — the test seam, exactly as
     /// [`Folder::open`] is the storage layer's.
     #[cfg(test)]
@@ -438,6 +721,7 @@ impl Playlists {
         let mut playlists = Self {
             folder: Some(folder),
             rows: Vec::new(),
+            favourite: empty_favourites_row(),
             order: PlaylistOrder::default(),
             hovered: None,
             confirming_overview_delete: None,
@@ -445,6 +729,7 @@ impl Playlists {
             pending: None,
             naming: None,
             saving_queue: None,
+            creation: CreationDraft::default(),
             open: None,
             undo: crate::undo::History::new(),
             undo_for: None,
@@ -465,6 +750,7 @@ impl Playlists {
     /// summoned: last writer wins, no prompt.
     pub(crate) fn refresh(&mut self, library: Option<&Library>) {
         self.stamp = self.stamp.wrapping_add(1);
+        self.favourite = favourites_row(library);
         let Some(folder) = &self.folder else {
             return;
         };
@@ -477,6 +763,10 @@ impl Playlists {
         };
         let readings: Vec<(String, Playlist, Option<u64>)> = listed
             .iter()
+            // The built-in owns this identity. A same-named imported file is
+            // left untouched on disk but can neither replace nor duplicate it
+            // in Baz's collection.
+            .filter(|file| !file.name.eq_ignore_ascii_case("Favourites"))
             .filter_map(|file| {
                 file.read().ok().map(|playlist| {
                     let created = std::fs::metadata(&file.path)
@@ -560,13 +850,13 @@ impl Playlists {
 
     /// Every saved playlist in the full page's selected order.
     pub(crate) fn ordered_rows(&self) -> Vec<&PanelRow> {
-        let mut rows: Vec<&PanelRow> = self.rows.iter().collect();
+        let mut saved: Vec<&PanelRow> = self.rows.iter().collect();
         let by_name = |a: &&PanelRow, b: &&PanelRow| {
             (a.name.to_lowercase(), a.name.as_str()).cmp(&(b.name.to_lowercase(), b.name.as_str()))
         };
         match self.order {
-            PlaylistOrder::Alphabetical => rows.sort_by(by_name),
-            PlaylistOrder::Created => rows.sort_by(|a, b| {
+            PlaylistOrder::Alphabetical => saved.sort_by(by_name),
+            PlaylistOrder::Created => saved.sort_by(|a, b| {
                 match (a.created_unix_s, b.created_unix_s) {
                     (Some(a), Some(b)) => b.cmp(&a),
                     (Some(_), None) => std::cmp::Ordering::Less,
@@ -575,7 +865,7 @@ impl Playlists {
                 }
                 .then_with(|| by_name(a, b))
             }),
-            PlaylistOrder::Played => rows.sort_by(|a, b| {
+            PlaylistOrder::Played => saved.sort_by(|a, b| {
                 match (
                     self.played.get(&a.id).copied(),
                     self.played.get(&b.id).copied(),
@@ -588,6 +878,9 @@ impl Playlists {
                 .then_with(|| by_name(a, b))
             }),
         }
+        let mut rows = Vec::with_capacity(saved.len() + 1);
+        rows.push(&self.favourite);
+        rows.extend(saved);
         rows
     }
 
@@ -672,6 +965,9 @@ impl Playlists {
     /// under the run withdraws the verb rather than letting it dangle).
     #[must_use]
     pub(crate) fn holds(&self, name: &str) -> bool {
+        if name.eq_ignore_ascii_case("Favourites") {
+            return true;
+        }
         self.folder
             .as_ref()
             .and_then(|folder| folder.list().ok())
@@ -917,65 +1213,6 @@ impl Playlists {
                 }
             }
             Err(error) => naming.error = Some(error.to_string()),
-        }
-    }
-
-    /// Create a listener-requested sonic playlist. The resulting file is
-    /// deliberately ordinary: the extra comment is provenance for people and
-    /// other tools, never an instruction baz later reads or regenerates from.
-    pub(crate) fn create_generated(
-        &mut self,
-        request: &crate::vibe::Generated,
-        library: &Library,
-    ) -> Option<u64> {
-        if request.items.is_empty() {
-            return None;
-        }
-        let folder = self.folder.as_ref()?;
-        let mut suffix = 1_usize;
-        let name = loop {
-            let name = if suffix == 1 {
-                "Vibe playlist".to_owned()
-            } else {
-                format!("Vibe playlist {suffix}")
-            };
-            if !self.holds(&name) {
-                break name;
-            }
-            suffix = suffix.saturating_add(1);
-        };
-        let mut playlist = match folder.create(&name) {
-            Ok(playlist) => playlist,
-            Err(error) => {
-                crate::baz_log!("[playlists] could not create generated playlist: {error}");
-                return None;
-            }
-        };
-        playlist
-            .items_mut()
-            .push(Item::Note(Note::from_text(&format!(
-                "# made by baz · {} · {}",
-                request.description,
-                request.pool_note().to_lowercase()
-            ))));
-        playlist
-            .items_mut()
-            .extend(request.items.iter().map(entry_for).map(Item::Entry));
-        match playlist.save() {
-            Ok(()) => {
-                let id = playlist_id(playlist.name());
-                crate::baz_log!(
-                    "[playlists] generated {:?} — {}",
-                    playlist.name(),
-                    request.pool_note()
-                );
-                self.refresh(Some(library));
-                Some(id)
-            }
-            Err(error) => {
-                crate::baz_log!("[playlists] could not save generated playlist: {error}");
-                None
-            }
         }
     }
 
@@ -1681,6 +1918,8 @@ mod tests {
     fn the_full_page_orders_by_name_creation_date_or_last_played() {
         let (_keep, folder) = folder();
         let mut playlists = Playlists::over(folder);
+        playlists.creation.mode = Some(CreationMode::Vibe);
+        playlists.creation.name = "ambient music that slowly gathers momentum".to_owned();
         let row = |name: &str, created_unix_s| PanelRow {
             id: playlist_id(name),
             name: name.to_owned(),
@@ -1704,7 +1943,7 @@ mod tests {
                 .iter()
                 .map(|row| row.name.as_str())
                 .collect::<Vec<_>>(),
-            ["Alpha", "beta", "Imported"]
+            ["Favourites", "Alpha", "beta", "Imported"]
         );
 
         playlists.order = PlaylistOrder::Created;
@@ -1714,7 +1953,7 @@ mod tests {
                 .iter()
                 .map(|row| row.name.as_str())
                 .collect::<Vec<_>>(),
-            ["beta", "Alpha", "Imported"],
+            ["Favourites", "beta", "Alpha", "Imported"],
             "creation order is newest first, with unknown dates last"
         );
 
@@ -1727,7 +1966,7 @@ mod tests {
                 .iter()
                 .map(|row| row.name.as_str())
                 .collect::<Vec<_>>(),
-            ["beta", "Alpha", "Imported"],
+            ["Favourites", "beta", "Alpha", "Imported"],
             "played order is most recent first, with never-played lists last"
         );
     }
@@ -1815,6 +2054,8 @@ mod tests {
         let (_dir, folder) = folder();
         let library = library();
         let mut playlists = Playlists::over(folder);
+        playlists.creation.mode = Some(CreationMode::Vibe);
+        playlists.creation.name = "ambient music that slowly gathers momentum".to_owned();
         let generated = crate::vibe::Generated {
             description: "ambient music that slowly gathers momentum · local semantic model"
                 .to_owned(),
@@ -1826,10 +2067,10 @@ mod tests {
             target_minutes: 60,
         };
         let id = playlists
-            .create_generated(&generated, &library)
+            .save_creation(Some(&generated), &library)
             .expect("a request with tracks creates a playlist");
         let row = playlists.row(id).expect("the ordinary listing includes it");
-        assert_eq!(row.name, "Vibe playlist");
+        assert_eq!(row.name, "ambient music that slowly gathers momentum");
         let file = playlists
             .folder
             .as_ref()
@@ -1844,6 +2085,44 @@ mod tests {
         assert!(playlist.items().iter().any(|item| {
             matches!(item, Item::Note(note) if note.text().contains("ambient music that slowly gathers momentum · local semantic model"))
         }));
+    }
+
+    #[test]
+    fn prompt_names_are_visible_safe_bounded_and_use_the_first_phrase() {
+        assert_eq!(
+            suggested_name(
+                "Start sparse and nocturnal, build into restless electronic music, then finish warm"
+            ),
+            "sparse and nocturnal"
+        );
+        assert_eq!(
+            suggested_name("dreamy shoegaze for a rainy evening"),
+            "dreamy shoegaze for a rainy evening"
+        );
+        assert_eq!(suggested_name("///"), "Vibe playlist");
+        assert!(suggested_name(&"word ".repeat(30)).chars().count() <= 48);
+    }
+
+    #[test]
+    fn creation_does_not_write_until_the_explicit_save_boundary() {
+        let (_dir, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        playlists.begin_creation();
+        playlists.creation.mode = Some(CreationMode::Manual);
+        playlists.creation.name = "Road notes".to_owned();
+        playlists
+            .creation
+            .items
+            .push(item("An Ending", "/m/eno/ascent.flac"));
+        assert!(playlists.rows.is_empty());
+        let id = playlists
+            .save_creation(None, &library)
+            .expect("explicit save writes the draft");
+        assert_eq!(
+            playlists.row(id).map(|row| row.name.as_str()),
+            Some("Road notes")
+        );
     }
 
     #[test]

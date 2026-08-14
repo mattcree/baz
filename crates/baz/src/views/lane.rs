@@ -207,11 +207,7 @@ fn destination_row(
     // Collapsed, the glyph is the only thing in the row, so it centres on the
     // lane's own axis — the same axis the sleeves below it centre on. Open, it
     // stands at the left of its box with the word after it.
-    let glyph_x = if open {
-        alignment::Horizontal::Left
-    } else {
-        alignment::Horizontal::Center
-    };
+    let glyph_x = alignment::Horizontal::Left;
     let boxed = |content: Element<'static, Message>, x| {
         container(content)
             .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
@@ -261,7 +257,7 @@ fn destination_row(
     // axis, which is the axis the sleeves below it centre on, and a rail
     // whose head and body stood on two different verticals would read as two
     // surfaces.
-    .padding(theme::pad(0.0, if open { theme::GAP_SM } else { 0.0 }))
+    .padding(theme::pad(0.0, theme::GAP_SM))
     // The row family, on the lane's own ground: one step up under the
     // pointer, the whole hit area painted (`theme::track_row`).
     // `here` only carries the row's card while there is a word in the row to

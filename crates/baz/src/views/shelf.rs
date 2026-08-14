@@ -623,6 +623,10 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// that was the loudest thing on screen after the artwork. Reserving the block
 /// costs nothing (the row pitch already has the room) and the title clips at one
 /// line instead, which is the failure the shelf can afford.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one album tile's complete visual and action anatomy"
+)]
 pub(crate) fn tile<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
@@ -657,7 +661,17 @@ pub(crate) fn tile<'a>(
     // and only while the pointer is on this tile. `stack` hands events to its
     // topmost layer first, so an option is reached before the sleeve under it.
     let art: Element<'_, Message> = if shelf.hovered_album == Some(album.id) || selected {
-        stack![art, hover_options(album.id, work, engine, collecting)].into()
+        stack![
+            art,
+            hover_options(
+                album.id,
+                work,
+                engine,
+                collecting,
+                selected.then_some(shelf.cover_action),
+            )
+        ]
+        .into()
     } else {
         art
     };
@@ -862,10 +876,17 @@ fn hover_options<'a>(
     work: f32,
     engine: bool,
     collecting: Collecting,
+    selected: Option<crate::app::CoverAction>,
 ) -> Element<'a, Message> {
     let listed: [Option<VeilOption>; theme::VEIL_OPTIONS] = [
-        engine.then(|| VeilOption::accented(icon::Glyph::Play, "Play", Message::PlayAlbum(album))),
-        engine.then(|| VeilOption::new(icon::Glyph::Queue, "Queue", Message::QueueAlbum(album))),
+        engine.then(|| {
+            VeilOption::accented(icon::Glyph::Play, "Play", Message::PlayAlbum(album))
+                .selected(selected == Some(crate::app::CoverAction::Play))
+        }),
+        engine.then(|| {
+            VeilOption::new(icon::Glyph::Queue, "Queue", Message::QueueAlbum(album))
+                .selected(selected == Some(crate::app::CoverAction::Queue))
+        }),
         collecting.available.then(|| {
             VeilOption::new(
                 icon::Glyph::Plus,
@@ -873,11 +894,10 @@ fn hover_options<'a>(
                 Message::AddAlbumToPlaylist(album),
             )
         }),
-        Some(VeilOption::new(
-            icon::Glyph::Open,
-            "Open",
-            Message::AlbumClicked(album),
-        )),
+        Some(
+            VeilOption::new(icon::Glyph::Open, "Open", Message::AlbumClicked(album))
+                .selected(selected == Some(crate::app::CoverAction::Open)),
+        ),
     ];
     veil(work, listed.into_iter().flatten())
 }
@@ -894,6 +914,7 @@ pub(crate) struct VeilOption {
     label: &'static str,
     press: Message,
     accent: bool,
+    selected: bool,
 }
 
 impl VeilOption {
@@ -904,6 +925,7 @@ impl VeilOption {
             label,
             press,
             accent: false,
+            selected: false,
         }
     }
 
@@ -915,7 +937,13 @@ impl VeilOption {
             label,
             press,
             accent: true,
+            selected: false,
         }
+    }
+
+    pub(crate) const fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
     }
 }
 
@@ -941,6 +969,7 @@ pub(crate) fn veil<'a>(
         label,
         press,
         accent,
+        selected,
     } in listed
     {
         // One decision about which option wears the accent, made in the
@@ -974,7 +1003,7 @@ pub(crate) fn veil<'a>(
             .width(Length::Fixed(band))
             .height(Length::Fill)
             .padding(iced::Padding::default().left(theme::VEIL_LEAD))
-            .style(move |_theme, status| theme::veil_row(room, status))
+            .style(move |_theme, status| theme::veil_row(room, status, selected))
             .on_press(press),
         );
     }
@@ -1351,14 +1380,14 @@ mod hover_option_tests {
         let source = source();
         let tile = function(&source, "tile<'a>");
         assert!(
-            tile.contains("stack![art, hover_options("),
+            tile.contains("stack![") && tile.contains("hover_options("),
             "the options are not the topmost layer over the work — a sleeve \
              press would reach them before they reached it, or not at all"
         );
         // The stack is inside the button, not around it: the `on_press` that
         // selects/activates the tile comes after the column that holds the sleeve.
         let sleeve_at = tile.find("let sleeve = container(").expect("the sleeve");
-        let stack_at = tile.find("stack![art, hover_options(").expect("the layer");
+        let stack_at = tile.find("stack![").expect("the layer");
         let press_at = tile
             .find(".on_press(Message::ContentPressed(Content::Album(album.id)))")
             .expect("the tile's own press");

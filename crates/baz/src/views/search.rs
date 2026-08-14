@@ -288,15 +288,23 @@ fn track_row<'a>(
         })
         .on_press(Message::SearchAction(content, action))
     };
-    let mut actions = row![action("Play", Action::Play)].spacing(theme::GAP_SM);
+    let mut actions =
+        row![
+            crate::views::page::favourite_slot(
+                &song.path,
+                crate::app::is_favourite(shelf, &song.path),
+            ),
+            action("Play", Action::Play),
+        ]
+        .spacing(theme::GAP_SM);
     if adding_to_playlist {
         actions = actions.push(action("Add to playlist", Action::End));
     } else if player.queued() == 0 {
         actions = actions.push(action("Enqueue", Action::End));
     } else {
         actions = actions
-            .push(action("Next", Action::Next))
-            .push(action("End", Action::End));
+            .push(action("Add next", Action::Next))
+            .push(action("Add to end", Action::End));
     }
     button(
         row![
@@ -353,7 +361,7 @@ fn album_row<'a>(shelf: &'a Shelf, player: &'a PlayerState, index: usize) -> Ele
         || album.artist.label().to_owned(),
         |year| format!("{} · {year}", album.artist.label()),
     );
-    let verb = |label, message| {
+    let action = |label, selected_action, message| {
         button(
             text(label)
                 .size(theme::SIZE_META)
@@ -361,7 +369,13 @@ fn album_row<'a>(shelf: &'a Shelf, player: &'a PlayerState, index: usize) -> Ele
         )
         .height(Length::Fixed(theme::STEPPER_HIT))
         .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-        .style(move |_theme, status| theme::word_button(room, room.plinth, status))
+        .style(move |_theme, status| {
+            theme::segment(
+                room,
+                status,
+                selected && shelf.search_action == selected_action,
+            )
+        })
         .on_press(message)
     };
     button(
@@ -378,8 +392,16 @@ fn album_row<'a>(shelf: &'a Shelf, player: &'a PlayerState, index: usize) -> Ele
             ])
             .width(Length::Fill)
             .clip(true),
-            verb("Play", Message::SearchAction(content, Action::Play)),
-            verb("Open", Message::SearchOpenAlbum(id)),
+            action(
+                "Play",
+                Action::Play,
+                Message::SearchAction(content, Action::Play)
+            ),
+            action(
+                "Open",
+                Action::End,
+                Message::SearchAction(content, Action::End)
+            ),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),

@@ -434,6 +434,13 @@ pub enum Command {
         /// The order to walk in.
         traversal: Traversal,
     },
+    /// Set whether a naturally completed track restarts instead of advancing.
+    /// Explicit [`Command::Next`], [`Command::Previous`], seeks past the end,
+    /// and [`Command::JumpTo`] remain navigation and are never intercepted.
+    SetRepeatOne {
+        /// Whether natural completion repeats the current queue entry.
+        enabled: bool,
+    },
 }
 
 /// A notification from the engine to its front end.
@@ -712,6 +719,11 @@ pub enum Event {
     TraversalChanged {
         /// The order now in effect.
         traversal: Traversal,
+    },
+    /// The standing Repeat current track property changed.
+    RepeatOneChanged {
+        /// Whether natural completion now repeats the current queue entry.
+        enabled: bool,
     },
     /// A ReplayGain analysis pass has begun, and this is how much work it
     /// found (ADR-0015).
@@ -1266,6 +1278,8 @@ mod tests {
                     seed: 0x5EED_0F00_D1CE_1234,
                 },
             },
+            Command::SetRepeatOne { enabled: true },
+            Command::SetRepeatOne { enabled: false },
             Command::SetReplayGain {
                 mode: ReplayGainMode::Off,
                 preamp_centidb: 0,
@@ -1360,6 +1374,8 @@ mod tests {
             Event::TraversalChanged {
                 traversal: Traversal::Shuffled { seed: 42 },
             },
+            Event::RepeatOneChanged { enabled: true },
+            Event::RepeatOneChanged { enabled: false },
             Event::QueueChanged {
                 len: 12,
                 position: Some(3),

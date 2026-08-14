@@ -5,6 +5,15 @@
 > interaction directly. The normal build bundles Baz's reproducibly exported
 > LAION CLAP pair and runs both audio indexing and prompt retrieval offline.
 
+> **Placement amendment, 2026-08-14.** After using the integrated feature, the
+> owner identified Vibe as a playlist-creation method rather than Home content.
+> [Design 17](17-playlist-creation-and-ux-review.md) moves the composer,
+> progress and preview into one `New playlist` flow beside `Manual`; Home keeps
+> only a discovery shortcut. The local model, consent, cancellation, silent
+> draft, explicit Play/Save and ordinary-file contracts below are unchanged.
+> Sections which draw the shipped Home form remain implementation history, not
+> the target placement.
+
 ## Product bar
 
 Baz should be able, with the network physically disconnected, to turn a

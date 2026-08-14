@@ -427,6 +427,8 @@ pub enum Control {
     /// The bottom bar's crossed arrows — the player's shuffle property
     /// (2026-08-10, the owner).
     Shuffle,
+    /// The bottom bar's Repeat current track property.
+    RepeatOne,
     /// The app bar's minimise button (ADR-0040 §3).
     WindowMinimise,
     /// The app bar's maximise/restore button — one control, two states.
@@ -785,6 +787,7 @@ mod tests {
             Control::Mute,
             Control::Settings,
             Control::Shuffle,
+            Control::RepeatOne,
             Control::WindowMinimise,
             Control::WindowMaximise,
             Control::WindowClose,

@@ -567,6 +567,7 @@ fn queue_row(
     let offered = live && hovered;
     let mut slots = row![
         body,
+        page::favourite_slot(&item.path, crate::app::is_favourite(shelf, &item.path)),
         // The reorder pair and the removal cross, in the composition's one
         // slot anatomy ([`page::icon_slot`]) — the same three this file drew
         // for itself in three private functions that were byte-for-byte the

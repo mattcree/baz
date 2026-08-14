@@ -932,6 +932,8 @@ pub struct PlayerState {
     /// (`baz_core::traversal`). What is kept here is a mirror of engine state,
     /// on exactly the terms [`Self::volume`] is.
     traversal: Traversal,
+    /// Engine-confirmed Repeat current track property.
+    repeat_one: bool,
     /// [`Self::traversal`] resolved against the queue this process last sent:
     /// the run's positions, in the order they will play.
     ///
@@ -1069,6 +1071,7 @@ impl PlayerState {
             // In order, over no run at all. `seed_traversal` replaces it from
             // the config at start-up, for `seed_volume`'s reason.
             traversal: Traversal::default(),
+            repeat_one: false,
             order: Vec::new(),
         }
     }
@@ -1086,6 +1089,17 @@ impl PlayerState {
     #[must_use]
     pub fn shuffle(&self) -> bool {
         self.traversal.is_shuffled()
+    }
+
+    /// Whether natural completion repeats the current queue entry.
+    #[must_use]
+    pub fn repeat_one(&self) -> bool {
+        self.repeat_one
+    }
+
+    /// Seed the persisted standing mode before the first engine event.
+    pub fn seed_repeat_one(&mut self, enabled: bool) {
+        self.repeat_one = enabled;
     }
 
     /// Record the traversal the engine has been sent, and re-derive the plan.
@@ -1275,6 +1289,7 @@ impl PlayerState {
             // a track boundary where the resolved figure changes, and each
             // arrival replaces the whole reading (ADR-0013).
             Event::ReplayGainChanged { .. } => self.replay_gain.apply(event),
+            Event::RepeatOneChanged { enabled } => self.repeat_one = *enabled,
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
         }

@@ -116,6 +116,8 @@ const SIDEBAR_OPEN: &str = "sidebar_open";
 
 /// The key the player's shuffle property is written under.
 const SHUFFLE: &str = "shuffle";
+/// The key the player's Repeat current track property is written under.
+const REPEAT_ONE: &str = "repeat_one";
 
 /// The key the volume fader's control position is written under.
 const VOLUME: &str = "volume";
@@ -141,6 +143,10 @@ pub const DEFAULT_VIBE_WORKERS: usize = 8;
 pub const MAX_VIBE_WORKERS: usize = 16;
 
 /// Application configuration. See the [module docs](self) for scope.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent persisted player, view and accessibility decisions"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     /// The music folders baz scans and shelves, **in the listener's order**
@@ -241,6 +247,9 @@ pub struct Config {
     /// launches with shuffle on should be two different shuffles; remembering
     /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
+    /// Whether a track restarts when it reaches its natural end. Explicit
+    /// transport navigation remains navigation; only completion is repeated.
+    pub repeat_one: bool,
     /// The album object drawn on Now Playing: flat cover, jewel case or none.
     ///
     /// View state, persisted beside density rather than exposed as a Settings
@@ -275,6 +284,7 @@ impl Default for Config {
             volume: Volume::UNITY,
             output_device: None,
             shuffle: false,
+            repeat_one: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -364,6 +374,12 @@ impl Config {
             "# whether shuffle is on — the crossed arrows on the \
              now-playing bar\n{SHUFFLE} = {}",
             self.shuffle,
+        );
+        let _ = writeln!(
+            out,
+            "# whether natural track ends repeat the current queue entry\n\
+             {REPEAT_ONE} = {}",
+            self.repeat_one,
         );
         let _ = writeln!(
             out,
@@ -469,6 +485,10 @@ impl Config {
             .get(SHUFFLE)
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
+        let repeat_one = table
+            .get(REPEAT_ONE)
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
         let visualization_foreground = table
             .get(VISUALIZATION_FOREGROUND)
             .and_then(toml::Value::as_str)
@@ -508,6 +528,7 @@ impl Config {
             volume,
             output_device,
             shuffle,
+            repeat_one,
             visualization_foreground,
             now_playing_facts,
             vibe_workers,
@@ -836,6 +857,7 @@ mod tests {
                 volume: Volume::new(618),
                 output_device: None,
                 shuffle: false,
+                repeat_one: false,
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
                 now_playing_facts: true,
                 vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1186,6 +1208,7 @@ mod tests {
             volume: Volume::new(500),
             output_device: None,
             shuffle: false,
+            repeat_one: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1212,6 +1235,7 @@ mod tests {
             volume: Volume::new(750),
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
+            repeat_one: true,
             visualization_foreground: crate::visualizer::Foreground::None,
             now_playing_facts: false,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1371,6 +1395,7 @@ mod tests {
             volume: Volume::new(250),
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
+            repeat_one: false,
             visualization_foreground: crate::visualizer::Foreground::Cover,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,

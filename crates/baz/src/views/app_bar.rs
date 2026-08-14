@@ -391,6 +391,7 @@ fn mark() -> Element<'static, Message> {
     )
     .width(Length::Fixed(theme::APP_BAR_NAME_W))
     .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(iced::Padding::default().left(theme::GAP_MD))
     // Leading, not centred: the mark's ink hangs from the compact chrome edge,
     // and the slot's spare `GAP_SM` falls on the
     // drag gap's side where nothing is looking at it.

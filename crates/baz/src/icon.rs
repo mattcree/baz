@@ -228,11 +228,59 @@ pub enum Glyph {
     /// notch at the crossing would need an even-odd hole and would be a pixel
     /// wide at [`RASTER_PX`].
     Shuffle,
+    /// Repeat current track: a loop arrow around one upright stroke.
+    RepeatOne,
+    /// Outline heart: the track is not in Favourites.
+    Heart,
+    /// Filled heart: the track is in Favourites.
+    HeartFilled,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
 /// mass of it reads as centred rather than the bounding box doing.
 const PLAY: &[Outline] = &[&[(0.27, 0.13), (0.27, 0.87), (0.83, 0.50)]];
+
+const HEART_FILLED: &[Outline] = &[&[
+    (0.50, 0.88),
+    (0.16, 0.56),
+    (0.10, 0.38),
+    (0.14, 0.22),
+    (0.26, 0.12),
+    (0.40, 0.14),
+    (0.50, 0.26),
+    (0.60, 0.14),
+    (0.74, 0.12),
+    (0.86, 0.22),
+    (0.90, 0.38),
+    (0.84, 0.56),
+]];
+
+const HEART: &[Outline] = &[&[
+    (0.50, 0.88),
+    (0.16, 0.56),
+    (0.10, 0.38),
+    (0.14, 0.22),
+    (0.26, 0.12),
+    (0.40, 0.14),
+    (0.50, 0.26),
+    (0.60, 0.14),
+    (0.74, 0.12),
+    (0.86, 0.22),
+    (0.90, 0.38),
+    (0.84, 0.56),
+    (0.50, 0.76),
+    (0.25, 0.51),
+    (0.21, 0.38),
+    (0.24, 0.27),
+    (0.31, 0.22),
+    (0.39, 0.23),
+    (0.50, 0.38),
+    (0.61, 0.23),
+    (0.69, 0.22),
+    (0.76, 0.27),
+    (0.79, 0.38),
+    (0.75, 0.51),
+]];
 
 /// Pause — two bars, symmetric about the centre.
 const PAUSE: &[Outline] = &[
@@ -1065,6 +1113,14 @@ const SHUFFLE: &[Outline] = &[
     &[(0.55, 0.90), (0.84, 0.76), (0.55, 0.62)],
 ];
 
+const REPEAT_ONE: &[Outline] = &[
+    &[(0.18, 0.22), (0.70, 0.22), (0.70, 0.31), (0.18, 0.31)],
+    &[(0.62, 0.12), (0.88, 0.27), (0.62, 0.42)],
+    &[(0.30, 0.69), (0.82, 0.69), (0.82, 0.78), (0.30, 0.78)],
+    &[(0.38, 0.58), (0.12, 0.73), (0.38, 0.88)],
+    &[(0.46, 0.37), (0.55, 0.37), (0.55, 0.64), (0.46, 0.64)],
+];
+
 /// Plain cover: one square frame, open in the middle.
 const VISUAL_COVER: &[Outline] = &[
     &[(0.16, 0.16), (0.84, 0.16), (0.84, 0.24), (0.16, 0.24)],
@@ -1113,20 +1169,26 @@ const VISUAL_FACTS: &[Outline] = &[
 /// A compact disclosure chevron. The unfilled shape distinguishes place
 /// navigation from transport's filled skip marks at the same 16 px size.
 const HISTORY_FORWARD: &[Outline] = &[&[
-    (0.35, 0.16),
-    (0.45, 0.16),
-    (0.75, 0.50),
-    (0.45, 0.84),
-    (0.35, 0.84),
-    (0.65, 0.50),
+    (0.50, 0.18),
+    (0.82, 0.50),
+    (0.50, 0.82),
+    (0.50, 0.66),
+    (0.66, 0.55),
+    (0.18, 0.55),
+    (0.18, 0.45),
+    (0.66, 0.45),
+    (0.50, 0.34),
 ]];
 const HISTORY_BACK: &[Outline] = &[&[
-    (0.65, 0.16),
-    (0.55, 0.16),
-    (0.25, 0.50),
-    (0.55, 0.84),
-    (0.65, 0.84),
-    (0.35, 0.50),
+    (0.50, 0.18),
+    (0.18, 0.50),
+    (0.50, 0.82),
+    (0.50, 0.66),
+    (0.34, 0.55),
+    (0.82, 0.55),
+    (0.82, 0.45),
+    (0.34, 0.45),
+    (0.50, 0.34),
 ]];
 
 /// Notification bell: a dome, clapper and short base at the shared icon stroke.
@@ -1186,10 +1248,13 @@ impl Glyph {
         Self::HistoryBack,
         Self::HistoryForward,
         Self::Bell,
+        Self::Heart,
+        Self::HeartFilled,
+        Self::RepeatOne,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 36;
+    const COUNT: usize = 39;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1231,6 +1296,9 @@ impl Glyph {
             Self::HistoryBack => HISTORY_BACK,
             Self::HistoryForward => HISTORY_FORWARD,
             Self::Bell => BELL,
+            Self::Heart => HEART,
+            Self::HeartFilled => HEART_FILLED,
+            Self::RepeatOne => REPEAT_ONE,
         }
     }
 
@@ -1273,6 +1341,9 @@ impl Glyph {
             Self::HistoryForward => 33,
             Self::Bell => 34,
             Self::VisualFacts => 35,
+            Self::Heart => 36,
+            Self::HeartFilled => 37,
+            Self::RepeatOne => 38,
         }
     }
 

@@ -301,6 +301,7 @@ fn track_rows<'a>(
                 }),
                 collecting,
                 hovered_row == Some(index),
+                crate::app::is_favourite(shelf, &track.path),
             ));
         }
     }
@@ -562,6 +563,7 @@ fn track_row(
     selected: bool,
     collecting: Collecting,
     hovered: bool,
+    favourite: bool,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
@@ -597,21 +599,20 @@ fn track_row(
     // The row's right press opens its mirror menu (doc 09 §5.2): the same
     // verbs the row's own controls speak, at the pointer.
     let target = crate::menu::Target::Track { album, row: index };
-    if !collecting.available {
-        return crate::menu::selection_area(body, target);
-    }
     let offered = collecting.panel_open || hovered;
+    let mut slots = row![body, page::favourite_slot(&track.path, favourite),]
+        .spacing(theme::GAP_XS)
+        .align_y(iced::Alignment::Center);
+    if collecting.available {
+        slots = slots.push(page::transfer_slot(
+            offered,
+            Message::AddTrackToPlaylist(album, index),
+        ));
+    }
     crate::menu::selection_area(
-        mouse_area(
-            row![
-                body,
-                page::transfer_slot(offered, Message::AddTrackToPlaylist(album, index))
-            ]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center),
-        )
-        .on_enter(Message::AlbumRowEntered(index))
-        .on_exit(Message::AlbumRowLeft(index)),
+        mouse_area(slots)
+            .on_enter(Message::AlbumRowEntered(index))
+            .on_exit(Message::AlbumRowLeft(index)),
         target,
     )
 }

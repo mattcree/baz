@@ -281,8 +281,13 @@ fn art_edge_with_below(width: f32, height: f32, run_w: f32, source: f32, below: 
 pub(crate) struct Visual<'a> {
     pub(crate) rotation: crate::jewel_case::Rotation,
     pub(crate) foreground: crate::visualizer::Foreground,
-    /// Present only while the independently toggled spectrum is visible.
+    pub(crate) mode: crate::visualizer::Mode,
+    /// Present only while the independently selected visualization is visible.
     pub(crate) audio: Option<&'a baz_core::engine::VisualizationFrame>,
+    pub(crate) history: &'a crate::visualizer::History,
+    /// The sounding library file and its durable membership reading. Unknown
+    /// external files carry no inert heart.
+    pub(crate) favourite: Option<(&'a std::path::Path, bool)>,
 }
 
 pub(crate) fn view<'a>(
@@ -325,7 +330,18 @@ pub(crate) fn view<'a>(
     // line where that distinction is useful.
     let show_album = show_album_line(now.album.as_deref(), source.as_ref());
     if !visual.foreground.draws_art() {
-        return without_album_object(now, width, height, source, show_album, visual.audio, fact);
+        return without_album_object(
+            now,
+            width,
+            height,
+            source,
+            show_album,
+            visual.audio,
+            visual.mode,
+            visual.history,
+            visual.favourite,
+            fact,
+        );
     }
     // **The source's own pixels**, which is what bounds the work now that
     // `NOW_PLAYING_MAX` is gone. Resolved only for a foreground that draws it,
@@ -371,7 +387,7 @@ pub(crate) fn view<'a>(
     // layer; with it on the bars fill the whole place beneath the centred
     // composition instead of replacing the artwork.
     let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
-        crate::visualizer::background(audio, width, height)
+        crate::visualizer::background(visual.mode, audio, visual.history, width, height)
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
@@ -380,6 +396,10 @@ pub(crate) fn view<'a>(
 
 /// The spectrum-led composition: identity in one soft calm pocket, with no
 /// album object and therefore no square stage reserved above it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the objectless branch receives the already-resolved visual composition facts"
+)]
 fn without_album_object<'a>(
     now: &'a crate::player::NowPlaying,
     width: f32,
@@ -387,10 +407,19 @@ fn without_album_object<'a>(
     source: Option<Source>,
     show_album: bool,
     audio: Option<&baz_core::engine::VisualizationFrame>,
+    mode: crate::visualizer::Mode,
+    history: &crate::visualizer::History,
+    favourite: Option<(&std::path::Path, bool)>,
     fact: Option<&String>,
 ) -> Element<'a, Message> {
     let (mask_width, identity_width) = objectless_measures(width);
-    let identity = identity(now, show_album, identity_width, fact.map(String::as_str));
+    let identity = identity(
+        now,
+        show_album,
+        identity_width,
+        favourite,
+        fact.map(String::as_str),
+    );
     let calm = placard_mask(identity, mask_width);
     let song = container(calm).center(Length::Fill);
     let body: Element<'a, Message> = match source {
@@ -400,7 +429,7 @@ fn without_album_object<'a>(
         None => song.into(),
     };
     let spectrum: Element<'static, Message> = if let Some(audio) = audio {
-        crate::visualizer::background(audio, width, height)
+        crate::visualizer::background(mode, audio, history, width, height)
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
@@ -741,7 +770,13 @@ fn record_column<'a>(
     let sleeve =
         crate::visualizer::foreground(layout.visual.foreground, layout.edge, cover, jewel_case);
 
-    let placard = identity(now, layout.show_album, layout.edge, layout.fact);
+    let placard = identity(
+        now,
+        layout.show_album,
+        layout.edge,
+        layout.visual.favourite,
+        layout.fact,
+    );
 
     // **No transport here.** The bar is under every place, this one included,
     // and it already carries play/pause and the two skips — so the page drew
@@ -765,9 +800,10 @@ fn identity<'a>(
     now: &'a crate::player::NowPlaying,
     show_album: bool,
     width: f32,
+    favourite: Option<(&std::path::Path, bool)>,
     fact: Option<&str>,
 ) -> Element<'a, Message> {
-    let mut identity = column![placard(now, show_album, width)]
+    let mut identity = column![placard(now, show_album, width, favourite)]
         .width(Length::Fixed(width))
         .align_x(alignment::Horizontal::Center);
     if let Some(fact) = fact {
@@ -796,8 +832,34 @@ fn fact_line(fact: &str, width: f32) -> Element<'static, Message> {
     .into()
 }
 
-fn placard(now: &crate::player::NowPlaying, show_album: bool, width: f32) -> Element<'_, Message> {
+fn placard<'a>(
+    now: &'a crate::player::NowPlaying,
+    show_album: bool,
+    width: f32,
+    favourite: Option<(&std::path::Path, bool)>,
+) -> Element<'a, Message> {
     let room = theme::active();
+    let title = text(now.title.clone())
+        .size(theme::SIZE_HERO)
+        .line_height(theme::LEADING_HERO)
+        .font(theme::SEMIBOLD)
+        .color(room.paper)
+        .wrapping(text::Wrapping::None);
+    let title_line: Element<'_, Message> = if let Some((path, selected)) = favourite {
+        row![
+            container(title).width(Length::Fill).clip(true),
+            crate::views::page::favourite_slot(path, selected),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fixed(width))
+        .into()
+    } else {
+        container(title)
+            .width(Length::Fixed(width))
+            .clip(true)
+            .into()
+    };
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
         // label's own order, at the far field's scale.
@@ -812,12 +874,7 @@ fn placard(now: &crate::player::NowPlaying, show_album: bool, width: f32) -> Ele
         .line_height(theme::LEADING_HEADING)
         .font(theme::MEDIUM)
         .color(room.paper_faint),
-        text(now.title.clone())
-            .size(theme::SIZE_HERO)
-            .line_height(theme::LEADING_HERO)
-            .font(theme::SEMIBOLD)
-            .color(room.paper)
-            .wrapping(text::Wrapping::None),
+        title_line,
     ]
     .spacing(theme::GAP_XS)
     .width(Length::Fixed(width));
@@ -901,6 +958,16 @@ fn source_link(source: Source) -> Element<'static, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sounding_library_track_carries_the_shared_favourite_action() {
+        let source = include_str!("now_playing.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("Now Playing source has a non-test head");
+        assert!(source.contains("crate::views::page::favourite_slot(path, selected)"));
+        assert!(source.contains("favourite: Option<(&'a std::path::Path, bool)>"));
+    }
 
     /// Every window side the sweeps below walk, in the shape `art_edge`'s
     /// original test walks them.

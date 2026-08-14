@@ -17,7 +17,9 @@ use crate::playlists::{PanelRow, PlaylistOrder, Playlists};
 use crate::selection::Content;
 use crate::shelf::Grid;
 use crate::theme;
-use crate::views::{arrangement_key, place_header_led, place_pad, playlist_sleeve};
+use crate::views::{
+    arrangement_key, place_header_led, place_name, place_pad, playlist_sleeve, section_rule,
+};
 use crate::vm::GroupHeaderVm;
 
 /// Draw every saved playlist in the shelf's shared work grid.
@@ -29,7 +31,7 @@ pub(crate) fn view<'a>(
     scroll_offset: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let count = playlists.rows.len();
+    let count = playlists.rows.len() + 1;
     let note = if let Some(id) = playlists.confirming_overview_delete {
         playlists.rows.iter().find(|row| row.id == id).map_or_else(
             || format!("{count} playlists"),
@@ -49,21 +51,20 @@ pub(crate) fn view<'a>(
             Message::PlaylistOrderSelected(choice),
         ));
     }
-    let header = place_header_led(order.into(), Some(note));
-    if playlists.rows.is_empty() {
-        return column![
-            header,
-            container(
-                text("No playlists yet.")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-            )
-            .center(Length::Fill)
-        ]
-        .into();
-    }
-
+    let create = button(
+        text("New playlist")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM),
+    )
+    .on_press(Message::NewPlaylistOpen)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status));
+    let lead = row![place_name("Playlists"), order, create]
+        .spacing(theme::GAP_MD)
+        .align_y(iced::Alignment::Center);
+    let header = place_header_led(lead.into(), Some(note));
     let ordered = playlists.ordered_rows();
     let total_rows = hang.rows(ordered.len());
     let (first, end) = hang.visible_rows(scroll_offset, shelf.grid_size.height, total_rows);
@@ -90,7 +91,9 @@ pub(crate) fn view<'a>(
     }
     tiles = tiles.push(Space::new().height(Length::Fixed(hang.spacer_height(total_rows - end))));
 
-    let body = tiles.width(Length::Fixed(hang.block_width()));
+    let body = column![section_rule("All playlists"), tiles]
+        .spacing(theme::GAP_MD)
+        .width(Length::Fixed(hang.block_width()));
     let wall: Element<'a, Message> = column![
         header,
         scrollable(
@@ -239,11 +242,13 @@ fn tile<'a>(
                 "Open",
                 Message::OpenPlaylist(playlist.id),
             ));
-            options.push(crate::views::shelf::VeilOption::new(
-                crate::icon::Glyph::Close,
-                "Delete",
-                Message::PlaylistOverviewDeleteStart(playlist.id),
-            ));
+            if playlist.id != crate::playlists::FAVOURITES_ID {
+                options.push(crate::views::shelf::VeilOption::new(
+                    crate::icon::Glyph::Close,
+                    "Delete",
+                    Message::PlaylistOverviewDeleteStart(playlist.id),
+                ));
+            }
         }
         stack![art, crate::views::shelf::veil(work, options)].into()
     } else {

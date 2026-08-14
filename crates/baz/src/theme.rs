@@ -2232,9 +2232,9 @@ pub fn app_bar_pad() -> Padding {
 }
 
 /// The app bar's reserved slot for the **display options** (logical px) — the
-/// widest tenant is the wall's four [`STEPPER_HIT`] density detents, **96**.
-/// Now Playing right-aligns its three foreground choices and spectrum toggle
-/// in the same four-detent slot.
+/// widest tenant is Now Playing's three foreground choices, visualizer choice
+/// and fact-feed toggle: five [`STEPPER_HIT`] marks, **120**. The wall's four
+/// density detents right-align inside the same stable slot.
 ///
 /// Reserved at every width and in **every place**, including the five that
 /// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism
@@ -2242,9 +2242,9 @@ pub fn app_bar_pad() -> Padding {
 /// ADR-0028's *absent, not disabled*: the marks are absent where they would be
 /// inert, and the **slot** they leave is not, so the gear and the window
 /// buttons stand on the same two vertical lines in all eight places. A bar
-/// whose right cluster slid 96 px as you navigated would be the frame moving,
+/// whose right cluster slid 120 px as you navigated would be the frame moving,
 /// which is the one thing the frame may not do.
-pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
+pub const APP_BAR_MARKS_W: f32 = 5.0 * STEPPER_HIT;
 
 /// The app bar's reserved slot for the **application's mark** (logical px) —
 /// [`ICON_PX`] 16 + [`GAP_SM`] 8 = **24**.
@@ -2269,7 +2269,7 @@ pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
 /// Larger application mark in the resident chrome. It remains a statement,
 /// not a control, and uses the committed 64 px raster at a crisp 24 logical px.
 pub const APP_MARK_PX: f32 = ICON_PX + GAP_SM;
-pub const APP_BAR_NAME_W: f32 = APP_MARK_PX + GAP_SM;
+pub const APP_BAR_NAME_W: f32 = APP_MARK_PX + GAP_MD;
 
 /// The app bar's reserved slot for the **window controls** (logical px) —
 /// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **104**.
@@ -4128,8 +4128,8 @@ pub const VEIL_ROW_WASH: [(f32, f32); 3] = [(0.00, 0.10), (0.40, 0.06), (0.75, 0
 /// is already `0.92` of the recess, so the ground under the wash is the room's
 /// own, known here, whatever sleeve is behind it.
 #[must_use]
-pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
-    let lit = matches!(status, button::Status::Hovered | button::Status::Pressed);
+pub fn veil_row(p: &Palette, status: button::Status, selected: bool) -> button::Style {
+    let lit = selected || matches!(status, button::Status::Hovered | button::Status::Pressed);
     let background = lit.then(|| {
         let gradient = VEIL_ROW_WASH.iter().fold(
             iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2)),
@@ -4144,8 +4144,12 @@ pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
         background,
         text_color: p.paper,
         border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
+            color: if lit {
+                p.paper_faint
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if lit { 1.0 } else { 0.0 },
             radius: 0.0.into(),
         },
         shadow: Shadow::default(),
@@ -6247,7 +6251,7 @@ mod tests {
                 button_colors(&word_button(p, p.wall, status)),
             ));
             painted.push(("primary", button_colors(&primary(p, status))));
-            painted.push(("veil_row", button_colors(&veil_row(p, status))));
+            painted.push(("veil_row", button_colors(&veil_row(p, status, false))));
         }
         for status in slider_states {
             painted.push(("needle", slider_colors(&needle(p, status))));
@@ -7774,9 +7778,9 @@ mod tests {
             + APP_BAR_BUTTONS_W
             + APP_BAR_HANG_R;
 
-        const { assert!(APP_BAR_MARKS_W == 96.0) }
+        const { assert!(APP_BAR_MARKS_W == 120.0) }
         const { assert!(APP_BAR_BUTTONS_W == 104.0) }
-        const { assert!(LINE == 600.0) }
+        const { assert!(LINE == 628.0) }
         const { assert!(LINE <= FLOOR) }
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
@@ -7784,13 +7788,13 @@ mod tests {
         //
         // The app-bar amendment spends 248 px of the old 304 px slack on the
         // 232 px well and its 16 px seam, leaving 56 px at the minimum window.
-        const { assert!(FLOOR - LINE == 96.0) }
+        const { assert!(FLOOR - LINE == 68.0) }
         const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 
         // **The display options' slot is held in every place**, which is what
         // makes one bar the same bar everywhere (ADR-0040 §5): the distance
         // from the gear to the marks contains no term that can be zero, so the
-        // right cluster does not slide 96 px as you navigate.
+        // right cluster does not slide 120 px as you navigate.
         //
         // The window buttons' slot is **not** held, and the two are different
         // on purpose. The marks come and go *within a run* as you move between
@@ -7899,8 +7903,10 @@ mod tests {
         const { assert!(APP_BAR_HANG_R == 8.0) }
         const { assert!(APP_BAR_HANG_R >= crate::window_frame::RESIZE_BAND) }
         // The mark's slot leaves it hanging from the leading gutter with one
-        // `GAP_SM` before the drag gap, so zone 1's ink starts on `HANG` too.
-        const { assert!(APP_BAR_NAME_W - APP_MARK_PX == GAP_SM) }
+        // `GAP_MD` positions its optical centre on the lane's immutable icon
+        // axis and leaves the remaining separation toward the drag gap.
+        const { assert!(APP_BAR_NAME_W - APP_MARK_PX == GAP_MD) }
+        const { assert!(APP_BAR_EDGE + GAP_MD + APP_MARK_PX / 2.0 == GAP_XL + GAP_SM + ICON_PX / 2.0) }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

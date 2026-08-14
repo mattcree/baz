@@ -99,8 +99,8 @@
 
 use iced::widget::scrollable::Viewport;
 use iced::widget::{
-    Column, Row, Space, button, column, container, image as iced_image, mouse_area, rich_text, row,
-    scrollable, span, text, text_input, tooltip,
+    Column, Row, Space, button, column, container, image as iced_image, mouse_area, row,
+    scrollable, text, text_input, tooltip,
 };
 use iced::{Element, Font, Length, alignment, mouse};
 
@@ -673,7 +673,11 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
                 .height(Length::Fixed(theme::PANEL_SLEEVE)),
         );
     }
-    contents = contents.push(container(stack).width(Length::Fill));
+    // `Fill` constrains layout but not painting. No-wrap title text and the
+    // independently clickable metadata children can have a larger intrinsic
+    // width, so clip the flexible lane before the fixed Album column and
+    // trailing controls.
+    contents = contents.push(container(stack).width(Length::Fill).clip(true));
     if let Some(context) = table_context {
         contents = contents.push(
             container(context)
@@ -719,21 +723,22 @@ fn metadata_label(
 ) -> Element<'_, Message> {
     let room = theme::active();
     if let Some(message) = press {
-        // The draggable-row wrapper owns the initial press. A release-only
-        // child target lets it distinguish this named route from the row's
-        // ordinary click without sacrificing drag initiation. Rich text
-        // underlines a linked span exactly while the pointer is over it, so
-        // the affordance appears only on the words that own the route.
-        let linked_label: iced::widget::text::Rich<'_, Message, Message> =
-            rich_text([span(label).link(message.clone())])
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None);
-        mouse_area(linked_label)
-            .on_release(message)
-            .interaction(mouse::Interaction::Pointer)
-            .into()
+        // A real button supplies keyboard focus/activation as well as the
+        // pointer cursor. Outside its exact bounds the surrounding row keeps
+        // its own selection/play grammar.
+        let linked_label = text(label)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None);
+        mouse_area(
+            button(linked_label)
+                .padding(0)
+                .style(move |_theme, status| theme::word_button(room, room.wall, status))
+                .on_press(message),
+        )
+        .interaction(mouse::Interaction::Pointer)
+        .into()
     } else {
         text(label)
             .size(theme::SIZE_META)
@@ -817,6 +822,27 @@ pub(crate) fn transfer_slot(offered: bool, message: Message) -> Element<'static,
     )
 }
 
+/// The one shared Favourites action. It is always present in the row's
+/// reserved trailing lane; changing membership changes ink, never geometry,
+/// selection or playback.
+pub(crate) fn favourite_slot(path: &std::path::Path, favourite: bool) -> Element<'static, Message> {
+    icon_slot(
+        if favourite {
+            icon::Glyph::HeartFilled
+        } else {
+            icon::Glyph::Heart
+        },
+        if favourite {
+            "Remove from Favourites"
+        } else {
+            "Add to Favourites"
+        },
+        true,
+        true,
+        Message::ToggleFavourite(path.to_path_buf()),
+    )
+}
+
 /// The playing row's lamp dot — the same amber circle, and the same token, the
 /// wall puts beside the playing record and the run column beside its row.
 pub(crate) fn lamp_dot() -> Element<'static, Message> {
@@ -834,6 +860,18 @@ pub(crate) fn lamp_dot() -> Element<'static, Message> {
 mod tests {
     use super::{is_playlist_two_column, is_two_column};
     use crate::theme;
+
+    #[test]
+    fn the_flexible_track_identity_is_clipped_before_fixed_columns() {
+        let source = include_str!("page.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("page source has a non-test head");
+        assert!(
+            source.contains("container(stack).width(Length::Fill).clip(true)"),
+            "long title and metadata ink can escape into the Album column"
+        );
+    }
 
     /// Both view sources, **code only** — no test module and no comment lines.
     ///

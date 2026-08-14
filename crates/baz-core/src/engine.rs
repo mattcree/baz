@@ -1303,6 +1303,10 @@ pub fn spawn_device_with(
 // Engine (control + pump) thread
 // ---------------------------------------------------------------------------
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "paused, repeat, resume and sink capability are independent engine properties"
+)]
 struct Control<S: Sink> {
     commands: Receiver<Command>,
     events: Sender<Event>,
@@ -1324,6 +1328,9 @@ struct Control<S: Sink> {
     /// engine state, not session state, so it survives every transport command
     /// exactly as the volume does.
     traversal: Traversal,
+    /// Whether natural completion restarts the current queue entry. Kept
+    /// separate from traversal because it overrides only one boundary.
+    repeat_one: bool,
     /// [`Self::traversal`] resolved against the queue's length: the queue
     /// positions to visit, in the order to visit them.
     ///
@@ -1496,6 +1503,7 @@ impl<S: Sink> Control<S> {
             instruments,
             queue: Vec::new(),
             traversal: Traversal::default(),
+            repeat_one: false,
             order: Vec::new(),
             position: 0,
             edited_index: None,
@@ -1759,6 +1767,11 @@ impl<S: Sink> Control<S> {
             }
             self.report_session(true);
             let resume_at = self.session.as_ref().and_then(Session::rate_change_at);
+            let repeat_at = (self.repeat_one
+                && resume_at.is_none()
+                && self.session.as_ref().is_some_and(Session::started))
+            .then(|| self.playing_index())
+            .flatten();
             // The last of this session's audio has been delivered; count it
             // before the session it is counted from goes away (ADR-0018).
             self.bank_listening();
@@ -1766,6 +1779,14 @@ impl<S: Sink> Control<S> {
             self.close_play();
             if let Some(next) = resume_at {
                 self.continue_at_new_rate(next);
+                return;
+            }
+            if let Some(current) = repeat_at {
+                // Natural completion is owed its buffered tail. Restart only
+                // after that tail drains; explicit navigation uses
+                // `abandon_for_move` and remains immediate.
+                self.sink.drain_buffered();
+                self.start_session(current, 0, None);
                 return;
             }
             let _ = self.events.send(Event::QueueEnded);
@@ -1876,7 +1897,21 @@ impl<S: Sink> Control<S> {
                 }
             }
             Command::SetTraversal { traversal } => self.set_traversal(traversal),
+            Command::SetRepeatOne { enabled } => self.set_repeat_one(enabled),
         }
+    }
+
+    fn set_repeat_one(&mut self, enabled: bool) {
+        if self.repeat_one == enabled {
+            return;
+        }
+        self.repeat_one = enabled;
+        // Reconsider the successor at the current track boundary. The
+        // sounding track is not interrupted and no decoded sample is lost.
+        if let Some(session) = &mut self.session {
+            session.cut_after_current();
+        }
+        let _ = self.events.send(Event::RepeatOneChanged { enabled });
     }
 
     /// Re-derive [`Self::order`] from the traversal and the queue's length.
@@ -2336,9 +2371,16 @@ impl<S: Sink> Control<S> {
     /// to hear. That is also why this is not [`Self::jump_to`] — the two look
     /// alike and differ on exactly the question of whose audio is still owed.
     fn hand_over_after_edit(&mut self) {
-        let next = self
-            .playing_index()
-            .map_or_else(|| self.top(), |current| self.successor(current));
+        let next = self.playing_index().map_or_else(
+            || self.top(),
+            |current| {
+                if self.repeat_one {
+                    current
+                } else {
+                    self.successor(current)
+                }
+            },
+        );
         // The track this session was told to finish has been delivered in
         // full — count it before the session goes away (ADR-0018).
         self.bank_listening();
@@ -2573,7 +2615,12 @@ impl<S: Sink> Control<S> {
             let _ = self.events.send(Event::QueueEnded);
             return;
         };
-        let plan: Arc<[usize]> = self.order[slot..].into();
+        let end = if self.repeat_one {
+            slot + 1
+        } else {
+            self.order.len()
+        };
+        let plan: Arc<[usize]> = self.order[slot..end].into();
         let itinerary: Arc<[PathBuf]> = plan.iter().map(|&at| self.queue[at].clone()).collect();
         self.session = Some(Session::start(
             itinerary,

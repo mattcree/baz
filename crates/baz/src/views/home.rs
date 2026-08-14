@@ -152,8 +152,7 @@ pub(crate) fn view<'a>(
 
     let continuing = continue_band(shelf, player, resume, width);
     let everything = all_songs_tile(shelf, player, hang);
-    let request = cfg!(feature = "vibe-analysis")
-        .then(|| vibe_playlist(shelf, player, collecting.available, width));
+    let request = cfg!(feature = "vibe-analysis").then(|| vibe_shortcut(collecting.available));
     let added = recently_added(shelf, player, hang, collecting);
     let counted = collection(shelf);
     let nothing = continuing.is_none()
@@ -208,11 +207,12 @@ pub(crate) fn view<'a>(
     clippy::too_many_lines,
     reason = "the Home request composer keeps every visible request/result state together"
 )]
-fn vibe_playlist<'a>(
+pub(crate) fn vibe_creator<'a>(
     shelf: &'a Shelf,
     _player: &'a PlayerState,
     available: bool,
     width: f32,
+    save_enabled: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let state = &shelf.vibe;
@@ -276,23 +276,42 @@ fn vibe_playlist<'a>(
     let can_create = !state.preparing
         && !state.prompt.trim().is_empty()
         && (!state.analyzing || state.has_features());
-    composer = composer.push(prompt).push(
-        row![
-            column![
-                text("LENGTH")
-                    .size(theme::SIZE_CAPTION)
-                    .line_height(theme::LEADING_CAPTION)
-                    .font(theme::MEDIUM)
-                    .color(room.paper_faint),
-                length
+    composer = composer
+        .push(prompt)
+        .push(
+            row![
+                word_button(
+                    "Late-night focus",
+                    Message::PlaylistCreationExample("Late-night focus"),
+                ),
+                word_button(
+                    "Warm Sunday morning",
+                    Message::PlaylistCreationExample("Warm Sunday morning"),
+                ),
+                word_button(
+                    "Restless then calm",
+                    Message::PlaylistCreationExample("Restless then calm"),
+                ),
             ]
-            .spacing(theme::GAP_XS),
-            Space::new().width(Length::Fill),
-            word_button_maybe("Create mix", can_create.then_some(Message::VibeCreate))
-        ]
-        .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::End),
-    );
+            .spacing(theme::GAP_SM),
+        )
+        .push(
+            row![
+                column![
+                    text("LENGTH")
+                        .size(theme::SIZE_CAPTION)
+                        .line_height(theme::LEADING_CAPTION)
+                        .font(theme::MEDIUM)
+                        .color(room.paper_faint),
+                    length
+                ]
+                .spacing(theme::GAP_XS),
+                Space::new().width(Length::Fill),
+                word_button_maybe("Create mix", can_create.then_some(Message::VibeCreate))
+            ]
+            .spacing(theme::GAP_MD)
+            .align_y(iced::Alignment::End),
+        );
 
     if state.open && !state.has_features() && !state.preparing && !state.analyzing {
         composer = composer
@@ -428,6 +447,10 @@ fn vibe_playlist<'a>(
             composer = composer.push(
                 row![
                     track,
+                    crate::views::page::favourite_slot(
+                        &item.path,
+                        crate::app::is_favourite(shelf, &item.path),
+                    ),
                     crate::views::page::icon_slot(
                         crate::icon::Glyph::ArrowUp,
                         "Move up",
@@ -458,7 +481,10 @@ fn vibe_playlist<'a>(
         composer = composer.push(
             row![
                 word_button_maybe("Play", can_act.then_some(Message::VibePlay)),
-                word_button_maybe("Save playlist", can_act.then_some(Message::VibeSubmit)),
+                word_button_maybe(
+                    "Save playlist",
+                    (can_act && save_enabled).then_some(Message::VibeSubmit),
+                ),
                 word_button_maybe(
                     "Another version",
                     (!state.request_changed()).then_some(Message::VibeAnother),
@@ -478,6 +504,24 @@ fn vibe_playlist<'a>(
         composer = composer.push(word_button("Refresh local analysis", Message::VibeAnalyze));
     }
     composer.spacing(theme::GAP_SM).width(Length::Fill).into()
+}
+
+/// Home keeps discovery, while the composer itself belongs to New playlist.
+fn vibe_shortcut<'a>(available: bool) -> Element<'a, Message> {
+    let room = theme::active();
+    column![
+        section_rule("Make a playlist"),
+        text("Describe a journey and Baz will shape it from music on this device.")
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .color(room.paper),
+        word_button_maybe(
+            "Make a vibe playlist",
+            available.then_some(Message::NewPlaylistOpenVibe),
+        )
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
 }
 
 fn word_button<'a>(label: &str, message: Message) -> iced::widget::Button<'a, Message> {
@@ -1130,10 +1174,10 @@ mod tests {
     }
 
     #[test]
-    fn make_a_mix_is_a_composer_not_an_analysis_launcher() {
+    fn new_playlist_owns_the_composer_and_home_keeps_only_its_shortcut() {
         let source = include_str!("home.rs");
         let body = source
-            .split("fn vibe_playlist")
+            .split("fn vibe_creator")
             .nth(1)
             .expect("composer")
             .split("fn word_button")
@@ -1152,6 +1196,15 @@ mod tests {
         }
         assert!(!body.contains("Make a sonic playlist"));
         assert!(!body.contains("Use sounding track as anchor"));
+        let home = source
+            .split("fn vibe_shortcut")
+            .nth(1)
+            .expect("Home shortcut")
+            .split("fn word_button")
+            .next()
+            .expect("shortcut body");
+        assert!(home.contains("Make a vibe playlist"));
+        assert!(!home.contains("VibePrompt"));
     }
 
     /// **The band stands on the interrupted run until something sounds**, and

@@ -128,6 +128,7 @@ pub(crate) struct AnalysisResult {
 pub(crate) struct State {
     pub(crate) open: bool,
     pub(crate) prompt: String,
+    journey: String,
     pub(crate) length: MixLength,
     pub(crate) awaiting_create: bool,
     pub(crate) preparing: bool,
@@ -151,6 +152,7 @@ impl Default for State {
         Self {
             open: false,
             prompt: String::new(),
+            journey: String::new(),
             length: MixLength::Hour,
             awaiting_create: false,
             preparing: false,
@@ -271,6 +273,18 @@ impl State {
         self.prompt = prompt.chars().take(240).collect();
     }
 
+    pub(crate) fn set_journey(&mut self, journey: String) {
+        self.journey = journey;
+    }
+
+    fn effective_request(&self) -> String {
+        if self.journey.is_empty() {
+            self.prompt.trim().to_owned()
+        } else {
+            format!("{}; {}", self.prompt.trim(), self.journey)
+        }
+    }
+
     pub(crate) fn set_length(&mut self, length: MixLength) {
         self.length = length;
     }
@@ -286,8 +300,9 @@ impl State {
         #[cfg(not(feature = "vibe-analysis"))]
         let _ = index;
         let recently_offered = self.recently_offered.iter().cloned().collect();
+        let request = self.effective_request();
         let generated = generate(
-            &self.prompt,
+            &request,
             self.length,
             self.variation,
             &recently_offered,
@@ -370,7 +385,8 @@ impl State {
 
     pub(crate) fn request_changed(&self) -> bool {
         self.preview.as_ref().is_some_and(|preview| {
-            preview.request != self.prompt.trim() || preview.target_minutes != self.length.minutes()
+            preview.request != self.effective_request()
+                || preview.target_minutes != self.length.minutes()
         })
     }
 
