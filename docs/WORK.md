@@ -436,13 +436,97 @@ Phase A is complete only when all twelve items are implemented and verified;
     VU, particles and fake vinyl remain excluded. Evidence:
     `docs/design/impl/now-playing-visualizers/`.
 
+### Phase F — a stated memory budget for artwork, and honest queue semantics
+
+37. **State a memory budget for decoded artwork and repair the thumbnail
+    scheduler's replace semantics.** Recorded 2026-08-14 from the owner's
+    clarification that the tiered art machinery was introduced to keep RAM
+    usage down — with **no sensible limit ever specified** — and from the
+    headless audit that reproduced his *"images do not load until an
+    interaction"* symptom. The published budgets (60.0 / 124.3 / 153.5 MiB
+    CPU RGBA at Dense/Balanced/Spacious on his 393-album index) are
+    **measurements** of the current shape, not a budget that shape was chosen
+    to meet. The audit's concrete defect: `App::request_target_thumbs`
+    (`app.rs:9467`) hands `ThumbJobs::focus` (`app.rs:7338`) only a *delta* —
+    ids that are neither cached, queued, nor in flight — while `focus` drains
+    the whole foreground queue and re-adds only its argument. iced reliably
+    emits `Scrolled` (and `WindowResized` on resize) once the scrollable
+    measures real bounds after the first layout, so at cold start the visible
+    batch queued by the scan drain is **discarded before the two-worker
+    trickle can consume it**; only the ≤2 in-flight decodes survive, and the
+    wall idles with gradients until a scroll re-queues the dropped ids. Fix:
+    feed `focus` the complete current target snapshot — drop only the
+    `thumb_jobs.contains(id)` exclusion (keep `touch` and `no_art`), since
+    `focus` already skips in-flight ids and `queued.insert` is idempotent —
+    and in the same change specify the memory budget and derive the LRU depth,
+    densities and retention from it rather than the reverse. Evidence:
+    headless `BAZ_MSG_LOG`/`BAZ_PERF_LOG` run — second 1 shows `Scrolled 2 ·
+    ThumbLoaded 2` then silence; `BAZ_PERF_LOG` stops at `queued=0 in-flight=0
+    completed=2`; six frames over 12 s are pixel-identical (`AE=0`); the first
+    wheel-click re-queues and decodes 3→8.
+
 ## Doing
 
-- Nothing active — ordered items 31–36 are complete.
+- Nothing active — items 1–36 are complete; item 37 is recorded in
+  `## Next` and ready to start.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
+- **State a real memory budget for decoded artwork and repair the thumbnail
+  scheduler's replace semantics.** Recorded 2026-08-14. The owner's words: the
+  tiered art machinery — the resident wall/page/chrome union, the 64-entry
+  speculative LRU, the two-worker `ThumbJobs` queue and the density-aware decode
+  edge — *"was introduced to try to keep RAM usage down but we never specified a
+  sensible limit."* Every published figure (60.0 / 124.3 / 153.5 MiB CPU RGBA
+  at Dense/Balanced/Spacious on his 393-album index) is a **measurement of the
+  resulting shape**, not a budget the shape was designed to meet. Item 37 must
+  therefore do two things in one coherent change.
+  1. **State the budget.** A chosen product limit (e.g. decoded RGBA resident +
+     speculative bytes, proportional to the visible wall with a hard cap) from
+     which the LRU depth, density decode edges and retention policy are
+     **derived**, with the derivation asserted in `theme.rs` or the art module
+     as existing measurements are. The owner's 393-album collection at full
+     Dense retention measures 60.0 MiB; the budget line should be an explicit
+     decision the owner can see, not an emergent property of `lru 0.18.2`'s
+     capacity constant.
+  2. **Repair the scheduler's replace semantics.** `App::request_target_thumbs`
+     (`app.rs:9467`) collects `wanted` as ids that are *neither* cached
+     (`touch`) *nor* queued/in flight (`thumb_jobs.contains`) *nor* known
+     artless (`no_art`), then hands that delta to `ThumbJobs::focus`
+     (`app.rs:7338`), which **drains the entire foreground queue and re-adds
+     only its argument**. So every re-aim that runs while jobs are merely
+     queued discards them. That is exactly what iced does at cold start: once
+     the scrollable measures its real bounds it emits `Scrolled` (and
+     `WindowResized` when a resize lands), each handler recomputes the visible
+     range, and the last one flushes the freshly-queued batch before the
+     two-worker trickle can consume it. Only the ≤2 already-in-flight decodes
+     finish; the wall idles with gradients until an interaction re-aims a range
+     that now includes ids that were dropped, at which point they are queued
+     again and decode. **The fix** is to feed `focus` the complete current
+     target snapshot rather than the delta: remove only the
+     `thumb_jobs.contains(id)` exclusion in `request_target_thumbs` (keep
+     `touch` and `no_art`), because `focus` already skips in-flight ids and
+     `queued.insert` is idempotent — drain-then-re-add then preserves queued
+     work. `request_thumbs` (page) and `request_thumbs_for` (chrome) flow
+     through the same function and receive the same repair; the
+     `last_requested` range guard stays as the dedupe for identical re-aims.
+     The density retry that prepends one id must not regress to replacing the
+     queue — item 30's shipped contract.
+  **Evidence of the defect** (headless, no interaction, 1280×860, Balanced,
+  fresh 25-album fixture, `BAZ_MSG_LOG=1 BAZ_PERF_LOG=1`): second 1 carries
+  `FirstFrame 2 · Scrolled 2 · ThumbLoaded 2 · ScanTick 1 · …` and then **zero
+  messages for 8+ seconds**; `[art] thumb … cache=2 resident=2 … queued=0
+  in-flight=0 completed=2 peak=2` and nothing further; six screenshots at
+  2…12 s are pixel-identical (`AE=0`) with bright cover pixels constant at
+  1625; the first wheel-click re-aims the dropped ids and decodes rise to 8
+  with the covers appearing. The reproduction method is fully scriptable; keep
+  the harness in the implementation record `docs/design/impl/art-memory-budget/`.
+  **Acceptance:** a cold start on a fresh library decodes the whole visible
+  wall without any interaction within the time the existing concurrency bounds
+  imply; a warm resize emits no gradient flash; the 810-cover transition
+  regression still holds; and the budget is a stated, asserted, documented
+  number rather than a measured coincidence.
 - **Done 2026-08-14 — Keep thumbnails present while scrolling away and back.** Recorded
   2026-08-14 after the owner reported that thumbnails still unload themselves
   while moving around the collection and queued as item 30. Item 20's cache split
@@ -627,6 +711,25 @@ This section preserves the evidence and acceptance detail behind `## Next`,
 plus lower-priority and truly owner-blocked work. It is **not execution order**
 and a brief repeated in `## Next` is ready—not waiting for the owner. Search by
 its bold title from the numbered item above.
+
+- **Show the app's own RAM and CPU usage in Settings → Debug.** Recorded from
+  the owner 2026-08-14, who asked it be **backlogged** as a resource-usage
+  feature: show how much RAM/CPU baz is using, in the debug menu. The natural
+  home is the Debug section item 23 built, which already carries the bounded
+  256-line session log and is unambiguously a developer surface. What "how much
+  RAM/CPU" means needs the two readings kept apart: **memory** is the process's
+  resident set size (and, where cheap and honest, the decoded-art share — the
+  very number item 37's budget decision is about), and **CPU** is a sampled
+  figure (e.g. process CPU time over a wall-clock interval) rather than a raw
+  instantaneous percentage that cannot be trusted. Both should be sampled only
+  while the Debug place is visible and should read like measurements, not
+  listener-facing health facts; there is no room for a live plot or a
+  continuously ticking redraw. *Needs later: priority; whether the readings
+  join the bounded ring on each fresh draw or render from the process itself;
+  the per-platform source of truth (Linux `/proc/self/status` `VmRSS` and
+  `/proc/self/stat`; Windows and macOS equivalents) with a Linux-first test;
+  and a deterministic way to assert the readout renders real values.* Cross-
+  referenced from BACKLOG.md's asks table.
 
 - **Wheel over volume adjusts volume and consumes the scroll.** Recorded from
   the owner's 2026-08-12 live review. Give the interactive volume block
