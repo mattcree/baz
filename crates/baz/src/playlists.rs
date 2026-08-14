@@ -214,9 +214,9 @@ impl PanelRow {
     /// 14 §3.1's finding.
     ///
     /// **No new widget and no geometry change**: the same `SIZE_META` text at
-    /// the same leading, a different string. At the lane's 176 px of measure
-    /// (`SIDEBAR_MEASURE` 232 − `SIDEBAR_SLEEVE` 48 − `GAP_SM` 8) the longest
-    /// form this can take is well inside the measure.
+    /// the same leading, a different string. At the lane's 146 px of measure
+    /// ([`crate::theme::SIDEBAR_ROW_TEXT_W`]) the longest form this can take is well
+    /// inside the measure — measured with the real face in the row test.
     #[must_use]
     pub(crate) fn counts(&self) -> String {
         match self.seconds {
@@ -1885,31 +1885,28 @@ mod tests {
         }
 
         // **And it costs no geometry.** The tightest surface the string
-        // reaches is the lane's row: SIDEBAR_MEASURE 232 − SIDEBAR_SLEEVE 48
-        // − GAP_SM 8 = 176 px, set at SIZE_META 12 with `Wrapping::None`
-        // inside a container that clips. At a conservative 0.62 em per
-        // character the ordinary form is inside that measure with room, which
-        // is what the rule was costed at (design 14 §5.3).
+        // reaches is the lane's row: its text lane is
+        // [`theme::SIDEBAR_ROW_TEXT_W`] 146 px (232 − the rail's two pads and
+        // sleeve, both seams and the lamp slot), set at SIZE_META 12 with
+        // `Wrapping::None` inside a container that clips. Measured with the
+        // real bundled face — the same `font::ttf` reader `font.rs`'s own
+        // slot tests use — the ordinary form sets in with room, which is what
+        // the rule was costed at (design 14 §5.3).
         //
-        // A list of four or five figures would run past 176 and be **clipped**
+        // A list of four or five figures would run past 146 and be **clipped**
         // — never reflowed, never taller, never pushing a row down: the
         // container's `clip(true)` and the row's fixed SIDEBAR_ROW_H see to
         // that, and it is the same truncation a long artist name has always
         // taken in the same slot. So the claim under test is *the ordinary
         // line fits*, and the guarantee under every line is *the row does not
         // move*.
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "a character count that cannot approach f32's mantissa"
-        )]
-        let sets_in = |line: &str| line.chars().count() as f32 * 0.62 * crate::theme::SIZE_META;
-        let measure =
-            crate::theme::SIDEBAR_MEASURE - crate::theme::SIDEBAR_SLEEVE - crate::theme::GAP_SM;
+        let sans = crate::font::tests::ttf::Face::parse(crate::font::SANS_REGULAR);
+        let measure = crate::theme::SIDEBAR_ROW_TEXT_W;
         for line in [timed.counts(), untimed.counts()] {
+            let width = sans.width(&line, crate::theme::SIZE_META);
             assert!(
-                sets_in(&line) < measure,
-                "`{line}` sets in {} px against the lane's {measure}",
-                sets_in(&line)
+                width < measure,
+                "`{line}` sets in {width} px against the lane's {measure}"
             );
         }
     }

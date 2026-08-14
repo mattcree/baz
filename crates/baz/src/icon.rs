@@ -68,7 +68,7 @@ use crate::player::PlayPause;
 use crate::theme;
 
 /// Sub-samples per pixel *per axis* when rasterizing coverage. Eight gives
-/// 64 coverage levels per pixel — smooth enough for a 16 px glyph's
+/// 64 coverage levels per pixel — smooth enough for a 20 px glyph's
 /// diagonals, and the whole sheet is a few hundred thousand point tests
 /// computed exactly once.
 pub const SAMPLES: u32 = 8;
@@ -80,7 +80,7 @@ pub const SUPERSCALE: u32 = 2;
 /// [`theme::ICON_PX`] as a whole number of pixels. Spelled separately
 /// because a float-to-integer cast is not something to do in a `const`; the
 /// tests pin it to the token it stands for.
-const ICON_WHOLE_PX: u32 = 16;
+const ICON_WHOLE_PX: u32 = 20;
 
 /// Edge of every glyph sprite, in raster pixels.
 pub const RASTER_PX: u32 = ICON_WHOLE_PX * SUPERSCALE;
@@ -199,7 +199,7 @@ pub enum Glyph {
     /// A ring rather than a disc: a filled circle at this size is a dot, and
     /// the one dot in the product means the lamp. Drawn as a single outline
     /// that traces the rim and then the label the other way round, so
-    /// [`encloses`]'s even-odd rule punches the hole — [`Glyph::covers`] takes
+    /// [`ray_crosses`]'s even-odd rule punches the hole — [`rasterize`] takes
     /// the *union* of outlines, so a second circle could not.
     NowPlaying,
     /// The lane, expanded: a frame with a wide left band. One of the two marks
@@ -223,7 +223,7 @@ pub enum Glyph {
     /// honest and it is taken.
     ///
     /// Drawn as four outlines — two shafts, two heads — because the union rule
-    /// in [`Self::covers`] fills the crossing solid, which is what the symbol
+    /// in [`rasterize`] fills the crossing solid, which is what the symbol
     /// wants: the two paths *meet*, they do not pass behind one another. A
     /// notch at the crossing would need an even-odd hole and would be a pixel
     /// wide at [`RASTER_PX`].
@@ -325,7 +325,7 @@ const CONE: Outline = &[
 ///
 /// The waves are chevrons rather than arcs, and that is a rasterizer
 /// decision rather than a stylistic one: an arc would have to be a polygon
-/// approximating it, and at [`RASTER_PX`] (32 px) the difference between a
+/// approximating it, and at [`RASTER_PX`] (40 px) the difference between a
 /// seven-segment arc and a straight chevron is under a pixel of coverage.
 /// Two hand-written hexagons say the same thing with no interpolation table.
 const SPEAKER: &[Outline] = &[
@@ -351,7 +351,7 @@ const SPEAKER: &[Outline] = &[
 /// Speaker, muted — the same cone, with a cross where the waves were.
 ///
 /// The two bars of the cross **overlap** at their centre, which is why
-/// [`Glyph::covers`] takes the union of the outlines rather than the
+/// [`rasterize`] takes the union of the outlines rather than the
 /// even-odd rule across all of them: an even-odd test over the pair would
 /// punch a diamond-shaped hole exactly where the cross should be solidest.
 const SPEAKER_MUTED: &[Outline] = &[
@@ -373,7 +373,7 @@ const SPEAKER_MUTED: &[Outline] = &[
 /// Close — two bars crossing at the centre of the box.
 ///
 /// The same construction as the mute cross and drawn the same way, by the
-/// union rule in [`Glyph::covers`]: an even-odd test over the pair would punch
+/// union rule in [`rasterize`]: an even-odd test over the pair would punch
 /// a diamond-shaped hole exactly where the two bars overlap. Symmetric about
 /// both axes, so the mark reads as centred in its button whichever panel it
 /// dismisses.
@@ -427,12 +427,12 @@ const WINDOW_RESTORE: &[Outline] = &[
     &[(0.735, 0.100), (0.88, 0.100), (0.88, 0.700), (0.735, 0.700)],
 ];
 
-/// The magnifier's ring — a **keyhole outline**, because [`Glyph::covers`]
+/// The magnifier's ring — a **keyhole outline**, because [`rasterize`]
 /// takes the union of outlines and a ring drawn as two circles would have its
 /// hole cancelled (doc 10 §3.6's implementation note). One closed polygon:
 /// the outer circle traced all the way round, a zero-width bridge in to the
 /// inner circle, the inner circle traced back the other way, and the bridge
-/// out again. The existing even-odd test ([`encloses`]) then fills the band
+/// out again. The existing even-odd test ([`ray_crosses`]) then fills the band
 /// and leaves the hole: a ray from a point inside the hole crosses both
 /// circles — an even count — and the two coincident bridge edges cancel.
 ///
@@ -591,7 +591,7 @@ const GEAR: &[Outline] = &[&[
 /// Add-to — two bars crossing at the centre, axis-aligned where [`CLOSE`]'s
 /// are diagonal: the transfer mark for every row slot (doc 10 §3.6),
 /// replacing the borrowed font `+`. The bars **overlap** at the centre and
-/// fill by the union rule in [`Glyph::covers`], exactly as the two crosses
+/// fill by the union rule in [`rasterize`], exactly as the two crosses
 /// do. Bar stroke 0.15, the pause bars' own.
 const PLUS: &[Outline] = &[
     &[
@@ -1166,30 +1166,81 @@ const VISUAL_FACTS: &[Outline] = &[
     &[(0.12, 0.72), (0.82, 0.72), (0.82, 0.81), (0.12, 0.81)],
 ];
 
-/// A compact disclosure chevron. The unfilled shape distinguishes place
-/// navigation from transport's filled skip marks at the same 16 px size.
-const HISTORY_FORWARD: &[Outline] = &[&[
-    (0.50, 0.18),
-    (0.82, 0.50),
-    (0.50, 0.82),
-    (0.50, 0.66),
-    (0.66, 0.55),
-    (0.18, 0.55),
-    (0.18, 0.45),
-    (0.66, 0.45),
-    (0.50, 0.34),
-]];
-const HISTORY_BACK: &[Outline] = &[&[
-    (0.50, 0.18),
-    (0.18, 0.50),
-    (0.50, 0.82),
-    (0.50, 0.66),
-    (0.34, 0.55),
-    (0.82, 0.55),
-    (0.82, 0.45),
-    (0.34, 0.45),
-    (0.50, 0.34),
-]];
+/// **Place history, forward** — a shaft at the set's stroke into a chevron
+/// head of two arms at the same stroke, exactly [`OPEN`]'s construction.
+///
+/// The *stroke* rather than a filled triangle is what keeps place navigation
+/// apart from transport's filled skip marks: one is an open angle on a line,
+/// the other a solid mass beside a bar. That distinction is unchanged and is
+/// the whole reason these are not simply [`NEXT`] and [`PREVIOUS`] rotated.
+///
+/// # It was one self-intersecting polygon, and it drew a shape nobody chose
+///
+/// The owner, having already had these fixed once: *"the back button icon is
+/// wrong and so is the forward"*. He is right, and the outlines were unchanged
+/// since — what changed is that they were **drawn 25 % larger**, [`ICON_PX`]
+/// 16 → 20 in the 2026-08-14 control pass, and the shape's faults stopped
+/// being mush.
+///
+/// The old form was a single nine-vertex polygon tracing a solid triangle and
+/// then doubling back along a shaft that crossed the triangle's own back edge.
+/// Under this rasterizer's even-odd cast that overlap **cancels**, so the head
+/// was hollow — which the comment here rationalised as *"the unfilled shape"*,
+/// as though it had been drawn that way. It had not: the surviving outline was
+/// the sliver between the triangle's edge and the shaft's diagonal, and that
+/// sliver **tapers**, from a hairline at the head's back corners to six times
+/// that near the tip. There was no stroke weight to re-proportion, because
+/// there was no stroke.
+///
+/// So it is drawn now, as three plain outlines whose union fills the joins:
+/// two 45° arms and a shaft, all at the set's **0.145**, which is the weight
+/// [`OPEN`], [`ARROW_UP`] and the window controls already share. A constant
+/// stroke is a thing a future size change can be checked against; a sliver is
+/// not.
+const HISTORY_FORWARD: &[Outline] = &[
+    &[
+        (0.4887, 0.2913),
+        (0.5913, 0.1887),
+        (0.8513, 0.4487),
+        (0.7487, 0.5513),
+    ],
+    &[
+        (0.4887, 0.7087),
+        (0.5913, 0.8113),
+        (0.8513, 0.5513),
+        (0.7487, 0.4487),
+    ],
+    &[
+        (0.1400, 0.4275),
+        (0.7800, 0.4275),
+        (0.7800, 0.5725),
+        (0.1400, 0.5725),
+    ],
+];
+
+/// **Place history, back** — [`HISTORY_FORWARD`] mirrored about `x = 0.5`,
+/// vertex for vertex, so the pair cannot drift apart under a later edit to
+/// one of them.
+const HISTORY_BACK: &[Outline] = &[
+    &[
+        (0.5113, 0.2913),
+        (0.4087, 0.1887),
+        (0.1487, 0.4487),
+        (0.2513, 0.5513),
+    ],
+    &[
+        (0.5113, 0.7087),
+        (0.4087, 0.8113),
+        (0.1487, 0.5513),
+        (0.2513, 0.4487),
+    ],
+    &[
+        (0.8600, 0.4275),
+        (0.2200, 0.4275),
+        (0.2200, 0.5725),
+        (0.8600, 0.5725),
+    ],
+];
 
 /// Notification bell: a dome, clapper and short base at the shared icon stroke.
 const BELL: &[Outline] = &[
@@ -1303,7 +1354,7 @@ impl Glyph {
     }
 
     /// Its slot in the sprite sheet.
-    fn index(self) -> usize {
+    const fn index(self) -> usize {
         match self {
             Self::Play => 0,
             Self::Pause => 1,
@@ -1337,10 +1388,10 @@ impl Glyph {
             Self::VisualCase => 29,
             Self::VisualNone => 30,
             Self::VisualSpectrum => 31,
-            Self::HistoryBack => 32,
-            Self::HistoryForward => 33,
-            Self::Bell => 34,
-            Self::VisualFacts => 35,
+            Self::VisualFacts => 32,
+            Self::HistoryBack => 33,
+            Self::HistoryForward => 34,
+            Self::Bell => 35,
             Self::Heart => 36,
             Self::HeartFilled => 37,
             Self::RepeatOne => 38,
@@ -1360,6 +1411,11 @@ impl Glyph {
     /// Whether the unit-square point `(x, y)` is inside the glyph — the
     /// *union* of its outlines, so overlapping ones (the mute cross) fill
     /// solid rather than cancelling.
+    ///
+    /// The **shape** reading, for tests that interrogate a glyph's geometry at
+    /// an arbitrary point. [`rasterize`] no longer goes through it: the sheet
+    /// samples the grid directly, so this would be dead code in the binary.
+    #[cfg(test)]
     #[must_use]
     pub fn covers(self, x: f32, y: f32) -> bool {
         self.outlines()
@@ -1393,6 +1449,45 @@ static SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
     let ink = rgb(theme::active().glyph());
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
+
+/// **The two orders are one order**, checked when the crate compiles.
+///
+/// [`Glyph::ALL`] is what the sheet is rasterized *from* and [`Glyph::index`]
+/// is what it is read *by*, so they are two hand-written lists that have to
+/// agree — and on 2026-08-14 they did not. `VisualFacts` was appended to
+/// `ALL` before the history pair but numbered after them in `index`, so the
+/// sheet handed out **four wrong sprites**: `HistoryBack` drew the facts
+/// mark, `HistoryForward` drew the back arrow, `Bell` drew the forward
+/// arrow and `VisualFacts` drew the bell.
+///
+/// That is the whole of the owner's *"the back button icon is wrong and so
+/// is the forward"*, and it is why the first telling of that ask was
+/// answered by redrawing the outlines and came back: the outlines were
+/// never what was on screen.
+///
+/// **Nothing could have caught it.** `every_glyph_rasterizes_to_the_same_square`
+/// walks `ALL` and `the_sheet_hands_out_one_stable_handle_per_glyph` checks
+/// that a handle is stable, so a permutation is invisible to both: every
+/// sprite exists, every sprite is the right size, and every glyph gets *a*
+/// stable handle. Only the pairing was wrong, and the pairing was the one
+/// thing neither test named.
+///
+/// So it is a **const** assertion rather than a test: the two lists are a
+/// duplication the type system cannot remove — a match arm per variant is
+/// what makes adding a glyph a compile error rather than a silent gap — and
+/// the answer to a duplication that must stay is to check it where it
+/// cannot be run past.
+const _: () = {
+    let mut i = 0;
+    while i < Glyph::COUNT {
+        assert!(
+            Glyph::ALL[i].index() == i,
+            "Glyph::ALL and Glyph::index disagree — the sheet will hand out \
+             the wrong sprite for this glyph and every one after it"
+        );
+        i += 1;
+    }
+};
 
 /// The sprite for `glyph`. Cheap: an `Arc` bump over the shared sheet.
 #[must_use]
@@ -1457,9 +1552,9 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
 ///
 /// # Which rung, and why that one
 ///
-/// The **32 px** rung, drawn at [`theme::ICON_PX`] 16 logical px — exactly
-/// [`SUPERSCALE`] 2, which is the same `@2x` contract every sprite on the sheet
-/// is drawn under, and exact on 1× and 2× displays for the same reason. The
+/// The **32 px** rung, drawn at [`theme::APP_MARK_PX`] 28 logical px — under
+/// 2× the sheet's [`SUPERSCALE`], and minifying the committed 64 px raster
+/// 64:28 ≈ 2.3:1 is the crisp-sprite contract the sheet uses. The
 /// rung is rendered from `io.github.mattcree.baz-small.svg`, the size-specific
 /// artwork the freedesktop icon theme spec exists to allow: the master's wall
 /// label loses its second line below ~48 px because two 1 px lanes composite
@@ -1473,7 +1568,8 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
 /// standing rule it would otherwise break (doc 02 §5.3). It is admitted as an
 /// exception with a stated boundary: **the application's mark is the
 /// application's, not the room's ink**, and nothing else in the chrome may
-/// reach for colour on this precedent. At 16 px the dot is roughly one pixel.
+/// reach for colour on this precedent. At 28 px the dot is still only a
+/// pixel or two.
 /// ADR-0040's amendment records it and states the reversal — a monochrome
 /// `Glyph::Baz` on the sheet, inked like every other mark in the bar, which is
 /// a real option and not a hypothetical one.
@@ -1531,18 +1627,23 @@ fn rgb(color: Color) -> [u8; 3] {
 /// when the sprite is scaled.
 #[must_use]
 fn rasterize(glyph: Glyph, ink: [u8; 3]) -> Vec<u8> {
-    let edge = index_to_f32(RASTER_PX);
-    let step = index_to_f32(SAMPLES);
     let total = SAMPLES * SAMPLES;
+    // The vertices move onto the grid **once per glyph**. They do not depend on
+    // the sample, and the loop below tests 102 400 of those per sprite, so
+    // converting inside it made the sheet's build the slowest thing on the
+    // first frame for no arithmetic gain.
+    let outlines: Vec<Vec<(i64, i64)>> = glyph.outlines().iter().map(|o| on_grid(o)).collect();
     let mut pixels = Vec::with_capacity((RASTER_PX * RASTER_PX * 4) as usize);
     for row in 0..RASTER_PX {
         for column in 0..RASTER_PX {
             let mut hits = 0_u32;
             for sub_y in 0..SAMPLES {
                 for sub_x in 0..SAMPLES {
-                    let x = (index_to_f32(column) + (index_to_f32(sub_x) + 0.5) / step) / edge;
-                    let y = (index_to_f32(row) + (index_to_f32(sub_y) + 0.5) / step) / edge;
-                    if glyph.covers(x, y) {
+                    // Sample coordinates on the shared integer grid, exact for
+                    // every sub-sample and a mirror pair by construction.
+                    let xs = sample_at(column * SAMPLES + sub_x);
+                    let ys = sample_at(row * SAMPLES + sub_y);
+                    if outlines.iter().any(|outline| ray_crosses(outline, xs, ys)) {
                         hits += 1;
                     }
                 }
@@ -1556,19 +1657,76 @@ fn rasterize(glyph: Glyph, ink: [u8; 3]) -> Vec<u8> {
 
 /// A small loop index as `f32`. Every caller passes a raster coordinate or a
 /// sub-sample index, all far below `f32`'s exact-integer range.
+///
+/// Test-only since the sheet moved onto the integer grid ([`RAY_D`]) — the
+/// rasterizer no longer converts an index to a float at all.
+#[cfg(test)]
 #[expect(
     clippy::cast_precision_loss,
-    reason = "raster indices are bounded by RASTER_PX * SAMPLES = 256"
+    reason = "raster indices are bounded by RASTER_PX * SAMPLES = 320"
 )]
 fn index_to_f32(value: u32) -> f32 {
     value as f32
 }
 
-/// Whether `(x, y)` is inside the closed polygon `outline`, by the
-/// even-odd ray-crossing rule: count the edges a ray cast to the left
-/// crosses, and an odd count means inside. Degenerate outlines (fewer than
-/// three vertices) enclose nothing.
-fn encloses(outline: Outline, x: f32, y: f32) -> bool {
+/// The integer grid every symbol decision runs on: coordinates are scaled by
+/// this and the ray cast is exact integer arithmetic, so a mirror pair of
+/// samples decides identically rather than by which way a float rounded.
+///
+/// The two factors are who lives on the grid: the **samples** sit on the odd
+/// lattice `(2k+1)/(2·RASTER_PX·SAMPLES)` — the centred half-step grid of the
+/// 8× anti-aliasing — and the **vertices** are the sheet's own
+/// constants, which never run deeper than four places (plus a handful of exact
+/// eighths and 64ths — 0.09375, 0.140625, 0.40625, 0.59375), so the product of
+/// the two denominators holds both exactly.
+const RAY_D: i64 = (2 * RASTER_PX * SAMPLES) as i64 * 10_000;
+
+/// A coordinate at [`RAY_D`]: a decimal to four places, or a dyadic eighth,
+/// times this grid is an exact integer, so a mirror pair of vertices sums to
+/// [`RAY_D`] exactly rather than to a decimal continuation's rounding.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "RAY_D rounds every coordinate on the lattice to its exact integer"
+)]
+fn to_grid(value: f32) -> i64 {
+    (f64::from(value) * RAY_D as f64).round() as i64
+}
+
+/// The scaled coordinate of sample `k` of [`SAMPLES`]·[`RASTER_PX`] per side:
+/// `(2k+1)/640`, at [`RAY_D`]. Mirror-exact by construction — the sample that
+/// mirrors `k` is `640/2 − 1 − k`, which lands on `RAY_D − x` rather than on
+/// a nearest-neighbour of it.
+fn sample_at(k: u32) -> i64 {
+    i64::from(2 * k + 1) * (RAY_D / i64::from(2 * RASTER_PX * SAMPLES))
+}
+
+/// One outline's vertices moved onto the [`RAY_D`] grid.
+#[must_use]
+fn on_grid(outline: Outline) -> Vec<(i64, i64)> {
+    outline
+        .iter()
+        .map(|&(x, y)| (to_grid(x), to_grid(y)))
+        .collect()
+}
+
+/// Whether the point `(xs, ys)` — on the [`RAY_D`] grid — is inside the
+/// closed polygon `outline`, by the even-odd ray cast, exactly. Degenerate
+/// outlines (fewer than three vertices) enclose nothing.
+///
+/// The edge test counts an edge as crossing when `xs` is **strictly to the
+/// left of it**, and separately recognises a sample sitting **exactly on an
+/// edge** — the cross-multiplication's equality case — as covered, the closed
+/// fill. A one-way cast alone would hand an on-edge sample an arbitrary
+/// parity: count to its left and count to its right and the two differ by
+/// one, and which of the two a float gives it is the round's doing. For an
+/// edge that passes exactly through sample points — the arrows' 45° arms and
+/// the cross's diagonals do — a mirror pair of samples can then read one
+/// inside and one out, which is precisely the asymmetry the sheet's
+/// reflection tests refuse. Counting the edge itself as filled gives a mirror
+/// pair of on-edge samples the same decision, and the sheet's symmetry is
+/// arithmetic rather than luck.
+fn ray_crosses(outline: &[(i64, i64)], xs: i64, ys: i64) -> bool {
     let Some(&last) = outline.last() else {
         return false;
     };
@@ -1576,21 +1734,47 @@ fn encloses(outline: Outline, x: f32, y: f32) -> bool {
         return false;
     }
     let mut inside = false;
+    let mut on_edge = false;
     let mut previous = last;
     for &current in outline {
-        let (cx, cy) = current;
-        let (px, py) = previous;
+        let (cxs, cys) = current;
+        let (pxs, pys) = previous;
         // Straddling edges only: the half-open test on `y` counts a vertex
         // exactly once, so a ray through one does not flip twice.
-        if (cy > y) != (py > y) {
-            let crossing = (px - cx) * (y - cy) / (py - cy) + cx;
-            if x < crossing {
-                inside = !inside;
+        if (cys > ys) != (pys > ys) {
+            // `crossing = (px − cx)(y − cy)/(py − cy) + cx`, compared against
+            // `xs` by cross-multiplication — the exact sign of `xs − crossing`
+            // on the shared grid.
+            let lhs = (xs - cxs) * (pys - cys);
+            let rhs = (pxs - cxs) * (ys - cys);
+            let rel = if pys - cys > 0 {
+                lhs.cmp(&rhs)
+            } else {
+                rhs.cmp(&lhs)
+            };
+            match rel {
+                std::cmp::Ordering::Less => inside = !inside,
+                std::cmp::Ordering::Equal => on_edge = true,
+                // Greater: the edge lies strictly to the left of the sample —
+                // the cast counts crossings strictly to the right.
+                std::cmp::Ordering::Greater => {}
             }
         }
         previous = current;
     }
-    inside
+    on_edge || inside
+}
+
+/// Whether `(x, y)` is inside the closed polygon `outline`, by the even-odd
+/// ray-crossing rule: count the edges a ray to one side crosses, an odd count
+/// means inside. The float reading of [`ray_crosses`] — any point of the sheet
+/// or of a measuring grid rounds onto the shared [`RAY_D`] lattice and the
+/// exact cast runs. Degenerate outlines (fewer than three vertices) enclose
+/// nothing. Test-only, with [`Glyph::covers`]: the sheet is sampled on the
+/// grid, so nothing in the binary reaches the outlines through a float.
+#[cfg(test)]
+fn encloses(outline: Outline, x: f32, y: f32) -> bool {
+    ray_crosses(&on_grid(outline), to_grid(x), to_grid(y))
 }
 
 #[cfg(test)]

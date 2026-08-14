@@ -1123,7 +1123,13 @@ mod tests {
         // catches the reservation not moving with them.
         const CHILDREN: f32 = theme::LINE_HEADING + theme::LINE_HERO + theme::LINE_BODY;
         const { assert!(BELOW == 96.0) }
-        const { assert!(BELOW + theme::TRANSPORT_HIT == 128.0) }
+        // The 128 this recorded was the *old* total — BELOW 96 plus the 32 px
+        // transport that no longer stands on this surface (ADR-0029's first
+        // step). It is pinned with that historical 32 as a literal: the
+        // 2026-08-14 control pass grew the box to 40 without giving this
+        // surface one — the transport is gone, `BELOW` is what `art_edge`
+        // actually reserves, and what must not move is `BELOW` alone.
+        const { assert!(BELOW + 32.0 == 128.0) }
         const { assert!(BELOW == theme::GAP_XL + CHILDREN + 2.0 * theme::GAP_XS) }
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the

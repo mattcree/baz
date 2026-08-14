@@ -770,10 +770,29 @@ pub(crate) fn icon_slot(
     offered: bool,
     message: Message,
 ) -> Element<'static, Message> {
+    slot(glyph, name, offered, can.then_some(message))
+}
+
+/// [`icon_slot`]'s body, over an **optional** press.
+///
+/// The public form takes a `Message` and a `can`, because every row control
+/// that draws one has a message whether or not it may be pressed today.
+/// [`favourite_slot_maybe`] has neither: its subject may have no library row,
+/// and there is no message for *toggle the favourite state of a track that is
+/// not in the library*. Inventing one — a `Noop`, or a toggle over an empty
+/// path — would be a message no control sends, which is the exact rot
+/// `Message::PlayAll` was deleted for.
+fn slot(
+    glyph: icon::Glyph,
+    name: &'static str,
+    offered: bool,
+    message: Option<Message>,
+) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
         return Space::new().width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
+    let can = message.is_some();
     let mark = container(
         iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
@@ -794,7 +813,7 @@ pub(crate) fn icon_slot(
             .height(Length::Fixed(theme::STEPPER_HIT))
             .padding(0)
             .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press_maybe(can.then_some(message)),
+            .on_press_maybe(message),
         text(name)
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
@@ -841,6 +860,37 @@ pub(crate) fn favourite_slot(path: &std::path::Path, favourite: bool) -> Element
         true,
         Message::ToggleFavourite(path.to_path_buf()),
     )
+}
+
+/// [`favourite_slot`] for a subject that **might not have one to give**.
+///
+/// `None` is a sounding file the library holds no row for — a hand-opened
+/// file, or one whose record has gone missing — and such a file cannot be
+/// favourited at all, because Favourites is durable library data keyed on a
+/// row (item 32).
+///
+/// The slot is still drawn, at the disabled ink and with no press. The
+/// alternative is dropping it, and dropping it moves whatever stands beside
+/// it: in the bottom bar that is the sounding track's name, in a bar whose
+/// whole discipline is that nothing moves as the music does. An inert control
+/// is normally what this product refuses — *absent, not disabled* — but that
+/// rule is about controls that are inert **in a place**, and this one is inert
+/// for **one file** while the surface it sits in is permanent. Reserving is
+/// the same call the row slots already make when `offered` is false; the only
+/// difference is that the reservation is inked, so the lane reads as a heart
+/// this track cannot have rather than as a gap.
+pub(crate) fn favourite_slot_maybe(
+    track: Option<(&std::path::Path, bool)>,
+) -> Element<'static, Message> {
+    match track {
+        Some((path, favourite)) => favourite_slot(path, favourite),
+        None => slot(
+            icon::Glyph::Heart,
+            "This track is not in your library, so it cannot be a favourite",
+            true,
+            None,
+        ),
+    }
 }
 
 /// The playing row's lamp dot — the same amber circle, and the same token, the

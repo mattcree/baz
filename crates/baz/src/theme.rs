@@ -1117,29 +1117,59 @@ pub const INDEX_CLEARANCE: f32 = GAP_SM;
 /// `the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column`.
 pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + HANG;
 
-/// **The returns lane, open** (ADR-0030 §2): [`GAP_XL`] 24 + the content lane
-/// 232 + [`GAP_XL`] 24 = **280**.
+/// The returns lane's one padding, on every side: [`GAP_SM`] **8**.
 ///
-/// The content lane is [`MENU_W`] 232 — the product's existing float measure —
-/// so the lane introduces no width of its own, and the two gutters are the
-/// panel-interior gap rather than the window's [`HANG`]: the lane is a surface
-/// *inside* the window rather than one hanging off its edge, which is what its
-/// own ground already says.
-///
-/// It lands on the industry's number from the other direction: Material's
-/// navigation drawer is 280 dp at its default maximum. Corroboration, not
-/// derivation.
-pub const SIDEBAR_W: f32 = GAP_XL + SIDEBAR_MEASURE + GAP_XL;
+/// Everything in the lane hangs from this one lead — the rail's sleeves, the
+/// head's glyphs and words, the open rows' text lane, the scrollable's rows,
+/// the hairline — so the lane has one number where it used to have two
+/// gutters, a seam and a list inset, and collapse cannot shift a pixel of it
+/// (ADR-0030 §3). It is [`GAP_SM`] because that is the ladder's "siblings
+/// within a group": the lane's content stands the same distance off its own
+/// ground as the pieces of a row stand off each other.
+pub const SIDEBAR_PAD: f32 = GAP_SM;
 
-/// The lane's content measure — [`MENU_W`] 232 — which is the width every head
-/// row, the well and every list row are drawn at, and the width `font.rs`
-/// measures the well's two strings against.
+/// **The returns lane, open** (ADR-0030 §2): **232** — the collapsed rail
+/// plus the text and lamp slots it expands by.
+///
+/// ```text
+/// SIDEBAR_RAIL_W                             64   the sleeve and its two pads
+///   + GAP_SM                                  8   sleeve → text
+///   + SIDEBAR_ROW_TEXT_W                    146   title and metadata lane
+///   + GAP_SM                                  8   text → lamp
+///   + SIDEBAR_LAMP_SLOT_W                     6   the sounding lamp's slot
+///   =                                        232
+/// ```
+///
+/// The rail already carries both its [`SIDEBAR_PAD`]s, so opening the lane
+/// adds the text column and its two [`GAP_SM`] seams and nothing else — which
+/// is why collapsing it back leaves the same sleeve on the same lead, with the
+/// words simply not drawn (ADR-0030 §3's no-reflow rule as a property of the
+/// geometry rather than of a flag).
+///
+/// It is also **the app-bar well's measure**: [`SIDEBAR_MEASURE`] is this
+/// same 232, so the resident well agrees with the lane by construction rather
+/// than because both once quoted a float's width.
+pub const SIDEBAR_W: f32 = SIDEBAR_MEASURE;
+
+/// The lane's content lane — [`MENU_W`] 232 — and the width the app-bar well
+/// is drawn at ([`SIDEBAR_W`]).
+///
+/// Re-documented with the well resident in the bar (ADR-0040): the lane's own
+/// rows no longer draw at this measure — they fill the open lane's content box
+/// (`SIDEBAR_W − 2 × SIDEBAR_PAD`), whose text lane is
+/// [`SIDEBAR_ROW_TEXT_W`] — while the well keeps it so that a query and its
+/// match count fit the same lane a menu's data always fit, and `font.rs`
+/// keeps one number to measure both strings against.
 pub const SIDEBAR_MEASURE: f32 = MENU_W;
 
-/// **The returns lane, collapsed**: [`GAP_XL`] 24 + [`SIDEBAR_SLEEVE`] 48 +
-/// [`GAP_XL`] 24 = **96**. Material's expressive navigation rail, again from
-/// the other direction.
-pub const SIDEBAR_RAIL_W: f32 = GAP_XL + SIDEBAR_SLEEVE + GAP_XL;
+/// **The returns lane, collapsed**: [`SIDEBAR_PAD`] 8 + [`SIDEBAR_SLEEVE`] 48
+/// + [`SIDEBAR_PAD`] 8 = **64**.
+///
+/// The pad is the lane's own rather than the window's [`HANG`]: the lane is a
+/// surface *inside* the window rather than one hanging off its edge, which is
+/// what its own ground already says. It is the open lane minus the text and
+/// lamp slots — nothing is re-derived, nothing moves ([`SIDEBAR_W`]).
+pub const SIDEBAR_RAIL_W: f32 = SIDEBAR_PAD + SIDEBAR_SLEEVE + SIDEBAR_PAD;
 
 /// The sleeve on a lane row: **48**, one step above [`PANEL_SLEEVE`] 40.
 ///
@@ -1148,12 +1178,27 @@ pub const SIDEBAR_RAIL_W: f32 = GAP_XL + SIDEBAR_SLEEVE + GAP_XL;
 /// can recognise a record by without a word beside it.
 pub const SIDEBAR_SLEEVE: f32 = PANEL_SLEEVE + GAP_SM;
 
-/// A lane row's pitch: **64** — [`SIDEBAR_SLEEVE`] 48 and one [`GAP_SM`] above
-/// and below.
+/// A lane row's pitch: **48** — [`SIDEBAR_SLEEVE`], and nothing else.
 ///
-/// It holds the two-line block ([`LINE_BODY`] 20 over [`LINE_META`] 16 = 36)
-/// centred, and it is above the hit-target floor at every density.
-pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE + 2.0 * GAP_SM;
+/// It was 48 **plus one [`GAP_SM`] above and below**, and the owner read the
+/// built list: *"the vertical padding on the sidebar recent list should not be
+/// like that… there doesn't need to be any"*. He is right, and the reason it
+/// read as loose rather than as generous is *where* the 16 px lived: it was
+/// **inside the row**, so every row carried air around its own sleeve and the
+/// sleeves stood 16 px apart down the list, while the row card — the thing the
+/// pointer lights — was 16 px taller than the only thing drawn in it.
+///
+/// The pitch is now the sleeve itself, which is also the pitch
+/// [`SIDEBAR_DEST_H`] already stands at: the head's destination tiles and the
+/// `RECENT` rows below the rule are the same 48 px square on the same lead, so
+/// the two halves of the lane finally share one rhythm instead of two.
+///
+/// **Re-derived, not renumbered.** The two claims the old 64 carried both
+/// survive at 48 and are asserted rather than restated: the two-line block is
+/// [`LINE_BODY`] 20 + [`GAP_XXS`] 2 + [`LINE_META`] 16 = **38**, which 48 holds
+/// centred with 5 px over and under; and 48 is above the hit-target floor with
+/// room to spare, being the transport's own [`TRANSPORT_HIT`] 40 and then some.
+pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE;
 
 /// The stable trailing slot in every expanded `RECENT` row: exactly the lamp
 /// dot's six pixels, present whether the row is sounding or quiet.
@@ -1167,45 +1212,60 @@ pub const SIDEBAR_LAMP_SLOT_W: f32 = DOT;
 /// metadata: **146 px**.
 ///
 /// ```text
-/// SIDEBAR_MEASURE                                      232
-///   − button's fixed left and right padding        2 × 8
-///   − SIDEBAR_SLEEVE                                    48
-///   − sleeve→text and text→lamp gaps             2 × 8
-///   − SIDEBAR_LAMP_SLOT_W                                6
-///   =                                                     146
+/// SIDEBAR_W                                  232
+///   − SIDEBAR_PAD, left                        8
+///   − SIDEBAR_SLEEVE                           48
+///   − sleeve→text gap                      GAP_SM 8
+///   − text→lamp gap                       GAP_SM 8
+///   − SIDEBAR_LAMP_SLOT_W                       6
+///   − SIDEBAR_PAD, right                        8
+///   =                                         146
 /// ```
 ///
 /// Both lines are fitted to this same boundary before Iced sees them, then
 /// clipped as a final guard. The lamp therefore never borrows geometry from
 /// one line while leaving the other wider.
 pub const SIDEBAR_ROW_TEXT_W: f32 =
-    SIDEBAR_MEASURE - 2.0 * GAP_SM - SIDEBAR_SLEEVE - 2.0 * GAP_SM - SIDEBAR_LAMP_SLOT_W;
+    SIDEBAR_W - 2.0 * SIDEBAR_PAD - SIDEBAR_SLEEVE - 2.0 * GAP_SM - SIDEBAR_LAMP_SLOT_W;
 
-/// The end-ellipsis subslot inside [`SIDEBAR_ROW_TEXT_W`]: 16 px, always wide
-/// enough for the bundled faces' ellipsis at body or metadata size.
+/// The end-ellipsis subslot reserved inside any fitted one-line measure:
+/// 16 px, always wide enough for the bundled faces' ellipsis at body or
+/// metadata size.
 ///
-/// Iced 0.13 can still break `Wrapping::None` text at a constrained width. A
+/// Iced 0.14 can still break `Wrapping::None` text at a constrained width. A
 /// long line therefore puts its fitted prefix in the clipped space before this
 /// slot and draws the ellipsis separately, guaranteeing that the one-line
 /// failure sign remains visible even if the renderer rounds advances upward.
-pub const SIDEBAR_ELLIPSIS_SLOT_W: f32 = GAP_LG;
-
-/// The head's destination row: **40** — [`TRANSPORT_HIT`] 32, the product's
-/// control hit box, with one [`GAP_SM`] of air under it.
 ///
-/// A destination is a *control*, not a listing, so its box is the box every
-/// other pressable thing in the product stands in; the gap is what separates
-/// three of them stacked without a rule between.
-pub const SIDEBAR_DEST_H: f32 = TRANSPORT_HIT + GAP_SM;
+/// It was `ELLIPSIS_SLOT_W`, and the rename is the point: the reading
+/// began in the returns lane and is now [`crate::views::fitted_line`]'s, shared
+/// with the bottom bar's sounding-track lines. The number was never about the
+/// lane — it is about the ellipsis, and the ellipsis is the same glyph
+/// wherever a string yields.
+pub const ELLIPSIS_SLOT_W: f32 = GAP_LG;
 
-/// **The width below which the lane is always collapsed**: **1000**.
+/// The head's destination rows' pitch: **48**, the tile's own size — when the
+/// row became the control ([`SIDEBAR_GLYPH_BOX`]) it gained no air of its own,
+/// so the pitch is the tile itself and three of them stack tight under the
+/// rule, the owner's *"the padding on hover is above and below the item… it
+/// should be a square around them"* made geometry.
+pub const SIDEBAR_DEST_H: f32 = SIDEBAR_GLYPH_BOX;
+
+/// **The width below which the lane is always collapsed**: **940**.
 ///
 /// The smallest window at which the *expanded* lane still leaves the wall two
-/// columns at or above [`ART_MIN`] — 988 by arithmetic, rounded up onto the 4 px
-/// lattice. Below it the lane draws its rail and the `Expanded` mark is inert:
-/// a control that would leave the collection one column of covers is not a
-/// control, it is a trap.
-pub const SIDEBAR_FLOOR: f32 = 1000.0;
+/// columns at or above [`ART_MIN`] — **940 exactly**, and on the 4 px lattice
+/// without rounding. It is not restated as a sum here because it is not one:
+/// what the wall does with `window − SIDEBAR_W − INDEX_LANE_W` is
+/// `Grid::new`'s to say, and `the_lane_has_two_widths_and_a_floor_that_chooses`
+/// searches for the first width that satisfies it rather than trusting a
+/// sentence. It was 1000 while the open lane was 280; the lane's truncation to
+/// 232 moved it by exactly the 48 the lane gave back.
+///
+/// Below it the lane draws its rail and the `Expanded` mark is inert: a control
+/// that would leave the collection one column of covers is not a control, it is
+/// a trap.
+pub const SIDEBAR_FLOOR: f32 = 940.0;
 
 /// **The lane's width at a window width, in the state the listener asked
 /// for** — the one function `Shelf::grid_width`, the composition and every
@@ -1230,41 +1290,71 @@ pub fn sidebar_can_expand(window_w: f32) -> bool {
     window_w >= SIDEBAR_FLOOR
 }
 
-/// The box a head destination's glyph stands in: [`ICON_PX`] 16 with room for
-/// the lamp dot tucked against its top-right corner.
+/// **The destination tile** a head row sits on: **48** — the sleeve's own
+/// size ([`SIDEBAR_SLEEVE`]), so a destination reads as the twin of a
+/// `RECENT` row's sleeve on the same lead: one 48 px square that takes up the
+/// space a thumbnail would.
 ///
-/// The dot must survive the collapse (the owner's requirement), so it is
-/// stacked *on the glyph* rather than set after the word — which means the
-/// glyph needs a box slightly larger than itself to tuck it into, in both
-/// states, at the same offset. [`GAP_SM`] of headroom is exactly the
-/// [`DOT`] 6 plus the 2 px that keeps it off the ink.
-pub const SIDEBAR_GLYPH_BOX: f32 = ICON_PX + GAP_SM;
+/// The tile holds the glyph ([`SIDEBAR_GLYPH_PX`]) **centred**, with one
+/// [`GAP_SM`] of the box's width over on both sides — the air the lamp dot
+/// tucks into against the tile's top-right corner in both states, at the same
+/// offset. The tile is the leading half of the destination **row** — the row
+/// is the control (`destination_row` in [`crate::views::lane`]), and its hover
+/// card ([`dest_row`]) spans the tile and the word together.
+pub const SIDEBAR_GLYPH_BOX: f32 = SIDEBAR_SLEEVE;
 
-/// **Where a head row's glyph is centred**, from the row's own left edge:
-/// [`GAP_SM`] 8 + half of [`SIDEBAR_GLYPH_BOX`] = **20**.
+/// The glyph drawn inside a destination tile: **32** — [`STEPPER_HIT`], the
+/// stepper's control size.
+///
+/// It used to fill the box at the transport's 40 ([`TRANSPORT_HIT`]) and hang
+/// from the tile's lead, which read as left-justified in the square. Under
+/// the owner's *"make the icons a little bit smaller, as long as the outer
+/// box for them is the same size as a thumbnail"* the mark draws smaller and
+/// **centres** in the 48 tile, a [`GAP_SM`] of air on both sides — the same
+/// headroom the glyph had since it was [`ICON_PX`] 20 in a 28 box, now
+/// symmetrical, so the four destinations' marks and the search well's
+/// magnifier stand on one centre.
+pub const SIDEBAR_GLYPH_PX: f32 = STEPPER_HIT;
+
+/// The air between a destination tile's edge and the glyph centred in it:
+/// ([`SIDEBAR_GLYPH_BOX`] 48 − [`SIDEBAR_GLYPH_PX`] 32) / 2 = **8**.
+///
+/// Declared because the `Now playing` lamp has to be inset by it. The dot
+/// tucks against the **mark's** top-right corner, not the tile's, and it was
+/// pinned to the tile's — correct while the box was the glyph's own 24, wrong
+/// the moment the box became the tile, and read by the owner as *"the pip when
+/// Now playing is active is in a strange position"*. Naming the inset means
+/// the next change to either size carries the dot along instead of stranding
+/// it in the corner of an invisible square a third time.
+pub const SIDEBAR_GLYPH_INSET: f32 = (SIDEBAR_GLYPH_BOX - SIDEBAR_GLYPH_PX) / 2.0;
+
+/// **Where a head row's tile — and its centred glyph — sit**, from the row's
+/// own left edge: [`SIDEBAR_PAD`] 8 + half of [`SIDEBAR_GLYPH_BOX`] 48 = **32**.
 ///
 /// Declared because the search well has to land on it. The well draws its
-/// magnifier as a layer over its own left padding ([`GAP_MD`] 12) and the
-/// glyph is [`ICON_PX`] 16 wide, so its centre is `12 + 8` = 20 — the same
-/// vertical the three destinations' marks stand on. That equality is asserted
-/// rather than eyeballed (`the_lane_head_stands_on_two_verticals`): a well
-/// whose mark sat 4 px off the marks above it would say *this is a different
+/// magnifier as a layer over its own left padding ([`SIDEBAR_WELL_GLYPH_LEAD`]
+/// 22) and the magnifier is [`ICON_PX`] 20 wide, so its centre is `22 + 10`
+/// = 32 — the same vertical the four destinations' tiles and their centred
+/// glyphs stand on. That equality is asserted rather than eyeballed: a well
+/// whose mark sat off the marks above it would say *this is a different
 /// surface* louder than any of its words.
-pub const SIDEBAR_HEAD_GLYPH_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX / 2.0;
+pub const SIDEBAR_HEAD_GLYPH_X: f32 = SIDEBAR_PAD + SIDEBAR_GLYPH_BOX / 2.0;
 
 /// **Where a head row's words begin**, from the row's own left edge:
-/// [`GAP_SM`] 8 + [`SIDEBAR_GLYPH_BOX`] 24 + [`GAP_MD`] 12 = **44**.
+/// [`SIDEBAR_PAD`] 8 + [`SIDEBAR_GLYPH_BOX`] 48 + [`GAP_SM`] 8 = **64**.
 ///
-/// The destination rows get it from the row's padding, its glyph box and its
-/// spacing; the well gets it by declaring it as the input's left padding, and
-/// the readout line under the well is indented to it too. One vertical for
-/// every word in the head.
-pub const SIDEBAR_HEAD_TEXT_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX + GAP_MD;
+/// The destination rows get it from the row's tile, its spacing and the tile's
+/// lead; the well gets it by declaring it as the input's left padding, and
+/// the readout line under the well is indented to it too. The seam is
+/// [`GAP_SM`] because the tile is the sleeve's size now: the head's words
+/// stand on the same vertical as the `RECENT` rows' titles, one column for
+/// every word in the lane.
+pub const SIDEBAR_HEAD_TEXT_X: f32 = SIDEBAR_PAD + SIDEBAR_GLYPH_BOX + GAP_SM;
 
 /// The lead the well's magnifier needs to stand on [`SIDEBAR_HEAD_GLYPH_X`]:
-/// the vertical, less half the glyph. **12** — which is [`GAP_MD`], but stated
-/// as the derivation so that a change to the head's box moves the mark with
-/// it rather than leaving it 4 px off three glyphs above it.
+/// the vertical, less half the glyph. **22** — derived so that a change to the
+/// head's tile moves the mark with it rather than leaving it off the four
+/// tiles above it.
 pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
 
 /// **The search well's control height**: **32** — the field, and nothing
@@ -1402,25 +1492,55 @@ pub fn lane_ground(p: &Palette) -> container::Style {
     }
 }
 
-/// **The collapsed lane's mark for the place you are in**: the destination's
-/// card, drawn as a square around its glyph rather than as a band across the
-/// rail.
+/// **A destination row's card**: the tile *and* its word, one highlight.
 ///
-/// Open, the current destination wears [`track_row`]'s card and hairline like
-/// any emphasised row, and it reads correctly because a word stands in it.
-/// Collapsed there is no word, so that same band became a rectangle drawn
-/// around a lone glyph — the owner's *"in collapsed mode the now playing thing
-/// has a rectangular outline around it"*. Two changes fix it: the card is the
-/// glyph's own box, and **there is no border at all**. The hairline in
-/// `track_row` marks *the row that is sounding*, which is a different fact
-/// from *the place you are standing in*; borrowing it here made a selection
-/// wear playback's mark.
-pub fn lane_current(p: &Palette) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(p.step_up(p.step_up(p.recess)))),
-        text_color: Some(p.paper),
-        border: iced::border::rounded(RADIUS_SEGMENT),
-        ..container::Style::default()
+/// The row is the control (`destination_row` in [`crate::views::lane`]): one
+/// button holding the 48 tile and, expanded, the word on the [`GAP_SM`] seam,
+/// so the paint is exactly the unit the listener aims at — the owner's *"the
+/// full row with icon and text should appear highlighted together and when
+/// selected the highlight should be together"*. Nothing the lane's widths
+/// could paint is drawn beyond the row: no band, no horizontal room, in the
+/// open lane or the 64 px rail.
+///
+/// The current destination keeps its card whatever the pointer does — open
+/// *and* collapsed alike. This is the same card that marked the collapsed
+/// lane before ([`track_row`] became a rectangle around a lone glyph under the
+/// owner's *"in collapsed mode the now playing thing has a rectangular outline
+/// around it"*): a square around the glyph, and **no border at all** — the
+/// hairline in `track_row` marks *the row that is sounding*, which is a
+/// different fact from *the place you are standing in*, and borrowing it would
+/// make a selection wear playback's mark.
+///
+/// A resting row lifts one plane under the pointer ([`Palette::step_up`]) and
+/// no further, the same lift any other emphasised row takes. The word rests
+/// at [`Palette::paper_dim`] and lifts with the card, so the state reads as
+/// the row's and never as the tile's alone.
+#[must_use]
+pub fn dest_row(p: &Palette, here: bool, status: button::Status) -> button::Style {
+    let lit = p.step_up(p.recess);
+    let carded = p.step_up(lit);
+    let (background, text_color) = match (here, status) {
+        // The current destination keeps its card whatever the pointer does; a
+        // resting row lifts one plane under the pointer, and no further than
+        // that, and its word lifts with the card.
+        (true, _) => (Some(Background::Color(carded)), p.paper),
+        (false, button::Status::Hovered | button::Status::Pressed) => {
+            (Some(Background::Color(lit)), p.paper)
+        }
+        (false, button::Status::Active) => (None, p.paper_dim),
+        (false, button::Status::Disabled) => (None, p.paper_muted),
+    };
+    button::Style {
+        snap: true,
+        background,
+        text_color,
+        border: Border {
+            // The no-border law above: a selection never wears playback's mark.
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        shadow: Shadow::default(),
     }
 }
 
@@ -1638,11 +1758,13 @@ pub const RAIL: f32 = 4.0;
 /// aim at, and the cursor changes across the whole of it. [`NEEDLE_HIT`] is the
 /// same idea for a control that cannot afford to reserve the height.
 ///
-/// **10, where it was 9**: [`RAIL_HIT`] is a reserved slot height and law L2
-/// puts every reserved slot on the 4 px lattice, so the band is 24 rather than
-/// 22. The target got larger, which is the only direction a hit band is allowed
-/// to move.
-pub const HIT_SLOP: f32 = 10.0;
+/// **14, where it was 10**: [`RAIL_HIT`] is a reserved slot height and law L2
+/// puts every reserved slot on the 4 px lattice, so the band is 32 rather than
+/// 28 — and it keeps its identity with [`STEPPER_HIT`] through the 2026-08-14
+/// control pass, which is the claim `the_product_stands_at_one_control_height`
+/// makes. The target got larger, which is the only direction a hit band is
+/// allowed to move.
+pub const HIT_SLOP: f32 = 14.0;
 /// Hit height of a groove: the rail plus [`HIT_SLOP`] on each side. The widget
 /// draws the rail centered in it.
 pub const RAIL_HIT: f32 = RAIL + 2.0 * HIT_SLOP;
@@ -1679,8 +1801,8 @@ pub const NEEDLE_H: f32 = 2.0;
 /// transport row's boxes, and a needle that swallows a press aimed at Next is
 /// a worse bargain than a smaller band.
 ///
-/// It is a **third** pointer height beside law L7's `TRANSPORT_HIT` 32 and
-/// `STEPPER_HIT`/`RAIL_HIT` 24, and it is named here rather than smuggled: L7's
+/// It is a **third** pointer height beside law L7's `TRANSPORT_HIT` 40 and
+/// `STEPPER_HIT`/`RAIL_HIT` 32, and it is named here rather than smuggled: L7's
 /// two heights are the heights of *boxes*, and the alternative for a line
 /// at the bar's edge is either 10 px of the transport row or 22 px of the
 /// page. The bound that keeps it honest is asserted, not asserted-about:
@@ -1816,11 +1938,20 @@ pub const fn insert_line_ink(p: &Palette) -> Color {
 /// Edge of a transport glyph (play/pause/next), in logical pixels. The
 /// sprite is drawn into a box exactly this size, so the glyph in it can
 /// never change the layout — see [`crate::icon`].
-pub const ICON_PX: f32 = 16.0;
+///
+/// **20, where it was 16** (the owner's "a bit larger, chunkier… help people
+/// click stuff and not miss", 2026-08-14). The glyphs are polygons on a unit
+/// square, so they rasterize at any size and the bump changes strokes 2.2 →
+/// 2.8–3.0 px, which is the whole of the chunky reading.
+pub const ICON_PX: f32 = 20.0;
 /// Edge of a transport button's square hit area. Comfortably above the
 /// glyph so the pointer aims at a target rather than at a shape, and fixed
 /// in both axes so play and pause occupy identically many pixels.
-pub const TRANSPORT_HIT: f32 = 32.0;
+///
+/// **40**, where it was 32 — Apple's ~40 pt pointer floor, on the 4 px
+/// lattice — and the product's one control height (law L7) that every other
+/// hit box derives from.
+pub const TRANSPORT_HIT: f32 = 40.0;
 /// Opacity of a glyph on a live control **at rest**.
 ///
 /// **0.57, where it was 1.00**, and the number is measured rather than chosen
@@ -1906,11 +2037,13 @@ pub const GLYPH_OPACITY_DISABLED: f32 = 0.28;
 /// The fix was to make the band symmetric about the transport rather than to
 /// nudge anything, and it survives every re-derivation of the band unchanged in
 /// principle: the lead is whatever is left of the band once the transport has
-/// taken its 32, halved. It is **derived, never chosen** — which is what makes
-/// law L4 true by construction rather than by an assertion somebody has to keep
-/// re-checking — and it is what [`NEEDLE_HIT`] is bounded by.
+/// taken its height, halved. It is **derived, never chosen** — which is what
+/// makes law L4 true by construction rather than by an assertion somebody has
+/// to keep re-checking — and it is what [`NEEDLE_HIT`] is bounded by.
 ///
-/// At [`BAR_CONTENT_H`] 80 it is [`GAP_XL`] 24.
+/// At [`BAR_CONTENT_H`] 80 and [`TRANSPORT_HIT`] 40 it is **20** — the band
+/// is set by the 56 px type block, not by the transport, so the transport
+/// keeps its centring without the band having to grow with the controls.
 pub const BAR_LEAD: f32 = (BAR_CONTENT_H - TRANSPORT_HIT) / 2.0;
 
 /// The bar's tallest zone: the now-playing stack's three line boxes — 20 · 16 ·
@@ -2035,7 +2168,7 @@ pub const BAR_CONTENT_H: f32 = NOW_PLAYING_H + 2.0 * BAR_ZONE_LEAD;
 /// (logical px) — the two strips that have to be one frame.
 pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 
-/// Height of the top bar, hairline included — **49**.
+/// Height of the top bar, hairline included — **57**.
 ///
 /// `2 × TOP_BAR_PAD_V + TRANSPORT_HIT + 1`. It is stated here rather than
 /// estimated in `app.rs`, which is what the audit's §2.1 aside asked for: that
@@ -2077,6 +2210,30 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_H
     + GAP_LG
     + LABEL_H
     + crate::shelf::Density::Dense.hang();
+
+/// **The shortest window baz will let you make**, horizontally — **860**.
+///
+/// Two strips own floors and the window has to clear both:
+///
+/// - the place strip needs [`TOP_BAR_FLOOR`] 600 with the lane's collapsed
+///   rail 64 beside it, 664 in all; and
+/// - the **app bar spans the window** rather than a strip, so its floor is
+///   the window's own — [`APP_BAR_LINE`] 850 plus one [`GAP_SM`] of air,
+///   which is the wider need.
+///
+/// The expression takes the wider of those two, rounds it up onto the
+/// 4 px lattice, and names the result: 858 → **860**. `app.rs`'s `min_size`
+/// reads this, and the app bar's budget test asserts both claims against it
+/// rather than trusting this prose.
+///
+/// **It was 712, and that was the width at which the window controls fell off
+/// the bar.** Not because 712 was too tight for the line, but because the
+/// line's declared sum was missing 156 px of tenants that were being drawn;
+/// [`APP_BAR_LINE`] records which, and how a number nothing could reach came
+/// to be enforced as a floor. The floor did not move because the bar grew —
+/// it moved because the bar was finally measured.
+pub const WINDOW_FLOOR_W: f32 =
+    ((TOP_BAR_FLOOR + SIDEBAR_RAIL_W).max(APP_BAR_LINE + GAP_SM) / GAP_XS).ceil() * GAP_XS;
 
 /// **Strip width** below which the Library strip splits into its two lines
 /// (logical px) — **680**, an exact sum rather than a rounded one.
@@ -2148,7 +2305,7 @@ pub const TOP_BAR_2LINE_H: f32 = 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0
 /// collection bought with nothing.
 pub const APP_BAR_PAD_V: f32 = GAP_XS;
 
-/// Height of the **app bar**, hairline included — **41** (ADR-0040 §2).
+/// Height of the **app bar**, hairline included — **49** (ADR-0040 §2).
 ///
 /// `2 × APP_BAR_PAD_V + TRANSPORT_HIT + 1`, derived the way every band in this
 /// file is derived — a control row plus a named lead each side (L4) — and
@@ -2157,22 +2314,21 @@ pub const APP_BAR_PAD_V: f32 = GAP_XS;
 /// shelf on the first frame.
 ///
 /// **It is 41 against the platform title bar's ~37–46**, which is the number
-/// the whole trade turns on: while `decorations` stays true baz pays this band
+/// the whole trade turned on while `decorations` stayed true: baz paid this band
 /// *on top of* the system's, and the day the flip lands it pays it *instead
-/// of* the system's. Doc 10 §6.10 refused a permanent second header line at
-/// 40 px — "the wall pays and the wide window gains nothing" — and ADR-0040 §6
-/// answers that refusal head-on rather than around it.
+/// of* the system's. The 2026-08-14 control pass took it to 49 with a
+/// [`TRANSPORT_HIT`] 40 — the trade itself is unchanged.
 pub const APP_BAR_H: f32 = 2.0 * APP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
 /// **How far a glyph's ink stands inside its control box** —
-/// `(TRANSPORT_HIT − ICON_PX) / 2`, **8**.
+/// `(TRANSPORT_HIT − ICON_PX) / 2`, **10**.
 ///
-/// Every control on the sheet is an [`ICON_PX`] 16 sprite centred in a
-/// [`TRANSPORT_HIT`] 32 box, because 32 is law L7's pointer floor and 16 is
+/// Every control on the sheet is an [`ICON_PX`] 20 sprite centred in a
+/// [`TRANSPORT_HIT`] 40 box, because 40 is law L7's pointer floor and 20 is
 /// the size the glyph is drawn at. The box is a **hit target**; the sprite is
 /// the **drawing**. They are concentric and they are not the same rectangle,
 /// and this token is the difference — named once, here, because a surface that
-/// hangs its controls by their boxes hangs its *ink* 8 px inside wherever it
+/// hangs its controls by their boxes hangs its *ink* 10 px inside wherever it
 /// thinks it put it.
 ///
 /// That is not a defect on a strip whose neighbours are also boxes. It is a
@@ -2233,7 +2389,7 @@ pub fn app_bar_pad() -> Padding {
 
 /// The app bar's reserved slot for the **display options** (logical px) — the
 /// widest tenant is Now Playing's three foreground choices, visualizer choice
-/// and fact-feed toggle: five [`STEPPER_HIT`] marks, **120**. The wall's four
+/// and fact-feed toggle: five [`STEPPER_HIT`] marks, **160**. The wall's four
 /// density detents right-align inside the same stable slot.
 ///
 /// Reserved at every width and in **every place**, including the five that
@@ -2247,32 +2403,143 @@ pub fn app_bar_pad() -> Padding {
 pub const APP_BAR_MARKS_W: f32 = 5.0 * STEPPER_HIT;
 
 /// The app bar's reserved slot for the **application's mark** (logical px) —
-/// [`ICON_PX`] 16 + [`GAP_SM`] 8 = **24**.
+/// [`SIDEBAR_GLYPH_PX`] **32**, the size the returns lane draws its own
+/// destination glyphs at, hanging from [`APP_BAR_EDGE`] with no lead of its
+/// own.
 ///
-/// The mark hangs from [`HANG`] at the slot's leading edge, so its ink stands
-/// on law L1's gutter exactly as the word it replaced did; the `GAP_SM` is the
-/// separation between it and the drag gap, which is a **fill** and would
-/// otherwise be touching.
+/// # It is the lane's glyph size because it stands on the lane's glyph centre
+///
+/// The owner, twice: *"the app icon doesn't align with icons on the left hand
+/// bar"* (shipped as item 35) and then, after the 2026-08-14 control pass,
+/// *"can we make the icon for the app align with the icons in the sidebar"*.
+/// Item 35 held the two on one measured 40 px optical centre with an
+/// assertion; the control pass **deleted that assertion** and argued that an
+/// 8 px lane pad under a 28 px mark need not pretend to share a spine. The
+/// second telling settles it against that argument, and the assertion is back
+/// in `the_lane_has_two_widths_and_a_floor_that_chooses`.
+///
+/// **Which side yielded, and why it is this one.** The lane's centre is
+/// [`SIDEBAR_HEAD_GLYPH_X`] `SIDEBAR_PAD` 8 + `SIDEBAR_GLYPH_BOX` 48 / 2 =
+/// **32**, and its 8 px pad is load-bearing for the whole
+/// collapse-cannot-shift-a-pixel rule (ADR-0030 §3) — so the lane may not
+/// move. The mark's centre was `APP_BAR_EDGE` 16 + a `GAP_MD` 12 lead +
+/// 28 / 2 = **42**. Two things were wrong with that lead and both are gone:
+/// it put the mark's ink 12 px inside law L1's gutter, which this constant's
+/// own doc comment already claimed it did *not* do, and it was the whole of
+/// the 10 px disagreement.
+///
+/// So the mark hangs on the gutter and its centre is `APP_BAR_EDGE` 16 +
+/// 32 / 2 = **32**, the lane's exactly — an equality of *tokens*, not of two
+/// numbers that happen to land together, which is what makes it survive the
+/// next pass. And because the size is now the lane's glyph size rather than a
+/// number of its own, the mark and the four destinations below it are the
+/// same square as well as on the same spine, which is the stronger reading of
+/// what was asked for. The committed 64 px raster draws at 32 on the sheet's
+/// own `@2x` contract, so it is crisper than it was at 28, not softer.
 ///
 /// **It was the word `baz`**, at the metadata size in the Medium face,
-/// measuring 19.54 px (`font.rs`) against this same 24 — and the number is
-/// unchanged by the swap, which is why the app bar's budget is unchanged too.
-/// The owner, 2026-08-10: *"we probably want an icon for our app to show in
-/// the bar"*. What zone 1 is for is unmoved (ADR-0040 §2): it is a
-/// **statement** of what this window is, and it is still the one zone that is
-/// not a control. See [`crate::icon::app_mark`] for why the thing drawn there
-/// is not on the glyph sheet.
+/// measuring 19.54 px (`font.rs`). The owner, 2026-08-10: *"we probably want
+/// an icon for our app to show in the bar"*. What zone 1 is for is unmoved
+/// (ADR-0040 §2): it is a **statement** of what this window is, and it is
+/// still the one zone that is not a control. See [`crate::icon::app_mark`] for
+/// why the thing drawn there is not on the glyph sheet.
 ///
 /// It is declared at all — rather than left to shrink to its content — because
 /// L9 wants every tenant of a strip to declare, and a fill next to an
 /// undeclared tenant is a region whose width nobody has written down.
-/// Larger application mark in the resident chrome. It remains a statement,
-/// not a control, and uses the committed 64 px raster at a crisp 24 logical px.
-pub const APP_MARK_PX: f32 = ICON_PX + GAP_SM;
-pub const APP_BAR_NAME_W: f32 = APP_MARK_PX + GAP_MD;
+/// It remains a statement, not a control, and uses the committed 64 px raster
+/// at a crisp 32 logical px.
+pub const APP_MARK_PX: f32 = SIDEBAR_GLYPH_PX;
+
+/// Zone 1's slot is the mark and nothing else.
+///
+/// It was the mark **plus a [`GAP_MD`]**, which was a second seam: the bar's
+/// one line already spaces every pair of children by [`GAP_LG`], so the slot's
+/// trailing air was separation the row was already paying for. A slot wider
+/// than its only tenant is a region whose extra width nobody can account for,
+/// which is the opposite of what declaring a slot is for.
+pub const APP_BAR_NAME_W: f32 = APP_MARK_PX;
+
+/// The app bar's **place history** (logical px) — two [`TRANSPORT_HIT`] boxes
+/// on a [`GAP_XS`] rhythm, **84**.
+///
+/// Declared for [`APP_BAR_BUTTONS_W`]'s reason, and declared *now* because it
+/// was not: the Back/Forward pair shipped into this bar on 2026-08-13 and
+/// never entered [`APP_BAR_LINE`]. See that constant for what the omission
+/// cost.
+pub const APP_BAR_HISTORY_W: f32 = 2.0 * TRANSPORT_HIT + GAP_XS;
+
+/// The app bar's **trailing furniture** (logical px) — the display options'
+/// reserved slot, the health bell and the gear, on the row's own [`GAP_LG`]
+/// rhythm: 160 + 16 + 40 + 16 + 40 = **272**.
+///
+/// One constant because [`crate::views::app_bar`] builds them as one nested
+/// row, and a budget that enumerated two of the three was exactly the failure
+/// [`APP_BAR_LINE`] records.
+pub const APP_BAR_FURNITURE_W: f32 =
+    APP_BAR_MARKS_W + GAP_LG + TRANSPORT_HIT + GAP_LG + TRANSPORT_HIT;
+
+/// **The app bar's one line at its widest** (logical px) — the budget L9
+/// demands this bar state, summed with the fill at nothing: the leading
+/// gutter, the application's mark, the place history, the resident well, the
+/// drag gap's two `GAP_LG` flanks, the trailing furniture, the window
+/// controls' reserved slot, and the trailing gutter.
+///
+/// **850**, and it is the window's own constraint: this bar spans the window
+/// rather than a strip, so its floor is [`WINDOW_FLOOR_W`] — and the window
+/// minimum is whichever strip needs more (see [`WINDOW_FLOOR_W`]).
+///
+/// # It said 702, and two of its tenants were not in it
+///
+/// The owner: *"the window controls disappear when we make the window
+/// narrow"*. They were the last child of the bar's one `row!`, so they were
+/// what a bar that had run out of width lost first — but the cause was not
+/// the 10 px of slack this sum used to leave against a 712 px floor. It was
+/// that **the sum was not the bar**. Two whole tenants shipped into the line
+/// on 2026-08-13 and neither was ever added here:
+///
+/// ```text
+/// APP_BAR_HISTORY_W    84   Back/Forward
+///   + GAP_LG           16   its seam
+/// the bell             40   inside the trailing furniture
+///   + GAP_LG           16   its seam
+///   =                 156   unbudgeted
+/// ```
+///
+/// So the bar's real line was 858 against a window that opened as narrow as
+/// 712, and the three window buttons went off the trailing edge **146 px
+/// before the floor** — not at it. Every test that could have caught it
+/// recomputed this same expression, so the arithmetic agreed with itself all
+/// the way down and never met the geometry.
+///
+/// The fix is the rule [`APP_BAR_BUTTONS_W`] already states and this constant
+/// failed to keep — *the budget the law adds up has to be the geometry
+/// actually drawn* — so both tenants are named slots now, and
+/// `the_app_bar_holds_its_tenants_at_the_windows_own_floor` walks the drawn
+/// row rather than restating the sum. The window's floor follows the honest
+/// line up: [`WINDOW_FLOOR_W`] 712 → **860**.
+///
+/// **The bar still has one regime and no collapse order**, which is now a
+/// decision rather than an oversight: the alternative to the wider floor was
+/// letting a tenant yield, and the only tenant that could is the search well
+/// ([`SIDEBAR_MEASURE`]). A well that narrowed as the window did would put
+/// the one app-wide control on a measure that changes underneath the query in
+/// it, to buy widths a desktop window is rarely dragged to. ADR-0040 §4 makes
+/// the buttons unconditional, so they are not what may yield.
+pub const APP_BAR_LINE: f32 = APP_BAR_EDGE
+    + APP_BAR_NAME_W
+    + GAP_LG
+    + APP_BAR_HISTORY_W
+    + GAP_LG
+    + SIDEBAR_MEASURE
+    + 2.0 * GAP_LG
+    + APP_BAR_FURNITURE_W
+    + GAP_LG
+    + APP_BAR_BUTTONS_W
+    + APP_BAR_HANG_R;
 
 /// The app bar's reserved slot for the **window controls** (logical px) —
-/// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **104**.
+/// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **128**.
 ///
 /// The three are drawn unconditionally and on the right, at every width and
 /// on every platform (ADR-0040 §4, the owner's decision). The width is still
@@ -2294,7 +2561,8 @@ pub fn top_bar_h(_window_w: f32, _lane_open: bool) -> f32 {
 ///
 /// iced lays a `text_input` out as its padding plus one line box — the 1 px
 /// border is drawn *inside* those bounds and adds nothing — so the padding is
-/// the control height minus the line box, halved. **6.**
+/// the control height minus the line box, halved. **10** at the current
+/// [`TRANSPORT_HIT`] 40.
 ///
 /// The `− 2.0` for the border is the mistake the shipped build made and the
 /// reason the well stood 30 px against a published floor of 32; it is measured
@@ -2305,7 +2573,7 @@ pub fn top_bar_h(_window_w: f32, _lane_open: bool) -> f32 {
 /// the search well used to stand 30 px and the first-run well 40 (law L7).
 pub const WELL_PAD_V: f32 = (TRANSPORT_HIT - LINE_BODY) / 2.0;
 /// Width of the bottom bar's centre column: three [`TRANSPORT_HIT`] squares and
-/// the two [`GAP_SM`] gaps between them — **112**.
+/// the two [`GAP_SM`] gaps between them — **136**.
 ///
 /// It was `SEEK_W + 2 × (STAMP_W + GAP_SM)` = 380, because the column held a
 /// timestamp, a 260 px groove and a timestamp, and the transport centred itself
@@ -2332,6 +2600,67 @@ pub const TRANSPORT_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * GAP_SM;
 /// saving of the face change, and it goes to the bar's left zone, which is the
 /// zone that clips.
 pub const SIGNAL_W: f32 = 96.0;
+
+/// **The bottom bar's trailing cluster, summed** (logical px) — **636**.
+///
+/// The whole of `bottom_bar::view`'s `controls` row on its [`GAP_LG`] rhythm:
+/// the `elapsed / total` readout, the transport, `Repeat`, `Shuffle`, and the
+/// status group (signal path, then the volume block on a [`GAP_SM`] seam).
+///
+/// Declared for the same reason the app bar's tenants are: something has to
+/// know how much of the bar is *not* the sounding track's name. Here that
+/// something is [`bar_title_lane_w`], which is what lets the title be fitted
+/// with an honest ellipsis instead of stopping mid-glyph.
+///
+/// The one tenant deliberately outside this sum is the skipped-tracks note,
+/// which is sized to its content and is absent in every ordinary run. When it
+/// does appear the title lane is narrower than this arithmetic says and the
+/// zone's clip takes the difference, exactly as it did before — so the fitted
+/// ellipsis is a floor on the failure, not a promise that clipping can never
+/// happen.
+pub const BAR_TRAILING_W: f32 = 2.0 * STAMP_W
+    + GAP_XS
+    + GAP_LG
+    + TRANSPORT_W
+    + GAP_LG
+    + TRANSPORT_HIT
+    + GAP_LG
+    + TRANSPORT_HIT
+    + GAP_LG
+    + SIGNAL_W
+    + GAP_SM
+    + VOLUME_BLOCK_W;
+
+/// **The measure left to the sounding track's name** at a window width — what
+/// `bottom_bar`'s identity zone actually has, after the bar's two edges, the
+/// trailing cluster and its seam, and the sounding sleeve and its seam.
+///
+/// The zone is a `Length::Fill` and must stay one (ADR-0040: track identity is
+/// the bar's sole left fill), so this is not a slot the view declares — it is
+/// the arithmetic the view has to *do* in order to fit a string to a lane it
+/// does not otherwise measure. At the window's floor it comes to a little over
+/// a hundred pixels, which is where the owner met it: *"the now playing song
+/// title seems cut off when it is long"*.
+///
+/// The zone's own trailing tenant is the shared Favourites action
+/// ([`crate::views::page::favourite_slot`]) on a [`GAP_SM`] seam — reserved in
+/// every state, including for a sounding file the library holds no row for, so
+/// that hearting a track changes ink and never this measure.
+///
+/// Clamped at zero rather than allowed to go negative, because the caller
+/// hands this to a text fitter and a negative measure is not a shorter string.
+#[must_use]
+pub fn bar_title_lane_w(window_w: f32) -> f32 {
+    (window_w
+        - 2.0 * BAR_EDGE_PAD
+        - BAR_TRAILING_W
+        - GAP_LG
+        - BAR_COVER
+        - GAP_MD
+        - STEPPER_HIT
+        - GAP_SM)
+        .max(0.0)
+}
 
 /// Width of a vertical scrollbar, and of the lane a scrolling list keeps
 /// clear for it (logical px).
@@ -2361,7 +2690,12 @@ pub const SCROLLBAR_LANE: f32 = SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN;
 /// is adjusted deliberately and rarely, where play and pause are hit in a
 /// hurry. Still a square, and still fixed in both axes, so a value changing
 /// under them moves nothing.
-pub const STEPPER_HIT: f32 = 24.0;
+///
+/// **32, where it was 24** — the same "chunkier" pass that lifted
+/// [`TRANSPORT_HIT`]: the `✕`, the row `+`, the reorder arrows and the
+/// index rail all hang on this box, and they are the targets a held-and-missed
+/// click is most likely to hit.
+pub const STEPPER_HIT: f32 = 32.0;
 /// Width reserved for a setting's value readout: enough for `−20.00 dB` at
 /// [`SIZE_META`].
 ///
@@ -3651,13 +3985,14 @@ pub const LIST_MEASURE: f32 = 880.0;
 /// Derived rather than chosen (`docs/design/12-now-playing-and-kiosk.md`
 /// §5.5a): [`LIST_MEASURE`] is the measure this product gives a list that owns
 /// its surface, and the run owns *half* of one — the record has the other half.
-/// It clears the run row's own anatomy with room to spare —
+/// It clears the run row's own anatomy —
 /// [`TRACK_NO_W`] 32 + [`GAP_SM`] 8 + title + `GAP_SM` 8 + [`DURATION_W`] 48 +
-/// [`GAP_XS`] 4 + four [`STEPPER_HIT`] 96 + three `GAP_XS` 12 +
-/// [`SCROLLBAR_LANE`] 10 = 210 + title — leaving 230 px of title lane, against
-/// the ~224 px the bar's own left block gets for the same three-line reading.
-/// **A run row is not a cramped row; it is the row the bar has always drawn,
-/// given more room.**
+/// [`GAP_XS`] 4 + four [`STEPPER_HIT`] 128 + three `GAP_XS` 12 +
+/// [`SCROLLBAR_LANE`] 10 = 250 + title — leaving **190 px of title lane**. The
+/// 2026-08-14 control pass spent 32 of the 222 px that stood here on the
+/// chunkier edit slots; the lane still clears a full album title at [`SIZE_BODY`]
+/// and yields to the ellipsis for anything longer, which is the bound every
+/// list row in the product lives under (`the_combined_measure_holds_the_run`).
 pub const RUN_MEASURE: f32 = LIST_MEASURE / 2.0;
 
 /// **The body width below which the merged surface stops being two columns**
@@ -4213,11 +4548,14 @@ pub const PLAYLIST_ALBUM_W: f32 = 160.0;
 ///
 /// A playlist's table is wider than an album's: beside its flexible title it
 /// permanently reserves the number, 40 px artwork, 160 px Album value,
-/// duration, and up to four 24 px edit targets. At the album page's 744 px
-/// breakpoint that furniture consumes the title lane completely. **1000 px**
-/// leaves roughly 140 px for the title in the worst (picker-open) case; below
-/// it the shared page stacks and gives the table the body's full measure.
-pub const PLAYLIST_BREAKPOINT: f32 = 1000.0;
+/// duration, and up to four 32 px edit targets. At the album page's 744 px
+/// breakpoint that furniture consumes the title lane completely. **1032 px**
+/// leaves 142 px for the title in the worst (picker-open) case — the floor
+/// the title lane is held to (derived rather than remembered, so the
+/// furniture's growth in 2026-08 is why the point is not the round 1000 it
+/// used to be); below it the shared page stacks and gives the table the
+/// body's full measure.
+pub const PLAYLIST_BREAKPOINT: f32 = 1032.0;
 
 /// **The ghost row's sleeve slot** (the owner's `New playlist`, 2026-08-09):
 /// the surface *below* the panel with a hairline edge, holding the drawn
@@ -4413,14 +4751,18 @@ mod tests {
         }
         // The hit target, the sprite box and the row they sit in are constants:
         // there is no expression anywhere above that could vary one of them.
-        const { assert!(TRANSPORT_HIT == 32.0) }
-        const { assert!(ICON_PX == 16.0) }
+        const { assert!(TRANSPORT_HIT == 40.0) }
+        const { assert!(ICON_PX == 20.0) }
         const { assert!(VOLUME_ROW_H == TRANSPORT_HIT) }
         // The band the bar draws in, and the lane that centres the transport in
         // it — both constants, so no transition can move the one line every
         // mark in the bar sits on (law L4).
         const { assert!(BAR_CONTENT_H == 2.0 * BAR_LEAD + TRANSPORT_HIT) }
-        const { assert!(BAR_LEAD == GAP_XL) }
+        // 20, on the 4 px lattice — no longer a named gap, because the band is
+        // set by the 56 px type block rather than by the controls, and the
+        // 2026-08-14 control pass made the transport 40 inside a band that was
+        // not allowed to grow with it.
+        const { assert!(BAR_LEAD == 20.0) }
         // **And the needle's geometry is constant too** — ADR-0020 forbids
         // animating bar geometry. Its thickness and aiming band are literals;
         // its fill moves only when playback does, which is data rather than a
@@ -4789,11 +5131,10 @@ mod tests {
         // moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 7.0 * DIGIT_EM) }
         // **The run column's measure holds a run row's whole anatomy**, and
-        // holds it with more title lane than the bar's own left block gets for
-        // the same reading (doc 12 §5.5a). The sum is the row's fixed furniture
-        // — number column, duration, the four reserved edit slots, the
-        // scrollbar's lane and the gaps between them — and what is left is the
-        // title's.
+        // holds it with a real title lane (the merged surface's own thesis,
+        // doc 12 §5.5a). The sum is the row's fixed furniture — number column,
+        // duration, the four reserved edit slots, the scrollbar's lane and the
+        // gaps between them — and what is left is the title's.
         const {
             let anatomy = TRACK_NO_W
                 + GAP_SM
@@ -4803,7 +5144,9 @@ mod tests {
                 + 4.0 * STEPPER_HIT
                 + 3.0 * GAP_XS
                 + SCROLLBAR_LANE;
-            assert!(RUN_MEASURE - anatomy > 200.0);
+            // 190 after the 2026-08-14 control pass; the bound says the lane
+            // survives it rather than the older, gentler 222.
+            assert!(RUN_MEASURE - anatomy > 180.0);
         }
         // …and the split floor is the narrowest body that can hold the run at
         // that measure *and* the record at its floor, hung from the body's own
@@ -5170,11 +5513,61 @@ mod tests {
     fn the_lane_has_two_widths_and_a_floor_that_chooses() {
         use crate::shelf::{Density, Grid};
 
-        const { assert!(SIDEBAR_W == 280.0 && SIDEBAR_RAIL_W == 96.0) }
-        const { assert!(SIDEBAR_W == GAP_XL + MENU_W + GAP_XL) }
-        const { assert!(SIDEBAR_RAIL_W == GAP_XL + SIDEBAR_SLEEVE + GAP_XL) }
-        const { assert!(SIDEBAR_SLEEVE == 48.0 && SIDEBAR_ROW_H == 64.0) }
-        const { assert!(SIDEBAR_DEST_H == 40.0) }
+        const { assert!(SIDEBAR_W == 232.0 && SIDEBAR_RAIL_W == 64.0) }
+        const { assert!(SIDEBAR_W == SIDEBAR_MEASURE) }
+        const { assert!(SIDEBAR_RAIL_W == SIDEBAR_PAD + SIDEBAR_SLEEVE + SIDEBAR_PAD) }
+        // The open lane is the rail plus the text and lamp slots it expands by
+        // (ADR-0030 §3's no-reflow rule, as arithmetic).
+        const {
+            assert!(
+                SIDEBAR_W
+                    == SIDEBAR_RAIL_W + 2.0 * GAP_SM + SIDEBAR_ROW_TEXT_W + SIDEBAR_LAMP_SLOT_W
+            );
+            assert!(SIDEBAR_PAD == GAP_SM);
+        }
+        const { assert!(SIDEBAR_SLEEVE == 48.0 && SIDEBAR_ROW_H == 48.0) }
+        // **A `RECENT` row is its sleeve and no air** — the owner's *"there
+        // doesn't need to be any"* vertical padding — which puts it at the
+        // head's destination pitch, so the lane has one rhythm above and below
+        // its one rule. Both of the claims the old 64 carried are re-derived
+        // here rather than taken on trust: the two-line block still fits
+        // centred, and the row still clears the hit-target floor.
+        const {
+            assert!(SIDEBAR_ROW_H == SIDEBAR_SLEEVE);
+            assert!(SIDEBAR_ROW_H == SIDEBAR_DEST_H);
+            assert!(LINE_BODY + GAP_XXS + LINE_META <= SIDEBAR_ROW_H);
+            assert!(SIDEBAR_ROW_H >= TRANSPORT_HIT);
+        }
+        // The destination tile is the sleeve's own footprint, its glyph one
+        // `GAP_SM` smaller on **both** sides (centred, not hung from the lead)
+        // at the stepper's control size, and the head's row pitch is the tile
+        // itself (a destination adds no air of its own).
+        const {
+            assert!(SIDEBAR_GLYPH_BOX == SIDEBAR_SLEEVE);
+            assert!(SIDEBAR_GLYPH_PX == STEPPER_HIT);
+            assert!(SIDEBAR_GLYPH_BOX == SIDEBAR_GLYPH_PX + 2.0 * GAP_SM);
+            assert!(SIDEBAR_DEST_H == SIDEBAR_GLYPH_BOX);
+            assert!(SIDEBAR_HEAD_GLYPH_X == SIDEBAR_PAD + SIDEBAR_GLYPH_BOX / 2.0);
+            assert!(SIDEBAR_HEAD_TEXT_X == SIDEBAR_PAD + SIDEBAR_GLYPH_BOX + GAP_SM);
+        }
+        // **The application's mark stands on the lane's glyph centre**, and it
+        // is the same square as well — the owner's *"the app icon doesn't
+        // align with icons on the left hand bar"*, shipped as item 35, and
+        // then asked for a second time after the 2026-08-14 control pass
+        // deleted this assertion: *"can we make the icon for the app align
+        // with the icons in the sidebar"*.
+        //
+        // It lives **here**, in the lane's own test, rather than in the app
+        // bar's, because the lane is the side that may not move: its 8 px pad
+        // is what makes collapse unable to shift a pixel (ADR-0030 §3), so
+        // this is a constraint on the bar stated where the thing it is
+        // constrained to is defined. The bar yielded a `GAP_MD` lead that was
+        // putting the mark's ink inside law L1's gutter anyway.
+        const {
+            assert!(APP_BAR_EDGE + APP_MARK_PX / 2.0 == SIDEBAR_HEAD_GLYPH_X);
+            assert!(APP_MARK_PX == SIDEBAR_GLYPH_PX);
+            assert!(APP_BAR_NAME_W == APP_MARK_PX);
+        }
         // Every one of them on the 4 px lattice (law L2).
         const {
             assert!(
@@ -7306,8 +7699,11 @@ mod tests {
         // The band's mid-line is the transport's centre line.
         const { assert!(BAR_CONTENT_H / 2.0 == BAR_LEAD + TRANSPORT_HIT / 2.0) }
         // What is below the transport is exactly what is above it — a gap
-        // now, where it used to be a gap and a seek row.
-        const { assert!(BAR_LEAD == GAP_XL) }
+        // now, where it used to be a gap and a seek row. The gap is 20, the
+        // 2026-08-14 value: the band is set by the 56 px type block, not by
+        // the controls, and the transport grew into the band rather than the
+        // band growing with it.
+        const { assert!(BAR_LEAD == 20.0) }
         // The right zone's block is symmetric about its own rail, so centring
         // the block centres the rail. The fader's hit band is centred in a
         // block of one control height, which is the same claim with two fewer
@@ -7455,8 +7851,8 @@ mod tests {
 
     /// **L7 — one control height.**
     ///
-    /// Every pointer target is [`TRANSPORT_HIT`] 32 tall. The only exception is
-    /// [`STEPPER_HIT`] 24, and it is named.
+    /// Every pointer target is [`TRANSPORT_HIT`] 40 tall. The only exception is
+    /// [`STEPPER_HIT`] 32, and it is named.
     ///
     /// The audit's defect 7: the product stood at **five** heights — transport
     /// 32, first-run input 40, search well 30, steppers 24, checkbox 13 — while
@@ -7465,14 +7861,14 @@ mod tests {
     #[test]
     fn the_product_stands_at_one_control_height() {
         // The two heights, and the fact that there are two.
-        const { assert!(TRANSPORT_HIT == 32.0) }
-        const { assert!(STEPPER_HIT == 24.0) }
+        const { assert!(TRANSPORT_HIT == 40.0) }
+        const { assert!(STEPPER_HIT == 32.0) }
         const { assert!(STEPPER_HIT < TRANSPORT_HIT) }
         // A text well is a control: its padding is derived from the height it
         // has to stand at, rather than the height falling out of its padding.
-        // 6 + a 20 px line box + 6 = 32, and iced draws the 1 px border inside
-        // those bounds rather than outside them — which is the half of the
-        // model the shipped build got wrong, and is measured off the render.
+        // 10 + a 20 px line box + 10 = 40, and iced draws the 1 px border
+        // inside those bounds rather than outside them — which is the half of
+        // the model the shipped build got wrong, and is measured off the render.
         assert!(
             (2.0f32.mul_add(WELL_PAD_V, LINE_BODY) - TRANSPORT_HIT).abs() < f32::EPSILON,
             "a text well no longer stands at the product's one control height"
@@ -7564,7 +7960,17 @@ mod tests {
         /// evening: its `TRANSPORT_HIT` box. Its `2 × GAP_SM` status lead
         /// stays, because the status notes are still tenants and still need
         /// their flanks.
+        ///
+        /// It was 32 that evening — the historical seam below is reconstructed
+        /// with that 32 as a literal, because the 2026-08-14 control pass grew
+        /// the box to 40 without the strip growing back. The two are different
+        /// questions: what the departure was worth, and what the box would
+        /// cost today.
         const GEAR_FREED: f32 = TRANSPORT_HIT;
+        /// The gear's box **as it stood on 2026-08-10**, when the departure
+        /// happened — the literal the historical seam is reconstructed with,
+        /// so the control pass cannot retroactively cheapen a day's work.
+        const GEAR_FREED_WAS: f32 = 32.0;
         /// What the arrangement row has spent, as the rise in that cluster's
         /// declared width — **46 px, for `A–Z` back in the row and first in it**
         /// (ADR-0035's third amendment).
@@ -7627,18 +8033,21 @@ mod tests {
         // by coincidence.
         const { assert!(FREED == 88.0) }
         const { assert!(ACTS_FREED == 206.0) }
-        const { assert!(GEAR_FREED == 32.0) }
+        const { assert!(GEAR_FREED == 40.0) }
         const { assert!(KEYS_SPENT == 46.0) }
         const { assert!(SINGLE_LINE == 680.0) }
         const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
         // The seam as it stood before ADR-0040, re-derived: the two departures
-        // are worth exactly 144 px between them.
-        const { assert!(SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED == 824.0) }
+        // are worth exactly 144 px between them — the acts cluster's 88 + 24
+        // seam, and the gear's 32 box *as it was that evening* (the box would
+        // be 40 today, but the 2026-08-14 control pass did not undo the
+        // departure).
+        const { assert!(SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED_WAS == 824.0) }
         // …and 960 is still reachable from here through every movement since,
         // which is the claim that the seam has never once been rounded.
         const {
             assert!(
-                SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED + FREED + (182.0 - ACTS_W_WAS)
+                SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED_WAS + FREED + (182.0 - ACTS_W_WAS)
                     - KEYS_SPENT
                     == 960.0
             );
@@ -7667,21 +8076,21 @@ mod tests {
         // before: `TOP_BAR_SPLIT + SIDEBAR_RAIL_W` collapsed, and
         // `+ SIDEBAR_W` open. The floor a window must clear for the strip to
         // hold its tenants at all rises with it.
-        const { assert!(STRIP_FLOOR_WINDOW == 696.0) }
+        const { assert!(STRIP_FLOOR_WINDOW == 664.0) }
 
         // **And the band the split serves is inside the band the well is
         // still a tenant of.** Once the well is the lane's the strip wants
-        // 456 px, and the narrowest strip that can happen in is 720 — the
+        // 456 px, and the narrowest strip that can happen in is 708 — the
         // lane's own floor less the lane's own width. So the strip is one line
         // at every width above `SIDEBAR_FLOOR`, in either lane state, and
         // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
         // hope. It was 648, then 554, then 600; ADR-0040's two departures put
-        // it at **456**, with 264 px of headroom against the narrowest strip
+        // it at **456**, with 252 px of headroom against the narrowest strip
         // the regime can be handed.
         const { assert!(SINGLE_LINE_NO_WELL == 456.0) }
-        const { assert!(WIDEST_LANE_STRIP == 720.0) }
+        const { assert!(WIDEST_LANE_STRIP == 708.0) }
         const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
-        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 264.0) }
+        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 252.0) }
         // The rail is wider still, so the collapsed lane cannot reach it either.
         const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W > WIDEST_LANE_STRIP) }
 
@@ -7689,18 +8098,20 @@ mod tests {
         // It is asserted because a costing once predicted it would not exist
         // at all: the proposal in `docs/BACKLOG.md` measured a six-word row
         // against a 182 px acts cluster and put the split at 926 — *above*
-        // `SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904, which would have deleted the
+        // `SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 876, which would have deleted the
         // band and made the strip two lines at every width below the lane's
-        // floor. The band is **680…904**, 224 px.
-        const { assert!(WIDEST_STRIP_WITH_WELL == 904.0) }
+        // floor. The band is **680…876**, 196 px. (The lane truncation of
+        // 2026-08-14 narrows both this band and the window's own floor, which
+        // are different numbers that happen to move together.)
+        const { assert!(WIDEST_STRIP_WITH_WELL == 876.0) }
         const { assert!(SINGLE_LINE < WIDEST_STRIP_WITH_WELL) }
-        const { assert!(WIDEST_STRIP_WITH_WELL - SINGLE_LINE == 224.0) }
+        const { assert!(WIDEST_STRIP_WITH_WELL - SINGLE_LINE == 196.0) }
 
         // The two-line band is the single-line band's own lead three times
-        // around two control rows — 8+32+8+32+8, plus the hairline: 89
-        // against 49. A pair of tokens and a breakpoint, not a measurement.
+        // around two control rows — 8+40+8+40+8, plus the hairline: 105
+        // against 57. A pair of tokens and a breakpoint, not a measurement.
         const { assert!(TOP_BAR_2LINE_H == 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0) }
-        const { assert!(TOP_BAR_H == 49.0 && TOP_BAR_2LINE_H == 89.0) }
+        const { assert!(TOP_BAR_H == 57.0 && TOP_BAR_2LINE_H == 105.0) }
         const { assert!(TOP_BAR_FLOOR < TOP_BAR_SPLIT) }
 
         // **The well has one width in the strip, because it can only be drawn
@@ -7733,93 +8144,146 @@ mod tests {
     /// sum plus the frame's gutters must fit the strip's declared floor, and
     /// that the sum is asserted in code. This bar's floor is not a strip floor
     /// of its own: it spans the **window**, so its floor is the window's
-    /// `min_size`, which is [`TOP_BAR_FLOOR`] + [`SIDEBAR_RAIL_W`] = 696.
+    /// `min_size`, [`theme::WINDOW_FLOOR_W`] 860.
     ///
-    /// **And it does not split.** The whole line comes to 400 against 696, so
-    /// there is 296 px of slack at the narrowest window baz opens — which is
+    /// **And it does not split.** The whole line comes to 850 against 860, so
+    /// there is 10 px of slack at the narrowest window baz opens — which is
     /// why this bar has one regime where the place strip below it has two. A
-    /// bar of five 32 px boxes and one short word does not need a collapse
-    /// order, and giving it one "for symmetry" would be inventing a breakpoint
-    /// nothing can reach.
+    /// bar of boxes and one mark does not need a collapse order, and giving it
+    /// one "for symmetry" would be inventing a breakpoint nothing can reach.
+    ///
+    /// # This test passed while the bar was 156 px wider than it said
+    ///
+    /// That sentence about slack was true of the *sum*, and the sum was not
+    /// the bar: the Back/Forward pair and the health bell both shipped into
+    /// the drawn row on 2026-08-13 and neither entered the budget. The owner
+    /// saw the consequence — *"the window controls disappear when we make the
+    /// window narrow"* — because the buttons are the row's last child and a
+    /// row that overruns loses its last child first.
+    ///
+    /// The reason it went unseen is worth keeping, because it is a property of
+    /// how the test was written rather than of what it asserted: **it
+    /// recomputed the same expression the constant did**, so the two agreed
+    /// with each other forever without either meeting the geometry. A budget
+    /// test that restates its constant is checking that addition is
+    /// deterministic.
+    ///
+    /// So this now **walks the tenants of `app_bar::view`'s own `row!`** — the
+    /// children, in order, each against its declared slot — and derives the
+    /// line from that walk. A tenant added to the bar without a declared width
+    /// fails here rather than silently shipping and pushing the window
+    /// controls off the edge; the source pin below is what makes the walk
+    /// answerable to the drawing.
     #[test]
     fn the_app_bar_holds_its_tenants_at_the_windows_own_floor() {
         /// The window's declared minimum width (`app.rs`'s `min_size`).
-        const FLOOR: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
+        const FLOOR: f32 = WINDOW_FLOOR_W;
         /// How far the gear's box stands from the window's right edge **when
         /// baz owns the chrome and the buttons are drawn**. Not a constant of
         /// the bar: with the buttons absent the gear *is* the trailing control
         /// and stands at [`APP_BAR_HANG_R`] (see
         /// `the_bars_trailing_ink_lands_on_the_windows_gutter`).
         const GEAR_FROM_RIGHT: f32 = APP_BAR_HANG_R + APP_BAR_BUTTONS_W + GAP_LG;
-        /// The same, for the display options' slot.
-        const MARKS_FROM_RIGHT: f32 = GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG;
-        /// The bar's one line: the leading gutter, the application's mark, the
-        /// resident search well and seam, the drag gap's two `GAP_LG` flanks,
-        /// the display options' reserved slot, the seam, the gear, the seam,
-        /// the window controls' reserved slot, and the trailing gutter.
-        ///
-        /// The drag gap contributes **zero** of its own — it is the fill, and
-        /// what the law has to hold is the line with the fill at nothing.
-        ///
-        /// This is the line **at its widest**, which is the state where baz
-        /// owns the chrome. With the buttons absent their slot and its seam are
-        /// not spent at all — that is the fix of 2026-08-10, and it is asserted
-        /// below rather than left to a reader to notice that the constant has
-        /// two values.
-        const LINE: f32 = APP_BAR_EDGE
-            + APP_BAR_NAME_W
-            + GAP_LG
-            + SIDEBAR_MEASURE
-            + 2.0 * GAP_LG
-            + APP_BAR_MARKS_W
-            + GAP_LG
-            + TRANSPORT_HIT
-            + GAP_LG
-            + APP_BAR_BUTTONS_W
-            + APP_BAR_HANG_R;
+        /// The same, for the display options' slot — past the gear, the bell
+        /// and both of their seams.
+        const MARKS_FROM_RIGHT: f32 =
+            GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG + TRANSPORT_HIT + GAP_LG;
 
-        const { assert!(APP_BAR_MARKS_W == 120.0) }
-        const { assert!(APP_BAR_BUTTONS_W == 104.0) }
-        const { assert!(LINE == 628.0) }
-        const { assert!(LINE <= FLOOR) }
+        // **The walk.** `app_bar::view`'s one `row!` is
+        // `[name, history, search, gap, furniture]`, plus `buttons` where baz
+        // owns the chrome, at `GAP_LG` between every pair — so the line is
+        // those six declared slots, five seams, and the frame's two gutters.
+        // The drag gap contributes **zero** of its own: it is the fill, and
+        // what the law has to hold is the line with the fill at nothing.
+        //
+        // This is the line **at its widest**, which is the state where baz
+        // owns the chrome. With the buttons absent their slot and its seam are
+        // not spent at all — that is the fix of 2026-08-10, and it is asserted
+        // below rather than left to a reader to notice that the constant has
+        // two values.
+        const TENANTS: [f32; 6] = [
+            APP_BAR_NAME_W,
+            APP_BAR_HISTORY_W,
+            SIDEBAR_MEASURE,
+            0.0,
+            APP_BAR_FURNITURE_W,
+            APP_BAR_BUTTONS_W,
+        ];
+        /// One seam between every pair of children, so one fewer than there
+        /// are children. Written out rather than derived from `TENANTS.len()`
+        /// so it stays a float the whole way; the two are pinned equal below.
+        const SEAMS: f32 = 5.0;
+        const { assert!(TENANTS.len() == 6) }
+        let walked = APP_BAR_EDGE + TENANTS.iter().sum::<f32>() + SEAMS * GAP_LG + APP_BAR_HANG_R;
+
+        // **The walk is answerable to the drawing.** Without this, the array
+        // above is one more restatement of the sum — which is exactly how the
+        // history pair and the bell shipped unbudgeted. It pins the order and
+        // membership of the row's children; their widths are the constants,
+        // and the views assert those against themselves.
+        let bar = include_str!("views/app_bar.rs").replace("\r\n", "\n");
+        assert!(
+            bar.contains("let mut line = row![name, history, search, gap, furniture];"),
+            "the app bar's tenants changed; add the new one to `TENANTS` with a \
+             declared width, or the window controls will be pushed off the \
+             trailing edge exactly as they were before 2026-08-14"
+        );
+        assert!(
+            bar.contains(
+                "row![\n        marks(density, visualization),\n        \
+                 crate::views::status::bell(health),\n        gear(ink),\n    ]"
+            ),
+            "the trailing furniture's tenants changed; `APP_BAR_FURNITURE_W` is \
+             what the budget spends on them"
+        );
+
+        const { assert!(APP_BAR_MARKS_W == 160.0) }
+        const { assert!(APP_BAR_BUTTONS_W == 128.0) }
+        const { assert!(APP_BAR_HISTORY_W == 84.0) }
+        const { assert!(APP_BAR_FURNITURE_W == 272.0) }
+        const { assert!(APP_BAR_LINE == 850.0) }
+        assert!(
+            (walked - APP_BAR_LINE).abs() < f32::EPSILON,
+            "the drawn line walks to {walked}, the declared budget is {APP_BAR_LINE}"
+        );
+        const { assert!(APP_BAR_LINE <= FLOOR) }
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
         // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
-        //
-        // The app-bar amendment spends 248 px of the old 304 px slack on the
-        // 232 px well and its 16 px seam, leaving 56 px at the minimum window.
-        const { assert!(FLOOR - LINE == 68.0) }
+        const { assert!(FLOOR - APP_BAR_LINE == 10.0) }
         const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 
         // **The display options' slot is held in every place**, which is what
         // makes one bar the same bar everywhere (ADR-0040 §5): the distance
         // from the gear to the marks contains no term that can be zero, so the
-        // right cluster does not slide 120 px as you navigate.
+        // right cluster does not slide 160 px as you navigate.
         //
         // The window buttons' slot is **not** held, and the two are different
         // on purpose. The marks come and go *within a run* as you move between
         // places, so a collapsing slot would be the frame moving under you; the
         // buttons are decided once per process by `app::owns_chrome`, so there
         // is no frame in which they appear and nothing can be seen to move.
-        // Holding their 120 px open would be 120 px of dead gutter in every
+        // Holding their 160 px open would be 160 px of dead gutter in every
         // build that ships.
-        const { assert!(GEAR_FROM_RIGHT == 128.0) }
-        const { assert!(MARKS_FROM_RIGHT == 176.0) }
+        const { assert!(GEAR_FROM_RIGHT == 150.0) }
+        // 262, not 206: the bell stands between the marks and the gear, and
+        // the figure that omitted it was the same omission `APP_BAR_LINE`
+        // records — read off the budget rather than off the row.
+        const { assert!(MARKS_FROM_RIGHT == 262.0) }
 
         // **The band's height is a control row plus a named lead each side**
         // (law L4), and it is smaller than the place strip's on purpose: this
         // bar holds boxes and one word, the strip below holds words and a text
-        // well. 4 + 32 + 4, plus the hairline.
+        // well. 4 + 40 + 4, plus the hairline.
         const { assert!(APP_BAR_PAD_V == GAP_XS) }
-        const { assert!(APP_BAR_H == 41.0) }
+        const { assert!(APP_BAR_H == 49.0) }
         const { assert!(APP_BAR_H < TOP_BAR_H) }
-        // **What the whole top of the window now costs**, which is the number
-        // doc 10 §6.10's refusal of a permanent second header line has to be
-        // met with: 41 + 49 = 90 on the five places that wear a strip, against
-        // 49 before — plus, today and only today, the platform title bar that
-        // is still drawn above it. ADR-0040 §6 takes that debt deliberately
-        // and names what clears it.
-        const { assert!(APP_BAR_H + TOP_BAR_H == 90.0) }
+        // **What the whole top of the window now costs**: 49 + 57 = 106 on the
+        // five places that wear a strip, against 90 before the control pass —
+        // plus, today and only today, the platform title bar that is still
+        // drawn above it. ADR-0040 §6 takes that debt deliberately and names
+        // what clears it; the pass grows it and leaves the reversal unchanged.
+        const { assert!(APP_BAR_H + TOP_BAR_H == 106.0) }
     }
 
     /// **The app bar's trailing ink lands on the window's gutter, in both
@@ -7899,14 +8363,19 @@ mod tests {
         );
         const { assert!(APP_BAR_HANG_R < APP_BAR_EDGE) }
         const { assert!(APP_BAR_EDGE - APP_BAR_HANG_R == CONTROL_INK_INSET) }
-        const { assert!(CONTROL_INK_INSET == 8.0) }
-        const { assert!(APP_BAR_HANG_R == 8.0) }
+        const { assert!(CONTROL_INK_INSET == 10.0) }
+        const { assert!(APP_BAR_HANG_R == 6.0) }
         const { assert!(APP_BAR_HANG_R >= crate::window_frame::RESIZE_BAND) }
-        // The mark's slot leaves it hanging from the leading gutter with one
-        // `GAP_MD` positions its optical centre on the lane's immutable icon
-        // axis and leaves the remaining separation toward the drag gap.
-        const { assert!(APP_BAR_NAME_W - APP_MARK_PX == GAP_MD) }
-        const { assert!(APP_BAR_EDGE + GAP_MD + APP_MARK_PX / 2.0 == GAP_XL + GAP_SM + ICON_PX / 2.0) }
+        // **The leading ink lands on the leading gutter**, which is the same
+        // rule as the trailing one and used not to hold: the mark's slot
+        // carried a `GAP_MD` lead, so zone 1's ink stood at 28 while every
+        // other edge in the bar stood at 16. The slot is the mark now, so the
+        // container's edge is the ink's.
+        //
+        // Where that ink's *centre* has to land is the lane's business and is
+        // asserted there — `the_lane_has_two_widths_and_a_floor_that_chooses`,
+        // which is the side of the equality that may not move.
+        const { assert!(APP_BAR_NAME_W == APP_MARK_PX) }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

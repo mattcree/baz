@@ -107,12 +107,14 @@ pub(crate) enum Cover {
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(
-    player: &PlayerState,
+pub(crate) fn view<'a>(
+    player: &'a PlayerState,
     ink: Ink,
     cover: Option<Cover>,
     source: Option<Message>,
-) -> Element<'_, Message> {
+    window_w: f32,
+    favourite: Option<(&'a std::path::Path, bool)>,
+) -> Element<'a, Message> {
     let room = theme::active();
     let mut status = row![]
         .spacing(theme::GAP_SM)
@@ -136,9 +138,11 @@ pub(crate) fn view(
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
     let bar = row![
-        container(now_playing_block(player, cover, source))
-            .width(Length::Fill)
-            .clip(true),
+        container(now_playing_block(
+            player, cover, source, window_w, favourite
+        ))
+        .width(Length::Fill)
+        .clip(true),
         container(controls)
             .align_x(alignment::Horizontal::Right)
             .clip(true),
@@ -263,15 +267,43 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// it: the queue's own control came off when its place was absorbed into
 /// `Now playing` (module docs, doc 12 §6.4). One door, one subject, labelled in
 /// words rather than by a gesture or an icon.
-fn now_playing_block(
-    player: &PlayerState,
+fn now_playing_block<'a>(
+    player: &'a PlayerState,
     cover: Option<Cover>,
     source: Option<Message>,
-) -> Element<'_, Message> {
-    container(back_to_source(player, cover, source))
-        .width(Length::Fill)
-        .clip(true)
-        .into()
+    window_w: f32,
+    favourite: Option<(&'a std::path::Path, bool)>,
+) -> Element<'a, Message> {
+    // **The heart is a sibling of the door, not a child of it.**
+    //
+    // The owner: *"add to favourites should be beside the playing song in the
+    // bottom bar"* — the one surface that names the sounding track at every
+    // moment, and the one that never had item 32's shared action. It is
+    // [`crate::views::page::favourite_slot`], the same control the record
+    // page's rows, the playlist page's rows, the wall's `Songs` rows and Now
+    // playing's title line draw; a second heart drawn here would be a second
+    // answer to one question.
+    //
+    // It sits *outside* [`back_to_source`]'s button because that button's
+    // press goes to the record or list this is playing from, and a heart
+    // nested inside it would either steal that press or issue it — iced runs
+    // the inner control first, so nesting is how a control ends up meaning two
+    // things depending on which pixel you hit.
+    //
+    // Its slot is reserved in **every** state, hearted or not and library row
+    // or not ([`crate::views::page::favourite_slot_maybe`]), and
+    // [`theme::bar_title_lane_w`] has already subtracted it from the name's
+    // measure. That is the bar's own law: starting a track, muting, crossing
+    // the hour mark and now hearting a song all change ink and never geometry.
+    row![
+        container(back_to_source(player, cover, source, window_w))
+            .width(Length::Fill)
+            .clip(true),
+        crate::views::page::favourite_slot_maybe(favourite),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 fn time_readout(player: &PlayerState) -> Element<'static, Message> {
@@ -327,9 +359,10 @@ fn back_to_source(
     player: &PlayerState,
     cover: Option<Cover>,
     source: Option<Message>,
+    window_w: f32,
 ) -> Element<'_, Message> {
     let room = theme::active();
-    let lines = now_playing_line(player);
+    let lines = now_playing_line(player, theme::bar_title_lane_w(window_w));
     let Some(source) = source else {
         return lines;
     };
@@ -412,7 +445,7 @@ fn back_to_source(
 /// continuation**, so the title and the artist above it sit on the same pixels
 /// from the first track of a queue to the last — the line coming and going as
 /// the music moves is precisely the case a reserved slot exists for.
-fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
+fn now_playing_line(player: &PlayerState, measure: f32) -> Element<'_, Message> {
     let room = theme::active();
     if let Some(note) = player.availability_note() {
         return text(note)
@@ -442,27 +475,67 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     // exception (law L2) buying what the line boxes carry. The air the block
     // needs is taken *outside* it, by [`theme::BAR_ZONE_LEAD`] — which is the
     // whole of what the bar's re-derivation from 56 to 80 changed.
+    // **All three lines are fitted, and all three end in a visible ellipsis
+    // when they do not fit.** They carried `Wrapping::None` inside fixed
+    // containers and left the zone's clip to do the rest, which stops a long
+    // string **mid-glyph with nothing to say it continues** — the owner's
+    // *"the now playing song title seems cut off when it is long"*.
+    //
+    // The reading is [`crate::views::fitted_line`]'s, which is the returns
+    // lane's, lifted out so this bar could have it rather than grow a second
+    // one: the string is measured against the real bundled face at the real
+    // size and the ellipsis gets a clipped subslot of its own, because iced
+    // 0.14 can still break `Wrapping::None` text and put its own `…` on an
+    // invisible second line.
+    //
+    // The **artist and the continuation are fitted too**, not just the title.
+    // They carry the same `Wrapping::None` and the same clip, so they had the
+    // same failure; the title is merely the one long enough often enough to be
+    // noticed. Fitting one and not the others would leave two of the three
+    // lines able to stop mid-glyph beside a third that cannot.
+    //
+    // The measure is [`theme::bar_title_lane_w`] — the window less the bar's
+    // edges, the trailing cluster, the sleeve and the Favourites slot. It
+    // matters most at the narrow end: at the window's floor the lane is little
+    // over a hundred pixels, which is where a title was always going to be cut.
+    let line = |content: &str, size, leading, line_height, font, color| {
+        crate::views::fitted_line(&crate::views::Fitted {
+            content,
+            face: if font == theme::MEDIUM {
+                &crate::views::FIT_MEDIUM
+            } else {
+                &crate::views::FIT_REGULAR
+            },
+            size,
+            leading,
+            line_height,
+            font,
+            color,
+            measure,
+        })
+    };
     let lines = column![
-        container(
-            text(now.title.as_str())
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None)
-        )
-        .height(Length::Fixed(theme::LINE_BODY)),
+        line(
+            now.title.as_str(),
+            theme::SIZE_BODY,
+            theme::LEADING_BODY,
+            theme::LINE_BODY,
+            theme::MEDIUM,
+            room.paper,
+        ),
         container(match now.track_artist.as_ref().or(now.artist.as_ref()) {
-            Some(artist) => Element::from(
-                text(artist.as_str())
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim)
-                    .wrapping(text::Wrapping::None),
+            Some(artist) => line(
+                artist.as_str(),
+                theme::SIZE_META,
+                theme::LEADING_META,
+                theme::LINE_META,
+                theme::SANS,
+                room.paper_dim,
             ),
             None => Space::new().height(Length::Fixed(theme::LINE_META)).into(),
         })
         .height(Length::Fixed(theme::LINE_META)),
-        continuation_lane(player),
+        continuation_lane(player, measure),
     ];
     // The block is [`theme::NOW_PLAYING_H`] in every state, which is the number
     // the whole band is derived from — say so here rather than letting it fall
@@ -480,19 +553,22 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
 /// height means the two lines above it never move, and the zone stays shorter
 /// than the centre column, so the bar's height stays a property of the
 /// transport (asserted in [`theme`] and below).
-fn continuation_lane(player: &PlayerState) -> Element<'_, Message> {
+fn continuation_lane(player: &PlayerState, measure: f32) -> Element<'_, Message> {
     let Some(note) = player.continuation_note() else {
         return Space::new()
             .height(Length::Fixed(theme::CONTINUATION_H))
             .into();
     };
-    container(
-        text(note)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .color(theme::active().paper_faint)
-            .wrapping(text::Wrapping::None),
-    )
+    container(crate::views::fitted_line(&crate::views::Fitted {
+        content: &note,
+        face: &crate::views::FIT_REGULAR,
+        size: theme::SIZE_CAPTION,
+        leading: theme::LEADING_CAPTION,
+        line_height: theme::CONTINUATION_H,
+        font: theme::SANS,
+        color: theme::active().paper_faint,
+        measure,
+    }))
     .height(Length::Fixed(theme::CONTINUATION_H))
     .into()
 }
@@ -1022,10 +1098,11 @@ mod tests {
 
         // 1. The band's mid-line **is** the transport's centre line. `BAR_LEAD`
         //    is derived from the band rather than chosen, so this cannot drift:
-        //    it is (80 − 32) / 2 = `GAP_XL` 24, and the transport row states it
-        //    as padding rather than borrowing the row's centring.
+        //    it is (80 − 40) / 2 = 20 since the 2026-08-14 control pass, and
+        //    the transport row states it as padding rather than borrowing the
+        //    row's centring.
         const { assert!(TRANSPORT_CENTRE == MID) }
-        const { assert!(theme::BAR_LEAD == theme::GAP_XL) }
+        const { assert!(theme::BAR_LEAD == 20.0) }
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
         // 2. The volume block is one control height with the fader's hit band
         //    centred in it, so centring the block centres the **rail** — the
@@ -1086,8 +1163,10 @@ mod tests {
     /// the lattice is law L2 broken to make a proportion true.
     #[test]
     fn the_band_is_its_content_plus_a_stated_lead_and_lands_on_two_hangs() {
-        /// The bar as the composition audit measured it, before the needle.
-        const WAS: f32 = 2.0 * (theme::GAP_SM + 24.0) + theme::TRANSPORT_HIT + 2.0 * 4.0 + 1.0;
+        /// The bar as the composition audit measured it, before the needle —
+        /// its transport was 32 that day, spelled here rather than derived,
+        /// because the control pass grew the box without growing the bar.
+        const WAS: f32 = 2.0 * (theme::GAP_SM + 24.0) + 32.0 + 2.0 * 4.0 + 1.0;
         /// What the window's bottom edge cost at the needle's 57 px bar.
         const SHORT: f32 = 56.0 + 1.0 + theme::NEEDLE_H;
         /// What it costs now.
@@ -1105,10 +1184,12 @@ mod tests {
         // as named tokens rather than as pixels chosen to look right.
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::HANG) }
         const { assert!(theme::BAR_ZONE_LEAD == theme::GAP_MD) }
-        const { assert!(theme::BAR_LEAD == theme::GAP_XL) }
+        const { assert!(theme::BAR_LEAD == 20.0) }
         // The lead is a named gap, and it is one rung above the top bar's,
         // because a hit box carries its own internal padding and a stack of
-        // line boxes carries only its leading.
+        // line boxes carries only its leading — until the 2026-08-14 control
+        // pass, when the transport grew into the band and the lead left the
+        // named ladder (20 is `HANG / 2`, on the lattice).
         const { assert!(theme::TOP_BAR_PAD_V == theme::GAP_SM) }
         const { assert!(theme::BAR_ZONE_LEAD > theme::TOP_BAR_PAD_V) }
 
@@ -1135,7 +1216,11 @@ mod tests {
         // the hairline is odd and everything else is doubled. Stated as the
         // parity of the band rather than of the bar, so no cast is needed.
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
-        const { assert!(theme::BAR_LEAD + theme::BAR_LEAD == theme::BAR_CONTENT_H - 32.0) }
+        const {
+            assert!(
+                theme::BAR_LEAD + theme::BAR_LEAD == theme::BAR_CONTENT_H - theme::TRANSPORT_HIT
+            );
+        }
     }
 
     /// **The sounding record's cover fits the band that already existed.**
@@ -1168,6 +1253,88 @@ mod tests {
         // And it never exceeds the decoded source, which is the wall's own
         // rule about artwork applied one surface along.
         const { assert!(theme::BAR_COVER <= theme::ART_MAX) }
+    }
+
+    /// **The sounding track's name yields with a visible ellipsis, and the
+    /// Favourites action beside it cannot move it.**
+    ///
+    /// Two of the owner's asks, tested together because they are one lane:
+    /// *"the now playing song title seems cut off when it is long"* and *"add
+    /// to favourites should be beside the playing song in the bottom bar"*.
+    /// The heart is the thing standing between the name and the trailing
+    /// cluster, so a test that pinned the fitting without pinning the slot
+    /// would be measuring against a lane that could change width.
+    ///
+    /// The fitting itself is proven where it lives — `views::fit` — over real
+    /// strings and the real bundled faces. What is proven here is that this
+    /// bar uses it, over the measure that describes this bar.
+    #[test]
+    fn the_sounding_name_is_fitted_against_the_lane_the_heart_leaves_it() {
+        // **The measure is the bar, summed.** Every tenant of the trailing
+        // cluster, the sleeve and its seam, the heart and its seam, and the
+        // bar's two edges — so a control added to this bar without entering
+        // `BAR_TRAILING_W` shows up as a name fitted to a lane it does not
+        // have, rather than as silence.
+        const { assert!(theme::BAR_TRAILING_W == 636.0) }
+        // The name's lane plus everything else is the window, exactly.
+        let everything_else = 2.0 * theme::BAR_EDGE_PAD
+            + theme::BAR_TRAILING_W
+            + theme::GAP_LG
+            + theme::BAR_COVER
+            + theme::GAP_MD
+            + theme::STEPPER_HIT
+            + theme::GAP_SM;
+        assert!((theme::bar_title_lane_w(1280.0) + everything_else - 1280.0).abs() < f32::EPSILON);
+        // And it is still a real lane at the narrowest window baz opens,
+        // which is the width the owner would have met the clip at.
+        assert!(theme::bar_title_lane_w(theme::WINDOW_FLOOR_W) > 0.0);
+        // A wider window gives the name more room, monotonically — the lane is
+        // the fill it has always been, not a slot that snaps.
+        assert!(theme::bar_title_lane_w(1920.0) > theme::bar_title_lane_w(1280.0));
+        assert!(
+            (theme::bar_title_lane_w(1920.0) - theme::bar_title_lane_w(1280.0) - 640.0).abs()
+                < f32::EPSILON
+        );
+
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/bottom_bar.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("this module has a non-test head");
+        // **All three lines**, not just the title. They carried the same
+        // `Wrapping::None` and the same clip, so they had the same failure.
+        assert_eq!(
+            shipped.matches("crate::views::Fitted {").count(),
+            2,
+            "the bar's lines are built by one local `line` closure and the \
+             continuation's own lane; a third construction is a second reading"
+        );
+        assert!(
+            !shipped.contains("text(now.title.as_str())"),
+            "the title is set raw again, so a long name stops mid-glyph with \
+             nothing to say it continues"
+        );
+        // **The heart is a sibling of the door, not a child of it.** Nested,
+        // it would either steal the block's press or issue it.
+        let block = {
+            let rest = shipped
+                .split_once("fn now_playing_block")
+                .expect("the block exists")
+                .1;
+            &rest[..rest.find("\n}\n").expect("a function ends")]
+        };
+        assert!(
+            block.contains("crate::views::page::favourite_slot_maybe(favourite)"),
+            "the bar draws its own heart instead of item 32's shared action"
+        );
+        assert!(
+            !block.contains("button("),
+            "the heart has been nested inside the block's own press"
+        );
     }
 
     /// **Real artwork and the record placeholder share one hit target.**
@@ -1287,7 +1454,10 @@ mod tests {
         /// control.
         const DOOR: f32 = 152.0 + theme::GAP_SM;
         const TITLE_LANE: f32 = ZONE - 2.0 * theme::STAMP_W - 2.0 * theme::GAP_SM;
-        // **248 → 408 at 1280**, and the gain is exactly the slot and its gap.
+        // **236 → 396 at 1280** (was 248 → 408 before the 2026-08-14 control
+        // pass widened the transport from 112 to 136, which took 12 px off
+        // each flank at this window), and the gain is exactly the slot and
+        // its gap.
         //
         // Doc 12 §6.4.1 computed 288 → 448 from the same tokens and flagged the
         // figure as unverified; it is 40 px optimistic in both columns, because
@@ -1295,16 +1465,16 @@ mod tests {
         // also carries its own `2 × HANG` window gutter. **The delta it was
         // making the argument about — 160 px, all of it to the title — is
         // exactly right**, and that is the claim that mattered.
-        const { assert!(TITLE_LANE - DOOR == 248.0) }
-        const { assert!(TITLE_LANE == 408.0) }
+        const { assert!(TITLE_LANE - DOOR == 236.0) }
+        const { assert!(TITLE_LANE == 396.0) }
         const { assert!(DOOR == 160.0) }
         // **And the transport column has not moved.** Its left edge is the
         // window's gutter, plus one flank, plus one gap — an expression the
         // door never appeared in, at any width. That is the whole reason the
         // slot could come off without a re-derivation.
         const {
-            assert!(transport_x(1280.0) == 528.0 + theme::HANG + theme::GAP_LG);
-            assert!(transport_x(1920.0) == 848.0 + theme::HANG + theme::GAP_LG);
+            assert!(transport_x(1280.0) == 516.0 + theme::HANG + theme::GAP_LG);
+            assert!(transport_x(1920.0) == 836.0 + theme::HANG + theme::GAP_LG);
         }
         // The zone's whole height: three stacked line boxes, every one of them
         // reserved, so this is its height in every state rather than its

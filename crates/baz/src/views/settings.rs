@@ -209,6 +209,7 @@ pub(crate) fn view<'a>(
     vibe_workers: usize,
     theme_view: ThemeView<'a>,
     diagnostic_lines: Vec<String>,
+    resources: Option<crate::resource::Reading>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
@@ -221,7 +222,7 @@ pub(crate) fn view<'a>(
         LIBRARY_SECTION => vec![library_section(library)],
         APPEARANCE_SECTION => vec![appearance_section(&theme_view)],
         VIBE_SECTION => vec![vibe_section(vibe_workers)],
-        DEBUG_SECTION => vec![debug_section(diagnostic_lines)],
+        DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![output_section(output, player), replay_gain_section(player)],
     };
     let content = container(
@@ -269,15 +270,50 @@ pub(crate) fn view<'a>(
 }
 
 /// The existing tagged console stream, retained only for this process.
-fn debug_section(lines: Vec<String>) -> Element<'static, Message> {
+fn debug_section(
+    lines: Vec<String>,
+    resources: Option<crate::resource::Reading>,
+) -> Element<'static, Message> {
     let room = theme::active();
-    let mut section = column![section_heading(
+    // **What baz itself is costing this machine**, above the log — the
+    // owner's *"show how much RAM/CPU it is using in the debug menu"*.
+    //
+    // It stands in this section and nowhere else, and its heading says whose
+    // numbers these are. Every other figure baz shows is a fact about the
+    // listener's music; this is a fact about the program, and on a health
+    // surface a resident-set figure would read as a verdict when the honest
+    // reading of a large one is *this is what a decoded artwork cache costs*.
+    // It is also where item 37's memory budget can finally be **measured**
+    // inside the running app rather than only argued about.
+    //
+    // Before the first tick there is nothing to draw and the block is absent
+    // rather than a placeholder — the clock is installed with the section, so
+    // "nothing yet" lasts under a second and a reserved row would flicker.
+    let mut section = column![].spacing(theme::GAP_XL);
+    if let Some(reading) = resources {
+        let mut block = column![section_heading(
+            "This process",
+            "Baz's own resource use · sampled once a second, only while you are \
+             reading this section.",
+        )]
+        .spacing(theme::GAP_MD);
+        for line in crate::resource::lines(reading) {
+            block = block.push(
+                text(line)
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper_dim),
+            );
+        }
+        section = section.push(block);
+    }
+    let mut log = column![section_heading(
         "Diagnostic log",
         "This session only · newest first · the notification bell remains the event history.",
     )]
     .spacing(theme::GAP_MD);
     if lines.is_empty() {
-        section = section.push(
+        log = log.push(
             text("No diagnostics have been recorded in this session.")
                 .size(theme::SIZE_BODY)
                 .line_height(theme::LEADING_BODY)
@@ -285,7 +321,7 @@ fn debug_section(lines: Vec<String>) -> Element<'static, Message> {
         );
     } else {
         for line in lines {
-            section = section.push(
+            log = log.push(
                 text(line)
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
@@ -294,7 +330,7 @@ fn debug_section(lines: Vec<String>) -> Element<'static, Message> {
             );
         }
     }
-    section.into()
+    section.push(log).into()
 }
 
 /// Four coordinated built-ins plus the bounded local JSON extension surface.

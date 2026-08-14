@@ -52,7 +52,13 @@ pub(crate) fn well(shelf: &Shelf) -> Element<'_, Message> {
     let mark: Element<'_, Message> = if filtering {
         container(crate::views::clear_mark(room.recess))
             .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .padding(theme::pad(0.0, theme::GAP_SM))
+            // Centre the stepper-sized cross on the head's one vertical
+            // ([`theme::SIDEBAR_HEAD_GLYPH_X`]), where the magnifier it
+            // replaces stood.
+            .padding(theme::pad(
+                0.0,
+                theme::SIDEBAR_HEAD_GLYPH_X - theme::STEPPER_HIT / 2.0,
+            ))
             .align_y(alignment::Vertical::Center)
             .into()
     } else {

@@ -101,11 +101,145 @@ pub(crate) mod shelf;
 pub(crate) mod status;
 pub(crate) mod top_bar;
 
+use std::sync::LazyLock;
+
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use iced::widget::{Space, button, column, container, image as iced_image, row, rule, text};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::{theme, vm};
+use crate::{font, theme, vm};
+
+/// The bundled Regular face, for measuring a string before Iced sets it.
+pub(crate) static FIT_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(font::SANS_REGULAR).expect("the bundled regular face is valid")
+});
+/// The bundled Medium face, likewise.
+pub(crate) static FIT_MEDIUM: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(font::SANS_MEDIUM).expect("the bundled medium face is valid")
+});
+
+/// One fixed-height line of type, shortened with a **visible** end ellipsis
+/// when it does not fit its measure.
+///
+/// # Why this exists rather than `Wrapping::None` and a clip
+///
+/// A clip stops a long string **mid-glyph, with nothing to say it continues**.
+/// The eye reads that as a rendering fault rather than as a shortened name,
+/// and it is what the owner met in the bottom bar: *"the now playing song
+/// title seems cut off when it is long"*.
+///
+/// Iced's own `…` is not the answer either. iced 0.14 can still break
+/// `Wrapping::None` text at a constrained width, which puts the ellipsis on an
+/// invisible second line — so the failure sign disappears in exactly the case
+/// it exists for. The returns lane worked this out first and solved it with
+/// two clipped subslots: the prefix, fitted against the **real bundled face at
+/// the real size**, and the ellipsis in a slot of its own that the fitting has
+/// already reserved. Nothing depends on the renderer's own rounding.
+///
+/// This is that reading, lifted out of `lane.rs` so the bar can have it rather
+/// than growing a second one. The lane passes its fixed row measure; the bar
+/// passes [`theme::bar_title_lane_w`], which is the same thing computed from
+/// the window rather than declared.
+pub(crate) struct Fitted<'a> {
+    pub content: &'a str,
+    pub face: &'a FontRef<'static>,
+    pub size: f32,
+    pub leading: f32,
+    pub line_height: f32,
+    pub font: iced::Font,
+    pub color: Color,
+    /// The lane the whole line — prefix and ellipsis together — must fit.
+    pub measure: f32,
+}
+
+/// Draw a [`Fitted`].
+pub(crate) fn fitted_line(line: &Fitted<'_>) -> Element<'static, Message> {
+    let (fitted, truncated) = fit(line.content, line.face, line.size, line.measure);
+    let set = |content: String, width: Length, align| {
+        container(
+            text(content)
+                .size(line.size)
+                .line_height(line.leading)
+                .font(line.font)
+                .color(line.color)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(width)
+        .height(Length::Fixed(line.line_height))
+        .align_x(align)
+        .clip(true)
+    };
+    let prefix = set(
+        fitted,
+        if truncated {
+            Length::Fixed(line.measure - theme::ELLIPSIS_SLOT_W)
+        } else {
+            Length::Fill
+        },
+        alignment::Horizontal::Left,
+    );
+    let ending: Element<'static, Message> = if truncated {
+        set(
+            "…".to_owned(),
+            Length::Fixed(theme::ELLIPSIS_SLOT_W),
+            alignment::Horizontal::Right,
+        )
+        .into()
+    } else {
+        Space::new().width(Length::Fixed(0.0)).into()
+    };
+    container(row![prefix, ending])
+        .width(Length::Fixed(line.measure))
+        .height(Length::Fixed(line.line_height))
+        .clip(true)
+        .into()
+}
+
+/// The longest prefix of `content` that fits `measure` less the ellipsis'
+/// reserved slot, and whether anything was dropped.
+///
+/// Measured with the face and size the widget will actually draw with,
+/// kerning included — a fit against a different face is a fit against a
+/// different string.
+pub(crate) fn fit(content: &str, face: &impl Font, size: f32, measure: f32) -> (String, bool) {
+    if text_width(face, size, content) <= measure {
+        return (content.to_owned(), false);
+    }
+    let scaled = face.as_scaled(PxScale::from(size));
+    let prefix_w = measure - theme::ELLIPSIS_SLOT_W;
+    let mut fitted = String::new();
+    let mut width = 0.0;
+    let mut previous = None;
+    for character in content.chars() {
+        let glyph = scaled.glyph_id(character);
+        let next =
+            width + previous.map_or(0.0, |was| scaled.kern(was, glyph)) + scaled.h_advance(glyph);
+        if next > prefix_w {
+            break;
+        }
+        fitted.push(character);
+        width = next;
+        previous = Some(glyph);
+    }
+    (fitted, true)
+}
+
+/// The width `text` occupies in `face` at `size`, kerning included.
+pub(crate) fn text_width(face: &impl Font, size: f32, text: &str) -> f32 {
+    let scaled = face.as_scaled(PxScale::from(size));
+    let mut width = 0.0;
+    let mut previous = None;
+    for character in text.chars() {
+        let glyph = scaled.glyph_id(character);
+        if let Some(was) = previous {
+            width += scaled.kern(was, glyph);
+        }
+        width += scaled.h_advance(glyph);
+        previous = Some(glyph);
+    }
+    width
+}
 
 /// A `size`×`size` block filled with the album's deterministic two-color
 /// gradient (hash → HSL, see [`vm::gradient_colors`]) — a stand-in sleeve,
@@ -265,9 +399,10 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// is drawn on.
 ///
 /// **It is a control, so it wears a control's anatomy**: [`theme::STEPPER_HIT`]
-/// 24 square — the same box the playlist row's own removal cross takes — which
-/// is exactly [`theme::SIDEBAR_GLYPH_BOX`], the destinations' glyph box, so it
-/// lands on the head's glyph vertical without a constant of its own.
+/// 32 square — the same box the playlist row's own removal cross takes. The
+/// well's layer pads it onto the head's one vertical
+/// ([`theme::SIDEBAR_HEAD_GLYPH_X`]) in the box the magnifier otherwise holds,
+/// so it is the same mark in the same place at every width.
 ///
 /// **At [`theme::glyph_opacity`]'s resting reading**, which is the same 0.57 the
 /// magnifier it replaces is drawn at, and the same every live icon button in the

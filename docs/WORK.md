@@ -436,6 +436,97 @@ Phase A is complete only when all twelve items are implemented and verified;
     VU, particles and fake vinyl remain excluded. Evidence:
     `docs/design/impl/now-playing-visualizers/`.
 
+38. **Done 2026-08-14 — Make controls chunkier and restyle the returns lane.**
+    The owner's live reading of the built lane: controls *"a bit larger,
+    chunkier… help people click stuff and not miss"*; *"the padding on hover is
+    above and below the item… it should be a square around them"*; *"make the
+    icons a little bit smaller, as long as the outer box for them is the same
+    size as a thumbnail"*; and *"the full row with icon and text should appear
+    highlighted together and when selected the highlight should be together"*.
+    One control pass across the sheet — `ICON_PX` 16 → 20, `TRANSPORT_HIT`
+    32 → 40, `STEPPER_HIT` 24 → 32 — with every band, budget and breakpoint
+    that derives from them re-derived rather than renumbered, and the bars'
+    historical seams pinned with literals so the pass cannot retroactively
+    cheapen a past day's work. The lane collapses its two gutters, seam and
+    list inset into one `SIDEBAR_PAD` 8, taking `SIDEBAR_W` 280 → 232,
+    `SIDEBAR_RAIL_W` 96 → 64 and `SIDEBAR_FLOOR` 1000 → 940; a destination
+    becomes a 48 px tile — the `RECENT` sleeve's twin — holding a centred 32 px
+    glyph, and the row is the control, so one card highlights tile and word
+    together and fills the lane's content box in both states. The glyph sheet's
+    even-odd cast moved onto an exact integer grid so mirror pairs decide
+    identically, with the vertices converted once per glyph rather than once
+    per sample. Recorded in ADR-0030's 2026-08-14 amendment.
+    **This regressed item 35 and the owner asked for it back**; item 39 restored
+    it, along with seven other consequences of this pass.
+
+39. **Done 2026-08-14 — the day's twelve asks, eleven shipped.** The owner read
+    the built control pass and logged twelve things in one sitting. Eight of
+    them are this pass coming back: `ICON_PX`, `TRANSPORT_HIT` and
+    `STEPPER_HIT` moved, and every surface those three feed was re-derived
+    except these.
+
+    **The returns lane.** The `RECENT` heading is gone and `heading` with it,
+    its test rewritten to assert the absence rather than deleted. A row's pitch
+    is the sleeve's own 48 — the 16 px lived *inside* the row, so the card the
+    pointer lights was taller than the only thing drawn in it — which puts the
+    list at the head's destination pitch and gives the lane one rhythm above
+    and below its one rule. Both lamps now stand against ink rather than
+    against a box: the destination dot tucks against the *mark's* corner
+    (`SIDEBAR_GLYPH_INSET`, derived, so the next glyph-size change carries it),
+    and the `RECENT` dot stands on the **title's** line rather than in the seam
+    between the two text lines. The footer reads the *resolved* lane state, so
+    a force-collapsed rail no longer carries a live `Collapse` control.
+
+    **The app bar was 156 px wider than it said.** *"The window controls
+    disappear when we make the window narrow"* was not the 10 px of slack the
+    budget left; the budget was not the bar. The Back/Forward pair and the
+    health bell both shipped into the drawn `row!` on 2026-08-13 and neither
+    entered `APP_BAR_LINE`, so the real line was 858 and the buttons — the
+    row's last child — left the trailing edge **146 px before the floor**.
+    Every test that could have caught it recomputed the constant's own
+    expression; the budget test walks the tenants of that `row!` now, pinned to
+    its source. `APP_BAR_LINE` 702 → 850, `WINDOW_FLOOR_W` 712 → 860.
+
+    **The glyph sheet was handing out four wrong sprites.** *"The back button
+    icon is wrong and so is the forward"* had been answered once by redrawing
+    the outlines, and came back because the outlines were never what was on
+    screen: `Glyph::ALL` and `Glyph::index` are two hand-written orderings of
+    one list and they disagreed. `HistoryBack` drew the facts mark,
+    `HistoryForward` drew the back arrow, `Bell` drew the forward arrow,
+    `VisualFacts` drew the bell. Now a module-scope `const` assertion, verified
+    to fire. The outlines were separately wrong — a self-intersecting polygon
+    whose overlap cancelled to a hollow head with a tapering sliver for a
+    stroke — and are three plain outlines at the set's 0.145.
+
+    **The bottom bar.** All three sounding-track lines are fitted with a
+    visible end ellipsis against `theme::bar_title_lane_w`, through
+    `views::fitted_line` — the returns lane's reading, lifted out rather than
+    copied. The shared Favourites heart is beside the name, a sibling of the
+    block's door rather than a child of it, its slot reserved in every state
+    including for a sounding file with no library row.
+
+    **Settings → Debug reports this process's own RAM and CPU**, sampled only
+    while that section is visible, with no new dependency. Its first reading
+    was of baz, and found 99.9 % of one core idle — which is the *harness*:
+    that run forced the tiny-skia software path, which has no vertical blank to
+    block on. The shipped renderer measures 4 %.
+
+    **Not shipped, and why.** *"The right hand rail is acting strangely"*
+    remains open. The first suspect is eliminated with evidence rather than
+    confirmed: `RAIL_HIT` is the volume groove's and the seek needle's, not the
+    rail's, and `spine.rs`, `rail.rs` and every token they read are untouched
+    by the pass. What did move is the lane the rail stands in — 16 px shorter,
+    which shifts the full-alphabet threshold from about 801 px of window height
+    to about 817. That is a real candidate and it is not a diagnosis; the ask
+    needs the owner to say what "strangely" is and at what height.
+
+    A thirteenth thing was found while verifying and is **backlogged rather
+    than fixed**, per the standing rule about new UI observations: with the
+    sheet's index corrected, the real `BELL` outlines draw for the first time
+    and are a filled disc rather than the stroked bell their own doc comment
+    describes. Evidence for all of it:
+    `docs/design/impl/backlog-pass-2026-08-14/`.
+
 ### Phase F — a stated memory budget for artwork, and honest queue semantics
 
 37. **State a memory budget for decoded artwork and repair the thumbnail
@@ -467,8 +558,11 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- Nothing active — items 1–36 are complete; item 37 is recorded in
-  `## Next` and ready to start.
+- Nothing active — items 1–36, 38 and 39 are complete; item 37 is recorded in
+  `## Next` and ready to start. Two things wait on the owner rather than on
+  work: what *"the right hand rail is acting strangely"* means, and whether the
+  notification bell is redrawn as a stroke or reshaped as a silhouette (both in
+  `BACKLOG.md`).
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

@@ -214,19 +214,15 @@ fn window_settings() -> window::Settings {
     let mut settings = window::Settings {
         size: WINDOW,
         decorations: !owns_chrome(),
-        // The strip's floor **plus the returns lane's rail** is the window's
-        // declared minimum width. At 600 the two-line strip holds every
-        // tenant (doc 10 §4.3), and below it nothing further collapses —
-        // there is no third regime, so the honest move is to not offer the
-        // widths the layout does not answer. ADR-0030 puts a 96 px rail
-        // permanently to the strip's left and the strip resolves against
-        // `Shelf::body_width`, so the *window* has to be that much wider for
-        // the same strip to fit: 600 + 96 = **696**. Height is left
+        // The window's declared minimum width is [`theme::WINDOW_FLOOR_W`]:
+        // the width at which both strips still hold — the app bar's own line
+        // needs 702 (see `theme::APP_BAR_LINE`) and the place strip below it
+        // needs the strip's 600 with the lane's collapsed rail beside it.
+        // ADR-0030 puts a 64 px rail permanently to the strip's left and the
+        // strip resolves against `Shelf::body_width`, so the *window* has to
+        // be that much wider for the same strip to fit. Height is left
         // unbounded; the study declares no floor for it.
-        min_size: Some(Size::new(
-            theme::TOP_BAR_FLOOR + theme::SIDEBAR_RAIL_W,
-            theme::WINDOW_FLOOR_H,
-        )),
+        min_size: Some(Size::new(theme::WINDOW_FLOOR_W, theme::WINDOW_FLOOR_H)),
         ..window::Settings::default()
     };
     settings.icon = window_icon();
@@ -1046,6 +1042,13 @@ pub(crate) enum Message {
     /// Settings place: show this section of the place (index into
     /// `views::settings::SECTIONS`).
     SettingsSection(usize),
+    /// Settings → Debug: sample this process's own RAM and CPU
+    /// ([`crate::resource`]). Carries the instant so the rate divides by the
+    /// interval that actually elapsed rather than by the timer's nominal one.
+    ///
+    /// Its clock exists **only** while that section is the visible one, which
+    /// is what keeps a resource meter from being a resource cost.
+    ResourceTick(Instant),
     /// Settings place: the add-a-folder field changed (ADR-0022).
     MusicFolderInput(String),
     /// Settings place: add the folder in the field, if it is one.
@@ -1448,6 +1451,20 @@ struct App {
     /// and for `crate::panels`' reason: which section you last read is not a
     /// standing decision, so it is not in `config.toml`.
     settings_section: usize,
+    /// The rolling RAM/CPU observer behind Settings → Debug.
+    ///
+    /// Session state, and **only alive while that section is visible**: its
+    /// clock is installed by `add_place_clocks` under the same guard every
+    /// other place-owned clock carries, and leaving the section resets it so
+    /// that returning warms up again rather than dividing a fresh counter by
+    /// however long the listener spent elsewhere (`crate::resource`).
+    resource_meter: crate::resource::Meter,
+    /// What that observer last said, or `None` before the first tick.
+    resource_reading: Option<crate::resource::Reading>,
+    /// When the meter was last sampled, so the rate divides by a real
+    /// interval rather than by the timer's nominal one — a tick the event
+    /// loop delivered late would otherwise read as a spike.
+    resource_sampled: Option<Instant>,
     /// Settings → Appearance paste/import field; session-only until validated.
     theme_json: String,
     /// Exact result of the most recent local theme operation.
@@ -1824,6 +1841,9 @@ impl App {
             _history_ledger: history_ledger,
             group_key,
             settings_section: 0,
+            resource_meter: crate::resource::Meter::default(),
+            resource_reading: None,
+            resource_sampled: None,
             theme_json: String::new(),
             theme_notice: None,
             density,
@@ -2170,6 +2190,27 @@ impl App {
             // decision.
             Message::SettingsSection(section) => {
                 self.settings_section = section;
+                // Leaving Debug ends the reading rather than freezing it: a
+                // stale figure redrawn on return would be a measurement of a
+                // moment nobody asked about.
+                if section != views::settings::DEBUG_SECTION {
+                    self.resource_meter.reset();
+                    self.resource_reading = None;
+                    self.resource_sampled = None;
+                }
+                Task::none()
+            }
+            // The Debug section's own clock, and nothing else's.
+            Message::ResourceTick(now) => {
+                if let Some(sample) = crate::resource::sample() {
+                    let interval = self
+                        .resource_sampled
+                        .map_or(Duration::ZERO, |was| now.duration_since(was));
+                    self.resource_sampled = Some(now);
+                    self.resource_reading = Some(self.resource_meter.observe(sample, interval));
+                } else {
+                    self.resource_reading = Some(crate::resource::Reading::Unavailable);
+                }
                 Task::none()
             }
             Message::OutputDeviceSelected(choice) => {
@@ -6604,6 +6645,7 @@ impl App {
                     } else {
                         Vec::new()
                     },
+                    self.resource_reading,
                 )
             }
         };
@@ -6742,6 +6784,19 @@ impl App {
                 self.bar_cover(),
                 self.now_playing_source()
                     .map(|_| Message::OpenPlayingSource),
+                self.window.width,
+                // The same reading Now playing's title line takes: the
+                // sounding file, and whether the library holds it as a
+                // favourite. `None` is a sounding file with no library row,
+                // which cannot be favourited at all — the bar keeps the slot
+                // and draws the action inert rather than dropping it, because
+                // a slot that came and went would move the title lane beside
+                // it, which is the one thing this bar may not do.
+                self.player
+                    .now_playing()
+                    .filter(|now| now.album_id.is_some())
+                    .and_then(|_| self.player.now_playing_path())
+                    .map(|path| (path, is_favourite(state, path))),
             ),
         ]
         .into();
@@ -6875,6 +6930,17 @@ impl App {
             self.visualization.facts,
         ) {
             subs.push(iced::time::every(Duration::from_secs(20)).map(|_| Message::AdvanceFact));
+        }
+        // **The resource meter's clock is the Debug section's**, so it does
+        // not exist anywhere else in the product — which is the whole of what
+        // makes a resource meter honest: one that ran while you listened would
+        // be a cost of its own inside the number it reports.
+        if self.place == Place::Settings && self.settings_section == views::settings::DEBUG_SECTION
+        {
+            subs.push(
+                iced::time::every(Duration::from_secs(1))
+                    .map(|_| Message::ResourceTick(Instant::now())),
+            );
         }
         if let Screen::Shelf(state) = &self.screen {
             if state.scanning {

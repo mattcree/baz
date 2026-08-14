@@ -135,7 +135,7 @@ pub const SERIF: &str = "IBM Plex Serif";
 pub const FACES: [&[u8]; 4] = [SANS_REGULAR, SANS_MEDIUM, SANS_SEMIBOLD, SERIF_ITALIC];
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::theme;
 
@@ -152,7 +152,9 @@ mod tests {
     /// Deliberately hand-written and test-only rather than a `ttf-parser`
     /// dev-dependency: the crate is already flagged unmaintained in
     /// `deny.toml`, and this is 120 lines against a file we ship and hash.
-    mod ttf {
+    /// `pub(crate)` only so `playlists`'s row-string test can measure with the
+    /// real face rather than with a per-character heuristic.
+    pub(crate) mod ttf {
         /// A parsed face: enough of one to measure text.
         pub struct Face<'a> {
             data: &'a [u8],
@@ -682,12 +684,12 @@ mod tests {
     /// [`theme::SIDEBAR_MATCH_W`] 72, sized here rather than guessed:
     ///
     /// ```text
-    ///   232 − SIDEBAR_HEAD_TEXT_X 44 − GAP_MD 12 − SIDEBAR_MATCH_W 72 = 104
+    ///   232 − SIDEBAR_HEAD_TEXT_X 64 − GAP_MD 12 − SIDEBAR_MATCH_W 72 = 84
     /// ```
     ///
     /// Two claims, and the second is the one the owner would notice: the slot
     /// **holds its worst figure**, so a right-aligned count never runs left
-    /// under the query, while the remaining 104 px still holds the query.
+    /// under the query, while the remaining 84 px still holds the query.
     #[test]
     fn the_app_bar_well_holds_a_query_beside_its_match_count() {
         let sans = sans();
@@ -706,8 +708,8 @@ mod tests {
             - theme::GAP_MD
             - theme::SIDEBAR_MATCH_W;
         assert!(
-            (query - 104.0).abs() < f32::EPSILON,
-            "the query's room in the app-bar well is {query} px, not the 104 \
+            (query - 84.0).abs() < f32::EPSILON,
+            "the query's room in the app-bar well is {query} px, not the 84 \
              the design records"
         );
     }
@@ -720,7 +722,7 @@ mod tests {
     /// and the reason is a coincidence the design can rely on: **a placeholder
     /// is drawn exactly when the query is empty, and the count's slot is
     /// reserved exactly when it is not.** So the placeholder's lane is the
-    /// field's resting width — 232 − 44 − 12 = 176 px — not the 104 px a query
+    /// field's resting width — 232 − 64 − 12 = 156 px — not the 84 px a query
     /// gets while the count stands beside it.
     ///
     /// Swept past the word actually shipped, because the next reasonable
@@ -731,8 +733,8 @@ mod tests {
         let sans = sans();
         let resting = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
         assert!(
-            (resting - 176.0).abs() < f32::EPSILON,
-            "the placeholder's lane is {resting} px, not the 176 the design \
+            (resting - 156.0).abs() < f32::EPSILON,
+            "the placeholder's lane is {resting} px, not the 156 the design \
              records"
         );
         fits(
@@ -874,33 +876,57 @@ mod tests {
     ///
     /// So this is no longer a measurement of what is drawn; it is a measurement
     /// of what the slot can still take, and it says so.
+    ///
+    /// **The slot is now the mark exactly**, and the `GAP_MD` it used to carry
+    /// beside it is gone (2026-08-14). That air was never separation the bar
+    /// needed — `app_bar::view`'s row already spaces every pair of children by
+    /// `GAP_LG` — and it was being spent as a *lead*, which put zone 1's ink
+    /// 12 px inside law L1's gutter and its optical centre 10 px off the four
+    /// destination glyphs in the returns lane. Both are fixed by the slot
+    /// being the mark; what this test still has to hold is the **reversal**,
+    /// which is unchanged and is the only reason the measurement exists.
     #[test]
     fn the_app_bars_zone_one_holds_the_enlarged_mark() {
+        let medium = Face::parse(SANS_MEDIUM);
+        // The stated reversal for the icon is *put the word back*. It is the
+        // word this zone drew until 2026-08-10, at the size and in the face it
+        // drew it in, and the slot has to still take it — a reversal that
+        // overran would push the drag region rather than clip, and the bar
+        // would stop being the geometry the budget adds up with nothing
+        // looking wrong.
+        let word = medium.width("baz", theme::SIZE_META);
         assert!(
-            (theme::APP_BAR_NAME_W - theme::APP_MARK_PX - theme::GAP_MD).abs() < f32::EPSILON,
-            "zone 1's slot is no longer the mark's lane plus its separation \
-             from the fill beside it"
+            word <= theme::APP_BAR_NAME_W,
+            "zone 1's slot is {} px and the word it reverts to measures \
+             {word:.2}: the stated reversal no longer fits",
+            theme::APP_BAR_NAME_W
+        );
+        assert!(
+            (theme::APP_BAR_NAME_W - theme::APP_MARK_PX).abs() < f32::EPSILON,
+            "zone 1's slot is no longer the mark itself, so it carries air \
+             nobody has accounted for"
         );
         const { assert!(theme::APP_MARK_PX > theme::ICON_PX) }
     }
 
-    /// **The returns lane holds its head's three words** at the measure the
+    /// **The returns lane holds its head's four words** at the measure the
     /// open lane gives them.
     ///
     /// The head is the one part of the lane whose copy is fixed and known —
-    /// `Home`, `Library`, `Now playing` — so unlike a record's title it can
-    /// be *held* rather than clipped. `Now playing` is the long one, and the
-    /// glyph, its gap and the row's own padding all come off the measure
+    /// `Home`, `Library`, `Playlists`, `Now playing` — so unlike a record's
+    /// title it can be *held* rather than clipped. `Now playing` is the long
+    /// one, and the tile and its seam both come off the lane's content measure
     /// before the word gets it.
     #[test]
-    fn the_returns_lane_holds_its_three_destinations() {
+    fn the_returns_lane_holds_its_four_destinations() {
         let medium = Face::parse(SANS_MEDIUM);
-        // What a destination row leaves the word: the lane's content measure,
-        // less the row's two `GAP_SM` flanks, the glyph's box and the
-        // `GAP_MD` between it and the word.
+        // What a destination row leaves the word: the open lane's content
+        // measure (its width less the two `SIDEBAR_PAD` flanks), less the
+        // tile and the `GAP_SM` between it and the word — the same seam the
+        // `RECENT` rows' titles stand on.
         let measure =
-            theme::MENU_W - 2.0 * theme::GAP_SM - theme::SIDEBAR_GLYPH_BOX - theme::GAP_MD;
-        for label in ["Home", "Library", "Now playing"] {
+            theme::SIDEBAR_W - 2.0 * theme::SIDEBAR_PAD - theme::SIDEBAR_GLYPH_BOX - theme::GAP_SM;
+        for label in ["Home", "Library", "Playlists", "Now playing"] {
             let word = medium.width(label, theme::SIZE_BODY);
             assert!(
                 word <= measure,

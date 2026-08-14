@@ -50,9 +50,6 @@
 //! from whatever it stands on ([`theme::Palette::step_up`]), so on the recess
 //! a hovered row lands on the wall's own colour.
 
-use std::sync::LazyLock;
-
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use iced::widget::{
     Space, button, column, container, image as iced_image, row, rule, scrollable, text,
 };
@@ -63,14 +60,7 @@ use crate::lane::{Destination, Subject, Touched};
 use crate::place::Place;
 use crate::playlists::Playlists;
 use crate::views::playlist_sleeve;
-use crate::{font, icon, theme};
-
-static LANE_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
-    FontRef::try_from_slice(font::SANS_REGULAR).expect("the bundled regular face is valid")
-});
-static LANE_MEDIUM: LazyLock<FontRef<'static>> = LazyLock::new(|| {
-    FontRef::try_from_slice(font::SANS_MEDIUM).expect("the bundled medium face is valid")
-});
+use crate::{icon, theme};
 
 /// The lane, at the width its state says.
 ///
@@ -90,7 +80,10 @@ pub(crate) fn view<'a>(
     let open = theme::sidebar_w(window_w, shelf.lane_open) >= theme::SIDEBAR_W;
     let width = theme::sidebar_w(window_w, shelf.lane_open);
 
-    let mut head = column![];
+    // The rows fill the lane's content box, open and collapsed, so the column
+    // has to offer them its whole width rather than shrinking to the widest
+    // word.
+    let mut head = column![].width(Length::Fill);
     for to in Destination::ALL {
         head = head.push(destination_row(to, place, open, sounding));
     }
@@ -102,15 +95,15 @@ pub(crate) fn view<'a>(
     // to the list rather than to the surface, and leaves a dead strip between
     // it and the seam. The rows keep the inset; only the bar reaches the edge.
     // `wall_scrollbar` consumes its 4 px from the scrollable's content box.
-    // The rows still need their full 232 px measure, including the Recent
-    // lamp's far-trailing slot, so only the edge-side gutter yields those
-    // pixels. Keeping the leading gutter at 24 preserves the head and row
+    // The rows still need their whole 216 px — sleeve 48, two `GAP_SM` seams,
+    // the 146 px text lane, the lamp's six — so only the edge-side pad yields
+    // those pixels. Keeping the leading pad at 8 preserves the head and row
     // alignment; shrinking both would merely move the clip to the other side.
     let list_pad = iced::Padding {
         top: 0.0,
-        right: theme::GAP_XL - theme::WALL_SCROLLBAR_W,
+        right: theme::SIDEBAR_PAD - theme::WALL_SCROLLBAR_W,
         bottom: 0.0,
-        left: theme::GAP_XL,
+        left: theme::SIDEBAR_PAD,
     };
     let list = scrollable(body_rows.padding(list_pad))
         .on_scroll(Message::LaneScrolled)
@@ -122,35 +115,50 @@ pub(crate) fn view<'a>(
     let flanked = |e: Element<'a, Message>| {
         container(e)
             .width(Length::Fill)
-            .padding(theme::pad(0.0, theme::GAP_XL))
+            .padding(theme::pad(0.0, theme::SIDEBAR_PAD))
     };
     let body = column![
         flanked(head.into()),
-        // The head's one rule: three destinations above it, the things you
+        // The head's one rule: four destinations above it, the things you
         // have touched below. **The lane still has exactly one seam**, and
         // that is the point of drawing the sections' headings rather than a
         // second rule: a heading names a section, a rule cuts the surface, and
         // there is one cut here because there are two parts — the frame's
         // concerns, and yours.
         container(rule::horizontal(1).style(move |_theme| theme::hairline(room, room.recess)))
-            .padding(theme::pad(theme::GAP_MD, theme::GAP_XL)),
+            .padding(theme::pad(theme::GAP_MD, theme::SIDEBAR_PAD)),
         list,
-        flanked(marks(shelf.lane_open, theme::sidebar_can_expand(window_w))),
+        // **The footer reads the *resolved* state, not the persisted intent.**
+        // It was handed the persisted intent, so a window narrowed below
+        // [`theme::SIDEBAR_FLOOR`] with the lane remembered open drew a 64 px
+        // rail whose foot still carried the open-state control — the
+        // `LaneCollapsed` chevron and the word `Collapse`, live and pressable,
+        // inside a rail with no measure for either. Every other part of the
+        // lane already drew from `open`; this was the one that did not.
+        //
+        // The intent itself is deliberately *kept* — widening the window
+        // restores the open lane rather than making the listener ask twice —
+        // which is exactly why the footer has to read the resolved state:
+        // the remembered value is a wish, and the foot of the lane states
+        // what the lane *is*. Below the floor that is the inert `Expanded`
+        // mark (ADR-0030 §3), the branch `lane_toggle` has always had and in
+        // this state never reached.
+        flanked(marks(open, theme::sidebar_can_expand(window_w))),
     ]
     .width(Length::Fill)
     .height(Length::Fill);
 
-    // Keep the established `GAP_XL` lead at the top, but only `GAP_MD` under
-    // the footer. The old symmetric 24 px outer padding combined with the
-    // collapse control's own 12 px padding into 36 px of dead space at the
-    // bottom, paid for by the scrollable list above it.
+    // The lane's one lead is `SIDEBAR_PAD` all round, and the collapse footer
+    // spends its own `GAP_MD` above the control — the old 24 px outer gutter
+    // combined with the collapse control's own 12 px padding into 36 px of
+    // dead space at the bottom, paid for by the scrollable list above it.
     let lane = container(body)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(iced::Padding {
-            top: theme::GAP_XL,
+            top: theme::SIDEBAR_PAD,
             right: 0.0,
-            bottom: theme::GAP_MD,
+            bottom: theme::SIDEBAR_PAD,
             left: 0.0,
         })
         .style(move |_theme| theme::lane_ground(room));
@@ -169,7 +177,9 @@ pub(crate) fn view<'a>(
     .into()
 }
 
-/// One of the head's four destinations: the glyph, and — expanded — its word.
+/// One of the head's four destinations: the tile and, expanded, its word, in
+/// **one row** — the control is the row, so the card (`theme::dest_row`)
+/// highlights the icon and the word together, hovered and selected alike.
 ///
 /// **Not a toggle.** [`Place::go`] argues it: pressing the destination you are
 /// already at leaves you there, where `Queue` and `Settings` close themselves.
@@ -192,95 +202,107 @@ fn destination_row(
         Destination::NowPlaying => icon::Glyph::NowPlaying,
     };
     let mark = iced_image(icon::handle(glyph))
-        .width(Length::Fixed(theme::ICON_PX))
-        .height(Length::Fixed(theme::ICON_PX))
+        .width(Length::Fixed(theme::SIDEBAR_GLYPH_PX))
+        .height(Length::Fixed(theme::SIDEBAR_GLYPH_PX))
         .opacity(if here {
             theme::GLYPH_OPACITY_HOVER
         } else {
             theme::GLYPH_OPACITY
         });
-    // **The lamp dot, tucked against the glyph's corner** — and it survives
-    // the collapse, which is the whole reason it is stacked on the glyph
-    // rather than set after the word: collapsed there is no word to set it
-    // after, and *is anything on?* is precisely the question a 96 px lane has
-    // to keep answering.
-    // Collapsed, the glyph is the only thing in the row, so it centres on the
-    // lane's own axis — the same axis the sleeves below it centre on. Open, it
-    // stands at the left of its box with the word after it.
-    let glyph_x = alignment::Horizontal::Left;
+    // **The tile holds the glyph centred** — [`theme::SIDEBAR_GLYPH_PX`] 32 in
+    // the 48 square, a [`theme::GAP_SM`] of air all round. Open and collapsed
+    // the tile starts on the same vertical; the collapse removes the word,
+    // never the tile.
     let boxed = |content: Element<'static, Message>, x| {
         container(content)
             .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
             .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
             .align_x(x)
     };
-    let mut glyph_box = boxed(mark.into(), glyph_x).align_y(alignment::Vertical::Center);
-    // Collapsed, the place you are in is marked by a card **the size of the
-    // glyph**, not by a band across the rail — see [`theme::lane_current`] for
-    // why the band was wrong and why it carries no border.
-    if here && !open {
-        glyph_box = glyph_box.style(move |_theme| theme::lane_current(room));
-    }
-    let glyph_block: Element<'static, Message> = if to == Destination::NowPlaying && sounding {
+    let tile =
+        boxed(mark.into(), alignment::Horizontal::Center).align_y(alignment::Vertical::Center);
+    // **The lamp dot, tucked against the *glyph's* top-right corner** — and it
+    // survives the collapse, which is the whole reason it is stacked on the
+    // tile rather than set after the word: collapsed there is no word to set
+    // it after, and *is anything on?* is precisely the question a 64 px lane
+    // has to keep answering.
+    //
+    // **The corner it tucks against is the mark's, not the box's**, and that
+    // is a correction. The dot was pinned to the container's own top-right,
+    // which was right while the box was the glyph's own 24 — then the box
+    // became the 48 px tile with a 32 px glyph centred in it, and the same
+    // line started putting the dot in the corner of an invisible square with
+    // a whole [`theme::GAP_SM`] of air diagonally between it and any ink. The
+    // owner read it as *"the pip when Now playing is active is in a strange
+    // position"*, which is exactly what it is: an accent floating in a corner
+    // that is not a corner of anything drawn.
+    //
+    // The inset is **derived from the tile and the glyph** rather than written
+    // as 8, so the next change to either size carries the dot with it instead
+    // of stranding it again.
+    let tile_block: Element<'static, Message> = if to == Destination::NowPlaying && sounding {
         iced::widget::stack![
-            glyph_box,
-            boxed(lamp_dot(), alignment::Horizontal::Right).align_y(alignment::Vertical::Top),
+            tile,
+            boxed(lamp_dot(), alignment::Horizontal::Right)
+                .align_y(alignment::Vertical::Top)
+                .padding(theme::SIDEBAR_GLYPH_INSET),
         ]
         .into()
     } else {
-        glyph_box.into()
+        tile.into()
     };
-    let mut line = row![glyph_block]
-        .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::Center);
-    if open {
-        line = line.push(
+    // **The row is the control**: the tile and, expanded, the word on the
+    // lane's one `GAP_SM` seam — the seam the `RECENT` rows' words stand on,
+    // since the tile is the sleeve's size, so every word in the lane shares
+    // one vertical ([`theme::SIDEBAR_HEAD_TEXT_X`]). One button holds both, so
+    // `theme::dest_row`'s card is a single highlight across them — the owner's
+    // *"the full row with icon and text should appear highlighted together"* —
+    // and the row's vertical centre is the tile's, so the word reads as
+    // standing level with the icon, never hung above or below it.
+    let content: Element<'static, Message> = if open {
+        row![
+            tile_block,
             text(to.label())
                 .size(theme::SIZE_BODY)
                 .line_height(theme::LEADING_BODY)
                 .font(theme::MEDIUM)
-                .color(if here { room.paper } else { room.paper_dim })
                 .wrapping(text::Wrapping::None),
-        );
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(alignment::Vertical::Center)
+        .into()
+    } else {
+        tile_block
+    };
+    // The card is the **row**, so it spans the lane's content box rather than
+    // shrinking to the word: at shrink width the four destinations wore four
+    // different cards and the widest of them cut through its own last letter,
+    // because a button sized to a `Wrapping::None` text has no room to spare.
+    // Filling also makes the head's card the same object as a `RECENT` row's,
+    // which is what "highlighted together" has to mean in a list.
+    let dest = button(content)
+        .width(Length::Fill)
+        .height(Length::Fixed(theme::SIDEBAR_DEST_H))
+        .padding(0)
+        .style(move |_theme, status| theme::dest_row(room, here, status))
+        .on_press(Message::GoTo(to));
+    if !open {
+        // Collapsed, the word is the tooltip — the icon-only law (doc 10
+        // §3.1): a control with no visible label carries its name where a
+        // pointer can find it.
+        return iced::widget::tooltip(
+            dest,
+            text(to.label())
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION),
+            iced::widget::tooltip::Position::Right,
+        )
+        .gap(theme::GAP_XS)
+        .padding(theme::GAP_XS)
+        .style(move |_theme| theme::tooltip(room))
+        .into();
     }
-    let row_button = button(
-        container(line)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(glyph_x)
-            .align_y(alignment::Vertical::Center)
-            .clip(true),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::SIDEBAR_DEST_H))
-    // Collapsed, the row's flanks go: the glyph centres on the lane's own
-    // axis, which is the axis the sleeves below it centre on, and a rail
-    // whose head and body stood on two different verticals would read as two
-    // surfaces.
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    // The row family, on the lane's own ground: one step up under the
-    // pointer, the whole hit area painted (`theme::track_row`).
-    // `here` only carries the row's card while there is a word in the row to
-    // stand in it; collapsed the mark is the glyph's own box, above.
-    .style(move |_theme, status| theme::track_row(room, room.recess, status, here && open))
-    .on_press(Message::GoTo(to));
-    if open {
-        return row_button.into();
-    }
-    // Collapsed, the word is the tooltip — the icon-only law (doc 10 §3.1):
-    // a control with no visible label carries its name where a pointer can
-    // find it.
-    iced::widget::tooltip(
-        row_button,
-        text(to.label())
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Right,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
+    dest.into()
 }
 
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
@@ -301,11 +323,22 @@ fn lamp_dot() -> Element<'static, Message> {
     .into()
 }
 
-/// The lane's one mixed `RECENT` body, inside its one scroller.
+/// The lane's one mixed body of touched things, inside its one scroller.
 ///
 /// Playlists and records use the same row and the same most-recent-touch order;
-/// the sleeve and second line still say which kind a row is. With no rows the
-/// heading is absent, so an empty history remains an honestly empty lane.
+/// the sleeve and second line still say which kind a row is.
+///
+/// # There is no `RECENT` heading any more
+///
+/// ADR-0030 drew one because the lane has two parts — the frame's concerns and
+/// yours — but **the head's one rule is what cuts them**, and it already does.
+/// A heading over the lane's only section names nothing the eye can use: there
+/// is no second section for it to distinguish this one from, so it was a word
+/// spent saying *the rest of this surface*. The owner: *"can you remove
+/// 'Recent' from the sidebar when it is not collapsed"* — and *not collapsed*
+/// was the only state it ever appeared in, so the ask is to drop it outright.
+/// Removing it also returns a whole heading line box to the scroller, which is
+/// the surface in the lane that is always short of one.
 fn sections<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
@@ -313,10 +346,10 @@ fn sections<'a>(
     open: bool,
     sounding_row: Option<Subject>,
 ) -> iced::widget::Column<'a, Message> {
-    if lane.rows.is_empty() {
-        return column![];
-    }
-    let mut body = column![heading("RECENT", open)];
+    // An empty history draws an empty column — there is no longer a heading
+    // that would otherwise stand over nothing, so the emptiness needs no
+    // special case to stay honest.
+    let mut body = column![];
     for entry in &lane.rows {
         // **Which row is sounding** — doc 13 §2.6's claim, delivered.
         //
@@ -347,25 +380,55 @@ fn sections<'a>(
     body
 }
 
-/// A section's word, in the room's quietest voice.
+/// **The far trailing six pixels of every expanded `RECENT` row**, occupied by
+/// the lamp when the row is sounding and reserved when it is not.
 ///
-/// Absent when the lane is collapsed: at 96 px there is no measure for a
-/// tracked word, and a heading over an unlabelled column of sleeves would be
-/// naming nothing the eye can use. The tooltips name every mixed row while the
-/// lane is collapsed, so no second kind mark is needed.
-fn heading(word: &'static str, open: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !open {
-        return Space::new().height(Length::Fixed(theme::GAP_SM)).into();
-    }
-    container(
-        text(theme::tracked(word))
-            .size(theme::SIZE_HEADING)
-            .line_height(theme::LEADING_HEADING)
-            .font(theme::MEDIUM)
-            .color(room.paper_faint),
-    )
-    .padding(theme::pad(0.0, theme::GAP_SM))
+/// # The slot
+///
+/// The dot used to be conditionally inserted *before* the title, so starting a
+/// run shifted the name right and switching its origin shifted two rows. A
+/// permanent trailing slot makes playback a change of ink, not geometry — the
+/// owner's *"we don't want reflowing text"*, and ADR-0030's 2026-08-12
+/// amendment. That is unchanged and is why the reservation is drawn in the
+/// quiet state too.
+///
+/// # Which line it stands on
+///
+/// What the amendment never settled was *which of the row's two text lines the
+/// dot is level with*, and the answer it inherited was neither: the slot was
+/// centred against a `Length::Fill` height inside a row whose other children
+/// are centred, so it landed on the **two-line block's** centre, which is the
+/// [`theme::GAP_XXS`] seam between the title and the metadata. The owner: *"the
+/// now playing pip on the recent list is also in a strange position"*.
+///
+/// The line it belongs on is the one it is a fact about — the **name** of the
+/// thing that is sounding. So the slot is built as the text column's own
+/// shape: the dot centred in a [`theme::LINE_BODY`] box, and under it exactly
+/// the seam and metadata line the title has under it. Both columns are then
+/// the same height, and the row's `Center` alignment lands the dot on the
+/// title's centre *by construction* — there is no offset for a later edit to
+/// leave stale, which is precisely how it drifted the first time.
+fn lamp_slot(playing: bool) -> Element<'static, Message> {
+    let lamp: Element<'static, Message> = if playing {
+        lamp_dot()
+    } else {
+        Space::new()
+            .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
+            .height(Length::Fixed(theme::DOT))
+            .into()
+    };
+    column![
+        container(lamp)
+            .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
+            .height(Length::Fixed(theme::LINE_BODY))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+        Space::new()
+            .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
+            .height(Length::Fixed(theme::LINE_META)),
+    ]
+    .spacing(theme::GAP_XXS)
+    .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
     .into()
 }
 
@@ -429,49 +492,32 @@ fn lane_row<'a>(
         Subject::Record(id) => Message::AlbumClicked(id),
         Subject::Playlist(id) => Message::OpenPlaylist(id),
     };
-    // **The lamp owns the far trailing six pixels in every expanded row.** It
-    // used to be conditionally inserted before the title, so starting a run
-    // shifted the name right and switching its origin shifted two rows. A
-    // permanent trailing slot makes playback a change of ink, not geometry.
-    // Both text lines share the 146 px boundary in `SIDEBAR_ROW_TEXT_W` and
-    // are fitted with the actual bundled face before clipping, so a long album
-    // or playlist name yields with an ellipsis instead of wrapping under it.
-    let lamp: Element<'static, Message> = if playing {
-        lamp_dot()
-    } else {
-        Space::new()
-            .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
-            .height(Length::Fixed(theme::DOT))
-            .into()
-    };
-    let lamp_slot = container(lamp)
-        .width(Length::Fixed(theme::SIDEBAR_LAMP_SLOT_W))
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Right)
-        .align_y(alignment::Vertical::Center);
+    let lamp_slot = lamp_slot(playing);
     let body: Element<'a, Message> = if open {
         row![
             sleeve,
             container(
                 column![
-                    lane_line(
-                        &entry.name,
-                        &*LANE_MEDIUM,
-                        theme::SIZE_BODY,
-                        theme::LEADING_BODY,
-                        theme::LINE_BODY,
-                        theme::MEDIUM,
-                        room.paper,
-                    ),
-                    lane_line(
-                        &entry.under,
-                        &*LANE_REGULAR,
-                        theme::SIZE_META,
-                        theme::LEADING_META,
-                        theme::LINE_META,
-                        theme::SANS,
-                        room.paper_faint,
-                    ),
+                    lane_line(&crate::views::Fitted {
+                        content: &entry.name,
+                        face: &crate::views::FIT_MEDIUM,
+                        size: theme::SIZE_BODY,
+                        leading: theme::LEADING_BODY,
+                        line_height: theme::LINE_BODY,
+                        font: theme::MEDIUM,
+                        color: room.paper,
+                        measure: theme::SIDEBAR_ROW_TEXT_W,
+                    }),
+                    lane_line(&crate::views::Fitted {
+                        content: &entry.under,
+                        face: &crate::views::FIT_REGULAR,
+                        size: theme::SIZE_META,
+                        leading: theme::LEADING_META,
+                        line_height: theme::LINE_META,
+                        font: theme::SANS,
+                        color: room.paper_faint,
+                        measure: theme::SIDEBAR_ROW_TEXT_W,
+                    }),
                 ]
                 .spacing(theme::GAP_XXS)
             )
@@ -485,7 +531,7 @@ fn lane_row<'a>(
     } else {
         container(sleeve)
             .width(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
+            .align_x(alignment::Horizontal::Left)
             .into()
     };
     let row_button = button(
@@ -497,10 +543,14 @@ fn lane_row<'a>(
     )
     .width(Length::Fill)
     .height(Length::Fixed(theme::SIDEBAR_ROW_H))
-    .padding(theme::pad(0.0, if open { theme::GAP_SM } else { 0.0 }))
+    // The flank is the lane's own [`theme::SIDEBAR_PAD`] (`list_pad` in
+    // `view`), so the row spends no padding of its own and the sleeve stands
+    // on the same lead open and collapsed — the collapse removes the text
+    // column, never the sleeve.
+    .padding(0)
     // The card the sounding row keeps whatever the pointer is doing — and the
     // one mark that survives the collapse, where there is no name to set a dot
-    // before and 96 px still has to answer *which of these is on?*
+    // before and 64 px still has to answer *which of these is on?*
     .style(move |_theme, status| theme::track_row(room, room.recess, status, playing))
     .on_press(press);
     if open {
@@ -522,99 +572,14 @@ fn lane_row<'a>(
     )
 }
 
-/// One fixed-height expanded-lane line. When it is long, the prefix and the
-/// ellipsis occupy separate clipped subslots: Iced 0.13 can still break
-/// `Wrapping::None` text, so relying on one text widget can put the ellipsis on
-/// an invisible second line.
-fn lane_line<'a>(
-    content: &str,
-    face: &impl Font,
-    size: f32,
-    leading: f32,
-    line_height: f32,
-    font: iced::Font,
-    color: iced::Color,
-) -> Element<'a, Message> {
-    let (fitted, truncated) = fit_lane_line(content, face, size);
-    let prefix = container(
-        text(fitted)
-            .size(size)
-            .line_height(leading)
-            .font(font)
-            .color(color)
-            .wrapping(text::Wrapping::None),
-    )
-    .width(if truncated {
-        Length::Fixed(theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W)
-    } else {
-        Length::Fill
-    })
-    .height(Length::Fixed(line_height))
-    .clip(true);
-    let ending: Element<'a, Message> = if truncated {
-        container(
-            text("…")
-                .size(size)
-                .line_height(leading)
-                .font(font)
-                .color(color)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fixed(theme::SIDEBAR_ELLIPSIS_SLOT_W))
-        .height(Length::Fixed(line_height))
-        .align_x(alignment::Horizontal::Right)
-        .clip(true)
-        .into()
-    } else {
-        Space::new().width(Length::Fixed(0.0)).into()
-    };
-
-    container(row![prefix, ending])
-        .width(Length::Fixed(theme::SIDEBAR_ROW_TEXT_W))
-        .height(Length::Fixed(line_height))
-        .clip(true)
-        .into()
-}
-
-/// Fit the prefix of one expanded-lane line using the same face and size the
-/// widget draws. The ellipsis itself owns a separate slot in [`lane_line`].
-fn fit_lane_line(text: &str, face: &impl Font, size: f32) -> (String, bool) {
-    if text_width(face, size, text) <= theme::SIDEBAR_ROW_TEXT_W {
-        return (text.to_owned(), false);
-    }
-
-    let scaled = face.as_scaled(PxScale::from(size));
-    let prefix_w = theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W;
-    let mut fitted = String::new();
-    let mut width = 0.0;
-    let mut previous = None;
-    for character in text.chars() {
-        let glyph = scaled.glyph_id(character);
-        let next =
-            width + previous.map_or(0.0, |was| scaled.kern(was, glyph)) + scaled.h_advance(glyph);
-        if next > prefix_w {
-            break;
-        }
-        fitted.push(character);
-        width = next;
-        previous = Some(glyph);
-    }
-    (fitted, true)
-}
-
-fn text_width(face: &impl Font, size: f32, text: &str) -> f32 {
-    let scaled = face.as_scaled(PxScale::from(size));
-    let mut width = 0.0;
-    let mut previous = None;
-    for character in text.chars() {
-        let glyph = scaled.glyph_id(character);
-        if let Some(was) = previous {
-            width += scaled.kern(was, glyph);
-        }
-        width += scaled.h_advance(glyph);
-        previous = Some(glyph);
-    }
-    width
+/// One fixed-height expanded-lane line, fitted with a visible end ellipsis.
+///
+/// The reading lives in [`crate::views::fitted_line`] now — it began here and
+/// the bottom bar's sounding-track lines needed the same thing, so it moved
+/// out rather than being copied. This is the lane's name for it, which keeps
+/// the row's own composition readable.
+fn lane_line(line: &crate::views::Fitted<'_>) -> Element<'static, Message> {
+    crate::views::fitted_line(line)
 }
 
 /// **One control at the lane's foot**: `Collapse` when the lane is open,
@@ -753,13 +718,18 @@ mod tests {
         );
     }
 
-    /// **The lists have a section, it stands above `RECENT`, and both are
-    /// inside one scroller.**
+    /// **Playlists and records are one list, in one scroller, under no
+    /// heading at all.**
     ///
-    /// Playlists and records are one recency list: one heading, one scroller,
-    /// and no kind-specific block to push the other kind away.
+    /// The heading half of this is asserted as an **absence**, deliberately,
+    /// and deleting the test instead would have been the wrong move: an
+    /// unasserted absence is an invitation, and the next edit that felt the
+    /// list wanted introducing would re-add a word over it unchallenged. The
+    /// lane's one rule is what separates the frame's concerns from yours;
+    /// there is no second section here for a heading to distinguish this one
+    /// from, which is why the owner asked for it gone.
     #[test]
-    fn playlists_and_records_share_one_recent_section_and_one_scroller() {
+    fn playlists_and_records_share_one_unheaded_list_and_one_scroller() {
         let source = source();
         let shipped = source
             .split("#[cfg(test)]")
@@ -767,12 +737,17 @@ mod tests {
             .expect("a source has a head");
         let sections = body(&source, "fn sections<'a>(");
         assert!(
-            sections.contains("heading(\"RECENT\", open)") && !sections.contains("PLAYLISTS"),
-            "the lane split playlists back into a separate area"
+            !sections.contains("heading(") && !sections.contains("PLAYLISTS"),
+            "the lane's one list has grown a heading over it again"
         );
         assert!(
-            sections.contains("if lane.rows.is_empty()"),
-            "an empty mixed history still draws a heading"
+            !shipped.contains("fn heading("),
+            "`heading` is unused now that the lane's one list carries no word; \
+             leaving it behind is a section waiting to be re-added"
+        );
+        assert!(
+            !shipped.contains("\"RECENT\""),
+            "the lane names a section again"
         );
         assert_eq!(
             shipped.matches("scrollable(").count(),
@@ -792,12 +767,103 @@ mod tests {
         let view = body(&source, "pub(crate) fn view<'a>(");
         let marks = body(&source, "fn marks(open: bool, can_expand: bool)");
         assert!(
-            view.contains("bottom: theme::GAP_MD"),
+            view.contains("bottom: theme::SIDEBAR_PAD"),
             "the lane kept its old oversized bottom gutter"
         );
         assert!(
             marks.contains("top: theme::GAP_MD") && marks.contains("bottom: 0.0"),
             "the collapse footer still pads equally above and below itself"
+        );
+    }
+
+    /// **The footer states what the lane *is*, not what it was asked to be.**
+    ///
+    /// Below [`theme::SIDEBAR_FLOOR`] the persisted intent is overruled — the
+    /// lane draws its 64 px rail whatever the listener last chose (ADR-0030
+    /// §3) — and every part of `view` resolves from that one answer except,
+    /// until now, the footer, which was handed `shelf.lane_open` directly. The
+    /// visible defect was the owner's: *"when I narrow the window, it force
+    /// collapses the sidebar, but it still shows the collapse icon"* — a live,
+    /// pressable `Collapse` control, word and all, inside a rail with no
+    /// measure for it.
+    ///
+    /// The intent is still read exactly once, to compute `open`, so widening
+    /// the window restores the lane the listener asked for. That is the
+    /// behaviour, and it is *why* this assertion exists: as long as the wish
+    /// is remembered, the foot of the lane must be drawn from the resolution
+    /// of it rather than from the wish.
+    #[test]
+    fn the_footer_reads_the_resolved_lane_state_not_the_persisted_intent() {
+        let source = source();
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        assert!(
+            view.contains("flanked(marks(open, theme::sidebar_can_expand(window_w)))"),
+            "the collapse footer is drawn from the persisted intent again, so a \
+             force-collapsed rail can carry the open state's control"
+        );
+        assert!(
+            !view.contains("marks(shelf.lane_open"),
+            "`marks` is reading `shelf.lane_open` directly"
+        );
+        assert_eq!(
+            view.matches("shelf.lane_open").count(),
+            2,
+            "the persisted intent should be read only where `open` and `width` \
+             are resolved from it — every other part of the lane takes `open`"
+        );
+    }
+
+    /// **Both of the lane's lamps sit against ink rather than against a box.**
+    ///
+    /// They are one test because they are one mistake made twice, and both
+    /// times by a container quietly changing meaning underneath an alignment
+    /// that was correct when it was written.
+    ///
+    /// * The destination lamp pinned to its container's top-right, which was
+    ///   the glyph's own corner while the box was 24 px. The box became the
+    ///   48 px tile with a 32 px glyph centred in it, and the dot was left in
+    ///   the corner of an invisible square. It is now inset by the tile's own
+    ///   air, **derived** from the two sizes so a future glyph change carries
+    ///   it along instead of stranding it a third time.
+    /// * The `RECENT` lamp centred against a `Length::Fill` height, which put
+    ///   it on the two-line block's centre — the [`theme::GAP_XXS`] gap
+    ///   between the title and the metadata, level with neither. It now
+    ///   carries the text column's own shape, so the row's `Center` alignment
+    ///   lands it on the title's centre by construction.
+    ///
+    /// The trailing *slot* is untouched by either fix and must stay: a
+    /// conditional dot before the name reflows the text, which is the whole
+    /// reason ADR-0030's 2026-08-12 amendment put it at the far edge.
+    #[test]
+    fn the_lanes_two_lamps_stand_against_ink() {
+        // The tile's air is what the destination dot is inset by, and the
+        // text column's shape is what the `RECENT` dot borrows — both are
+        // arithmetic on tokens rather than numbers written into the view.
+        const {
+            assert!(theme::SIDEBAR_GLYPH_BOX > theme::SIDEBAR_GLYPH_PX);
+            assert!((theme::SIDEBAR_GLYPH_BOX - theme::SIDEBAR_GLYPH_PX) / 2.0 == theme::GAP_SM);
+        }
+
+        let source = source();
+        let destination = body(&source, "fn destination_row(");
+        assert!(
+            destination.contains(".padding(theme::SIDEBAR_GLYPH_INSET)"),
+            "the destination lamp is back in the corner of the tile rather than \
+             the corner of the mark drawn in it"
+        );
+
+        let slot = body(&source, "fn lamp_slot(playing: bool)");
+        assert!(
+            slot.contains(".height(Length::Fixed(theme::LINE_BODY))")
+                && slot.contains(".height(Length::Fixed(theme::LINE_META))")
+                && slot.contains(".spacing(theme::GAP_XXS)"),
+            "the `RECENT` lamp no longer carries the text column's own shape, so \
+             it is free to drift off the title line it is a fact about"
+        );
+        assert!(
+            !slot.contains("Length::Fill"),
+            "the `RECENT` lamp is centred against the whole row again, which \
+             puts it in the gap between the two text lines"
         );
     }
 
@@ -852,10 +918,11 @@ mod tests {
              it; the rule belongs in `lane::sounding_subject`"
         );
         let row = body(&source, "fn lane_row<'a>(");
+        let slot = body(&source, "fn lamp_slot(playing: bool)");
         assert!(
-            row.contains("let lamp: Element<'static, Message> = if playing")
-                && row.contains("lamp_dot()")
-                && row.contains("lamp_slot"),
+            row.contains("let lamp_slot = lamp_slot(playing);")
+                && slot.contains("if playing")
+                && slot.contains("lamp_dot()"),
             "the sounding row lost its stable trailing lamp slot"
         );
         assert!(
@@ -878,7 +945,7 @@ mod tests {
         let row = body(&source, "fn lane_row<'a>(");
         assert_eq!(
             row.matches("lamp_slot").count(),
-            2,
+            3,
             "the slot should be built once and placed once"
         );
         assert!(
@@ -892,22 +959,30 @@ mod tests {
         );
     }
 
+    /// The edge scrollbar spends its lane inside the right pad, so the rows
+    /// still get their whole 216 px of open geometry and the lamp's trailing
+    /// edge never reaches the scrollbar's lane. In numbers: the padded content
+    /// box is `SIDEBAR_W − SIDEBAR_PAD − (SIDEBAR_PAD − WALL_SCROLLBAR_W)`, and
+    /// the row's far edge is the sleeve plus both seams, the text lane and the
+    /// lamp slot.
     #[test]
     fn the_edge_scrollbar_cannot_clip_the_recents_trailing_lamp() {
         const {
-            assert!(
-                theme::SIDEBAR_W
-                    - theme::WALL_SCROLLBAR_W
-                    - theme::GAP_XL
-                    - (theme::GAP_XL - theme::WALL_SCROLLBAR_W)
-                    == theme::SIDEBAR_MEASURE
-            );
+            let content = theme::SIDEBAR_W
+                - theme::SIDEBAR_PAD
+                - (theme::SIDEBAR_PAD - theme::WALL_SCROLLBAR_W);
+            let row = theme::SIDEBAR_SLEEVE
+                + theme::GAP_SM
+                + theme::SIDEBAR_ROW_TEXT_W
+                + theme::GAP_SM
+                + theme::SIDEBAR_LAMP_SLOT_W;
+            assert!(row <= content);
         }
         let source = source();
         let head = source.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            head.contains("right: theme::GAP_XL - theme::WALL_SCROLLBAR_W")
-                && head.contains("left: theme::GAP_XL"),
+            head.contains("right: theme::SIDEBAR_PAD - theme::WALL_SCROLLBAR_W")
+                && head.contains("left: theme::SIDEBAR_PAD"),
             "the lane's scrollbar has reclaimed the Recent lamp's measured slot"
         );
     }
@@ -923,16 +998,34 @@ mod tests {
         let body_size = theme::SIZE_BODY; // drawn with theme::LEADING_BODY
         let meta_size = theme::SIZE_META; // drawn with theme::LEADING_META
 
-        let (album, album_truncated) = super::fit_lane_line(album, &*super::LANE_MEDIUM, body_size);
-        let (playlist, playlist_truncated) =
-            super::fit_lane_line(playlist, &*super::LANE_REGULAR, meta_size);
+        let (album, album_truncated) = crate::views::fit(
+            album,
+            &*crate::views::FIT_MEDIUM,
+            body_size,
+            theme::SIDEBAR_ROW_TEXT_W,
+        );
+        let (playlist, playlist_truncated) = crate::views::fit(
+            playlist,
+            &*crate::views::FIT_REGULAR,
+            meta_size,
+            theme::SIDEBAR_ROW_TEXT_W,
+        );
         assert!(album_truncated);
         assert!(playlist_truncated);
-        let prefix_w = theme::SIDEBAR_ROW_TEXT_W - theme::SIDEBAR_ELLIPSIS_SLOT_W;
-        assert!(super::text_width(&*super::LANE_MEDIUM, body_size, &album) <= prefix_w);
-        assert!(super::text_width(&*super::LANE_REGULAR, meta_size, &playlist) <= prefix_w);
+        let prefix_w = theme::SIDEBAR_ROW_TEXT_W - theme::ELLIPSIS_SLOT_W;
+        assert!(
+            crate::views::text_width(&*crate::views::FIT_MEDIUM, body_size, &album) <= prefix_w
+        );
+        assert!(
+            crate::views::text_width(&*crate::views::FIT_REGULAR, meta_size, &playlist) <= prefix_w
+        );
         assert_eq!(
-            super::fit_lane_line(short, &*super::LANE_MEDIUM, body_size),
+            crate::views::fit(
+                short,
+                &*crate::views::FIT_MEDIUM,
+                body_size,
+                theme::SIDEBAR_ROW_TEXT_W
+            ),
             (short.to_owned(), false)
         );
     }

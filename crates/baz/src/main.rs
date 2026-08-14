@@ -79,6 +79,7 @@ mod queue_edit;
 mod queue_window;
 mod rail;
 mod replaygain;
+mod resource;
 mod scan;
 mod search;
 mod selection;

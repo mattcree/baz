@@ -391,10 +391,15 @@ fn mark() -> Element<'static, Message> {
     )
     .width(Length::Fixed(theme::APP_BAR_NAME_W))
     .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(iced::Padding::default().left(theme::GAP_MD))
-    // Leading, not centred: the mark's ink hangs from the compact chrome edge,
-    // and the slot's spare `GAP_SM` falls on the
-    // drag gap's side where nothing is looking at it.
+    // **No lead of its own.** It carried a `GAP_MD`, which put the mark's ink
+    // 12 px inside law L1's gutter — the one thing the doc comment above
+    // claimed it did not do — and put its optical centre 10 px off the four
+    // destination glyphs in the returns lane. The owner asked for that
+    // alignment back (*"can we make the icon for the app align with the icons
+    // in the sidebar"*), and with the slot now the mark's own size
+    // ([`theme::APP_BAR_NAME_W`]) the container's edge *is* the ink's edge, so
+    // the centre is `APP_BAR_EDGE + APP_MARK_PX / 2` = 32 — the lane's
+    // [`theme::SIDEBAR_HEAD_GLYPH_X`] exactly, and asserted as such.
     .align_x(alignment::Horizontal::Left)
     .align_y(alignment::Vertical::Center)
     .into()

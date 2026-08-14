@@ -470,8 +470,56 @@
 > survives there. No clock, animation, engine state or additional idle work is
 > introduced.
 
+> ## Amendment (2026-08-14) — one pad, four destinations, and the row as the control
+>
+> Three of the owner's readings of the built lane, taken together, because
+> they move the same numbers: *"the padding on hover is above and below the
+> item… it should be a square around them"*; *"make the icons a little bit
+> smaller, as long as the outer box for them is the same size as a
+> thumbnail"*; and *"the full row with icon and text should appear
+> highlighted together and when selected the highlight should be together"*.
+>
+> **The lane now has one pad instead of two gutters, a seam and a list
+> inset.** `SIDEBAR_PAD` is `GAP_SM` 8 on every side, and everything in the
+> lane hangs from it, so the collapse cannot shift a pixel. §2's table is
+> superseded in three of its five rows:
+>
+> | Token | Was | Now | Derivation |
+> |---|---:|---:|---|
+> | `SIDEBAR_W` | 280 | **232** | `SIDEBAR_RAIL_W` 64 + `GAP_SM` 8 + `SIDEBAR_ROW_TEXT_W` 146 + `GAP_SM` 8 + `SIDEBAR_LAMP_SLOT_W` 6 — the rail plus exactly the slots opening adds, so §3's no-reflow rule is geometry rather than a flag |
+> | `SIDEBAR_RAIL_W` | 96 | **64** | `SIDEBAR_PAD` 8 + `SIDEBAR_SLEEVE` 48 + `SIDEBAR_PAD` 8 |
+> | `SIDEBAR_FLOOR` | 1000 | **940** | unchanged in kind — the smallest window leaving the wall two columns at or above `ART_MIN` — and it moves by exactly the 48 the lane gave back |
+>
+> `SIDEBAR_SLEEVE` 48 and `SIDEBAR_ROW_H` 64 are untouched. The lane no
+> longer lands on Material's 280/96; it lands on its own row anatomy, which
+> is the better authority and was always the actual derivation.
+>
+> **A destination is a tile plus a word, and the row is the control.** The
+> tile is `SIDEBAR_SLEEVE` 48 — a destination reads as the twin of a
+> `RECENT` row's sleeve on the same lead — holding a `STEPPER_HIT` 32 glyph
+> **centred**, one `GAP_SM` of air on each side. The head's words therefore
+> stand at `SIDEBAR_HEAD_TEXT_X` 64, the same vertical as the `RECENT` rows'
+> titles: one column for every word in the lane. The row's pitch is the
+> tile's own 48, so four stack tight under the one rule.
+>
+> One button holds the tile and the word, so the card is a single highlight
+> across both, hovered and selected alike, and it **fills the lane's content
+> box** rather than shrinking to the word — four destinations wearing four
+> different cards is not "highlighted together", and the widest of them cut
+> through its own last letter. Collapsed, the same card is the 48 square
+> around the lone glyph, and it still carries no border: the hairline in
+> `track_row` marks *the row that is sounding*, which is a different fact
+> from *the place you are standing in*.
+>
+> **A correction this amendment does not own but must not leave standing.**
+> §1 and §2 still say a fourth destination is the nav rail L8.4 refused. A
+> fourth (`Playlists`) shipped before this pass and the head draws it, so the
+> sentence is already false where it stands. What L8.4 refuses is a rail of
+> unrelated tenants; these four are the product's own places. The geometry
+> above is stated for four rows because that is what is drawn.
+
 **Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10,
-2026-08-12) · extracts the decisions of
+2026-08-12, 2026-08-14) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes the product's no-resident-side-surfaces
 entry and `11-jobs-era-critique.md` P10** · **restates ADR-0022's
