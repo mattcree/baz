@@ -960,6 +960,8 @@ pub(crate) enum Message {
     /// the next launch, when the engine can be opened on it before any run is
     /// restored.
     OutputDeviceSelected(OutputChoice),
+    /// Settings: choose how many local CLAP model sessions a Vibe scan may use.
+    VibeWorkers(usize),
     /// Settings place: show this section of the place (index into
     /// `views::settings::SECTIONS`).
     SettingsSection(usize),
@@ -2031,6 +2033,11 @@ impl App {
                         format!("{label} will be used the next time baz starts."),
                     );
                 }
+                Task::none()
+            }
+            Message::VibeWorkers(workers) => {
+                let workers = workers.clamp(1, config::MAX_VIBE_WORKERS);
+                persist(move |config| config.vibe_workers = workers);
                 Task::none()
             }
             Message::WindowResized(size) => {
@@ -3533,10 +3540,15 @@ impl App {
     /// spending more memory to finish sooner. `BAZ_VIBE_WORKERS` tunes the
     /// trade-off for the current machine and is capped to sixteen workers.
     fn configured_vibe_workers() -> usize {
+        let configured = config::config_file().map_or(config::DEFAULT_VIBE_WORKERS, |path| {
+            config::load(&path).vibe_workers
+        });
         std::env::var("BAZ_VIBE_WORKERS")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
-            .map_or(8, |workers| workers.clamp(1, 16))
+            .map_or(configured, |workers| {
+                workers.clamp(1, config::MAX_VIBE_WORKERS)
+            })
     }
 
     /// Ask for the playlist artwork belonging to the current place only.
@@ -5912,6 +5924,9 @@ impl App {
                         selected: &self.output_choice,
                         error: self.output_devices_error.as_deref(),
                     },
+                    config::config_file().map_or(config::DEFAULT_VIBE_WORKERS, |path| {
+                        config::load(&path).vibe_workers
+                    }),
                 )
             }
         };

@@ -129,6 +129,13 @@ const LAST_PLACE: &str = "last_place";
 /// The foreground album object selected on Now Playing.
 const VISUALIZATION_FOREGROUND: &str = "visualization_foreground";
 
+/// The number of concurrent local Vibe model sessions.
+const VIBE_WORKERS: &str = "vibe_workers";
+/// The safe default for an aggressive but bounded local scan.
+pub const DEFAULT_VIBE_WORKERS: usize = 8;
+/// The hard upper bound for persisted/configured model sessions.
+pub const MAX_VIBE_WORKERS: usize = 16;
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -235,6 +242,8 @@ pub struct Config {
     /// View state, persisted beside density rather than exposed as a Settings
     /// row. The three radio-like marks live on the surface they change.
     pub(crate) visualization_foreground: crate::visualizer::Foreground,
+    /// Concurrent local CLAP model sessions used by a Vibe scan.
+    pub vibe_workers: usize,
     /// The place restored on the next launch after a clean close.
     ///
     /// This is view state, not a Settings row. Subject places keep their
@@ -258,6 +267,7 @@ impl Default for Config {
             output_device: None,
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
+            vibe_workers: DEFAULT_VIBE_WORKERS,
             last_place: Place::Library,
         }
     }
@@ -351,6 +361,12 @@ impl Config {
         );
         let _ = writeln!(
             out,
+            "# concurrent local CLAP model sessions for Vibe scans (1–{MAX_VIBE_WORKERS})\n\
+             {VIBE_WORKERS} = {}",
+            self.vibe_workers,
+        );
+        let _ = writeln!(
+            out,
             "# the screen to restore after a clean close\n{LAST_PLACE} = {}",
             toml_string(&self.last_place.code()),
         );
@@ -435,6 +451,12 @@ impl Config {
             .and_then(toml::Value::as_str)
             .and_then(crate::visualizer::Foreground::from_code)
             .unwrap_or(crate::visualizer::Foreground::JewelCase);
+        let vibe_workers = table
+            .get(VIBE_WORKERS)
+            .and_then(toml::Value::as_integer)
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| (1..=MAX_VIBE_WORKERS).contains(value))
+            .unwrap_or(DEFAULT_VIBE_WORKERS);
         // A place this build cannot name is Library, and only Library: never
         // guess which screen a newer spelling meant. Subject existence is
         // checked later, once the library and playlists are available.
@@ -453,6 +475,7 @@ impl Config {
             output_device,
             shuffle,
             visualization_foreground,
+            vibe_workers,
             last_place,
         }
     }
@@ -766,6 +789,7 @@ mod tests {
                 output_device: None,
                 shuffle: false,
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
+                vibe_workers: DEFAULT_VIBE_WORKERS,
                 last_place: Place::Library,
             };
             let back = Config::from_toml(&config.to_toml());
@@ -1080,6 +1104,21 @@ mod tests {
         assert_eq!(config.replay_gain.mode, ReplayGainMode::Track);
     }
 
+    #[test]
+    fn vibe_workers_are_bounded_and_round_trip() {
+        let config = Config::from_toml("vibe_workers = 12");
+        assert_eq!(config.vibe_workers, 12);
+        assert_eq!(
+            Config::from_toml("vibe_workers = 0").vibe_workers,
+            DEFAULT_VIBE_WORKERS
+        );
+        assert_eq!(
+            Config::from_toml("vibe_workers = 99").vibe_workers,
+            DEFAULT_VIBE_WORKERS
+        );
+        assert_eq!(Config::from_toml(&config.to_toml()).vibe_workers, 12);
+    }
+
     /// v0.1 refused to write the file at all for an unrepresentable path.
     /// Now the path is omitted and everything else is kept: one limitation
     /// must not become two.
@@ -1098,6 +1137,7 @@ mod tests {
             output_device: None,
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
+            vibe_workers: DEFAULT_VIBE_WORKERS,
             last_place: Place::Library,
         };
         let text = config.to_toml();
@@ -1121,6 +1161,7 @@ mod tests {
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::None,
+            vibe_workers: DEFAULT_VIBE_WORKERS,
             last_place: Place::Playlist(42),
         };
         store(&path, &config).expect("store creates parents and writes");
@@ -1277,6 +1318,7 @@ mod tests {
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::Cover,
+            vibe_workers: DEFAULT_VIBE_WORKERS,
             last_place: Place::NowPlaying,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");

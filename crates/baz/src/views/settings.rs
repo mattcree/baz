@@ -4,7 +4,7 @@
 //! # What this surface is for
 //!
 //! Everything that is a standing decision rather than a transport action. It
-//! holds two sections: **Playback** — ReplayGain (ADR-0013), whose content moved
+//! holds three sections: **Playback** — ReplayGain (ADR-0013), whose content moved
 //! here from the rail panel *verbatim* — and **Library**, the music folders baz
 //! holds and the force sync that re-reads them (ADR-0022). It remains the
 //! container for the ones the vision promises next: the output chain and
@@ -154,10 +154,12 @@ const PLACE_PAD: f32 = theme::HANG;
 ///
 /// Playback stays first because it was first; a listener who opens Settings out
 /// of habit finds what they left.
-const SECTIONS: [&str; 2] = ["Playback", "Library"];
+const SECTIONS: [&str; 3] = ["Playback", "Library", "Vibe"];
 
 /// The index of the Library section in [`SECTIONS`].
 pub(crate) const LIBRARY_SECTION: usize = 1;
+/// The index of the Vibe section in [`SECTIONS`].
+pub(crate) const VIBE_SECTION: usize = 2;
 
 /// The Settings place: a header with the way back, a list of sections, and the
 /// current section's content.
@@ -173,13 +175,14 @@ pub(crate) fn view<'a>(
     section: usize,
     library: LibraryView<'a>,
     output: OutputView<'a>,
+    vibe_workers: usize,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
-    let blocks = if section == LIBRARY_SECTION {
-        vec![library_section(library)]
-    } else {
-        vec![output_section(output), replay_gain_section(player)]
+    let blocks = match section {
+        LIBRARY_SECTION => vec![library_section(library)],
+        VIBE_SECTION => vec![vibe_section(vibe_workers)],
+        _ => vec![output_section(output), replay_gain_section(player)],
     };
     let content = container(
         scrollable(
@@ -225,6 +228,36 @@ pub(crate) fn view<'a>(
             .height(Length::Fill)
             .padding(PLACE_PAD),
     ]
+    .into()
+}
+
+/// Controls the amount of parallel local CLAP inference used by the first
+/// library scan. More sessions trade additional CPU and RAM for a shorter
+/// wait; the setting is persisted and applies to the next scan.
+fn vibe_section(workers: usize) -> Element<'static, Message> {
+    let room = theme::active();
+    column![
+        section_heading(
+            "Vibe model workers",
+            "Concurrent local CLAP sessions used during the first library scan.",
+        ),
+        stepper_row(
+            "Workers",
+            workers.to_string(),
+            workers > 1,
+            workers < crate::config::MAX_VIBE_WORKERS,
+            Message::VibeWorkers(workers.saturating_sub(1).max(1)),
+            Message::VibeWorkers((workers + 1).min(crate::config::MAX_VIBE_WORKERS)),
+        ),
+        text(format!(
+            "1–{} sessions. More workers finish sooner but use more CPU and RAM.",
+            crate::config::MAX_VIBE_WORKERS
+        ))
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .color(room.paper_faint),
+    ]
+    .spacing(theme::GAP_SM)
     .into()
 }
 
