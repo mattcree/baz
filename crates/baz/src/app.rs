@@ -3513,20 +3513,30 @@ impl App {
     }
 
     fn next_vibe_job(&mut self) -> Task<Message> {
-        const WORKERS: usize = 4;
         let Some(index) = config::vibe_db_file() else {
             return Task::none();
         };
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let jobs = state.vibe.next_jobs(WORKERS);
+        let jobs = state.vibe.next_jobs(Self::configured_vibe_workers());
         Task::batch(jobs.into_iter().map(|(run, path)| {
             Task::perform(
                 crate::vibe::analyze(index.clone(), run, path),
                 Message::VibeAnalyzed,
             )
         }))
+    }
+
+    /// Number of concurrent local Vibe analyzers. Four model sessions are a
+    /// reasonable baseline, while this temporary workload benefits from
+    /// spending more memory to finish sooner. `BAZ_VIBE_WORKERS` tunes the
+    /// trade-off for the current machine and is capped to sixteen workers.
+    fn configured_vibe_workers() -> usize {
+        std::env::var("BAZ_VIBE_WORKERS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .map_or(8, |workers| workers.clamp(1, 16))
     }
 
     /// Ask for the playlist artwork belonging to the current place only.

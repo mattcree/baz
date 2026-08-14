@@ -37,6 +37,9 @@ Every release is built from a tag by CI, gated on the full test suite — see
   back into generation instead of minutes being treated as a fixed track count.
   Exact paths cannot duplicate, while a bounded persistent recent-mix history
   stops the same strong match repeatedly appearing across generated playlists.
+- Vibe analysis now uses eight concurrent model workers by default so an
+  initial scan can spend CPU and RAM to finish sooner. Set `BAZ_VIBE_WORKERS`
+  to tune the temporary trade-off (`1`–`16`) before launching Baz.
 - **Baz's app bar now owns the window chrome by default.** The iced 0.14
   migration supplies native eight-way edge and corner resizing around the
   borderless frame while retaining window drag, double-click maximise, the
