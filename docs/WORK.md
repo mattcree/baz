@@ -558,8 +558,55 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ### Phase F — a stated memory budget for artwork, and honest queue semantics
 
-37. **State a memory budget for decoded artwork and repair the thumbnail
-    scheduler's replace semantics.** Recorded 2026-08-14 from the owner's
+37. **Done 2026-08-14 — a stated memory budget for artwork, and the scheduler
+    repair beside it.** Two halves, in one change because they are one
+    subject: how much decoded artwork baz holds, and why the artwork it holds
+    does not reach the screen.
+
+    **The repair.** `ThumbJobs::focus` drains the foreground queue and re-adds
+    only its argument — that is what a re-aim is, and it is right.
+    `request_target_thumbs` was handing it a **delta**, the targets neither
+    cached nor already queued, so a re-aim over an unchanged viewport passed
+    the empty set and the replace threw the queue away and put nothing back.
+    On an untouched cold start that happens twice (iced emits `Scrolled` when
+    the scrollable measures its real bounds, and `WindowResized` when the first
+    resize lands) and nothing re-queues afterwards. Measured on a fresh
+    25-album library at 1280 × 860 with no interaction at all: **2** decodes
+    completed in 15 seconds and four frames pixel-identical with every cover a
+    gradient; after, **8** — the whole visible wall. A warm resize shows no
+    gradient flash and re-decodes nothing.
+
+    **The budget.** The owner: the tiered art machinery *"was introduced to try
+    to keep RAM usage down but we never specified a sensible limit."* The gap
+    was specific — the **retained** tier was a `HashMap` with no bound at all
+    except the size of the indexed collection, so every figure this project
+    published was a measurement of what that came to on his 393 albums, and a
+    5,000-album library retained over two gigabytes with nothing saying so.
+    `THUMB_BUDGET_BYTES` is **160 MiB**, chosen against the collection the
+    feature exists for (393 albums at Spacious is 153.5 MiB, so his whole
+    collection stays retained at every density) and the smallest 32 MiB step
+    that clears it. `SPECULATIVE_BUDGET_BYTES` **25 MiB** is what the tier's
+    long-standing 64 entries already cost at the largest edge, and
+    `THUMB_CACHE_ENTRIES` is **derived** from it back to 64 — the decision
+    moved to the side of the equation that can be argued with, and no
+    behaviour changed. With the hero and artist tiers, **170 MiB is all of
+    baz's decoded artwork**, which item 39's Debug readout now lets a listener
+    check against the real resident set.
+
+    `retained` is an LRU now, so "least recently visited" is a real ordering;
+    `trim_to_budget` drops speculative art first, then the least recently
+    visited retained art. The **resident tier is exempt** — a visible sleeve
+    turning back into a gradient is what the tier exists to prevent — and that
+    hole is stated rather than assumed: the widest supported window pins
+    51 MiB at its worst density, a third of the budget, asserted at a 2×
+    margin. An earlier draft of that assertion claimed two orders of magnitude
+    and was wrong, which is why the figure is a measured table.
+
+    Evidence and both harnesses: `docs/design/impl/art-memory-budget/`.
+
+    **The brief it was built from**, kept because its diagnosis was exact and
+    its reproduction is the harness that shipped: recorded 2026-08-14 from the
+    owner's
     clarification that the tiered art machinery was introduced to keep RAM
     usage down — with **no sensible limit ever specified** — and from the
     headless audit that reproduced his *"images do not load until an
@@ -587,9 +634,9 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- Nothing active — items 1–36 and 38–40 are complete; item 37 is recorded in
-  `## Next` and ready to start. One thing waits on the owner rather than on
-  work: what *"the right hand rail is acting strangely"* means (`BACKLOG.md`).
+- Nothing active — items 1–40 are complete. One thing waits on the owner rather
+  than on work: what *"the right hand rail is acting strangely"* means
+  (`BACKLOG.md`).
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

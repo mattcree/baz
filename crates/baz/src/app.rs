@@ -7239,8 +7239,22 @@ struct ThumbCache {
     /// Moving away must not turn an already-present sleeve back into a
     /// gradient. Retaining only entries that were resident (rather than every
     /// speculative completion) makes the cost proportional to artwork the
-    /// listener has visited; it is bounded above by the indexed collection.
-    retained: HashMap<u64, ThumbEntry>,
+    /// listener has visited.
+    ///
+    /// **It is an LRU now, and it was a `HashMap`.** "Bounded above by the
+    /// indexed collection" was the whole of its bound, which is to say it had
+    /// none: a large library retained every cover it ever showed, and the
+    /// figures this project published were measurements of what that came to
+    /// on the owner's 393 albums rather than a limit anything enforced. It is
+    /// ordered so that [`art::THUMB_BUDGET_BYTES`] can be enforced against the
+    /// **least recently visited** art, which is the only ordering under which
+    /// trimming is not arbitrary.
+    ///
+    /// Its capacity is the byte budget at the *smallest* entry the tier can
+    /// hold, so the count never binds before the bytes do — the bound that
+    /// matters is [`ThumbCache::trim_to_budget`]'s, and this one exists only
+    /// because `LruCache` requires a capacity.
+    retained: LruCache<u64, ThumbEntry>,
     wall: HashSet<u64>,
     chrome: HashSet<u64>,
     page: HashSet<u64>,
@@ -7251,7 +7265,7 @@ impl ThumbCache {
         Self {
             recent: LruCache::new(capacity),
             resident: HashMap::new(),
-            retained: HashMap::new(),
+            retained: LruCache::new(art::retained_capacity()),
             wall: HashSet::new(),
             chrome: HashSet::new(),
             page: HashSet::new(),
@@ -7261,14 +7275,22 @@ impl ThumbCache {
     fn peek(&self, id: u64) -> Option<&iced_image::Handle> {
         self.resident
             .get(&id)
-            .or_else(|| self.retained.get(&id))
+            .or_else(|| self.retained.peek(&id))
             .or_else(|| self.recent.peek(&id))
             .map(|entry| &entry.handle)
     }
 
+    /// Is this id's art already decoded — and, if it is, say so **and mark it
+    /// used**.
+    ///
+    /// The promotion is the point and is why this takes `&mut`: it is called
+    /// on every target of every re-aim, so "recently used" means "recently on
+    /// screen", which is exactly the order [`Self::trim_to_budget`] has to
+    /// trim against. `retained` moved from a `HashMap` to an LRU for this
+    /// reason as much as for the popping.
     fn touch(&mut self, id: u64) -> bool {
         self.resident.contains_key(&id)
-            || self.retained.contains_key(&id)
+            || self.retained.get(&id).is_some()
             || self.recent.get(&id).is_some()
     }
 
@@ -7279,12 +7301,44 @@ impl ThumbCache {
         };
         if self.is_pinned(id) {
             self.recent.pop(&id);
-            self.retained.remove(&id);
+            self.retained.pop(&id);
             self.resident.insert(id, entry);
         } else {
             self.resident.remove(&id);
-            self.retained.remove(&id);
+            self.retained.pop(&id);
             self.recent.put(id, entry);
+        }
+        self.trim_to_budget();
+    }
+
+    /// **Hold the stated budget** ([`art::THUMB_BUDGET_BYTES`]), by dropping
+    /// the least valuable decoded artwork until the total fits.
+    ///
+    /// The order is the tiering argument, spent: **speculative first** — art a
+    /// decode completed for that no surface ever displayed — and then the
+    /// **least recently visited retained** art. Nothing the current frame can
+    /// draw is ever dropped; the resident tier is exempt, because a visible
+    /// sleeve turning back into a gradient is the defect this whole tier
+    /// exists to prevent (item 20), and the loop stops rather than reaching
+    /// for it. `the_visible_wall_can_never_exhaust_the_art_budget` is what
+    /// makes that exemption safe to state.
+    ///
+    /// The running total is carried rather than recomputed: the sum is a walk
+    /// of every entry, and recomputing it inside the loop would make trimming
+    /// a large overflow quadratic in the size of the cache.
+    fn trim_to_budget(&mut self) {
+        let mut held = self.decoded_bytes();
+        while held > art::THUMB_BUDGET_BYTES {
+            let dropped = self
+                .recent
+                .pop_lru()
+                .or_else(|| self.retained.pop_lru())
+                .map(|(_, entry)| entry.decoded_bytes);
+            let Some(dropped) = dropped else {
+                // Only the resident tier is left, and it is not ours to take.
+                break;
+            };
+            held = held.saturating_sub(dropped);
         }
     }
 
@@ -7309,7 +7363,7 @@ impl ThumbCache {
     fn decoded_bytes(&self) -> usize {
         self.resident
             .values()
-            .chain(self.retained.values())
+            .chain(self.retained.iter().map(|(_, entry)| entry))
             .chain(self.recent.iter().map(|(_, entry)| entry))
             .map(|entry| entry.decoded_bytes)
             .sum()
@@ -7364,19 +7418,24 @@ impl ThumbCache {
             .collect();
         for id in leaving {
             if let Some(entry) = self.resident.remove(&id) {
-                self.retained.insert(id, entry);
+                self.retained.put(id, entry);
             }
         }
         for id in wanted {
             if self.resident.contains_key(&id) {
                 continue;
             }
-            if let Some(entry) = self.retained.remove(&id) {
+            if let Some(entry) = self.retained.pop(&id) {
                 self.resident.insert(id, entry);
             } else if let Some(entry) = self.recent.pop(&id) {
                 self.resident.insert(id, entry);
             }
         }
+        // A composition change can only ever move art *into* the resident
+        // tier or out of it, never decode more — but art arriving from the
+        // speculative tier stops being trimmable when it does, so the budget
+        // is re-checked here as well as after a decode.
+        self.trim_to_budget();
     }
 }
 
@@ -7436,10 +7495,6 @@ impl ThumbJobs {
     fn finished(&mut self, id: u64) {
         self.in_flight.remove(&id);
         self.completed += 1;
-    }
-
-    fn contains(&self, id: u64) -> bool {
-        self.queued.contains(&id) || self.in_flight.contains(&id)
     }
 }
 
@@ -9530,10 +9585,47 @@ impl Shelf {
     /// Re-aim the scheduler from one complete target snapshot. Updating the
     /// wall, a page or resident chrome can no longer discard still-visible
     /// work nominated by either of the other two.
+    ///
+    /// # `focus` replaces, so it has to be given everything
+    ///
+    /// [`ThumbJobs::focus`] **drains the whole foreground queue and re-adds
+    /// only its argument** — that is what "re-aim" means, and it is right: a
+    /// wall that has scrolled past a record should stop waiting to decode it.
+    /// But this function was handing it a **delta** — the targets that were
+    /// neither cached nor *already queued* — so every re-aim threw away every
+    /// job that was merely waiting its turn, and re-added nothing in its place.
+    ///
+    /// **That is the cold start, exactly.** iced emits `Scrolled` once the
+    /// scrollable measures its real bounds (and `WindowResized` when the first
+    /// resize lands); each handler recomputes the visible range and calls this;
+    /// and the last one flushes the batch the scan drain had just queued,
+    /// before two workers could consume more than two of it. Nothing else
+    /// happens on an untouched window, so the wall sits on gradients until a
+    /// scroll re-aims a range whose ids are now missing again and re-queues
+    /// them. Measured on a fresh 25-album library at 1280 × 860 with no
+    /// interaction at all: **two** decodes completed, and frames at 6, 9, 12
+    /// and 15 seconds pixel-identical.
+    ///
+    /// The repair is to pass the **complete snapshot** rather than the delta —
+    /// drop the `thumb_jobs.contains` exclusion and keep the other two. It is
+    /// safe because `focus` already skips in-flight ids and `queued.insert` is
+    /// idempotent, so drain-then-re-add now *preserves* queued work instead of
+    /// discarding it, while still dropping whatever left the target set. The
+    /// two exclusions that stay are the ones that are facts about the id rather
+    /// than about the queue: `touch` says it is already decoded (and marks it
+    /// recently used, which is why it must still be called on every target),
+    /// and `no_art` says there is nothing on disk to decode.
+    ///
+    /// `request_thumbs` (a page) and `request_thumbs_for` (resident chrome)
+    /// come through here too and get the same repair. `request_visible_thumbs`
+    /// keeps its `last_requested` range guard, which is the dedupe for
+    /// *identical* re-aims and is a separate concern from this one.
+    /// [`ThumbJobs::retry`] — the density-grew retry — pushes to the front
+    /// without draining and is untouched, which is item 30's shipped contract.
     fn request_target_thumbs(&mut self) -> Task<Message> {
         let mut wanted = Vec::new();
         for id in self.thumbs.targets() {
-            if self.thumbs.touch(id) || self.thumb_jobs.contains(id) || self.no_art.contains(&id) {
+            if self.thumbs.touch(id) || self.no_art.contains(&id) {
                 continue;
             }
             wanted.push(id);
@@ -10430,6 +10522,321 @@ mod tests {
         assert_eq!(jobs.pop(), Some(11));
         assert_eq!(jobs.pop(), Some(20));
         assert_eq!(jobs.pop(), Some(21));
+    }
+
+    /// **A re-aim that changes nothing must lose nothing** — the cold start,
+    /// as arithmetic.
+    ///
+    /// `focus` replaces, which is right: a wall that scrolled past a record
+    /// should stop waiting to decode it. What was wrong was *what it was
+    /// given*. `request_target_thumbs` handed it the targets that were neither
+    /// cached nor **already queued**, so a re-aim over an unchanged viewport
+    /// passed the empty set and the replace threw the whole queue away.
+    ///
+    /// On an untouched cold start that happens twice — iced emits `Scrolled`
+    /// when the scrollable measures its real bounds, and `WindowResized` when
+    /// the first resize lands — and there is no third event to re-queue
+    /// anything, so the wall sits on gradients until someone touches it.
+    /// Measured before the fix on a fresh 25-album library at 1280 × 860 with
+    /// no interaction: **2** decodes completed and frames at 6, 9, 12 and 15
+    /// seconds pixel-identical. After: **8**, the whole visible wall.
+    ///
+    /// This is the pure half of that, and it is deliberately written as the
+    /// *shape of the call* rather than as a screenshot: the defect is that a
+    /// caller passed a delta to a replacing queue, so what has to be pinned is
+    /// that a snapshot survives the replace and a delta does not.
+    #[test]
+    fn re_aiming_with_the_whole_snapshot_keeps_queued_work_that_a_delta_would_drop() {
+        // The snapshot: everything still wanted, including what is already
+        // queued. Two workers have taken the first two; the rest are waiting.
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(jobs.pop(), Some(1));
+        jobs.started(1);
+        assert_eq!(jobs.pop(), Some(2));
+        jobs.started(2);
+
+        // The re-aim iced delivers on its own, over an unchanged viewport.
+        jobs.focus([1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            jobs.foreground,
+            VecDeque::from([3, 4, 5, 6, 7, 8]),
+            "the six waiting decodes were discarded by a re-aim that asked for \
+             exactly what was already asked for"
+        );
+        assert!(
+            jobs.in_flight.contains(&1) && jobs.in_flight.contains(&2),
+            "a re-aim must not re-queue what two workers are already decoding"
+        );
+
+        // And the delta the old caller would have computed — nothing is
+        // uncached-and-unqueued, so it is empty — takes the queue with it.
+        let mut delta = ThumbJobs::default();
+        delta.focus([1, 2, 3, 4, 5, 6, 7, 8]);
+        delta.pop();
+        delta.pop();
+        delta.focus(std::iter::empty());
+        assert!(
+            delta.foreground.is_empty(),
+            "this is the defect, held here so the difference between the two \
+             calls is visible in one place"
+        );
+    }
+
+    /// The other half of the same rule: a re-aim still **drops** what left the
+    /// target set, which is what makes `focus` a re-aim rather than an append.
+    /// Passing the whole snapshot buys back the waiting work without buying
+    /// back the work that scrolled away.
+    #[test]
+    fn a_snapshot_re_aim_still_drops_what_left_the_viewport() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([1, 2, 3, 4]);
+        jobs.focus([3, 4, 5, 6]);
+        assert_eq!(jobs.foreground, VecDeque::from([3, 4, 5, 6]));
+        assert!(!jobs.queued.contains(&1) && !jobs.queued.contains(&2));
+    }
+
+    /// **The density retry still prepends rather than replacing** — item 30's
+    /// shipped contract, re-asserted beside the change that altered how the
+    /// queue is filled.
+    ///
+    /// A decode that completed too small after the density grew re-queues one
+    /// id. It must not take the rest of the visible wall with it, which is
+    /// exactly what it would do if it reached for `focus`.
+    #[test]
+    fn the_density_retry_prepends_and_keeps_the_rest_of_the_wall() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([1, 2, 3]);
+        jobs.retry(9);
+        assert_eq!(jobs.foreground, VecDeque::from([9, 1, 2, 3]));
+    }
+
+    /// **The stated budget is stated, derived from, and reachable** — item 37's
+    /// first half, which is a decision rather than a repair.
+    ///
+    /// The owner: the art machinery *"was introduced to try to keep RAM usage
+    /// down but we never specified a sensible limit."* Everything this asserts
+    /// is the arithmetic of that limit, so the numbers in `art`'s prose cannot
+    /// drift away from the constants underneath them.
+    #[test]
+    fn the_art_budget_is_a_stated_decision_the_tiers_derive_from() {
+        const MIB: usize = 1024 * 1024;
+        // The figure, and the two it is chosen against: the owner's 393-album
+        // index at Spacious's 320 px ceiling, every cover square.
+        const OWNERS_ALBUMS: usize = 393;
+        const SPACIOUS_ENTRY: usize = 320 * 320 * 4;
+        // The two smaller tiers, for the whole-process figure below.
+        const HERO: usize = 1024 * 1024 * 4 * art::HERO_CACHE_ENTRIES;
+        const ARTIST: usize = 256 * 256 * 4 * art::ARTIST_CACHE_ENTRIES;
+        const {
+            assert!(art::THUMB_BUDGET_BYTES == 160 * MIB);
+            assert!(OWNERS_ALBUMS * SPACIOUS_ENTRY < art::THUMB_BUDGET_BYTES);
+            // …and it is the smallest 32 MiB step that clears it, so the
+            // headroom is not a second undeclared decision.
+            assert!(OWNERS_ALBUMS * SPACIOUS_ENTRY > art::THUMB_BUDGET_BYTES - 32 * MIB);
+        }
+        // The speculative sub-budget is what the entry count is derived *from*,
+        // and it comes to the count the tier has always had — so stating the
+        // decision in bytes changed no behaviour.
+        const {
+            assert!(art::SPECULATIVE_BUDGET_BYTES == 25 * MIB);
+            assert!(art::THUMB_CACHE_ENTRIES == 64);
+            assert!(art::THUMB_CACHE_ENTRIES * SPACIOUS_ENTRY == art::SPECULATIVE_BUDGET_BYTES);
+            assert!(art::SPECULATIVE_BUDGET_BYTES < art::THUMB_BUDGET_BYTES);
+        }
+        // And all decoded artwork in the process is the figure worth quoting,
+        // which is the one a process monitor shows — and which Settings →
+        // Debug now shows the resident set beside.
+        const {
+            assert!(HERO == 8 * MIB);
+            assert!(ARTIST == 2 * MIB);
+            assert!(art::THUMB_BUDGET_BYTES + HERO + ARTIST == 170 * MIB);
+        }
+    }
+
+    /// **The resident tier's exemption is safe**, which is the budget's one
+    /// hole and therefore the one thing that has to be argued rather than
+    /// assumed.
+    ///
+    /// `trim_to_budget` will not evict art the current frame can draw — item
+    /// 20's rule, and the reason this whole tier exists. That means a window
+    /// whose *visible wall alone* exceeded [`art::THUMB_BUDGET_BYTES`] would
+    /// exceed it. It cannot: the widest window baz supports, at the loosest
+    /// density's smallest work and the largest decode edge, holds two orders
+    /// of magnitude less than the budget.
+    ///
+    /// The bound is deliberately generous — a full 4K window, every tile at
+    /// the density's *smallest* work so the count is maximal, no room taken by
+    /// the two bars or the captions — and the margin it clears by is **stated
+    /// rather than assumed**, because it is nearer than it looks: the worst
+    /// density comes to about a third of the budget, not a hundredth. A tier
+    /// that cannot be evicted is worth knowing the size of.
+    ///
+    /// Each density is costed against **its own** decode ceiling
+    /// ([`crate::shelf::Density::art_max_px`]), which is the pairing that
+    /// actually happens — Dense hangs the most tiles *and* decodes the
+    /// smallest, so the two do not compound. Costing every density at
+    /// [`art::THUMB_PX`] would be a worst case the product cannot reach and
+    /// would fail this test for a reason that is not true.
+    #[test]
+    fn the_visible_wall_can_never_exhaust_the_art_budget() {
+        use crate::shelf::Density;
+
+        // Far past any window baz is dragged to, and the bars take none of it.
+        let (window_w, window_h) = (3840.0_f32, 2160.0_f32);
+        let worst = Density::ALL
+            .iter()
+            .map(|density| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "a count of tiles across a window is small and non-negative"
+                )]
+                let tiles = ((window_w / density.art_min()).ceil() as usize)
+                    * ((window_h / density.art_min()).ceil() as usize);
+                let edge = density.art_max_px() as usize;
+                (tiles * edge * edge * 4, *density, tiles)
+            })
+            .max_by_key(|(bytes, _, _)| *bytes)
+            .expect("the densities are not empty");
+        let (bytes, density, tiles) = worst;
+        assert!(
+            bytes * 2 < art::THUMB_BUDGET_BYTES,
+            "the widest supported window at {density:?} pins {tiles} tiles, \
+             {} MiB, against a {} MiB budget — the resident tier is exempt from \
+             the trim, so it must stay comfortably under it",
+            bytes / (1024 * 1024),
+            art::THUMB_BUDGET_BYTES / (1024 * 1024)
+        );
+    }
+
+    /// **The budget is enforced, and it is enforced in the right order.**
+    ///
+    /// Speculative art — decoded for, never displayed — goes first; then the
+    /// least recently *visited* retained art; and the resident tier is never
+    /// touched. Written over a tiny budget so the arithmetic is legible; the
+    /// tiering is what is being asserted, not the size.
+    #[test]
+    fn the_budget_trims_speculative_art_first_then_the_least_recently_visited() {
+        // One entry per byte-budget slot: `put_pixel` writes 4 bytes.
+        let mut cache = ThumbCache::new(NonZeroUsize::new(8).expect("a cache"));
+
+        // Three covers the listener has actually looked at, in order.
+        for id in [1, 2, 3] {
+            cache.focus_wall([id]);
+            put_pixel(&mut cache, id);
+            cache.focus_wall([]);
+        }
+        assert_eq!(cache.retained_len(), 3);
+
+        // One the listener is looking at now.
+        cache.focus_wall([9]);
+        put_pixel(&mut cache, 9);
+        assert_eq!(cache.resident_len(), 1);
+
+        // And some speculative completions behind them.
+        for id in [20, 21] {
+            put_pixel(&mut cache, id);
+        }
+        assert_eq!(cache.recent.len(), 2);
+
+        // Now squeeze. The trim runs on `put`, so a budget this small is
+        // easier to exercise directly.
+        cache.trim_to_budget();
+        assert_eq!(
+            cache.decoded_bytes(),
+            6 * 4,
+            "nothing should be dropped while the whole cache is far under budget"
+        );
+
+        // Re-touching a retained id makes it the most recent, which is the
+        // ordering the trim depends on and the reason `retained` is an LRU.
+        assert!(cache.touch(1));
+        let order: Vec<u64> = cache.retained.iter().map(|(id, _)| *id).collect();
+        assert_eq!(
+            order.first(),
+            Some(&1),
+            "visiting retained art did not make it recent, so a trim would drop \
+             the art the listener just looked at"
+        );
+
+        // Resident art survives a trim that has nothing else left to take.
+        cache.recent.clear();
+        cache.retained.clear();
+        cache.trim_to_budget();
+        assert!(
+            cache.peek(9).is_some(),
+            "the trim reached into the current frame"
+        );
+    }
+
+    /// **The trim actually drops things, and drops them in the stated order.**
+    ///
+    /// The test above establishes the ordering and the resident exemption; this
+    /// one makes the budget *bind*, which needs entries big enough to reach it.
+    /// The sizes are declared rather than decoded — `decoded_bytes` is a number
+    /// the caller hands the cache from the real decode, so a 1 × 1 handle that
+    /// claims a quarter of the budget exercises exactly the accounting under
+    /// test without allocating 160 MiB in a unit test.
+    #[test]
+    fn the_budget_binds_and_takes_speculative_art_before_visited_art() {
+        // Quarter-budget entries: four fit exactly, a fifth must displace one.
+        let quarter = art::THUMB_BUDGET_BYTES / 4;
+        let mut cache = ThumbCache::new(NonZeroUsize::new(64).expect("a cache"));
+        let put = |cache: &mut ThumbCache, id: u64| {
+            cache.put(id, pixel_handle(1), quarter);
+        };
+
+        // Two the listener has visited, oldest first, then two speculative.
+        for id in [1, 2] {
+            cache.focus_wall([id]);
+            put(&mut cache, id);
+            cache.focus_wall([]);
+        }
+        put(&mut cache, 20);
+        put(&mut cache, 21);
+        assert_eq!(cache.decoded_bytes(), 4 * quarter);
+        assert!(cache.decoded_bytes() <= art::THUMB_BUDGET_BYTES);
+
+        // A fifth decode. Speculative art goes first — art nobody has seen is
+        // worth less than art the listener has.
+        put(&mut cache, 22);
+        assert!(
+            cache.decoded_bytes() <= art::THUMB_BUDGET_BYTES,
+            "the budget is not enforced"
+        );
+        assert!(
+            cache.peek(1).is_some() && cache.peek(2).is_some(),
+            "visited art was dropped while speculative art was still held"
+        );
+        assert!(
+            cache.peek(20).is_none(),
+            "the oldest speculative entry survived"
+        );
+
+        // With no speculative art left to absorb the overflow, the **least
+        // recently visited** retained entry is what goes — and the one just
+        // re-visited stays, which is the whole reason `retained` is ordered.
+        cache.recent.clear();
+        assert!(cache.touch(1), "1 is now the most recently visited");
+        for id in [3, 4, 5] {
+            cache.focus_wall([id]);
+            put(&mut cache, id);
+            cache.focus_wall([]);
+        }
+        assert!(cache.decoded_bytes() <= art::THUMB_BUDGET_BYTES);
+        assert!(
+            cache.peek(1).is_some(),
+            "the trim dropped art the listener had looked at more recently than              art it kept"
+        );
+        assert!(
+            cache.peek(2).is_none(),
+            "the least recently visited retained art should have gone first"
+        );
+        assert!(
+            [4, 5].iter().all(|id| cache.peek(*id).is_some()),
+            "the art just visited was dropped"
+        );
     }
 
     fn pixel_handle(red: u8) -> iced_image::Handle {

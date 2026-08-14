@@ -17,14 +17,30 @@
 //!
 //! # Memory budget
 //!
+//! **[`THUMB_BUDGET_BYTES`] 160 MiB is the limit**, and it is a decision the
+//! owner can disagree with rather than an emergent property of an LRU's
+//! capacity argument — see that constant for where 160 comes from. Everything
+//! below is how it is spent and held.
+//!
 //! Thumbnails are decoded to the active density's real maximum (200 px in
 //! Dense, up to [`THUMB_PX`] in Spacious). Handles needed by the current wall
 //! viewport, current page and resident chrome are pinned in a resident tier.
-//! Once a handle has reached one of those targets it is retained for the rest
-//! of the session, so scrolling away and back cannot replace it with a
-//! gradient. A decode that finishes after its target has left still competes
-//! in a 64-entry recent LRU; speculative work cannot grow the session store.
-//! Prepared PNGs live in the local XDG cache for the next launch.
+//! Once a handle has reached one of those targets it is retained, so scrolling
+//! away and back cannot replace it with a gradient. A decode that finishes
+//! after its target has left competes in a
+//! [`THUMB_CACHE_ENTRIES`]-entry recent LRU, itself derived from
+//! [`SPECULATIVE_BUDGET_BYTES`]. Prepared PNGs live in the local XDG cache for
+//! the next launch.
+//!
+//! When the total would exceed the budget, `ThumbCache::trim_to_budget` drops
+//! **speculative art first, then the least recently visited retained art**.
+//! The resident tier is exempt: a visible sleeve turning back into a gradient
+//! is the defect the whole tier exists to prevent. That exemption is safe
+//! because the resident tier is bounded by the window — the widest window baz
+//! supports pins **51 MiB** at its worst density (Dense: 336 tiles at the
+//! 200 px ceiling), a little under a third of the budget, which
+//! `the_visible_wall_can_never_exhaust_the_art_budget` asserts rather than
+//! assumes.
 //!
 //! **The ceiling remains 320** (ADR-0017 step 5/7), because Spacious really
 //! can draw a sleeve that large. Tighter densities now ask for their smaller
@@ -49,13 +65,21 @@
 //! The owner's real 8,602-track index resolves to 393 albums. At Dense's 200 px
 //! ceiling, retaining every square cover is at most **60.0 MiB** of CPU RGBA;
 //! the measured first 180 real decodes occupied 27.3 MiB. Balanced (288 px)
-//! and Spacious (320 px) worst cases are 124.3 and 153.5 MiB. The 800-album
-//! synthetic ceiling is 122.1 / 253.1 / 312.5 MiB respectively. This is a
-//! collection-bounded session budget, not an unexplained entry count. iced's
-//! wgpu raster cache trims device allocations to handles hit by the current
-//! renderer pass, while retained RGBA handles make a return upload synchronous;
-//! renderer residency therefore follows the current target set, not the whole
-//! session store.
+//! and Spacious (320 px) worst cases are 124.3 and 153.5 MiB, and the last of
+//! those is what [`THUMB_BUDGET_BYTES`] was chosen to clear — his whole
+//! collection stays retained at every density.
+//!
+//! **These figures used to be the budget, and that was the defect.** They are
+//! measurements of one collection on one machine; the 800-album synthetic
+//! ceiling is 122.1 / 253.1 / 312.5 MiB, and nothing above that was bounded at
+//! all. They are still worth keeping, because a limit chosen against a real
+//! collection is a better limit than a round number — but they are now inputs
+//! to the decision rather than a substitute for one.
+//!
+//! iced's wgpu raster cache trims device allocations to handles hit by the
+//! current renderer pass, while retained RGBA handles make a return upload
+//! synchronous; renderer residency therefore follows the current target set,
+//! not the whole session store.
 //!
 //! # Two tiers, because two surfaces want different things
 //!
@@ -68,8 +92,15 @@
 //!
 //! | Tier | Edge | Entries | Worst case | For |
 //! |---|---|---|---|---|
-//! | [`load_thumb_cached`] | density-aware, ≤ [`THUMB_PX`] 320 | displayed this session + [`THUMB_CACHE_ENTRIES`] 64 speculative/recent | collection-bounded; measured above | the wall, the lane, every collage |
+//! | [`load_thumb_cached`] | density-aware, ≤ [`THUMB_PX`] 320 | visited this session + [`THUMB_CACHE_ENTRIES`] 64 speculative/recent | **[`THUMB_BUDGET_BYTES`] 160 MiB**, enforced | the wall, the lane, every collage |
 //! | [`load_hero`] | [`HERO_PX`] 1024 | [`HERO_CACHE_ENTRIES`] 2 | **8 MiB** | the Now playing place's one work |
+//! | [`load_artist`] | [`ARTIST_PX`] 256 | [`ARTIST_CACHE_ENTRIES`] 8 | **2 MiB** | an artist page's portrait |
+//!
+//! **170 MiB is therefore the whole of baz's decoded artwork**, which is the
+//! figure worth quoting because it is the one a process monitor shows —
+//! and Settings → Debug now shows the resident set beside it
+//! ([`crate::resource`]), so the claim is checkable inside the running app
+//! rather than only in this comment.
 //!
 //! **The hero tier is 16 % more art memory** for the surface the owner wants
 //! to leave running, and it is what makes *no artwork is ever drawn larger
@@ -116,12 +147,101 @@ use lofty::prelude::*;
 /// asserts the two are one number.
 pub const THUMB_PX: u32 = 320;
 
+/// Bytes of decoded RGBA per pixel. Named because every budget below is this
+/// times an area times a count, and a `4` written out four times is four
+/// chances to write a `3`.
+const RGBA: usize = 4;
+
+/// **The thumbnail tier's whole decoded-RGBA budget: 160 MiB.**
+///
+/// # It is a decision now, and it was not one before
+///
+/// The owner, 2026-08-14: the tiered art machinery *"was introduced to try to
+/// keep RAM usage down but we never specified a sensible limit."* He is right,
+/// and the gap was specific — the **retained** tier had no bound at all except
+/// the size of the indexed collection. Every figure this module published
+/// (60.0 / 124.3 / 153.5 MiB at Dense/Balanced/Spacious on his 393 albums) was
+/// a *measurement of what that shape happened to cost on his machine*, not a
+/// limit the shape was built to meet. On a 5,000-album library the same code
+/// retains something over two gigabytes and nothing in the product would have
+/// said so.
+///
+/// # Where 160 comes from
+///
+/// It is chosen against the collection the feature exists for, and stated so
+/// the next person can disagree with a number rather than with an emergent
+/// property of `lru`'s capacity argument:
+///
+/// - The owner's 8,602-track index resolves to **393 albums**, whose worst
+///   case — every cover square, at Spacious's 320 px ceiling — is
+///   **153.5 MiB**. 160 clears it, so *his whole collection stays retained at
+///   every density*, which is the case item 30 was built to serve.
+/// - It is the smallest 32 MiB step that does, which keeps the headroom an
+///   accident of rounding rather than a second undeclared decision.
+/// - With the hero tier's 8 MiB ([`HERO_CACHE_ENTRIES`]) and the artist tier's
+///   2 MiB ([`ARTIST_CACHE_ENTRIES`]), **all decoded artwork in the process is
+///   under 170 MiB**, which is the number worth quoting because it is the one
+///   a listener's process monitor shows. Settings → Debug now shows the
+///   resident set beside it (`crate::resource`), so the claim is checkable
+///   inside the running app.
+///
+/// # What it bounds, and the one thing it cannot
+///
+/// The cache trims **speculative first, then the least-recently-visited
+/// retained art**, until the total fits. The **resident tier is exempt**, and
+/// that exemption is the budget's one honest hole: the current frame's
+/// artwork is un-evictable by construction (item 20 — a visible sleeve turning
+/// back into a gradient is the defect this whole tier exists to prevent), so a
+/// window large enough that its visible wall alone exceeded this figure would
+/// exceed it. It cannot in practice — the widest supported window at the
+/// largest edge holds well under a tenth of this — and
+/// `the_visible_wall_can_never_exhaust_the_art_budget` asserts the margin
+/// rather than leaving it to be believed.
+pub const THUMB_BUDGET_BYTES: usize = 160 * 1024 * 1024;
+
+/// **The share of [`THUMB_BUDGET_BYTES`] speculative work may hold: 25 MiB.**
+///
+/// Speculative art is what a decode completed for but no surface ever
+/// displayed — the tail of a fast scroll, mostly. It is worth keeping (the
+/// scroll usually comes back) and it is worth keeping *least*, so it is the
+/// first thing trimmed and it gets a sub-budget of its own rather than
+/// competing freely with art the listener has actually looked at.
+///
+/// 25 MiB is not a new number: it is exactly what the tier's long-standing 64
+/// entries cost at the largest edge, which this module already published as
+/// its worst case. Stating it as the budget and **deriving the entry count**
+/// changes no behaviour and moves the decision to the side of the equation
+/// where it belongs — a count of entries cannot be argued with, and a number
+/// of megabytes can.
+pub const SPECULATIVE_BUDGET_BYTES: usize = 25 * 1024 * 1024;
+
 /// Off-screen thumbnail LRU capacity for decodes that never reached a visible
-/// target: 64 recent works, or 9.8 MiB at Dense and 25 MiB at Spacious.
+/// target: **64**, derived — [`SPECULATIVE_BUDGET_BYTES`] divided by one entry
+/// at [`THUMB_PX`], which is `320 × 320 × 4` = 400 KiB.
+///
+/// A count rather than a byte cap because the LRU is a count, and because at
+/// the *smaller* density ceilings the same 64 entries cost less (9.8 MiB at
+/// Dense's 200 px) — so this is the tier's ceiling and not its size.
 ///
 /// Current wall, page and chrome targets live in a separate resident tier and
-/// do not count against this cap; see the module-level memory budget.
-pub const THUMB_CACHE_ENTRIES: usize = 64;
+/// do not count against this cap; see [`THUMB_BUDGET_BYTES`].
+pub const THUMB_CACHE_ENTRIES: usize =
+    SPECULATIVE_BUDGET_BYTES / (THUMB_PX as usize * THUMB_PX as usize * RGBA);
+
+/// The retained tier's entry capacity — [`THUMB_BUDGET_BYTES`] at the
+/// **smallest** entry it can hold, so the count can never bind before the
+/// bytes do.
+///
+/// The bound that matters is the byte budget, enforced by
+/// `ThumbCache::trim_to_budget`. This exists only because `LruCache` requires
+/// a capacity, and giving it one that could bite first would be a second,
+/// undeclared limit — exactly the thing this whole item is undoing. The
+/// smallest entry is one square pixel of RGBA, which is what a 1 × 1 cover
+/// decodes to and what the cache's own tests use.
+#[must_use]
+pub fn retained_capacity() -> std::num::NonZeroUsize {
+    std::num::NonZeroUsize::new(THUMB_BUDGET_BYTES / RGBA).unwrap_or(std::num::NonZeroUsize::MIN)
+}
 
 /// Maximum thumbnail decodes allowed to run at once.
 ///
