@@ -4,7 +4,7 @@ use std::f32::consts::TAU;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use baz_core::playback::{AudioSource, resample_interleaved};
+use baz_core::playback::{DecodedAudio, resample_interleaved};
 use ort::session::Session;
 use ort::value::Tensor;
 use rustfft::FftPlanner;
@@ -34,8 +34,8 @@ pub(crate) fn embed_text(prompt: &str) -> Result<Vec<f32>, String> {
     with_model(|model| model.text(prompt))
 }
 
-pub(crate) fn embed_audio(path: &Path) -> Result<Vec<f32>, String> {
-    with_model(|model| model.audio(path))
+pub(crate) fn embed_audio(decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
+    with_model(|model| model.audio(decoded))
 }
 
 fn with_model<T>(run: impl FnOnce(&mut Model) -> Result<T, String>) -> Result<T, String> {
@@ -115,9 +115,7 @@ impl Model {
         normalized(values)
     }
 
-    pub(crate) fn audio(&mut self, path: &Path) -> Result<Vec<f32>, String> {
-        let decoded = AudioSource::decode_all(path)
-            .map_err(|error| format!("could not decode track for local Vibe: {error}"))?;
+    pub(crate) fn audio(&mut self, decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
         let stereo = resample_interleaved(&decoded.samples, decoded.sample_rate, RATE)
             .map_err(|error| format!("could not resample track for local Vibe: {error}"))?;
         let mono: Vec<f32> = stereo
@@ -372,7 +370,8 @@ mod tests {
         }
         writer.finalize().expect("finalize");
         let mut model = Model::load().expect("local reproduced model");
-        let vector = model.audio(&path).expect("audio inference");
+        let decoded = baz_core::playback::AudioSource::decode_all(&path).expect("decode fixture");
+        let vector = model.audio(&decoded).expect("audio inference");
         assert_eq!(vector.len(), EMBEDDING_SIZE);
         assert!(vector.iter().all(|value| value.is_finite()));
     }

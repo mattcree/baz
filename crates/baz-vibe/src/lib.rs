@@ -731,7 +731,7 @@ pub fn analyze_and_store(store_path: &Path, path: PathBuf) -> Result<Analyzed, E
         path: path.clone(),
         detail: error.to_string(),
     })?;
-    let semantic = semantic::embed_audio(&path).map_err(Error::Semantic)?;
+    let semantic = semantic::embed_audio(&decoded).map_err(Error::Semantic)?;
     let after = Stamp::read(&path)?;
     if before != after {
         return Err(Error::Analyze {
