@@ -195,26 +195,28 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ### Phase B — Home is the next feature area
 
-13. **Done 2026-08-13 — Build local-first sonic vibe playlists on Home.** The owner
+13. **Done 2026-08-14 — Finish local-first sonic vibe playlists on Home.** The owner
     rejected the metadata/history grammar as the feature: the product bar is a
     genuinely impressive offline musical model of the listener's collection.
-    A first end-to-end sonic slice now lives behind the optional
-    `vibe-analysis` build feature: explicit/cancellable incremental audio
-    analysis, a separate versioned/stale-file-aware cache, Calm/Warm/Focus/
-    Bright/Drive controls, sounding-track anchoring, continuity/diversity
-    sequencing and an ordinary silent editable playlist. The owner accepted
-    this transparent local feature after using it. The official LAION
-    text/audio towers are now reproducibly exported, pinned and checked against
-    PyTorch, and a fingerprint-locked 72-track private-corpus ballot compares
-    metadata, conventional and semantic lists without revealing identity.
-    The product interaction is now fixed as one Home composer: describe a
-    journey, adjust a visible default energy curve or semantic turns, and press
-    Create; first-use consent continues the same request automatically, the
-    playing track is never an implicit baseline, and the result is a silent
-    editable preview. Semantic research remains separate and may be integrated
-    later only after it is chosen and demonstrated useful. Baz is one product;
-    its normal build includes the local controls. `docs/design/16-local-vibe-
-    playlists.md` is the current research/evaluation record.
+    The first end-to-end sonic slice introduced explicit/cancellable
+    incremental audio analysis, a separate versioned/stale-file-aware cache,
+    conventional sonic controls and continuity/diversity sequencing behind the
+    default `vibe-analysis` feature. Its hidden, analysis-first preset panel and
+    sounding-track anchor were accepted, then explicitly reopened after use as
+    too poor to leave as the product. The finished composer keeps the whole
+    request visible on Home as ordinary free text rather than presets,
+    30/60/90/120-minute targets, Create-driven first-use consent, incremental
+    progress, and a silent in-place preview with reorder/remove, Play, Save and
+    Another version as separate acts. The playing track is never an implicit
+    baseline; an existing local index makes later Create presses resume without
+    repeating consent; cancellation retains the request without leaving the
+    consent notice standing. The normal build bundles Baz's reproducibly
+    exported quantized LAION CLAP audio/text pair and tokenizer, so local
+    track windows and prompts meet in the same 512-dimensional space. Retrieval
+    iterates against real durations, retains continuity and album/artist
+    diversity, prevents exact duplicate paths, and persistently avoids songs
+    offered by recent generated mixes. Release archives and Flatpak carry the
+    pinned model, licences and runtime without a first-run download.
 
 ### Phase C — make releases sustainable, then ship
 
@@ -403,25 +405,18 @@ its bold title from the numbered item above.
   mask while the spectrum remains full-body. All six states have independent
   clock tests, objectless measures are swept from narrow through 4K, and
   returning to Cover/Case self-heals the hero request and existing dissolve.*
-- **Doing: after critical usability, tackle Home through local-first vibe playlist
-  generation.** This is the owner's explicit ordering from the 2026-08-12 live
+- **Done 2026-08-14: Home's local-first free-text Vibe composer.** This is the
+  owner's explicit ordering from the 2026-08-12 live
   review. Do not spend the Home pass on decorative rearrangement: give it the
-  entry point for a listener-requested vibe/prompt and the ordinary editable
-  playlist that results. The existing ground rules remain binding—explicit
+  entry point for a listener-requested vibe and the ordinary editable playlist
+  that results. The existing ground rules remain binding—explicit
   request, visible candidate pool, inert provenance, no autoplay, no silent
-  regeneration, no cloud/account, and no second playlist species. Run a signal
-  spike from cheapest to richest: deterministic metadata/history plus a small
-  prompt grammar; lightweight local NLP/classification or embeddings; then
-  incremental local audio features (tempo/energy/timbre) and local joint
-  text–audio embeddings. The owner has now set the quality bar: this must be a
-  unique offline selling point, not decorated filtering or nearest-neighbour
-  shuffle. Measure output quality as well as model/binary size, CPU,
-  memory, library-analysis time, licensing, offline/cross-platform packaging
-  and explainability. *Starts only after the critical-usability tranche. Needs
-  then: a precise definition of that tranche, a research corpus/evaluation
-  method, prompt/vibe interaction, visible scope/progress/cancel behavior,
-  diversity rules, sparse-library fallback, analysis index/versioning, and a
-  staged implementation plan.*
+  regeneration, no cloud/account, and no second playlist species. The honest
+  bundled paired LAION engine now drives the ordinary-language request and
+  silent editable preview. The earlier ballot gate was explicitly removed by
+  the owner; the reproducible export, preprocessing checks and pinned payload
+  remain the implementation evidence. Recent-offer persistence prevents one
+  standout match from recurring across separate mixes.
 - **Ship four polarity themes and a safe, AI-friendly custom-theme JSON
   format.** Recorded from the owner's live review on 2026-08-12. The rendering
   system already routes styles through one semantic `Palette`; Closing Time is

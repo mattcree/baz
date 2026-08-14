@@ -68,6 +68,10 @@ allow = [
   # Creative Commons Zero: public-domain dedication, GPL-compatible per the
   # FSF license list. Transitive via iced → wgpu → naga → hexf-parse.
   "CC0-1.0",
+  # Permissive data licence for Mozilla's public root-certificate list, used
+  # only by ort-sys's build-time verified runtime fetch. No network code from
+  # this dependency is reachable in the Baz application.
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 

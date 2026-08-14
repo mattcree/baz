@@ -521,8 +521,8 @@ pub(crate) enum Message {
     /// the picker for `Add to…` (ADR-0031's card at the pointer is not
     /// built), and the key is now its only summons.
     TogglePlaylists,
-    /// Open Home's opt-in local sonic-playlist composer.
-    VibeStart,
+    /// Create the requested mix, or preserve it while first-use consent opens.
+    VibeCreate,
     /// Inspect the selected library editions and begin missing local analysis.
     VibeAnalyze,
     /// The persistent sonic cache was checked away from the UI thread.
@@ -531,15 +531,20 @@ pub(crate) enum Message {
     VibeAnalyzed(crate::vibe::AnalysisResult),
     /// Stop scheduling analysis after the currently running track returns.
     VibeAnalysisCancel,
-    /// Choose a controlled sonic target and rebuild the preview.
-    VibePreset(crate::vibe::Preset),
-    /// Anchor the target around the currently sounding analyzed track.
-    VibeUsePlaying,
-    /// Remove the sonic anchor while retaining the selected target.
-    VibeClearSeed,
+    /// Edit the ordinary-language request without generating or playing.
+    VibePrompt(String),
+    /// Set the requested listening duration.
+    VibeLength(crate::vibe::MixLength),
+    /// Explicitly explore another deterministic version of this request.
+    VibeAnother,
+    /// Edit the in-memory preview without touching music or playlist files.
+    VibePreviewRemove(usize),
+    VibePreviewShift(usize, i32),
+    /// Put the edited preview on as the run. This is Vibe's explicit playback act.
+    VibePlay,
     /// Write the previewed, ordinary playlist file and open it without playing.
     VibeSubmit,
-    /// Put away Home's request composer without writing anything.
+    /// Cancel first-use consent/analysis while retaining the request controls.
     VibeCancel,
     /// **The returns lane's head, pressed**: go to that destination
     /// (ADR-0030 as the owner amended it). Not a toggle — see [`Place::go`].
@@ -3307,16 +3312,37 @@ impl App {
     #[allow(clippy::too_many_lines)]
     fn update_vibe(&mut self, message: &Message) -> Option<Task<Message>> {
         match message {
-            Message::VibeStart => {
+            Message::VibeCreate => {
                 let Screen::Shelf(state) = &mut self.screen else {
                     return Some(Task::none());
                 };
                 if !self.playlists.available() {
                     return Some(Task::none());
                 }
-                state.vibe.begin();
-                state.vibe.rebuild(&state.albums, &state.edition_choice);
-                Some(Task::none())
+                if state.vibe.prompt.trim().is_empty()
+                    || state.vibe.preparing
+                    || state.vibe.analyzing
+                {
+                    return Some(Task::none());
+                }
+                state.vibe.begin_request();
+                if state.vibe.has_features() && !state.vibe.preparing && !state.vibe.analyzing {
+                    state.vibe.create(
+                        config::vibe_db_file().as_deref(),
+                        &state.albums,
+                        &state.edition_choice,
+                    );
+                    return Some(Task::none());
+                }
+                let Some(index) = config::vibe_db_file().filter(|path| path.exists()) else {
+                    return Some(Task::none());
+                };
+                let paths = crate::vibe::library_paths(&state.albums, &state.edition_choice);
+                state.vibe.start_preparing();
+                Some(Task::perform(
+                    crate::vibe::prepare(index, paths),
+                    Message::VibePrepared,
+                ))
             }
             Message::VibeAnalyze => {
                 let Some(index) = config::vibe_db_file() else {
@@ -3341,14 +3367,19 @@ impl App {
             Message::VibePrepared(result) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_preparation(result.clone());
-                    state.vibe.rebuild(&state.albums, &state.edition_choice);
+                    if !state.vibe.analyzing && state.vibe.awaiting_create {
+                        state.vibe.create(
+                            config::vibe_db_file().as_deref(),
+                            &state.albums,
+                            &state.edition_choice,
+                        );
+                    }
                 }
                 Some(self.next_vibe_job())
             }
             Message::VibeAnalyzed(result) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_analysis(result.clone());
-                    state.vibe.rebuild(&state.albums, &state.edition_choice);
                     if !state.vibe.analyzing
                         && state.vibe.failed > 0
                         && let Some(detail) = state.vibe.failure_note()
@@ -3359,45 +3390,82 @@ impl App {
                             detail,
                         );
                     }
+                    if !state.vibe.analyzing && state.vibe.awaiting_create {
+                        state.vibe.create(
+                            config::vibe_db_file().as_deref(),
+                            &state.albums,
+                            &state.edition_choice,
+                        );
+                    }
                 }
                 Some(self.next_vibe_job())
             }
-            Message::VibeAnalysisCancel => {
+            Message::VibeAnalysisCancel | Message::VibeCancel => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.cancel_analysis();
                 }
                 Some(Task::none())
             }
-            Message::VibePreset(preset) => {
+            Message::VibePrompt(prompt) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state
-                        .vibe
-                        .choose(*preset, &state.albums, &state.edition_choice);
+                    state.vibe.set_prompt(prompt);
                 }
                 Some(Task::none())
             }
-            Message::VibeUsePlaying => {
-                let path = self.player.now_playing_path().map(Path::to_owned);
+            Message::VibeLength(length) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state
-                        .vibe
-                        .use_seed(path, &state.albums, &state.edition_choice);
+                    state.vibe.set_length(*length);
                 }
                 Some(Task::none())
             }
-            Message::VibeClearSeed => {
+            Message::VibeAnother => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state
-                        .vibe
-                        .use_seed(None, &state.albums, &state.edition_choice);
+                    state.vibe.another(
+                        config::vibe_db_file().as_deref(),
+                        &state.albums,
+                        &state.edition_choice,
+                    );
                 }
                 Some(Task::none())
             }
-            Message::VibeCancel => {
+            Message::VibePreviewRemove(row) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.cancel_analysis();
-                    state.vibe.close();
+                    state.vibe.remove_preview(*row);
                 }
+                Some(Task::none())
+            }
+            Message::VibePreviewShift(row, delta) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.shift_preview(*row, *delta);
+                }
+                Some(Task::none())
+            }
+            Message::VibePlay => {
+                let items = match &self.screen {
+                    Screen::Shelf(state) => state
+                        .vibe
+                        .preview
+                        .as_ref()
+                        .map(|preview| preview.items.clone())
+                        .unwrap_or_default(),
+                    Screen::Setup(_) | Screen::Blocked(_) => Vec::new(),
+                };
+                if items.is_empty() {
+                    return Some(Task::none());
+                }
+                let queue = vm::QueueVm {
+                    album: None,
+                    artist: "Various artists".to_owned(),
+                    items,
+                    origin: Some(crate::origin::Origin::Hand { was: None }),
+                    source: vm::RunSource::Assembled,
+                };
+                if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
+                    self.player.note_transport_sent();
+                } else {
+                    self.player.engine_closed();
+                }
+                self.publish_mpris(false);
                 Some(Task::none())
             }
             Message::VibeSubmit => {

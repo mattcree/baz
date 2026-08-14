@@ -10,10 +10,14 @@ authors.workspace = true
 [dependencies]
 baz-core = { workspace = true }
 bliss-audio = { workspace = true }
+ndarray = { workspace = true }
+ort = { workspace = true }
+rustfft = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokenizers = { workspace = true }
 
 [dev-dependencies]
 hound = { workspace = true }

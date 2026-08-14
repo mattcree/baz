@@ -4,14 +4,14 @@
 //! to the optional `baz-vibe` crate. A light build retains the same Home seam
 //! but contains no analyzer dependency or model/runtime payload.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::vm::{self, AlbumVm, EditionKey, QueueItemVm};
 
-/// An ordinary generated playlist is deliberately bounded and editable.
-#[cfg(feature = "vibe-analysis")]
-pub(crate) const PLAYLIST_LEN: usize = 24;
+/// An ordinary generated mix is deliberately bounded and editable.
+pub(crate) const PLAYLIST_CAP: usize = 64;
+const RECENTLY_OFFERED_CAP: usize = PLAYLIST_CAP * 2;
 
 #[cfg(feature = "vibe-analysis")]
 type SonicFeatures = baz_vibe::Features;
@@ -19,50 +19,37 @@ type SonicFeatures = baz_vibe::Features;
 #[cfg(not(feature = "vibe-analysis"))]
 type SonicFeatures = u8;
 
-/// The listener-facing controlled vocabulary for the first sonic build.
+/// Listening-time targets offered beside the ordinary-language request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Preset {
-    Calm,
-    Warm,
+pub(crate) enum MixLength {
+    HalfHour,
     #[default]
-    Focus,
-    Bright,
-    Drive,
+    Hour,
+    NinetyMinutes,
+    TwoHours,
 }
 
-impl Preset {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Calm,
-        Self::Warm,
-        Self::Focus,
-        Self::Bright,
-        Self::Drive,
+impl MixLength {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::HalfHour,
+        Self::Hour,
+        Self::NinetyMinutes,
+        Self::TwoHours,
     ];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub(crate) const fn minutes(self) -> u64 {
         match self {
-            Self::Calm => "Calm",
-            Self::Warm => "Warm",
-            Self::Focus => "Focus",
-            Self::Bright => "Bright",
-            Self::Drive => "Drive",
+            Self::HalfHour => 30,
+            Self::Hour => 60,
+            Self::NinetyMinutes => 90,
+            Self::TwoHours => 120,
         }
     }
+}
 
-    #[cfg(feature = "vibe-analysis")]
-    fn profile(self, seed: Option<PathBuf>) -> baz_vibe::Profile {
-        let (energy, brightness) = match self {
-            Self::Calm => (-2, -1),
-            Self::Warm => (-1, -2),
-            Self::Focus => (-1, 0),
-            Self::Bright => (0, 2),
-            Self::Drive => (2, 1),
-        };
-        baz_vibe::Profile {
-            energy,
-            brightness,
-            seed,
-        }
+impl std::fmt::Display for MixLength {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} minutes", self.minutes())
     }
 }
 
@@ -70,10 +57,12 @@ impl Preset {
 #[derive(Debug, Clone)]
 pub(crate) struct Generated {
     pub(crate) description: String,
+    pub(crate) request: String,
     pub(crate) items: Vec<QueueItemVm>,
     pub(crate) pool_tracks: usize,
     pub(crate) analyzed_tracks: usize,
     pub(crate) tempo_span: Option<(f32, f32)>,
+    pub(crate) target_minutes: u64,
 }
 
 impl Generated {
@@ -87,6 +76,30 @@ impl Generated {
             format!("{coverage} · selected tempo {low:.0}–{high:.0} BPM")
         })
     }
+
+    #[must_use]
+    pub(crate) fn duration_note(&self) -> String {
+        let known: Vec<_> = self.items.iter().filter_map(|item| item.duration).collect();
+        let unknown = self.items.len().saturating_sub(known.len());
+        let known_total: std::time::Duration = known.iter().copied().sum();
+        let average = if known.is_empty() {
+            std::time::Duration::from_secs(4 * 60)
+        } else {
+            known_total / u32::try_from(known.len()).unwrap_or(u32::MAX)
+        };
+        let estimated = known_total + average * u32::try_from(unknown).unwrap_or(u32::MAX);
+        let prefix = if unknown > 0 { "about " } else { "" };
+        let actual = format!("{prefix}{}", crate::vm::format_duration(estimated));
+        let target = std::time::Duration::from_secs(self.target_minutes * 60);
+        if unknown == 0 && estimated < target {
+            format!(
+                "{actual} of requested {}",
+                crate::vm::format_duration(target)
+            )
+        } else {
+            actual
+        }
+    }
 }
 
 /// Result of checking the persistent cache away from the UI thread.
@@ -94,6 +107,7 @@ impl Generated {
 pub(crate) struct Preparation {
     ready: HashMap<PathBuf, SonicFeatures>,
     pending: Vec<PathBuf>,
+    recently_offered: Vec<PathBuf>,
 }
 
 /// Result of one bounded worker task. `run` makes a late completion from a
@@ -106,11 +120,16 @@ pub(crate) struct AnalysisResult {
 }
 
 /// Home's transient controller plus the session copy of the persistent index.
-#[derive(Debug, Default)]
+#[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "open/awaiting/preparing/analyzing are independent visible facts: consent, requested generation, cache inspection and worker scheduling"
+)]
 pub(crate) struct State {
     pub(crate) open: bool,
-    pub(crate) preset: Preset,
-    pub(crate) seed: Option<PathBuf>,
+    pub(crate) prompt: String,
+    pub(crate) length: MixLength,
+    pub(crate) awaiting_create: bool,
     pub(crate) preparing: bool,
     pub(crate) analyzing: bool,
     pub(crate) total: usize,
@@ -121,17 +140,45 @@ pub(crate) struct State {
     pub(crate) preview: Option<Generated>,
     features: HashMap<PathBuf, SonicFeatures>,
     pending: VecDeque<PathBuf>,
+    recently_offered: VecDeque<PathBuf>,
     run: u64,
+    variation: u64,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            open: false,
+            prompt: String::new(),
+            length: MixLength::Hour,
+            awaiting_create: false,
+            preparing: false,
+            analyzing: false,
+            total: 0,
+            done: 0,
+            failed: 0,
+            current: None,
+            error: None,
+            preview: None,
+            features: HashMap::new(),
+            pending: VecDeque::new(),
+            recently_offered: VecDeque::new(),
+            run: 0,
+            variation: 0,
+        }
+    }
 }
 
 impl State {
-    pub(crate) fn begin(&mut self) {
+    pub(crate) fn begin_request(&mut self) {
         self.open = true;
+        self.awaiting_create = true;
         self.error = None;
     }
 
     pub(crate) fn close(&mut self) {
         self.open = false;
+        self.awaiting_create = false;
         self.error = None;
         self.preview = None;
     }
@@ -145,7 +192,6 @@ impl State {
         self.failed = 0;
         self.current = None;
         self.error = None;
-        self.preview = None;
         self.pending.clear();
     }
 
@@ -155,6 +201,7 @@ impl State {
             Ok(prepared) => {
                 self.features = prepared.ready;
                 self.pending = prepared.pending.into();
+                self.recently_offered = prepared.recently_offered.into();
                 self.total = self.features.len() + self.pending.len();
                 self.done = self.features.len();
                 self.analyzing = !self.pending.is_empty();
@@ -198,49 +245,118 @@ impl State {
 
     pub(crate) fn cancel_analysis(&mut self) {
         self.run = self.run.wrapping_add(1);
+        self.open = false;
         self.preparing = false;
         self.analyzing = false;
         self.current = None;
         self.pending.clear();
         self.error = None;
+        self.awaiting_create = false;
     }
 
-    pub(crate) fn choose(
+    pub(crate) fn set_prompt(&mut self, prompt: &str) {
+        self.prompt = prompt.chars().take(240).collect();
+    }
+
+    pub(crate) fn set_length(&mut self, length: MixLength) {
+        self.length = length;
+    }
+
+    pub(crate) fn create(
         &mut self,
-        preset: Preset,
+        _index: Option<&Path>,
         albums: &[AlbumVm],
         chosen: &HashMap<u64, EditionKey>,
     ) {
-        self.preset = preset;
-        self.rebuild(albums, chosen);
-    }
-
-    pub(crate) fn use_seed(
-        &mut self,
-        path: Option<PathBuf>,
-        albums: &[AlbumVm],
-        chosen: &HashMap<u64, EditionKey>,
-    ) {
-        self.seed = path.filter(|path| self.features.contains_key(path));
-        self.rebuild(albums, chosen);
-    }
-
-    pub(crate) fn rebuild(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
-        self.preview = generate(
-            self.preset,
-            self.seed.clone(),
+        self.open = true;
+        self.awaiting_create = false;
+        let recently_offered = self.recently_offered.iter().cloned().collect();
+        let generated = generate(
+            &self.prompt,
+            self.length,
+            self.variation,
+            &recently_offered,
             &self.features,
             albums,
             chosen,
         );
+        self.variation = self.variation.wrapping_add(1);
+        let preview = match generated {
+            Ok(preview) => {
+                self.error = None;
+                preview
+            }
+            Err(error) => {
+                self.error = Some(error);
+                None
+            }
+        };
+        if let Some(preview) = &preview {
+            for item in &preview.items {
+                self.recently_offered.retain(|path| path != &item.path);
+                self.recently_offered.push_back(item.path.clone());
+            }
+            while self.recently_offered.len() > RECENTLY_OFFERED_CAP {
+                self.recently_offered.pop_front();
+            }
+            #[cfg(feature = "vibe-analysis")]
+            {
+                if let Some(index) = _index
+                    && let Err(error) = baz_vibe::remember_offered(
+                        index,
+                        &preview
+                            .items
+                            .iter()
+                            .map(|item| item.path.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                {
+                    self.error = Some(format!("Could not retain mix freshness: {error}"));
+                }
+            }
+        }
+        self.preview = preview;
+    }
+
+    pub(crate) fn another(
+        &mut self,
+        index: Option<&Path>,
+        albums: &[AlbumVm],
+        chosen: &HashMap<u64, EditionKey>,
+    ) {
+        self.create(index, albums, chosen);
+    }
+
+    pub(crate) fn remove_preview(&mut self, row: usize) {
+        if let Some(preview) = &mut self.preview
+            && row < preview.items.len()
+        {
+            preview.items.remove(row);
+        }
+    }
+
+    pub(crate) fn shift_preview(&mut self, row: usize, delta: i32) {
+        let Some(preview) = &mut self.preview else {
+            return;
+        };
+        let neighbour = match delta {
+            value if value < 0 => row.checked_sub(1),
+            value if value > 0 => row.checked_add(1),
+            _ => None,
+        };
+        if let Some(neighbour) = neighbour.filter(|neighbour| *neighbour < preview.items.len()) {
+            preview.items.swap(row, neighbour);
+        }
     }
 
     pub(crate) fn has_features(&self) -> bool {
         !self.features.is_empty()
     }
 
-    pub(crate) fn can_seed(&self, path: &Path) -> bool {
-        self.features.contains_key(path)
+    pub(crate) fn request_changed(&self) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            preview.request != self.prompt.trim() || preview.target_minutes != self.length.minutes()
+        })
     }
 
     /// One bounded, listener-facing summary; raw paths and decoder internals
@@ -275,6 +391,7 @@ pub(crate) async fn prepare(index: PathBuf, paths: Vec<PathBuf>) -> Result<Prepa
         .map(|prepared| Preparation {
             ready: prepared.ready,
             pending: prepared.pending,
+            recently_offered: prepared.recently_offered,
         })
         .map_err(|error| error.to_string())
 }
@@ -321,6 +438,9 @@ fn friendly_analysis_error(path: &Path, error: &baz_vibe::Error) -> String {
             "Baz could not read its audio data. The file may be damaged or use an unsupported encoding."
         }
         baz_vibe::Error::Analyze { .. } => "Local audio feature extraction failed for this file.",
+        baz_vibe::Error::Semantic(_) => {
+            "The bundled local semantic model could not analyse this file."
+        }
         baz_vibe::Error::Store(_)
         | baz_vibe::Error::UnsupportedStoreVersion { .. }
         | baz_vibe::Error::InvalidRow => {
@@ -356,21 +476,31 @@ pub(crate) fn analyze(
 }
 
 #[cfg(feature = "vibe-analysis")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "candidate projection, duration convergence and result construction form one generation boundary"
+)]
 fn generate(
-    preset: Preset,
-    seed: Option<PathBuf>,
+    prompt: &str,
+    length: MixLength,
+    variation: u64,
+    recently_offered: &HashSet<PathBuf>,
     features: &HashMap<PathBuf, SonicFeatures>,
     albums: &[AlbumVm],
     chosen: &HashMap<u64, EditionKey>,
-) -> Option<Generated> {
+) -> Result<Option<Generated>, String> {
     let mut candidates = Vec::new();
     let mut items = HashMap::new();
+    let mut seen_paths = HashSet::new();
     let pool_tracks = library_paths(albums, chosen).len();
     for album in albums {
         let Some(edition) = vm::selected_edition(album, chosen.get(&album.id).copied()) else {
             continue;
         };
         for track in &edition.tracks {
+            if !seen_paths.insert(track.path.clone()) {
+                continue;
+            }
             let Some(feature) = features.get(&track.path) else {
                 continue;
             };
@@ -394,45 +524,93 @@ fn generate(
         }
     }
     if candidates.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let profile = preset.profile(seed.clone());
-    let selection = baz_vibe::select(&profile, &candidates, PLAYLIST_LEN);
+    let known: Vec<_> = items.values().filter_map(|item| item.duration).collect();
+    let average_seconds = if known.is_empty() {
+        240
+    } else {
+        known.iter().map(std::time::Duration::as_secs).sum::<u64>()
+            / u64::try_from(known.len()).unwrap_or(1)
+    }
+    .max(1);
+    let target_seconds = length.minutes() * 60;
+    let mut limit = usize::try_from(target_seconds.div_ceil(average_seconds))
+        .unwrap_or(PLAYLIST_CAP)
+        .clamp(1, PLAYLIST_CAP.min(candidates.len()));
+    let mut best = None;
+    for _ in 0..4 {
+        let selection =
+            baz_vibe::select_semantic(prompt, &candidates, limit, variation, recently_offered)
+                .map_err(|error| error.to_string())?;
+        let selected_seconds = selection
+            .paths
+            .iter()
+            .filter_map(|path| items.get(path))
+            .map(|item| {
+                item.duration
+                    .map_or(average_seconds, |value| value.as_secs())
+            })
+            .sum::<u64>()
+            .max(1);
+        let difference = selected_seconds.abs_diff(target_seconds);
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_difference)| difference < *best_difference)
+        {
+            best = Some((selection, difference));
+        }
+        let scaled = u64::try_from(limit)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(target_seconds)
+            .div_ceil(selected_seconds);
+        let adjusted = usize::try_from(scaled)
+            .unwrap_or(PLAYLIST_CAP)
+            .clamp(1, PLAYLIST_CAP.min(candidates.len()));
+        if adjusted == limit {
+            break;
+        }
+        limit = adjusted;
+    }
+    let Some((selection, _)) = best else {
+        return Ok(None);
+    };
     let selected = selection
         .paths
         .iter()
         .filter_map(|path| items.remove(path))
         .collect();
-    let description = seed.map_or_else(
-        || format!("{} · local sonic features", preset.label()),
-        |path| {
-            format!(
-                "{} · shaped around {} · local sonic features",
-                preset.label(),
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("the sounding track")
-            )
-        },
+    let description = format!(
+        "{} · {} minutes · local semantic model",
+        prompt.trim(),
+        length.minutes()
     );
-    Some(Generated {
+    Ok(Some(Generated {
         description,
+        request: prompt.trim().to_owned(),
         items: selected,
         pool_tracks,
         analyzed_tracks: selection.pool_tracks,
         tempo_span: selection.tempo_span,
-    })
+        target_minutes: length.minutes(),
+    }))
 }
 
 #[cfg(not(feature = "vibe-analysis"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the light-build seam retains the full build's generation result contract"
+)]
 fn generate(
-    _preset: Preset,
-    _seed: Option<PathBuf>,
+    _prompt: &str,
+    _length: MixLength,
+    _variation: u64,
+    _recently_offered: &HashSet<PathBuf>,
     _features: &HashMap<PathBuf, SonicFeatures>,
     _albums: &[AlbumVm],
     _chosen: &HashMap<u64, EditionKey>,
-) -> Option<Generated> {
-    None
+) -> Result<Option<Generated>, String> {
+    Ok(None)
 }
 
 /// Name shown for the current seed without exposing a full path in Home.
@@ -488,8 +666,10 @@ mod tests {
     }
 
     #[test]
-    fn cancel_invalidates_a_late_worker_result() {
+    fn cancel_dismisses_consent_without_losing_the_request_and_invalidates_late_work() {
         let mut state = State::default();
+        state.set_prompt("warm brass after midnight");
+        state.begin_request();
         state.start_preparing();
         let old = state.run;
         state.cancel_analysis();
@@ -500,6 +680,8 @@ mod tests {
         });
         assert_eq!(state.failed, 0);
         assert!(state.error.is_none());
+        assert!(!state.open);
+        assert_eq!(state.prompt, "warm brass after midnight");
     }
 
     #[test]
@@ -519,6 +701,49 @@ mod tests {
                 .failure_note()
                 .expect("failure note")
                 .starts_with("1 track skipped.")
+        );
+    }
+
+    #[test]
+    fn the_request_survives_consent_and_preview_edits_are_in_memory() {
+        let mut state = State::default();
+        state.set_prompt("warm brass becoming urgent, then calm");
+        state.set_length(MixLength::NinetyMinutes);
+        state.begin_request();
+        assert!(state.open && state.awaiting_create);
+        assert_eq!(state.prompt, "warm brass becoming urgent, then calm");
+        assert_eq!(state.length, MixLength::NinetyMinutes);
+
+        let item = |title: &str| QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            album: None,
+            album_artist: None,
+            duration: Some(std::time::Duration::from_secs(180)),
+            path: PathBuf::from(format!("/{title}.flac")),
+        };
+        state.preview = Some(Generated {
+            description: "request".to_owned(),
+            request: "warm brass becoming urgent, then calm".to_owned(),
+            items: vec![item("one"), item("two"), item("three")],
+            pool_tracks: 3,
+            analyzed_tracks: 3,
+            tempo_span: None,
+            target_minutes: 90,
+        });
+        assert!(!state.request_changed());
+        state.set_length(MixLength::Hour);
+        assert!(state.request_changed());
+        state.shift_preview(2, -1);
+        state.remove_preview(0);
+        let preview = state.preview.expect("preview remains local");
+        assert_eq!(
+            preview
+                .items
+                .iter()
+                .map(|item| item.title.as_str())
+                .collect::<Vec<_>>(),
+            ["three", "two"]
         );
     }
 

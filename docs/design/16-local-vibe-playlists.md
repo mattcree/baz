@@ -1,10 +1,9 @@
 # Local sonic vibe playlists
 
-> **Status: local Vibe playlists shipped; semantic integration deferred,
-> 2026-08-13.** The owner accepted the conventional local controls after using
-> them. The reproducible LAION export and identity-blind ballot remain research
-> tooling; semantic integration resumes only if it is chosen and demonstrated
-> useful.
+> **Status: free-text semantic composer integrated, 2026-08-14.** The owner
+> removed the earlier listening gate and asked for the intended free-text
+> interaction directly. The normal build bundles Baz's reproducibly exported
+> LAION CLAP pair and runs both audio indexing and prompt retrieval offline.
 
 ## Product bar
 
@@ -57,61 +56,41 @@ Describe a journey through your own music
 │ Start sparse and nocturnal, build, then finish warm and expansive   │
 └──────────────────────────────────────────────────────────────────────┘
 
-JOURNEY   ▁▃▆█▅▂   Rise & fall ▾       LENGTH   60 minutes ▾
-                                            [ Create mix ]
+LENGTH   60 minutes ▾                       [ Create mix ]
 ```
 
 The example is placeholder copy, not a request Baz runs. The section carries
 one quiet assurance beneath its heading: **On this device · your audio never
 leaves Baz**. It does not lead with model names or the word “analysis”.
 
-The first shipped shape is **Rise & fall**, because a mix normally moves. The
-menu also offers Build, Cool down and Steady. Steady is available but is not
-the conceptual default. **Custom** turns the little graph into two to four
-keyboard- and pointer-adjustable energy points; adding or moving a point is
-immediately visible in the curve but regenerates nothing until Create mix is
-pressed.
-
 Length is expressed in listening time, not an implementation track count: 30,
-60, 90 and 120 minutes, plus Custom. Baz fills toward that duration using known
-track lengths and states when missing durations made the result approximate.
-The initial default is 60 minutes.
+60, 90 and 120 minutes. Baz fills toward that duration using known track
+lengths and states when missing durations made the result approximate. The
+initial default is 60 minutes.
 
-### A prompt becomes an editable journey
+### Free text is the composer
 
-One prompt may describe a constant quality or movement. Baz recognizes a
-small, documented set of structural cues—start/open/begin, then/build/become,
-and finish/end/land—and separates only clauses those cues make explicit. It
-does not claim general language understanding where there is none.
+The shipped simple path is one ordinary-language field and a 30, 60, 90 or 120
+minute target. Baz embeds that text with the bundled CLAP text tower and ranks
+audio embeddings produced by its paired audio tower. There is no keyword map,
+hidden preset conversion or metadata-token fallback.
 
-Before generation, an interpreted multi-part request appears as an editable
-timeline:
+Create keeps those choices intact through first-use consent and local analysis.
+An existing disposable index records that consent and is checked directly on a
+later Create, so restarting Baz does not make the listener consent again.
+Cancellation dismisses the request state without resetting its text. The
+result is an in-place silent preview: tracks may be moved or removed, **Another
+version** changes close choices without changing the request, **Play** is the
+only playback act, and **Save playlist** is the only persistence act. This is a
+semantic request whose text remains visible beside the result.
 
-```text
-OPENING                 TURN                    LANDING
-sparse · nocturnal  ──  restless · electronic  ──  warm · expansive
-0%                      55%                         100%
-```
+### A prompt remains free text
 
-Each phrase remains ordinary editable text. A listener can add a turn, remove
-one, or drag its position. A request without structural cues remains one sound
-target while the selected energy curve still gives the list movement. Baz does
-not split prose speculatively, hide an interpretation, or average “start dark,
-end bright” into one meaningless middle.
-
-Two optional controls sit behind **Refine**, below the simple path:
-
-- **Avoid** — a distinct negative target such as “sweet vocals” or “harsh
-  guitars”; this is not left for an embedding model to guess from the word
-  “not”. Explicit “without/avoid” clauses in the prompt are moved here visibly
-  and remain editable.
-- **Scope** — Whole library by default, or a visible artist, genre, selected
-  albums, or current Library result set. The scope always names its track and
-  analysed-track counts; a hidden candidate pool is forbidden.
-
-The curve and semantic waypoints are complementary. The curve states the
-energy contour. Waypoint text states how the musical character changes. A
-listener may use either or both without learning those implementation terms.
+The shipped composer sends the listener's complete request directly through
+the paired text encoder. Baz does not split it into opening/turn/landing
+fields, translate it into hidden presets, or expose an interpretation step.
+Movement, negative anchors, visible scope controls and editable curves remain
+possible follow-on work; none is claimed by the current one-field interface.
 
 ### The current track is never an implicit baseline
 
@@ -211,16 +190,14 @@ the library or model changes.
 
 ### Build boundary
 
-The normal Baz build includes the opt-in conventional analyser and performs no
-first-run download. `--no-default-features` contains no analyser, model,
+The normal Baz build includes the analyser, quantized LAION CLAP audio/text
+towers and tokenizer and performs no first-run download. `--no-default-features` contains no analyser, model,
 tokenizer or embedding index and exists as an internal dependency-boundary
 check, not a separately named product. It omits Vibe from Home. Both builds
 read, edit and play generated `.m3u8` files identically.
 
-A future semantic integration may bundle an audited model/runtime payload. It
-must not download a model after installation unless a later signed model
-discovery, verification, staged replacement and removal design explicitly
-permits that.
+Release archives and Flatpak stage the pinned model, licence and runtime assets
+beside the executable. Baz does not contain an application model downloader.
 
 ### Responsive and accessible behavior
 
@@ -315,15 +292,16 @@ files are compile/package inputs of the full edition, pinned and verified in
 release automation, not mutable application data and not a network service.
 
 Internal quality controls do not enter this state model. Diversity-matched
-random, metadata and conventional runs remain evaluation systems. Only a
-candidate that clears the predeclared blind preference gate is allowed behind
-Make a mix; the listener never chooses among algorithms.
+random, metadata and conventional runs remain evaluation systems; they do not
+gate the listener's access to Make a mix, and the listener never chooses among
+algorithms.
 
-## What exists now: the honest comparator
+## Previous implementation: the honest comparator
 
-The full build includes a separate `baz-vibe` crate behind the default
-`vibe-analysis` feature. `cargo build -p baz --no-default-features` produces a
-light build without that crate; playback and ordinary playlists remain.
+The first sonic slice was a conventional-feature comparator. It established
+the separate `baz-vibe` crate, cancellable indexing and cache boundaries that
+the semantic composer now uses. `cargo build -p baz --no-default-features`
+still provides an internal dependency-boundary check without that crate.
 
 On explicit consent, Home analyzes the tracks in each record's selected
 edition, one cancellable worker task at a time. It reuses `baz-core`'s hardened
@@ -337,27 +315,33 @@ rows are reanalysed; light builds do not need to understand this disposable
 database. Cancel stops scheduling after the bounded current-track task and a
 run token makes late completion inert.
 
-The Home controls map onto transparent conventional signals:
+The Home waypoint controls map onto transparent conventional signals:
 
 - energy: tempo plus mean/dynamic loudness;
 - warm ↔ bright: zero-crossing rate, spectral centroid and rolloff;
-- a sounding-track anchor: distance in the complete tempo/timbre/chroma vector.
+- full-vector distance for adjacent sonic continuity; playback supplies no
+  implicit anchor or request input.
 
 Retrieval and ordering are distinct. Baz takes a broad best-fit shortlist,
-then walks it for sonic continuity while taking one track per album before
-repeats, limiting an artist to two tracks and preventing adjacent repeats.
-The preview states coverage, selected count and BPM span. Create writes a
-normal `.m3u8` with inert local-sonic provenance and opens it without playback.
+interpolates the three waypoint targets over playlist position, then walks it
+for sonic continuity while taking one track per album before repeats, limiting
+an artist to two tracks and preventing adjacent repeats. It iterates the
+requested track count against selected tracks' known durations and labels a
+result approximate when durations are missing. The preview states coverage,
+selected count and BPM span. It exists only in memory until the listener
+presses Save playlist; Play and Save are separate and neither happens on
+Create.
 
-This comparator cannot honestly interpret “wistful”, instruments, genre from
-sound, or a time-shaped sentence. It therefore does not expose a text box.
+That comparator could not honestly interpret “wistful”, instruments or genre
+from sound, so it did not expose a text box. It has been superseded in the
+product by the paired semantic model described above.
 
 ## Current landscape and licensing
 
 | Candidate | Capability | Packaging/licence finding | Current place |
 |---|---|---|---|
 | `bliss-audio` | Native tempo, loudness, timbre/chroma similarity and custom distance | GPL-3.0-only; combining it with Baz's GPL-3.0-or-later code selects GPLv3 for the full artifact, while the light build excludes it. Its Symphonia path documents about 65 minutes for 10k tracks. | Built comparator |
-| LAION CLAP | Joint text/audio 512-D space for free-text retrieval | GitHub code is CC0 and the official Hugging Face model card is Apache-2.0. The pinned official checkpoint contains a 614,525,833-byte PyTorch weight file; Baz's reproducible paired quantized ONNX export is 162.7 MB including tokenizer/configuration. | Preferred engineering candidate for blind evaluation; not yet a product choice |
+| LAION CLAP | Joint text/audio 512-D space for free-text retrieval | GitHub code is CC0 and the official Hugging Face model card is Apache-2.0. The pinned official checkpoint contains a 614,525,833-byte PyTorch weight file; Baz's reproducible paired quantized ONNX export is 162.7 MB including tokenizer/configuration. | Bundled product engine; export and hashes pinned |
 | AudioMuse DCLAP | Distilled CLAP audio tower, 7M parameters, same 512-D space | The v1 audio graph/data are 22.4 MB, but its unchanged text tower is 501.4 MB plus a 2.1 MB tokenizer. The repository is AGPL-3.0-only and the release gives no separate weight grant; its training inventory also includes some CC BY-ND sources. Treat artifacts as evaluation-only pending a combined-work, weight and training-provenance review. | Comparative evaluation only; not redistributable by assumption |
 | Microsoft CLAP | General audio/text retrieval | Code MIT, but published weights are labelled Microsoft Public License; not assume-redistributable from the code licence. | Research only pending weight audit |
 | Essentia models | Strong mood, danceability, arousal/valence and Discogs heads | Official models are non-commercial Creative Commons or proprietary; unsuitable as Baz's default redistributable dependency. | Reject absent separate permission |
@@ -370,13 +354,14 @@ Primary references: [bliss-audio](https://docs.rs/crate/bliss-audio/latest),
 [Essentia licensing](https://essentia.upf.edu/licensing_information.html), and
 [MuQ](https://github.com/tencent-ailab/muq).
 
-## Evaluation gate
+## Ongoing evaluation, not a product gate
 
-No semantic UI ships on benchmark reputation alone. Create an owned corpus
-large and varied enough to expose failure, with tag-rich and tag-poor music,
-multiple languages, live/electronic/acoustic material, repeated artists and
-editions. Keep private audio out of the repository; commit only corpus
-manifests, prompts and anonymous judgements.
+Evaluation continues after integration and does not block or hide the
+free-text UI. Maintain an owned corpus large and varied enough to expose
+failure, with tag-rich and tag-poor music, multiple languages,
+live/electronic/acoustic material, repeated artists and editions. Keep private
+audio out of the repository; commit only corpus manifests, prompts and
+anonymous judgements.
 
 Compare at least four systems blind:
 
@@ -469,7 +454,7 @@ not music/text retrieval quality.
 
 The generated-fixture smoke completed all 12 requests, kept the ballot free of
 system identity and restored mappings during scoring; generated silence does
-not count toward the gate. A deliberately consented private corpus now covers
+not count as listening evidence. A deliberately consented private corpus now covers
 72 real tracks (36 FLAC, 35 MP3 and one WAV), 14 genre labels and 71 artists.
 Its six-window LAION pass indexed 432 windows in 85.81 s on the CPU above:
 43.35 s decode, 10.72 s mel extraction and 31.70 s inference. Metadata,
@@ -487,7 +472,7 @@ top-20 lists shared 17 tracks on average and at least 15. Sampling was 5.3×
 faster for this run, so its anonymous lists are the practical listening
 candidate; those agreement figures do not establish musical quality.
 
-## Next implementation spike
+## Evaluation and follow-on work
 
 1. **Done for evaluation:** keep the standalone harness and its four controls
    outside the GUI; CI runs its dependency-free protocol tests.
@@ -496,12 +481,13 @@ candidate; those agreement figures do not establish musical quality.
    and PyTorch/ONNX alignment checks. Complete distribution notices remain a
    release requirement. Retain DCLAP only as a quality comparator unless its
    separate weight/provenance questions are resolved.
-3. **Listening now:** rate the identity-blind real-music ballot. The completed
-   full-overlap comparison supports six representative windows for this gate;
-   then measure the accepted policy on CPU-only Linux, Windows and macOS. Model files must ship with the full
-   offline edition, never appear as an unannounced first-run download.
-4. Add free text to the product only after audio/text vectors demonstrably
-   align on the owned prompt corpus. Then add hybrid explicit controls and
-   playlist arcs.
+3. Continue rating the identity-blind real-music ballot. The completed
+   full-overlap comparison supports six representative windows for practical
+   evaluation; measure the integrated policy on CPU-only Linux, Windows and
+   macOS. Model files ship with the full offline edition and never appear as an
+   unannounced first-run download.
+4. **Done 2026-08-14:** add direct free text after verifying the reproduced
+   audio and text towers align. Hybrid explicit controls and playlist arcs are
+   optional follow-on work, not prerequisites for the composer.
 5. Keep the analyzer/index capability boundary stable so another model can
    replace it without changing playlist files or the Home contract.

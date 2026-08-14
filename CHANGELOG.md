@@ -26,6 +26,17 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **Home's local Vibe feature is now a free-text Make a mix composer.** A
+  listener describes the music in ordinary language and chooses a duration in
+  minutes. Baz's bundled paired LAION CLAP model embeds both local track audio
+  and that description entirely offline. Create carries the request through first-use
+  local-analysis consent into a silent in-place preview; tracks can be moved or
+  removed, Another version varies close choices, and Play and Save are explicit
+  separate acts. The sounding track no longer changes the request implicitly,
+  existing local analysis avoids repeated consent, and selected durations feed
+  back into generation instead of minutes being treated as a fixed track count.
+  Exact paths cannot duplicate, while a bounded persistent recent-mix history
+  stops the same strong match repeatedly appearing across generated playlists.
 - **Baz's app bar now owns the window chrome by default.** The iced 0.14
   migration supplies native eight-way edge and corner resizing around the
   borderless frame while retaining window drag, double-click maximise, the

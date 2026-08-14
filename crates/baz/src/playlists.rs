@@ -1787,11 +1787,14 @@ mod tests {
         let library = library();
         let mut playlists = Playlists::over(folder);
         let generated = crate::vibe::Generated {
-            description: "Calm · local sonic features".to_owned(),
+            description: "ambient music that slowly gathers momentum · local semantic model"
+                .to_owned(),
+            request: "ambient music that slowly gathers momentum".to_owned(),
             items: vec![item("An Ending", "/m/eno/ascent.flac")],
             pool_tracks: 1,
             analyzed_tracks: 1,
             tempo_span: Some((72.0, 72.0)),
+            target_minutes: 60,
         };
         let id = playlists
             .create_generated(&generated, &library)
@@ -1810,7 +1813,7 @@ mod tests {
         let playlist = file.read().expect("read generated file");
         assert_eq!(playlist.entries().count(), 1);
         assert!(playlist.items().iter().any(|item| {
-            matches!(item, Item::Note(note) if note.text().contains("Calm · local sonic features"))
+            matches!(item, Item::Note(note) if note.text().contains("ambient music that slowly gathers momentum · local semantic model"))
         }));
     }
 
@@ -2362,11 +2365,11 @@ mod tests {
         };
         playlists.refresh(Some(&library));
         assert_eq!(playlists.row(two).expect("row").art, expected[..2]);
-        assert_eq!(playlists.row(bare).expect("row").art, []);
+        assert_eq!(playlists.row(bare).expect("row").art, Vec::<u64>::new());
         // Without a library there is nothing to resolve against, and the
         // rows say so rather than guessing.
         playlists.refresh(None);
-        assert_eq!(playlists.row(id).expect("row").art, []);
+        assert_eq!(playlists.row(id).expect("row").art, Vec::<u64>::new());
     }
 
     /// The picker's ordering (09 §8.1, S4): the playing list is hoisted to

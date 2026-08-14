@@ -8,3 +8,6 @@
 *.yml text eol=lf
 *.sh text eol=lf
 *.py text eol=lf
+models/vibe/*.onnx filter=lfs diff=lfs merge=lfs -text
+models/vibe/tokenizer.json filter=lfs diff=lfs merge=lfs -text
+models/runtime/**/*.a filter=lfs diff=lfs merge=lfs -text

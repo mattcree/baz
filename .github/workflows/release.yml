@@ -125,6 +125,8 @@ jobs:
             universal: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       # Same reason and same package as CI's test job: --features
       # device-output pulls cpal, which needs ALSA headers on Linux.
@@ -190,6 +192,14 @@ jobs:
           # it to, and ADR-0001 is why. The changelog and readme are there so
           # an unpacked archive can answer "what is this and what changed".
           cp LICENSE README.md CHANGELOG.md "$stage/"
+          mkdir -p "$stage/models/vibe"
+          cp models/vibe/audio_model_quantized.onnx \
+             models/vibe/text_model_quantized.onnx \
+             models/vibe/tokenizer.json \
+             models/vibe/LICENSE \
+             models/vibe/MODEL_CARD.md \
+             models/vibe/README.md \
+             "$stage/models/vibe/"
 
           # Desktop integration files, for anyone installing the tarball by
           # hand rather than through Flatpak (docs/INSTALL.md says where).
