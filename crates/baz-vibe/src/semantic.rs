@@ -1,8 +1,8 @@
 //! Local LAION CLAP inference and its exact audio preprocessing contract.
 
+use std::cell::RefCell;
 use std::f32::consts::TAU;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use baz_core::playback::{DecodedAudio, resample_interleaved};
 use ort::session::Session;
@@ -28,7 +28,13 @@ pub(crate) struct Model {
     tokenizer: Tokenizer,
 }
 
-static MODEL: Mutex<Option<Model>> = Mutex::new(None);
+thread_local! {
+    // Each bounded scan worker owns a session so independent tracks can use
+    // the model concurrently without sharing a mutex. The GUI caps the
+    // number of workers; keeping sessions thread-local avoids cross-thread
+    // inference contention while making the memory trade-off explicit.
+    static MODEL: RefCell<Option<Model>> = const { RefCell::new(None) };
+}
 
 pub(crate) fn embed_text(prompt: &str) -> Result<Vec<f32>, String> {
     with_model(|model| model.text(prompt))
@@ -39,13 +45,13 @@ pub(crate) fn embed_audio(decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
 }
 
 fn with_model<T>(run: impl FnOnce(&mut Model) -> Result<T, String>) -> Result<T, String> {
-    let mut guard = MODEL
-        .lock()
-        .map_err(|_| "the local Vibe model stopped unexpectedly".to_owned())?;
-    if guard.is_none() {
-        *guard = Some(Model::load()?);
-    }
-    run(guard.as_mut().expect("model inserted above"))
+    MODEL.with(|slot| {
+        let mut model = slot.borrow_mut();
+        if model.is_none() {
+            *model = Some(Model::load()?);
+        }
+        run(model.as_mut().expect("model inserted above"))
+    })
 }
 
 impl Model {

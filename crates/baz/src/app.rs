@@ -3513,19 +3513,20 @@ impl App {
     }
 
     fn next_vibe_job(&mut self) -> Task<Message> {
+        const WORKERS: usize = 4;
         let Some(index) = config::vibe_db_file() else {
             return Task::none();
         };
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let Some((run, path)) = state.vibe.next_job() else {
-            return Task::none();
-        };
-        Task::perform(
-            crate::vibe::analyze(index, run, path),
-            Message::VibeAnalyzed,
-        )
+        let jobs = state.vibe.next_jobs(WORKERS);
+        Task::batch(jobs.into_iter().map(|(run, path)| {
+            Task::perform(
+                crate::vibe::analyze(index.clone(), run, path),
+                Message::VibeAnalyzed,
+            )
+        }))
     }
 
     /// Ask for the playlist artwork belonging to the current place only.

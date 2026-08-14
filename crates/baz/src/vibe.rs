@@ -143,6 +143,7 @@ pub(crate) struct State {
     recently_offered: VecDeque<PathBuf>,
     run: u64,
     variation: u64,
+    active_workers: usize,
 }
 
 impl Default for State {
@@ -165,6 +166,7 @@ impl Default for State {
             recently_offered: VecDeque::new(),
             run: 0,
             variation: 0,
+            active_workers: 0,
         }
     }
 }
@@ -191,6 +193,7 @@ impl State {
         self.done = 0;
         self.failed = 0;
         self.current = None;
+        self.active_workers = 0;
         self.error = None;
         self.pending.clear();
     }
@@ -214,19 +217,28 @@ impl State {
         }
     }
 
-    pub(crate) fn next_job(&mut self) -> Option<(u64, PathBuf)> {
-        if !self.analyzing || self.current.is_some() {
-            return None;
+    pub(crate) fn next_jobs(&mut self, limit: usize) -> Vec<(u64, PathBuf)> {
+        if !self.analyzing {
+            return Vec::new();
         }
-        let path = self.pending.pop_front()?;
-        self.current = Some(path.clone());
-        Some((self.run, path))
+        let count = limit.saturating_sub(self.active_workers);
+        let mut jobs = Vec::with_capacity(count.min(self.pending.len()));
+        for _ in 0..count {
+            let Some(path) = self.pending.pop_front() else {
+                break;
+            };
+            self.active_workers += 1;
+            self.current = Some(path.clone());
+            jobs.push((self.run, path));
+        }
+        jobs
     }
 
     pub(crate) fn accept_analysis(&mut self, result: AnalysisResult) {
         if result.run != self.run || !self.analyzing {
             return;
         }
+        self.active_workers = self.active_workers.saturating_sub(1);
         self.current = None;
         match result.features {
             Ok(features) => {
@@ -238,7 +250,7 @@ impl State {
                 self.error = Some(error);
             }
         }
-        if self.pending.is_empty() {
+        if self.pending.is_empty() && self.active_workers == 0 {
             self.analyzing = false;
         }
     }
@@ -249,6 +261,7 @@ impl State {
         self.preparing = false;
         self.analyzing = false;
         self.current = None;
+        self.active_workers = 0;
         self.pending.clear();
         self.error = None;
         self.awaiting_create = false;
@@ -264,12 +277,14 @@ impl State {
 
     pub(crate) fn create(
         &mut self,
-        _index: Option<&Path>,
+        index: Option<&Path>,
         albums: &[AlbumVm],
         chosen: &HashMap<u64, EditionKey>,
     ) {
         self.open = true;
         self.awaiting_create = false;
+        #[cfg(not(feature = "vibe-analysis"))]
+        let _ = index;
         let recently_offered = self.recently_offered.iter().cloned().collect();
         let generated = generate(
             &self.prompt,
@@ -301,7 +316,7 @@ impl State {
             }
             #[cfg(feature = "vibe-analysis")]
             {
-                if let Some(index) = _index
+                if let Some(index) = index
                     && let Err(error) = baz_vibe::remember_offered(
                         index,
                         &preview
@@ -663,6 +678,29 @@ mod tests {
             library_paths(&[album()], &HashMap::new()),
             [PathBuf::from("/m/one.flac")]
         );
+    }
+
+    #[test]
+    fn analysis_scheduler_keeps_four_workers_in_flight() {
+        let mut state = State {
+            analyzing: true,
+            pending: (0..6)
+                .map(|index| PathBuf::from(format!("/m/{index}.flac")))
+                .collect(),
+            ..State::default()
+        };
+
+        let first = state.next_jobs(4);
+        assert_eq!(first.len(), 4);
+        assert!(state.next_jobs(4).is_empty());
+
+        let (run, path) = first[0].clone();
+        state.accept_analysis(AnalysisResult {
+            run,
+            path,
+            features: Err("test".to_owned()),
+        });
+        assert_eq!(state.next_jobs(4).len(), 1);
     }
 
     #[test]
