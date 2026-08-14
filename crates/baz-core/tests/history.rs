@@ -86,16 +86,6 @@ impl Rig {
         Self::with_config(config())
     }
 
-    /// Drain at decode speed for assertions whose subject is not wall-clock
-    /// playback. Coverage instrumentation can otherwise turn the deliberately
-    /// paced sink into a scheduler test when this suite runs in parallel.
-    fn unpaced() -> Self {
-        Self::with_config(EngineConfig {
-            consumer_pace: Duration::ZERO,
-            ..config()
-        })
-    }
-
     fn with_config(config: EngineConfig) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let a = dir.path().join("01 a.wav");
@@ -131,11 +121,16 @@ impl Rig {
 
     /// Wait for the next event matching `want`, returning it.
     fn wait_for(&self, want: impl Fn(&Event) -> bool) -> Event {
+        let mut observed = Vec::new();
         loop {
             match self.events.recv_timeout(EVENT_TIMEOUT) {
                 Ok(event) if want(&event) => return event,
-                Ok(_) => {}
-                Err(RecvTimeoutError::Timeout) => panic!("timed out waiting for an event"),
+                Ok(event) => observed.push(format!("{event:?}")),
+                Err(RecvTimeoutError::Timeout) => panic!(
+                    "timed out waiting for an event; observed={observed:#?}, written={}, failures={}",
+                    self.ledger.written(),
+                    self.ledger.write_failures()
+                ),
                 Err(RecvTimeoutError::Disconnected) => panic!("the engine went away"),
             }
         }
@@ -415,17 +410,17 @@ fn pausing_adds_nothing_to_what_was_heard() {
 #[test]
 fn the_play_recorded_event_follows_the_line_into_the_file() {
     // This test is about the writer's state-before-event ordering, not the
-    // consumer clock. Running unpaced removes scheduling load from the proof.
-    let mut rig = Rig::unpaced();
+    // consumer clock. The shortest fixture keeps that proof quick.
+    let mut rig = Rig::new();
     rig.send(Command::SetQueue {
-        paths: vec![rig.a.clone(), rig.b.clone()],
+        paths: vec![rig.b.clone()],
         origin: None,
     });
     rig.send(Command::Play);
     let event = rig.wait_for(|event| matches!(event, Event::PlayRecorded { .. }));
     // Read with no flush: if the event is honest, the line is already there.
     let history = History::read(&rig.ledger_path).expect("read");
-    assert_eq!(history.track(&rig.a).plays, 1);
+    assert_eq!(history.track(&rig.b).plays, 1);
     let Event::PlayRecorded {
         path,
         listened_ms,
@@ -436,11 +431,13 @@ fn the_play_recorded_event_follows_the_line_into_the_file() {
     else {
         unreachable!("filtered above")
     };
-    assert_eq!(path, rig.a);
+    assert_eq!(path, rig.b);
     assert_eq!(outcome, PlayOutcome::Played);
-    assert_eq!(listened_ms, (A_SECS as u64) * 1_000);
-    assert_eq!(track_ms, Some((A_SECS as u64) * 1_000));
-    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    assert_eq!(listened_ms, (B_SECS as u64) * 1_000);
+    assert_eq!(track_ms, Some((B_SECS as u64) * 1_000));
+    // `QueueEnded` comes from the engine while `PlayRecorded` comes from the
+    // ledger writer, so it may already have been consumed by `wait_for` above.
+    // Dropping the engine is the deterministic completion barrier here.
     rig.finish();
 }
 
