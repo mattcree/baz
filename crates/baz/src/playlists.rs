@@ -345,6 +345,8 @@ pub(crate) struct Playlists {
     pub(crate) order: PlaylistOrder,
     /// The saved-playlist tile currently under the pointer.
     pub(crate) hovered: Option<u64>,
+    /// Saved-playlist overview row awaiting an explicit trash confirmation.
+    pub(crate) confirming_overview_delete: Option<u64>,
     /// Whether the panel is summoned. Session state, not config — which
     /// surface you were last collecting into is not a standing decision, the
     /// same argument that keeps `settings_section` out of `config.toml`.
@@ -380,7 +382,7 @@ pub(crate) struct Playlists {
     /// **It is not persisted, and that is a stated shortfall rather than an
     /// oversight** — see [`Self::note_played`].
     played: std::collections::HashMap<u64, u64>,
-    /// How [`Self::delete_open`] removes the file: the **platform trash** in
+    /// How [`Self::delete_id`] removes the file: the **platform trash** in
     /// the product ([`Folder::delete_to_trash`], doc 11 §5 P2), a plain
     /// unlink under the test constructor's tempdir fixtures — where the real
     /// trash would mean a test writing outside its own directory, the XDG-isolation
@@ -391,15 +393,20 @@ pub(crate) struct Playlists {
 }
 
 impl Playlists {
+    /// The listener-owned playlist directory, when this platform supplied it.
+    pub(crate) fn folder_path(&self) -> Option<&Path> {
+        self.folder.as_ref().map(Folder::dir)
+    }
+
     /// Open the surfaces over the user's own folder.
     pub(crate) fn start() -> Self {
         let folder = match Folder::open_default() {
             Ok(folder) => {
-                println!("[playlists] folder: {}", folder.dir().display());
+                crate::baz_log!("[playlists] folder: {}", folder.dir().display());
                 Some(folder)
             }
             Err(error) => {
-                println!("[playlists] unavailable: {error}");
+                crate::baz_log!("[playlists] unavailable: {error}");
                 None
             }
         };
@@ -408,6 +415,7 @@ impl Playlists {
             rows: Vec::new(),
             order: PlaylistOrder::default(),
             hovered: None,
+            confirming_overview_delete: None,
             panel_open: false,
             pending: None,
             naming: None,
@@ -432,6 +440,7 @@ impl Playlists {
             rows: Vec::new(),
             order: PlaylistOrder::default(),
             hovered: None,
+            confirming_overview_delete: None,
             panel_open: false,
             pending: None,
             naming: None,
@@ -462,7 +471,7 @@ impl Playlists {
         let listed = match folder.list() {
             Ok(listed) => listed,
             Err(error) => {
-                println!("[playlists] cannot list the folder: {error}");
+                crate::baz_log!("[playlists] cannot list the folder: {error}");
                 return;
             }
         };
@@ -781,7 +790,7 @@ impl Playlists {
         let listed = match folder.list() {
             Ok(listed) => listed,
             Err(error) => {
-                println!("[playlists] cannot list the folder: {error}");
+                crate::baz_log!("[playlists] cannot list the folder: {error}");
                 return;
             }
         };
@@ -796,7 +805,7 @@ impl Playlists {
         let mut playlist = match file.read() {
             Ok(playlist) => playlist,
             Err(error) => {
-                println!("[playlists] cannot read {}: {error}", file.path.display());
+                crate::baz_log!("[playlists] cannot read {}: {error}", file.path.display());
                 return;
             }
         };
@@ -811,13 +820,13 @@ impl Playlists {
             .items_mut()
             .extend(entries.into_iter().map(Item::Entry));
         match playlist.save() {
-            Ok(()) => println!(
+            Ok(()) => crate::baz_log!(
                 "[playlists] {added} added to {:?} ({} entries)",
                 playlist.name(),
                 playlist.entries().count()
             ),
             Err(error) => {
-                println!("[playlists] could not save {:?}: {error}", playlist.name());
+                crate::baz_log!("[playlists] could not save {:?}: {error}", playlist.name());
                 return;
             }
         }
@@ -899,7 +908,7 @@ impl Playlists {
         };
         match folder.create(&name) {
             Ok(playlist) => {
-                println!("[playlists] created {:?}", playlist.name());
+                crate::baz_log!("[playlists] created {:?}", playlist.name());
                 let id = playlist_id(playlist.name());
                 self.naming = None;
                 self.refresh(Some(library));
@@ -938,7 +947,7 @@ impl Playlists {
         let mut playlist = match folder.create(&name) {
             Ok(playlist) => playlist,
             Err(error) => {
-                println!("[playlists] could not create generated playlist: {error}");
+                crate::baz_log!("[playlists] could not create generated playlist: {error}");
                 return None;
             }
         };
@@ -955,7 +964,7 @@ impl Playlists {
         match playlist.save() {
             Ok(()) => {
                 let id = playlist_id(playlist.name());
-                println!(
+                crate::baz_log!(
                     "[playlists] generated {:?} — {}",
                     playlist.name(),
                     request.pool_note()
@@ -964,7 +973,7 @@ impl Playlists {
                 Some(id)
             }
             Err(error) => {
-                println!("[playlists] could not save generated playlist: {error}");
+                crate::baz_log!("[playlists] could not save generated playlist: {error}");
                 None
             }
         }
@@ -988,7 +997,7 @@ impl Playlists {
                     .extend(queue.items.iter().map(|item| Item::Entry(entry_for(item))));
                 match playlist.save() {
                     Ok(()) => {
-                        println!(
+                        crate::baz_log!(
                             "[playlists] queue saved as {:?} ({} entries)",
                             playlist.name(),
                             queue.items.len()
@@ -1034,7 +1043,7 @@ impl Playlists {
                 true
             }
             Err(error) => {
-                println!("[playlists] cannot read {}: {error}", file.path.display());
+                crate::baz_log!("[playlists] cannot read {}: {error}", file.path.display());
                 false
             }
         }
@@ -1053,7 +1062,7 @@ impl Playlists {
                 // Deleted under the page. The shell draws the wall when the
                 // place stops resolving; nothing to hold here — the edit
                 // history included, which described a file that is gone.
-                println!("[playlists] cannot read {}: {error}", path.display());
+                crate::baz_log!("[playlists] cannot read {}: {error}", path.display());
                 self.open = None;
                 self.clear_undo();
                 self.refresh(Some(library));
@@ -1098,7 +1107,7 @@ impl Playlists {
             // apply nothing (module docs — last writer wins is about files,
             // not about stale indices). The history goes with the stale
             // picture: its snapshots describe a lineage the disk has left.
-            println!("[playlists] {:?} changed on disk; re-reading", open.name());
+            crate::baz_log!("[playlists] {:?} changed on disk; re-reading", open.name());
             self.clear_undo();
             self.reload_open(library);
             return;
@@ -1109,7 +1118,7 @@ impl Playlists {
             return;
         }
         if let Err(error) = open.playlist.save() {
-            println!("[playlists] could not save {:?}: {error}", open.name());
+            crate::baz_log!("[playlists] could not save {:?}: {error}", open.name());
         } else if record {
             self.record_undo(id, before);
         }
@@ -1252,7 +1261,7 @@ impl Playlists {
         let folder = self.folder.as_ref()?;
         match folder.rename(&from, &to) {
             Ok(file) => {
-                println!("[playlists] renamed {from:?} to {to:?}");
+                crate::baz_log!("[playlists] renamed {from:?} to {to:?}");
                 // The id is the name, hashed, so a rename mints a new page
                 // identity — the old id's history does not follow it.
                 self.clear_undo();
@@ -1271,35 +1280,55 @@ impl Playlists {
         }
     }
 
-    /// The page's `Delete`: the file moves to the **platform trash**; the
-    /// music stays. Reports whether it went, so the shell can leave the page
-    /// it was for.
-    ///
-    /// The shell exposes this only after the page's explicit confirmation.
-    /// The operation remains reversible through the desktop trash; a refusal
-    /// from that layer leaves the file exactly where it was and the page
-    /// standing — nothing falls back to unlinking.
-    pub(crate) fn delete_open(&mut self, library: Option<&Library>) -> bool {
-        let Some(open) = &self.open else {
+    /// Delete one saved playlist from either of its two doors. The file moves
+    /// to the platform trash; the music stays.
+    pub(crate) fn delete_id(&mut self, id: u64, library: Option<&Library>) -> bool {
+        let Some(name) = self
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+            .map(|row| row.name.clone())
+        else {
+            self.confirming_overview_delete = None;
             return false;
         };
         let Some(folder) = &self.folder else {
+            self.confirming_overview_delete = None;
             return false;
         };
-        let name = open.playlist.name().to_owned();
         match (self.delete)(folder, &name) {
             Ok(()) => {
-                println!("[playlists] {name:?} moved to the trash — the file; the music stays");
-                self.open = None;
+                crate::baz_log!(
+                    "[playlists] {name:?} moved to the trash — the file; the music stays"
+                );
+                if self.open.as_ref().is_some_and(|open| open.id == id) {
+                    self.open = None;
+                }
+                self.confirming_overview_delete = None;
+                self.hovered = None;
                 self.clear_undo();
                 self.refresh(library);
                 true
             }
             Err(error) => {
-                println!("[playlists] could not delete {name:?}: {error}");
+                crate::baz_log!("[playlists] could not delete {name:?}: {error}");
                 false
             }
         }
+    }
+
+    /// Compatibility door for the detail page and its existing focused tests.
+    ///
+    /// The shell exposes this only after the page's explicit confirmation.
+    /// The operation remains reversible through the desktop trash; a refusal
+    /// from that layer leaves the file exactly where it was and the page
+    /// standing — nothing falls back to unlinking.
+    #[cfg(test)]
+    pub(crate) fn delete_open(&mut self, library: Option<&Library>) -> bool {
+        self.open
+            .as_ref()
+            .map(|open| open.id)
+            .is_some_and(|id| self.delete_id(id, library))
     }
 }
 
@@ -2481,6 +2510,27 @@ mod tests {
         assert!(playlists.row(id).is_none(), "the old name is gone");
         assert!(playlists.delete_open(None));
         assert!(playlists.rows.is_empty());
+    }
+
+    #[test]
+    fn overview_delete_uses_the_same_door_without_opening_or_playing_the_list() {
+        let (_keep, folder) = folder();
+        let mut playlists = Playlists::over(folder);
+        let doomed = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            let doomed = write_list(folder, "Doomed", &["/m/a.flac"]);
+            write_list(folder, "Keep", &["/m/a.flac"]);
+            doomed
+        };
+        playlists.refresh(None);
+        assert!(playlists.open.is_none());
+        playlists.confirming_overview_delete = Some(doomed);
+
+        assert!(playlists.delete_id(doomed, None));
+        assert!(playlists.row(doomed).is_none());
+        assert_eq!(playlists.rows.len(), 1);
+        assert!(playlists.open.is_none());
+        assert_eq!(playlists.confirming_overview_delete, None);
     }
 
     /// The paths the open page's file holds, in order — what the undo tests

@@ -201,7 +201,7 @@ mod imp {
             let (handle, events) = match spawned {
                 Ok(pair) => pair,
                 Err(error) => {
-                    println!("[playback] audio device unavailable: {error}");
+                    crate::baz_log!("[playback] audio device unavailable: {error}");
                     return Self::unavailable(error.to_string());
                 }
             };
@@ -219,7 +219,7 @@ mod imp {
                 });
             match bridge {
                 Ok(_detached) => {
-                    println!(
+                    crate::baz_log!(
                         "[playback] engine ready (initially requested {INITIAL_SAMPLE_RATE} Hz, \
                          follows the source from there; device ring {DEVICE_RING_FRAMES} frames)"
                     );
@@ -233,7 +233,7 @@ mod imp {
                     // No bridge means the UI would fly blind on optimistic
                     // state; shut the engine down rather than pretend.
                     handle.shutdown();
-                    println!("[playback] event bridge thread failed: {error}");
+                    crate::baz_log!("[playback] event bridge thread failed: {error}");
                     Self::unavailable(format!("event bridge failed: {error}"))
                 }
             }

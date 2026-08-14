@@ -158,18 +158,16 @@ pub(crate) fn view(
             // edge of the window without stealing a control's hit box.
             needle_line(line),
             rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
-            // **One centre line, one window gutter.** The band is
+            // **One centre line, one compact edge.** The band is
             // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's
             // centre line by construction ([`theme::BAR_LEAD`]), so every zone
             // centred in it puts its own mark on that line rather than centring
-            // its block around it. The horizontal padding is [`theme::HANG`],
-            // the one gutter every surface that touches a window edge hangs
-            // from. There is no *vertical* padding left to be asymmetric: the
-            // band is the whole bar.
+            // its block around it. [`theme::BAR_EDGE_PAD`] is derived from the
+            // cover's vertical inset, so its left and top air are identical.
             container(bar)
                 .width(Length::Fill)
                 .height(Length::Fixed(theme::BAR_CONTENT_H))
-                .padding(theme::pad(0.0, theme::HANG))
+                .padding(theme::pad(0.0, theme::BAR_EDGE_PAD))
                 .style(move |_theme| theme::bar(room)),
         ],
         tip_layer(tip),
@@ -1140,6 +1138,10 @@ mod tests {
         const { assert!(theme::BAR_COVER < theme::NOW_PLAYING_H) }
         const { assert!(theme::BAR_COVER % theme::GAP_XS == 0.0) }
         const { assert!(theme::BAR_COVER + theme::GAP_XS == theme::NOW_PLAYING_H) }
+        // The owner's reported asymmetry is closed by derivation: centring the
+        // square vertically and padding the bar horizontally spend one value.
+        const { assert!(theme::BAR_EDGE_PAD == (theme::BAR_CONTENT_H - theme::BAR_COVER) / 2.0) }
+        const { assert!(theme::BAR_EDGE_PAD == 14.0) }
         // And it never exceeds the decoded source, which is the wall's own
         // rule about artwork applied one surface along.
         const { assert!(theme::BAR_COVER <= theme::ART_MAX) }

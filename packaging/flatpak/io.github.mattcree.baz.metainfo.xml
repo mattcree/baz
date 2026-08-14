@@ -140,12 +140,12 @@
     The maturity word lives in exactly two places — the description and the
     release note below — and it must agree with README.md's status block,
     which is the same claim to the same stranger. It said "pre-alpha" until
-    2026-08-10 and says "public beta" from the README rewrite onwards, on
+    2026-08-14 and says "public beta" from the README rewrite onwards, on
     docs/WORK.md's beta scope: the core loop is finished, and the things baz
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
-    <release version="0.1.0" date="2026-08-10" type="stable">
+    <release version="0.1.0" date="2026-08-14" type="stable">
       <description>
         <p>
           The first release. baz scans a folder of music, shows the albums as

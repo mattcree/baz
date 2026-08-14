@@ -430,7 +430,7 @@ pub(crate) async fn analyze(index: PathBuf, run: u64, path: PathBuf) -> Analysis
             .map_err(|error| format!("local analysis worker stopped: {error}"))
             .and_then(|result| {
                 result.map_err(|error| {
-                    eprintln!("[vibe] skipped {}: {error}", path.display());
+                    crate::baz_log!("[vibe] skipped {}: {error}", path.display());
                     friendly_analysis_error(&path, &error)
                 })
             })

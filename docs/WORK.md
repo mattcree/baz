@@ -71,13 +71,10 @@
 > **What is deliberately outside the critical-usability tranche**, recorded so
 > the phases do not blur together:
 >
-> - **The remainder of ambient `Now playing`** — the local facts feed and kiosk
->   affordances. The cover-derived field, rotating jewel case and independently
->   toggled full-body spectrum shipped during the owner's visual pass on
->   2026-08-11; the VU mode was tried and explicitly removed. The remaining
->   pieces are 1.0 work, not beta blockers.
-> - **Kiosk mode**, for the same reason and because iced cannot enumerate
->   monitors.
+> - ~~**The remainder of ambient `Now playing`.**~~ Completed as items 25–26:
+>   the local fixed-cycle facts feed and honest single-window F11 kiosk now join
+>   the cover-derived field, rotating jewel case and independently toggled
+>   spectrum. The VU experiment remains explicitly removed by the owner.
 > - **Vibe- or prompt-generated playlists** — the opt-in conventional sonic
 >   baseline and model-swappable semantic evaluation path are now built, but the
 >   owned listening evaluation and product interaction remain a whole feature
@@ -235,29 +232,118 @@ Phase A is complete only when all twelve items are implemented and verified;
     default window chrome.** A six-logical-pixel inside-edge band dispatches
     all eight upstream resize directions; drag, maximise, system menu and
     window controls remain, with `BAZ_NATIVE_CHROME=1` as a diagnostic escape.
-17. **Ship built-in and JSON custom themes.** Four polarity rooms, versioned
-    schema/examples/import/export, runtime accessibility validation and safe
-    fallback; no executable theme content.
-18. **Continue the remaining briefs below and `BACKLOG.md` functional-first.**
-    Defects and data correctness precede interface polish; do not silently drop
-    an ask merely because it is not named in phases A–D.
-19. **Tighten the app and bottom-bar edge composition.** Re-measure and reduce
+17. **Done 2026-08-14 — Ship built-in and JSON custom themes.** Closing Time,
+    Stone, Plaster and Reading Room are selectable and persisted. Local v1 JSON
+    supports paste/file import, immediate Settings preview and export, with a
+    bundled schema/examples/prompt, strict contrast/elevation validation and
+    safe Closing Time fallback. Whole-app changes apply after restart because
+    the glyph atlas is process-cached; themes contain no executable content.
+18. **Done 2026-08-14 — Continue the remaining briefs below and `BACKLOG.md`
+    functional-first.** Conservative missing-album pruning, overview playlist
+    deletion, actionable/deduplicated resampling warnings and an audited,
+    explicitly next-launch audio-output picker are shipped and reconciled.
+19. **Done 2026-08-14 — Tighten the app and bottom-bar edge composition.** Re-measure and reduce
     their gutters without compromising hit targets or the rail/scrollbar law;
     enlarge and correctly hang the app mark, and equalize the bottom-left
     artwork block's x/y padding.
-20. **Make all visible artwork resident.** A visible target with available art
+    Resident chrome now uses its own compact edges: 16 px app-bar ink with a
+    24 px mark and resize-safe trailing targets, and a derived 14 px bottom
+    edge that equals the centred 52 px sleeve's vertical inset. The 696 px
+    floor retains 96 px of app-bar slack; collection rail/scrollbar geometry
+    is unchanged. Isolated 1280 and 1920 renders verified both ordinary and
+    playing states; ADR-0040 and the implementation record carry measurements.
+20. **Done 2026-08-14 — Make all visible artwork resident.** A visible target with available art
     must hold an image handle through cache churn; simplify toward visible
     residency plus the existing bounded off-screen LRU, rather than adding
-    another cache policy or speculative prefetcher.
-21. **Contain scrolling artwork beneath the resident chrome.** Reproduce the
+    another cache policy or speculative prefetcher. The audit retained the
+    resident-union + 64 recent-LRU design and repaired three nomination gaps:
+    Queue page pins were cleared in the same update, Home omitted All songs,
+    and the floating playlist panel nominated no collages. An 800-album churn
+    regression holds simultaneous wall/page/chrome handles and the bound. This
+    closed eviction *inside one static target set*; item 30 records the owner's
+    observed scroll-away/return failure that this acceptance test did not model.
+21. **Done 2026-08-14 — Contain scrolling artwork beneath the resident chrome.** Reproduce the
     intermittent state—currently cleared by a reset—and repair the shared
     invalidation, clipping or paint-order fault that lets sleeves cross over
     the app bar or bottom transport. Off-viewport content must neither draw nor
-    receive input through either bar.
-22. **Align sticky section headers with their grouped content.** Remove the
+    receive input through either bar. iced 0.14's inactive-scrollbar draw path
+    supplied only a logical child viewport, which image widgets do not obey;
+    the shared body now owns an unconditional renderer layer plus the matching
+    input/overlay viewport. A transition/resize/density stress run remained
+    contained at both resident boundaries without a reset.
+22. **Done 2026-08-14 — Align sticky section headers with their grouped content.** Remove the
     excess left inset in the shared sticky bar without changing its full-width
     field; its visible heading edge must stay aligned before and after it sticks
-    across Artists and every other consumer.
+    across Artists and every other consumer. The pinned layer was centered in
+    the outer wall while the ordinary grid was centered after the 112 px
+    rail/scrollbar reservation, producing an exact 56 px rightward jump. The
+    full-width pinned field now reserves that same right lane before centering
+    its block. All six group keys, 900/1280/1920 widths and every density share
+    the corrected edge and unchanged vertical hand-over.
+23. **Done 2026-08-14 — Put the diagnostic session log in Settings.** Capture Baz's
+    existing tagged runtime diagnostics in one bounded in-memory stream while
+    preserving stdout/stderr for development, then expose that stream under a
+    Debug section. Do not duplicate the notification bell's listener-facing
+    event history or create an unbounded/private path-bearing disk log. The
+    existing tagged console calls now also enter a 256-line process-local ring;
+    Debug shows newest first with elapsed time and an explicit no-disk promise.
+    Release Windows therefore gains diagnostics without restoring a console.
+24. **Done 2026-08-14 — Split live-run insertion into Next and End.** Search and every matching
+    live-run route must offer insertion immediately after the cursor or at the
+    run's end, preserve order under repeated insertions, start no playback, and
+    collapse to one honest action when no run makes the distinction real. An
+    existing run exposes `Play | Next | End`; an empty run exposes
+    `Play | Enqueue`, and saved playlists retain `Play | Add to playlist`.
+    Consecutive Next presses keep press order. A new absolute
+    `UpdateQueueNext` edit forces one successor even under shuffle while
+    preserving the remaining pass and never starting or interrupting audio.
+25. **Done 2026-08-14 — Finish the optional local facts layer on Now Playing.**
+    A fourth independent persisted visual control enables a one-line local
+    feed. It cycles in the design's fixed value order through only facts the
+    sounding file actually has, resets on track change, advances on press or
+    every 20 seconds, and owns no clock outside visible Now Playing. History,
+    artist collection count, full engine-reported signal path, encoding/size,
+    playlist provenance, release tags and track position are eligible; missing
+    analysis is absent rather than guessed. `PlayRecorded` refreshes the
+    ledger snapshot so the same session's count is current. The feed remains a
+    flat archivist's note—no streaks, rankings, congratulations or totals.
+26. **Done 2026-08-14 — Finish the designed single-window kiosk mode.** F11
+    toggles the sole window between windowed and current-monitor fullscreen in
+    every place, even while search has focus. Move Baz to a second display
+    first and that display becomes the kiosk. Escape exits fullscreen before
+    peeling any content or navigating away. This uses iced's native window
+    mode, creates no coupled second window, and makes no monitor-enumeration
+    claim the toolkit cannot keep.
+27. **Done 2026-08-14 — Give rootless legacy index rows an explicit way out.**
+    Settings' existing `Outside held folders` reading now offers `Review
+    unheld paths`, shows every exact rootless path and requires `Remove from
+    index | Keep`. Confirm uses the same transactional `forget_paths` and v9
+    first-seen tombstones as folder removal; audio files, playlists, listening
+    history and the current run stay untouched. The wall and artwork state
+    rebuild after removal. A new read-only core projection keeps count and
+    preview over one definition.
+28. **Done 2026-08-14 — Show the owned playlists folder in Settings.** Library
+    settings now state the exact listener-owned playlist directory beside the
+    music roots and expose `Open folder`. Linux delegates a percent-encoded
+    file URI to the desktop portal; macOS and Windows launch their native file
+    managers with the path as an argument. Failure enters the canonical health
+    history. No playlist is parsed, moved or rewritten by the action.
+29. **Done 2026-08-14 — Reorder held music folders in Settings.** Every root
+    row now has bounded Up/Down controls beside Remove. End controls are
+    visibly disabled, all movement stands down during a scan or removal
+    confirmation, and a successful adjacent swap persists the exact ordered
+    `music_dirs` list immediately. It starts no scan and touches no files or
+    indexed rows; the next scheduled/manual scan consumes the new order.
+30. **Done 2026-08-14 — Keep decoded thumbnails present across scrolling.**
+    Artwork that reached a visible target is retained for the session rather
+    than falling into the 64-entry speculative LRU, so scroll-away/return never
+    turns it back into a gradient. One complete wall/page/chrome target snapshot
+    now feeds the scheduler; panel-open, Home Continue and stale-density retry
+    gaps are closed. The transition regression traverses 810 displayed covers
+    and returns intact. On the owner's 393-album / 8,602-track index, full Dense
+    session retention is capped at 60.0 MiB CPU RGBA; iced trims device textures
+    to current renderer hits. Balanced/Spacious and the 800-album synthetic
+    ceilings are recorded in the implementation evidence.
 
 ## Doing
 
@@ -268,12 +354,14 @@ Phase A is complete only when all twelve items are implemented and verified;
   published SHA-256 checksum, quits Baz, replaces the application files, and
   relaunches; config, library data and playlists remain in their existing data
   directories. The corrected locked CI release rehearsal and all three
-  platform builds are green. The 2026-08-13 local gate passed warnings-denied
-  clippy, all workspace tests (including 775 Baz tests), rustdoc, cargo-deny,
-  packaging validation, the 14-test Vibe evaluator harness and the
-  explicit-feature Linux release build. Its staged 0.1.0 archive is 13 MB,
-  contains the expected desktop assets and verifies against its generated
-  SHA-256. GitHub
+  platform builds are green. The 2026-08-14 local gate passed warnings-denied
+  clippy, all workspace tests (including 806 Baz tests), rustdoc, cargo-deny,
+  packaging validation, the 14-test Vibe evaluator harness and the locked
+  explicit-feature Linux release build. Its binary was also checked for
+  absolute workspace leakage; Vibe's locator now remains runtime-relative.
+  The current staged 0.1.0 Linux archive is 154 MB with the deliberately
+  bundled 156 MB Vibe model set, contains the expected desktop assets and
+  verifies against its generated SHA-256. GitHub
   Actions rehearsal [31751846915](https://github.com/mattcree/baz/actions/runs/31751846915)
   then passed the complete CI gate, built Linux x86-64, Windows x86-64 and
   universal macOS archives from commit `8f5c1cf`, and completed its guarded
@@ -287,7 +375,51 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
-- **Sticky section bars sit too far right.** Recorded 2026-08-14 from the
+- **Done 2026-08-14 — Keep thumbnails present while scrolling away and back.** Recorded
+  2026-08-14 after the owner reported that thumbnails still unload themselves
+  while moving around the collection and queued as item 30. Item 20's cache split
+  is locally correct but its acceptance test is too static: it pins one wall,
+  chrome and page set, churns unrelated IDs, and never scrolls a displayed
+  record out of and back into the target set. `ThumbCache::reconcile` moves a
+  departing handle into a 64-entry recent LRU immediately. In Dense, a few
+  rows can displace it; returning then exposes the gradient while the
+  two-worker scheduler reads and decodes the prepared image again. Rapid
+  scrolling continually replaces queued foreground work while the two old
+  blocking decodes cannot be cancelled, increasing that visible interval.
+
+  Three related lifecycle holes are confirmed and belong in the same repair:
+  opening the floating playlist panel is absent from `art_mark`, so its
+  collages may remain unpinned until another scroll invalidates the mark;
+  Home's Continue band reads `shelf.thumb` but its resumed album is absent from
+  `home_art`; and a too-small decode completing after density grows calls
+  `ThumbJobs::focus([id])`, replacing the rest of the visible foreground queue
+  with one retry. Centralize the complete current-target snapshot rather than
+  relying on three independently replaced sets and incidental invalidation.
+
+  Acceptance must exercise transitions, not a static cache: display set A,
+  travel through more than 64 distinct covers, and return to A at ordinary and
+  fling speed; open and close the panel without changing place/lane stamps;
+  restore Home with a silent Continue record; change to a looser density with
+  both decode slots occupied; and repeat on the Library, Playlists, saved and
+  unsaved playlist pages, Artist, Home, lane, bottom bar and panel. Artwork
+  already shown during the process must never be replaced by a gradient solely
+  because of scrolling. Newly encountered artwork may retain its honest
+  in-flight placeholder. Record peak decoded CPU memory, renderer allocations,
+  reload count and time-to-first-present at Dense/Balanced/Spacious on the
+  owner's 8,602-track library plus the existing 800-album synthetic sweep;
+  use those measurements to choose session retention or an equivalent stable
+  renderer-backed design. The regression must fail the current 64-entry
+  scroll-return implementation and cover every missing nomination above.
+  The shipped lifecycle retains only handles that reached a current target;
+  speculative completions remain in the 64-entry LRU. One scheduler snapshot
+  covers wall/page/chrome targets, including the panel and Home Continue, and
+  density retry prepends without replacement. The 810-cover transition test
+  returns to its first 18 without a reload. The owner's 393 real albums cost at
+  most 60.0 / 124.3 / 153.5 MiB at Dense/Balanced/Spacious; iced trims device
+  textures to current renderer hits. Evidence:
+  `docs/design/impl/scrolling-thumbnail-retention/`.
+
+- **Done 2026-08-14 — Sticky section bars sit too far right.** Recorded 2026-08-14 from the
   owner's live use and queued as item 22. Measure the shared sticky-header
   component's visible heading edge against the content it labels rather than
   assuming the container edge is the ink edge. Audit Artists and every other
@@ -297,8 +429,18 @@ Phase A is complete only when all twelve items are implemented and verified;
   interaction geometry. Fix the shared alignment token/composition rather than
   introducing a page-specific negative margin. Acceptance is same-viewport
   captures with measured content and heading edges for every consumer in both
-  states.
-- **Scrolling artwork escapes over the app and bottom bars.** Recorded
+  states. The ordinary header lived inside the scrollable's content measure,
+  which excludes `WALL_RESERVE` (108 px rail plus 4 px scrollbar), while its
+  full-width pinned twin centered against the outer wall. The sticky state
+  therefore shifted right by exactly half that reservation: 56 px. The pinned
+  band still paints the complete wall but now spends the same 112 px as right
+  padding before centering its header block. A geometry regression sweeps the
+  696/900/1280/1920/2560 widths at all four density steps; real 900, 1280 and
+  1920 renders exercised A–Z, Artist, Year, Genre, Added and Played. Ordinary
+  and stuck ink now retain one left edge, with no page-specific offset and no
+  change to the vertical hand-over. Evidence:
+  `docs/design/impl/sticky-header-alignment/`.
+- **Done 2026-08-14 — Scrolling artwork escapes over the app and bottom bars.** Recorded
   2026-08-14 from the owner's live use and queued as item 21. Treat “z-index”
   as the observed effect, not a predetermined implementation: first establish
   whether the shared collection viewport fails to clip, whether nested scroll
@@ -317,7 +459,20 @@ Phase A is complete only when all twelve items are implemented and verified;
   at the top and bottom boundaries plus a structural regression check that the
   clip and resident paint order remain intact across the triggering state
   transition and supported renderers. A fresh launch alone cannot close it.
-- **Prune albums whose files have genuinely been removed.** Recorded
+  iced 0.14's `scrollable::draw` opens a physical renderer layer only while
+  its cached scrollbars are active; otherwise it merely passes a viewport to
+  children, and `Image::draw` ignores that logical viewport. That explains why
+  widget-tree/layout transitions could expose translated sleeves and why a
+  reset repaired the state. `window_frame::body_clip` now physically scissors
+  the one body between both resident bars on every frame and hands the same
+  intersection to update, interaction and body overlays. Search, status and
+  menu dropovers are composed later and intentionally remain whole-window.
+  Source regressions hold that ordering and layer call. A 39-album isolated
+  run stressed dense scrolling, playlist-panel churn, Home/Library routing,
+  1280→900→1280 resizing and density changes; its final top and bottom edges
+  remained clean without resetting the process. Implementation evidence:
+  `docs/design/impl/body-artwork-clip/`.
+- **Done 2026-08-14 — Prune albums whose files have genuinely been removed.** Recorded
   2026-08-13 on the side of item 13; do not investigate or implement as part
   of the vibe work. First establish what the successful scanner currently
   removes and identify the cases that leave stale albums. Any automatic or
@@ -328,7 +483,12 @@ Phase A is complete only when all twelve items are implemented and verified;
   never delete audio, playlist files or history; decide how their now-missing
   references are represented; and reconcile the wall, search, selection,
   current run/provenance and artwork caches without starting playback.
-- **Delete a saved playlist from the Playlists overview with confirmation.**
+  The scanner now separates its existing automatically confirmed file removals
+  from absent-parent candidates produced only by completed root walks. Settings
+  previews every candidate before a reversible `forget_paths` confirmation;
+  unavailable/partial roots nominate nothing, and audio/playlists/history/run
+  state remain untouched while the collection projections rebuild.
+- **Done 2026-08-14 — Delete a saved playlist from the Playlists overview with confirmation.**
   Recorded 2026-08-13 on the side of item 13; do not implement as part of the
   vibe work. Give each saved list's overview affordances a Delete action which
   opens an explicit confirmation naming that list. Cancel is inert; confirm
@@ -336,19 +496,35 @@ Phase A is complete only when all twelve items are implemented and verified;
   remove the overview row and leave a sensible remaining destination selected
   without playback. Preserve the existing playlist-page action and make both
   doors invoke one behavior, including for foreign playlists.
-- **Warn when the active signal path resamples.** Recorded 2026-08-13 on the
+  Delete now appears with a tile's overview actions, names its subject in the
+  collection header, and becomes `Move to Trash | Keep`. Both overview and
+  detail doors share `delete_id`; confirmation refreshes and selects the next
+  sensible tile without playback, while cancel changes nothing.
+- **Done 2026-08-14 — Warn when the active signal path resamples.** Recorded 2026-08-13 on the
   side of item 13; do not implement as part of the vibe work. Settings and the
   canonical event history should both treat active conversion as a warning,
   name source/output rates when known and explain the exact device/output or
   boundary choice that can restore a direct path. Deduplicate a continuing
   condition and clear it when conversion ends; distinguish Baz's boundary
   resampler from conversion owned by the operating-system mixer.
-- **Verify when an audio-device picker change takes effect.** Recorded
+  Settings → Playback and the canonical event history now share one structured
+  warning derived from the engine's reported chain. It names both rates and
+  the device-rate or fixed-boundary remedy, includes exclusive conversion,
+  deduplicates a continuing path, clears on a direct report or playback end,
+  and explicitly disclaims visibility into the downstream OS mixer.
+- **Done 2026-08-14 — Verify when an audio-device picker change takes effect.** Recorded
   2026-08-13 as an explicitly uninvestigated question; do not probe it during
   item 13. Later audit selection, persistence, engine reopen/command, signal-
   path event and visible selected value together, then make immediate, next-
   track or restart behavior honest and consistent and expose open failures.
-- **Tighten the top and bottom bars' edge composition.** Recorded 2026-08-13.
+  The audited path is next-launch by construction: startup alone creates the
+  engine and there is no reopen command. Settings now distinguishes the
+  endpoint in use by this process from the persisted next-launch selection,
+  preserving the current run. Startup remains where actual engine events
+  confirm the new signal path, and an endpoint open failure now appears beside
+  the picker with an explicit choose-another-output-and-restart remedy as well
+  as in canonical health.
+- **Done 2026-08-14 — Tighten the top and bottom bars' edge composition.** Recorded 2026-08-13.
   The Settings cog still reads too far in from the right, and the application
   mark is both too small and too far from the left edge. The bottom bar's
   left-hand artwork also has unequal padding: its x inset visibly exceeds its
@@ -358,7 +534,13 @@ Phase A is complete only when all twelve items are implemented and verified;
   gutters should be deliberately shared or deliberately different with the
   reason and measurements recorded; the artwork block must have equal x/y
   padding. See item 19 and ADR-0040's existing gutter amendment.
-- **Make visible artwork unconditionally resident.** Recorded 2026-08-13. The
+  The app bar now places ink 16 px from each edge, grows the application mark
+  to 24 px and keeps trailing hit targets clear of the six-pixel resize band.
+  The bottom bar spends the centred 52 px sleeve's exact 14 px vertical inset
+  horizontally too. The two-pixel difference is deliberate and documented;
+  collection geometry is unchanged, and isolated same-size renders verified
+  both widths plus the playing state.
+- **Done 2026-08-14 — Make visible artwork unconditionally resident.** Recorded 2026-08-13. The
   current cache sometimes leaves a sleeve blank or unloads it while it remains
   on screen, likely from earlier memory optimisation. Re-establish the simple
   product guarantee: if a visible target has art, it has a loaded handle. Audit
@@ -366,7 +548,12 @@ Phase A is complete only when all twelve items are implemented and verified;
   lane consumers; retain only the current bounded LRU for off-screen recent
   artwork. Reproduce around 500 and 800 albums, including Windows: it is mild
   at 393 albums on the owner's Linux machine and reportedly worse near 800 on
-  a friend's Windows machine. See item 20.
+  a friend's Windows machine. See item 20. The audit found Queue page pins
+  cleared by the subsequent chrome pass, the Home All songs collage absent
+  from Home's target list, and the floating playlist panel absent from
+  residency. All now nominate the existing resident union; no new cache or
+  speculation was added. An 800-album stress test keeps simultaneous
+  wall/page/chrome handles through churn while the recent tier stays at 64.
 
 This section preserves the evidence and acceptance detail behind `## Next`,
 plus lower-priority and truly owner-blocked work. It is **not execution order**
@@ -616,13 +803,13 @@ its bold title from the numbered item above.
   placement and narrow-width app-bar tenancy; the canonical event/condition
   model; safe retry classes; manual/automatic and backoff/cap/reset rules; and
   what Settings retains once status owns runtime health.*
-- **Where does a listener find out *which* files were skipped?** The Zappa
-  album above was lost for as long as it was because the answer was
-  "nowhere" — `14 files skipped` in the status line is a statistic, and a
-  statistic cannot name a record. A scan now prints one
-  `[scan] skipped <path>: <reason>` line, which is enough for him at a
-  terminal and **nothing at all** for a listener running the Flatpak, so the
-  product question is still open. Three shapes, in increasing cost:
+- ~~**Where does a listener find out which files were skipped?**~~ **Closed.**
+  Each failed path/reason enters the bounded canonical health history behind
+  the app-bar bell, and the full tagged scan diagnostic also appears in
+  Settings → Debug—including packaged Windows, which has no console. The
+  Zappa failure that motivated this no longer collapses into a count.
+
+  The alternatives considered before the bell and Debug surfaces shipped:
   - **The log line alone** (what shipped). Free, honest, and invisible to the
     people the beta is for.
   - **A readout in Settings** — *"14 files could not be read"*, expanding to

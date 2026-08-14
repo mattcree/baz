@@ -32,6 +32,23 @@
 
 use crate::vm::QueueVm;
 
+/// Insert `items` at one absolute slot in the run, preserving their order.
+#[must_use]
+pub fn inserted(
+    queue: &QueueVm,
+    at: usize,
+    items: impl IntoIterator<Item = crate::vm::QueueItemVm>,
+) -> Option<QueueVm> {
+    if at > queue.items.len() {
+        return None;
+    }
+    let mut items = items.into_iter().peekable();
+    items.peek()?;
+    let mut edited = queue.clone();
+    edited.items.splice(at..at, items);
+    Some(edited)
+}
+
 /// The queue with entry `index` removed — the list a per-row ✕ means.
 ///
 /// `None` when `index` is not in the queue at all, which is a click on a stale
@@ -143,6 +160,15 @@ mod tests {
 
     fn titles(queue: &QueueVm) -> Vec<String> {
         queue.items.iter().map(|item| item.title.clone()).collect()
+    }
+
+    #[test]
+    fn insertion_is_absolute_and_preserves_the_additions_order() {
+        let edited =
+            inserted(&queue(&["A", "D"]), 1, [item("B"), item("C")]).expect("the slot exists");
+        assert_eq!(titles(&edited), ["A", "B", "C", "D"]);
+        assert!(inserted(&queue(&["A"]), 2, [item("B")]).is_none());
+        assert!(inserted(&queue(&["A"]), 1, []).is_none());
     }
 
     #[test]

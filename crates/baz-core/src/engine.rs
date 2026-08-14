@@ -1805,7 +1805,8 @@ impl<S: Sink> Control<S> {
                 self.position = self.top();
                 self.announce_queue(changed, before);
             }
-            Command::UpdateQueue { paths } => self.update_queue(paths),
+            Command::UpdateQueue { paths } => self.update_queue(paths, None),
+            Command::UpdateQueueNext { paths, next } => self.update_queue(paths, Some(next)),
             Command::Play => {
                 if self.session.is_some() {
                     if self.paused {
@@ -2224,7 +2225,7 @@ impl<S: Sink> Control<S> {
 
     /// [`Command::UpdateQueue`]: replace the queue without interrupting the
     /// music (ADR-0014; the module docs carry the argument).
-    fn update_queue(&mut self, paths: Vec<PathBuf>) {
+    fn update_queue(&mut self, paths: Vec<PathBuf>, forced_next: Option<usize>) {
         if paths == self.queue {
             return; // the engine already holds this queue: nothing to say
         }
@@ -2240,8 +2241,13 @@ impl<S: Sink> Control<S> {
         // changed length has no plan until this runs. Before every use of
         // `successor`, `top` or `slot_of` below.
         self.replan();
-        if let Some((index, path)) = playing {
-            let target = derive_position(&self.queue, index, &path);
+        let target = playing
+            .as_ref()
+            .and_then(|(index, path)| derive_position(&self.queue, *index, path));
+        if let Some(next) = forced_next.filter(|next| *next < self.queue.len()) {
+            crate::traversal::force_next(&mut self.order, target, next);
+        }
+        if let Some((index, _path)) = playing {
             if !delivering {
                 // Nothing audible yet, so there is nothing to protect and no
                 // reason to keep the old session's plan: rebuild it on the new

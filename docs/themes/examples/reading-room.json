@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "reading-room",
+  "name": "Reading Room",
+  "colors": {
+    "recess": "#FAF6EF", "wall": "#EEEBE4", "plinth": "#E3DFD8", "plinth_lit": "#D7D4CD",
+    "ink": "#1E2226", "ink_dim": "#393E42", "ink_faint": "#575B60", "ink_muted": "#70757B",
+    "playback": "#A33E25", "playback_bright": "#BE563D", "playback_deep": "#892408", "playback_ink": "#F6F3EC",
+    "alert": "#9B1E22", "warning": "#8A6420", "success": "#356C38", "shadow": "#00000073"
+  },
+  "focus_opacity": 0.55
+}

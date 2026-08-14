@@ -193,6 +193,16 @@ pub enum Command {
         /// The queue as it should now be, in play order.
         paths: Vec<PathBuf>,
     },
+    /// Apply one absolute whole-queue edit and make `next` the successor of
+    /// the current track (or the first entry while stopped). This is the
+    /// explicit listener override used by **Enqueue next**; traversal remains
+    /// otherwise unchanged, including a shuffled pass after that entry.
+    UpdateQueueNext {
+        /// The queue as it should now be, in listed order.
+        paths: Vec<PathBuf>,
+        /// Absolute position in `paths` that must be visited next.
+        next: usize,
+    },
     /// Start playback of the current queue position, or resume if paused.
     Play,
     /// Pause playback, keeping the current position. No-op when not playing.
@@ -1225,6 +1235,10 @@ mod tests {
                 ],
             },
             Command::UpdateQueue { paths: Vec::new() },
+            Command::UpdateQueueNext {
+                paths: vec![PathBuf::from("/music/a.flac")],
+                next: 0,
+            },
             Command::Play,
             Command::Pause,
             Command::Stop,
@@ -1793,6 +1807,10 @@ mod tests {
     /// contract; a change here is a protocol break and must be a deliberate,
     /// versioned decision.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive wire-format table keeps every command variant in one audit"
+    )]
     fn command_wire_format_is_stable() {
         let cases: Vec<(String, &str)> = vec![
             (
@@ -1819,6 +1837,17 @@ mod tests {
                 serde_json::to_string(&Command::UpdateQueue { paths: Vec::new() })
                     .expect("serialize"),
                 r#"{"cmd":"update_queue","paths":[]}"#,
+            ),
+            (
+                serde_json::to_string(&Command::UpdateQueueNext {
+                    paths: vec![
+                        PathBuf::from("/music/a.flac"),
+                        PathBuf::from("/music/b.flac"),
+                    ],
+                    next: 1,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"update_queue_next","paths":["/music/a.flac","/music/b.flac"],"next":1}"#,
             ),
             (
                 serde_json::to_string(&Command::Play).expect("serialize"),

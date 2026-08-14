@@ -169,6 +169,8 @@ pub enum Glyph {
     VisualNone,
     /// Uneven frequency bars across the visual field.
     VisualSpectrum,
+    /// Three short lines: the Now Playing fact feed.
+    VisualFacts,
     /// Browser-style place history, backward. This is a chevron, not the
     /// transport's `Previous`: it changes the window's place, never a track.
     HistoryBack,
@@ -1102,6 +1104,12 @@ const VISUAL_SPECTRUM: &[Outline] = &[
     &[(0.80, 0.67), (0.90, 0.67), (0.90, 0.84), (0.80, 0.84)],
 ];
 
+const VISUAL_FACTS: &[Outline] = &[
+    &[(0.12, 0.20), (0.88, 0.20), (0.88, 0.29), (0.12, 0.29)],
+    &[(0.12, 0.46), (0.72, 0.46), (0.72, 0.55), (0.12, 0.55)],
+    &[(0.12, 0.72), (0.82, 0.72), (0.82, 0.81), (0.12, 0.81)],
+];
+
 /// A compact disclosure chevron. The unfilled shape distinguishes place
 /// navigation from transport's filled skip marks at the same 16 px size.
 const HISTORY_FORWARD: &[Outline] = &[&[
@@ -1174,13 +1182,14 @@ impl Glyph {
         Self::VisualCase,
         Self::VisualNone,
         Self::VisualSpectrum,
+        Self::VisualFacts,
         Self::HistoryBack,
         Self::HistoryForward,
         Self::Bell,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 35;
+    const COUNT: usize = 36;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1218,6 +1227,7 @@ impl Glyph {
             Self::VisualCase => VISUAL_CASE,
             Self::VisualNone => VISUAL_NONE,
             Self::VisualSpectrum => VISUAL_SPECTRUM,
+            Self::VisualFacts => VISUAL_FACTS,
             Self::HistoryBack => HISTORY_BACK,
             Self::HistoryForward => HISTORY_FORWARD,
             Self::Bell => BELL,
@@ -1262,6 +1272,7 @@ impl Glyph {
             Self::HistoryBack => 32,
             Self::HistoryForward => 33,
             Self::Bell => 34,
+            Self::VisualFacts => 35,
         }
     }
 

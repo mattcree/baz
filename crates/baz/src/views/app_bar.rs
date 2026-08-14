@@ -246,16 +246,14 @@ pub(crate) fn view(
     // moved is broken; one that cannot be edge-resized is annoying.
     let band = mouse_area(
         container(line)
-            // One window gutter, law L1 — the same `HANG` the wall, both
-            // strips, the now-playing bar and the index rail hang from. This
-            // bar spans the **window**, not the body, so its edges are the
-            // window's: the window buttons belong to the window and may not be
-            // inset by a lane.
+            // Resident chrome has a compact edge of its own; the collection's
+            // 40 px `HANG` remains the wall/rail law. This bar spans the
+            // **window**, not the body, so its edges are the window's.
             //
-            // **The two horizontal gutters differ, and both put ink on
-            // `HANG`.** Zone 1 holds a mark whose ink fills its own box, so the
-            // leading gutter is `HANG`. Zones 3–5 hold sprites centred in boxes
-            // twice their size, so the trailing gutter is `HANG` *less* that
+            // **The two horizontal gutters differ, and both put ink on the
+            // compact app-bar edge.** Zone 1 fills its own box. Zones 3–5 hold
+            // sprites centred in boxes twice their size, so trailing padding is
+            // `APP_BAR_EDGE` *less* that
             // inset ([`theme::APP_BAR_HANG_R`]) — otherwise the box lands on the
             // line and the drawing lands 8 px inside it, which is the other
             // half of the 2026-08-10 defect. The arithmetic and the measurement
@@ -362,11 +360,8 @@ fn history_button(
 /// the faintest readout ink — and *replaces* rather than joins, which is the
 /// choice worth stating because the other one was available:
 ///
-/// - **The slot does not move.** It was 24 for a 19.54 px word and it is 24 for
-///   a 16 px mark and one `GAP_SM`; the bar's budget, its drag gap and every
-///   coordinate in `docs/design/impl/app-bar/` are unchanged. Icon *and* word
-///   would have widened zone 1 to 48 and been the only ask of the three that
-///   cost the composition anything.
+/// - **The slot declares the larger mark.** It is 32 for a 24 px mark and one
+///   `GAP_SM`; the minimum-width budget still retains 96 px of drag slack.
 /// - **They would say the same thing twice.** On a single-window product this
 ///   zone's content never varies — it is `baz` in every place, in every state,
 ///   forever — so it carries identity and nothing else, and a mark carries
@@ -391,13 +386,13 @@ fn history_button(
 fn mark() -> Element<'static, Message> {
     container(
         iced_image(icon::app_mark())
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX)),
+            .width(Length::Fixed(theme::APP_MARK_PX))
+            .height(Length::Fixed(theme::APP_MARK_PX)),
     )
     .width(Length::Fixed(theme::APP_BAR_NAME_W))
     .height(Length::Fixed(theme::TRANSPORT_HIT))
-    // Leading, not centred: the mark's ink hangs from the window's gutter
-    // exactly as the word's did, and the slot's spare `GAP_SM` falls on the
+    // Leading, not centred: the mark's ink hangs from the compact chrome edge,
+    // and the slot's spare `GAP_SM` falls on the
     // drag gap's side where nothing is looking at it.
     .align_x(alignment::Horizontal::Left)
     .align_y(alignment::Vertical::Center)

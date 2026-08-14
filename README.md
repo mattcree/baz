@@ -172,6 +172,7 @@ after the audio engine confirms that a track began.
 | any printable character | open and filter the app-wide Tracks and Albums chooser; the search well takes the caret with the first keystroke |
 | <kbd>Enter</kbd> | confirm the selected search result; with no query, activate the selected album, playlist or track |
 | <kbd>Esc</kbd> | peel one layer, top down: a drag in flight, then a menu, then the playlists panel, then a field, then the place you are in, then the query |
+| <kbd>F11</kbd> | fill the window's current monitor, or return to the previous window size; move Baz to a second display first to use it as a kiosk |
 | <kbd>Space</kbd> | play / pause |
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |

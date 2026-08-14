@@ -309,6 +309,13 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
         } else {
             0.0
         }))
+        // The wall's scrollable centers the in-flow grid after reserving the
+        // right-hand rail + scrollbar lane. This layer spans the outer wall
+        // so its opaque field can cover sleeves, but centering its block in
+        // that *outer* width moved the sticky word right by half the 112 px
+        // reservation. Spend the identical reservation as right padding:
+        // full-width paint outside, the scrollable's content measure inside.
+        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
         .align_x(alignment::Horizontal::Center)
         .style(move |_theme| {
             if run.is_some() {
@@ -1179,6 +1186,45 @@ mod tests {
             stack.trim_end().ends_with("body"),
             "the body is no longer the layer over the rail — the bar is under \
              the rail and cannot be grabbed"
+        );
+    }
+
+    /// The ordinary heading is a child of the scrollable, whose content
+    /// measure excludes [`theme::WALL_RESERVE`]. The sticky copy is painted in
+    /// a full-width layer. It must reserve that same lane before centring its
+    /// block or the visible word jumps right by `WALL_RESERVE / 2` precisely
+    /// when it sticks.
+    #[test]
+    fn sticky_and_ordinary_headers_share_the_content_edge_at_every_density() {
+        for outer in [696.0_f32, 900.0, 1280.0, 1920.0, 2560.0] {
+            let content = outer - theme::WALL_RESERVE;
+            for density in Density::ALL {
+                let grid = Grid::new(content, density);
+                let ordinary_left = grid.margin;
+                let sticky_left = (outer - theme::WALL_RESERVE - grid.block_width()) / 2.0;
+                assert!(
+                    (ordinary_left - sticky_left).abs() < 0.01,
+                    "{} at {outer}px: ordinary {ordinary_left}, sticky {sticky_left}",
+                    density.label()
+                );
+            }
+        }
+
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let pinned = source
+            .split_once("fn pinned_header(")
+            .expect("the pinned header exists")
+            .1;
+        let pinned = &pinned[..pinned.find("\n}\n").expect("a function ends")];
+        assert!(
+            pinned.contains(".padding(iced::Padding::default().right(theme::WALL_RESERVE))")
+                && pinned.contains(".width(Length::Fill)")
+                && pinned.contains(".align_x(alignment::Horizontal::Center)"),
+            "the full-width sticky field no longer centers in the scrollable's content measure"
         );
     }
 

@@ -133,10 +133,10 @@ toolbox run -c baz-dev env CARGO_INCREMENTAL=0 \
               -p baz
 ```
 
-That last one takes about eight minutes from cold and produces a 33 MB binary
-at `target/x86_64-unknown-linux-gnu/release/baz`. It links `libasound.so.2`,
-`libc`, `libm` and `libgcc_s` and nothing else — `ldd` it if you want the
-receipt; `docs/INSTALL.md` states what it additionally `dlopen`s.
+That last one takes about eight minutes from cold and currently produces a
+76 MB binary at `target/x86_64-unknown-linux-gnu/release/baz`. It links
+`libstdc++`, `libasound`, `libc`, `libm` and `libgcc_s`; `ldd` it if you want
+the receipt, and `docs/INSTALL.md` states what it additionally `dlopen`s.
 
 Then the staging and checksum steps, which are the ones nobody had ever run:
 
@@ -155,9 +155,9 @@ cd dist && sha256sum -- * | tee SHA256SUMS
 grep -v ' SHA256SUMS$' SHA256SUMS | sha256sum --check --strict
 ```
 
-The archive comes out at about 12 MB. The last line is the workflow's own
-self-check — it proves the sums file describes the files beside it — and it
-passes.
+With the pinned 156 MB Vibe model set included, the Linux archive currently
+comes out at about 154 MB. The last line is the workflow's own self-check — it
+proves the sums file describes the files beside it — and it passes.
 
 **Build the Flatpak too**, which the dry run does not cover at all:
 `packaging/flatpak/README.md` §"Building it". Budget fifteen minutes and 10 GB

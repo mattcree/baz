@@ -860,9 +860,7 @@ mod tests {
         // where a *width* claim belongs.
     }
 
-    /// **The app bar's zone 1 still holds the word it was sized for**, if the
-    /// mark ever has to come back out — L9's declaration/measurement pairing,
-    /// kept alive across a swap.
+    /// **The app bar's zone 1 holds the enlarged mark and its separation.**
     ///
     /// Zone 1 drew the word `baz` at the metadata size in the Medium face until
     /// 2026-08-10, when the owner asked for the application's icon there
@@ -877,29 +875,13 @@ mod tests {
     /// So this is no longer a measurement of what is drawn; it is a measurement
     /// of what the slot can still take, and it says so.
     #[test]
-    fn the_app_bars_zone_one_still_fits_the_word_it_was_sized_for() {
-        let medium = Face::parse(SANS_MEDIUM);
-        let name = medium.width("baz", theme::SIZE_META);
+    fn the_app_bars_zone_one_holds_the_enlarged_mark() {
         assert!(
-            name <= theme::APP_BAR_NAME_W,
-            "the window's name measures {name:.2} px against a declared {}",
-            theme::APP_BAR_NAME_W
-        );
-        // Not a slot ten times the word: the slack is stated so that a
-        // reservation nothing needs would be visible rather than comfortable.
-        let slack = theme::APP_BAR_NAME_W - name;
-        assert!(
-            (1.0..8.0).contains(&slack),
-            "the name's reservation carries {slack:.2} px of slack: it is \
-             either overflowing or reserving room for a word that is not there"
-        );
-        // …and the mark actually drawn there hangs from the leading gutter
-        // with the slot's remainder falling on the drag gap's side.
-        assert!(
-            (theme::APP_BAR_NAME_W - theme::ICON_PX - theme::GAP_SM).abs() < f32::EPSILON,
+            (theme::APP_BAR_NAME_W - theme::APP_MARK_PX - theme::GAP_SM).abs() < f32::EPSILON,
             "zone 1's slot is no longer the mark's lane plus its separation \
              from the fill beside it"
         );
+        const { assert!(theme::APP_MARK_PX > theme::ICON_PX) }
     }
 
     /// **The returns lane holds its head's three words** at the measure the

@@ -19,12 +19,12 @@
 //!
 //! Thumbnails are decoded to the active density's real maximum (200 px in
 //! Dense, up to [`THUMB_PX`] in Spacious). Handles needed by the current wall
-//! viewport, current page and resident chrome are pinned in a resident tier;
-//! everything else competes in a 64-entry recent LRU keyed by album id. The
-//! bounded tier is about **9.8 MiB** at Dense and **25 MiB** at the largest
-//! density, versus the former fixed 50 MiB allocation. Prepared PNGs live in
-//! the local XDG cache, so an evicted or next-launch sleeve does not require
-//! another full source decode.
+//! viewport, current page and resident chrome are pinned in a resident tier.
+//! Once a handle has reached one of those targets it is retained for the rest
+//! of the session, so scrolling away and back cannot replace it with a
+//! gradient. A decode that finishes after its target has left still competes
+//! in a 64-entry recent LRU; speculative work cannot grow the session store.
+//! Prepared PNGs live in the local XDG cache for the next launch.
 //!
 //! **The ceiling remains 320** (ADR-0017 step 5/7), because Spacious really
 //! can draw a sleeve that large. Tighter densities now ask for their smaller
@@ -32,11 +32,30 @@
 //! is deliberately proportional to what the interface currently promises to
 //! keep drawn: `N * edge * edge * 4` bytes, about **0.316 MiB per record** at
 //! Balanced's 288 px ceiling. An 80-record Artist-page stress run therefore
-//! held about **25.3 MiB** of decoded resident art while the separate off-screen
-//! LRU remained bounded at 64. Ordinary virtualized walls pin only the visible
-//! range and overscan; the current non-virtual Artist page pins its whole
-//! discography until that page is left. Presentation stability wins that
-//! measured memory trade: a loaded, current sleeve cannot be evicted.
+//! held about **25.3 MiB** of decoded resident art. Ordinary virtualized walls
+//! pin only the visible range and overscan; the current non-virtual Artist
+//! page pins its whole discography until that page is left. Presentation
+//! stability wins that measured memory trade: a sleeve shown once in this
+//! process cannot be evicted back into a placeholder.
+//!
+//! The 2026-08-14 all-consumer audit closed three supply gaps around that
+//! policy: Queue row pins were cleared later in the same update, Home omitted
+//! the visible All songs collage, and the floating playlist panel never
+//! nominated its collages. All now enter the same wall/chrome/page resident
+//! union. The follow-up transition test walks 810 displayed ids, returns to the
+//! first viewport and finds every handle still present; a separate stale-
+//! density regression keeps the rest of the target queue intact.
+//!
+//! The owner's real 8,602-track index resolves to 393 albums. At Dense's 200 px
+//! ceiling, retaining every square cover is at most **60.0 MiB** of CPU RGBA;
+//! the measured first 180 real decodes occupied 27.3 MiB. Balanced (288 px)
+//! and Spacious (320 px) worst cases are 124.3 and 153.5 MiB. The 800-album
+//! synthetic ceiling is 122.1 / 253.1 / 312.5 MiB respectively. This is a
+//! collection-bounded session budget, not an unexplained entry count. iced's
+//! wgpu raster cache trims device allocations to handles hit by the current
+//! renderer pass, while retained RGBA handles make a return upload synchronous;
+//! renderer residency therefore follows the current target set, not the whole
+//! session store.
 //!
 //! # Two tiers, because two surfaces want different things
 //!
@@ -49,7 +68,7 @@
 //!
 //! | Tier | Edge | Entries | Worst case | For |
 //! |---|---|---|---|---|
-//! | [`load_thumb_cached`] | density-aware, ≤ [`THUMB_PX`] 320 | current residents + [`THUMB_CACHE_ENTRIES`] 64 recent | 9.8–25 MiB recent + resident targets | the wall, the lane, every collage |
+//! | [`load_thumb_cached`] | density-aware, ≤ [`THUMB_PX`] 320 | displayed this session + [`THUMB_CACHE_ENTRIES`] 64 speculative/recent | collection-bounded; measured above | the wall, the lane, every collage |
 //! | [`load_hero`] | [`HERO_PX`] 1024 | [`HERO_CACHE_ENTRIES`] 2 | **8 MiB** | the Now playing place's one work |
 //!
 //! **The hero tier is 16 % more art memory** for the surface the owner wants
@@ -97,8 +116,8 @@ use lofty::prelude::*;
 /// asserts the two are one number.
 pub const THUMB_PX: u32 = 320;
 
-/// Off-screen thumbnail LRU capacity: 64 recent works, or 9.8 MiB at Dense
-/// and 25 MiB at the Spacious tier's absolute 320 px ceiling.
+/// Off-screen thumbnail LRU capacity for decodes that never reached a visible
+/// target: 64 recent works, or 9.8 MiB at Dense and 25 MiB at Spacious.
 ///
 /// Current wall, page and chrome targets live in a separate resident tier and
 /// do not count against this cap; see the module-level memory budget.

@@ -2,6 +2,33 @@
 
 **Status**: accepted (2026-08-10), **with one field not yet flipped** (§6) · **amends [ADR-0022](0022-places-and-nothing-else.md)'s foundational sentence for the third time**, after [ADR-0030](0030-the-returns-lane-and-the-home-band.md)'s lane · **reverses [ADR-0028](0028-density-detents.md)'s amendment §3** on where the density marks stand, and keeps its §2 · **empties the strip charter in [ADR-0026](0026-iconography-and-the-strip-budget.md) §3** of two tenants and re-derives its budget · frames in `docs/design/impl/app-bar/`
 
+> ## Amendment (2026-08-14) — resident chrome has its own compact edge
+>
+> The collection's 40 px `HANG` remains the wall, rail and place-content law;
+> applying it to both resident chrome bands made the application mark, close
+> control, sounding sleeve and volume control read detached from the physical
+> window. The owner asked for both bar gutters to shrink, for the mark to grow,
+> and for the bottom-left sleeve's x/y padding to become equal.
+>
+> The app bar now uses a **16 px ink edge** (`APP_BAR_EDGE = GAP_LG`). Its
+> trailing container padding is 8 px because a 16 px sprite stands 8 px inside
+> its 32 px hit target; the sprite therefore ends 16 px from the right in both
+> chrome states. Eight pixels of container padding also keeps the 6 px
+> borderless resize band outside the control. The full-colour application mark
+> grows from **16 to 24 logical px**, decoded from the committed 64 px raster,
+> and its declared lane becomes 32 px. At the 696 px window floor the complete
+> line is 600 px, retaining **96 px** of draggable slack.
+>
+> The bottom band uses **14 px** (`BAR_EDGE_PAD`), deliberately two pixels
+> tighter: `(80 − 52) / 2` is the sounding sleeve's vertical inset, so applying
+> the same value horizontally puts its left and top edges on exactly one line.
+> The bars are deliberately different by 2 px: the top edge is a control/resize
+> safety decision on the 4 px lattice; the bottom edge is equality derived from
+> a centred 52 px artwork square. The collection rail and scrollbar do not
+> move. Isolated Toolbox/Xvfb renders at 1280×860 and 1920×1080 plus a playing
+> frame verified the composition; the playing frame put the sleeve at x=14 and
+> y=14 within the band.
+
 > ## Amendment (2026-08-10) — the bar hangs by its ink, and zone 1 is the mark
 >
 > The owner, with the bar in front of him, in three more messages. Two are

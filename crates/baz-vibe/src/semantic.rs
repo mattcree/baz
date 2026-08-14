@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::f32::consts::TAU;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use baz_core::playback::{DecodedAudio, resample_interleaved};
 use ort::session::Session;
@@ -155,18 +155,24 @@ impl Model {
 }
 
 fn model_directory() -> Option<PathBuf> {
-    let candidates = [
-        std::env::var_os("BAZ_VIBE_MODEL_DIR").map(PathBuf::from),
-        std::env::current_exe()
-            .ok()
-            .and_then(|path| path.parent().map(|parent| parent.join("models/vibe"))),
-        Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/vibe")),
-        Some(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../tools/vibe-eval/local/laion-reproduced"),
-        ),
-    ];
-    candidates.into_iter().flatten().find(|path| {
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("BAZ_VIBE_MODEL_DIR") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(parent) = executable.parent()
+    {
+        candidates.extend(parent.ancestors().map(|path| path.join("models/vibe")));
+    }
+    if let Ok(working) = std::env::current_dir() {
+        candidates.extend(working.ancestors().flat_map(|path| {
+            [
+                path.join("models/vibe"),
+                path.join("tools/vibe-eval/local/laion-reproduced"),
+            ]
+        }));
+    }
+    candidates.into_iter().find(|path| {
         path.join("audio_model_quantized.onnx").is_file()
             && path.join("text_model_quantized.onnx").is_file()
             && path.join("tokenizer.json").is_file()

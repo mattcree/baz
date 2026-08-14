@@ -9,8 +9,9 @@
 //! This is safe because nothing a listener must know is console-only:
 //! user-facing failures flow through the canonical health/event surface
 //! (`crate::health`), and release diagnostics that remain necessary use an
-//! intentional path rather than the console. Other platforms are untouched by
-//! the `windows` gate.
+//! the bounded session stream in Settings → Debug while still going to the
+//! developer console where one exists. Other platforms are untouched by the
+//! `windows` gate.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 //!
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
@@ -49,7 +50,9 @@ mod app;
 mod art;
 mod config;
 mod desktop;
+mod diagnostic;
 mod drag;
+mod facts;
 mod field;
 mod font;
 mod groove;
@@ -83,6 +86,7 @@ mod session;
 mod shelf;
 mod spine;
 mod theme;
+mod theme_file;
 mod undo;
 mod vibe;
 mod views;

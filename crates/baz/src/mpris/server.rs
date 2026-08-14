@@ -74,7 +74,7 @@ impl Mpris {
             .name("baz-mpris".into())
             .spawn(move || serve(&updates_rx, requests_tx));
         if let Err(error) = spawned {
-            println!("[mpris] could not start the D-Bus thread: {error}");
+            crate::baz_log!("[mpris] could not start the D-Bus thread: {error}");
         }
         Self {
             updates: updates_tx,
@@ -130,21 +130,21 @@ fn serve(updates: &Receiver<Update>, requests: UnboundedSender<Request>) {
     let connection = match connect(root, player) {
         Ok(connection) => connection,
         Err(error) => {
-            println!("[mpris] no session bus; desktop media controls unavailable ({error})");
+            crate::baz_log!("[mpris] no session bus; desktop media controls unavailable ({error})");
             return;
         }
     };
     let Some(name) = claim_name(&connection) else {
-        println!("[mpris] could not claim a bus name; desktop media controls unavailable");
+        crate::baz_log!("[mpris] could not claim a bus name; desktop media controls unavailable");
         return;
     };
-    println!("[mpris] serving {name} at {OBJECT_PATH}");
+    crate::baz_log!("[mpris] serving {name} at {OBJECT_PATH}");
 
     let object_server = connection.object_server();
     let interface = match object_server.interface::<_, Player>(OBJECT_PATH) {
         Ok(interface) => interface,
         Err(error) => {
-            println!("[mpris] player interface unavailable: {error}");
+            crate::baz_log!("[mpris] player interface unavailable: {error}");
             return;
         }
     };

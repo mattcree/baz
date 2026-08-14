@@ -6,7 +6,7 @@
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Operation, Tree};
-use iced::advanced::{Clipboard, Shell, Widget, overlay, renderer};
+use iced::advanced::{Clipboard, Renderer as _, Shell, Widget, overlay, renderer};
 use iced::{Element, Event, Length, Rectangle, Size, Theme, Vector, mouse, window};
 
 use crate::app::Message;
@@ -23,6 +23,163 @@ pub(crate) fn resize_frame<'a>(
         content: content.into(),
         enabled,
     })
+}
+
+/// Make the place/lane body a hard paint and input viewport between Baz's two
+/// resident bars.
+///
+/// This is intentionally outside every individual scrollable. iced 0.14's
+/// scrollable only opens a renderer layer while its cached scrollbar state is
+/// active; its inactive branch passes a viewport rectangle that image widgets
+/// ignore. One composition boundary remains correct through stale layout and
+/// widget-tree transitions and covers every current/future sleeve consumer.
+pub(crate) fn body_clip<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    Element::new(Clip {
+        content: content.into(),
+    })
+}
+
+struct Clip<'a> {
+    content: Element<'a, Message>,
+}
+
+fn clipped_bounds(bounds: Rectangle, viewport: &Rectangle) -> Option<Rectangle> {
+    bounds.intersection(viewport)
+}
+
+impl Widget<Message, Theme, iced::Renderer> for Clip<'_> {
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let Some(clipped) = clipped_bounds(layout.bounds(), viewport) else {
+            return;
+        };
+        let cursor = if cursor.is_over(clipped) || cursor.is_levitating() {
+            cursor
+        } else {
+            mouse::Cursor::Unavailable
+        };
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            &clipped,
+        );
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let Some(clipped) = clipped_bounds(layout.bounds(), viewport) else {
+            return;
+        };
+        renderer.with_layer(clipped, |renderer| {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                &clipped,
+            );
+        });
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        let Some(clipped) = clipped_bounds(layout.bounds(), viewport) else {
+            return mouse::Interaction::default();
+        };
+        if !cursor.is_over(clipped) {
+            return mouse::Interaction::default();
+        }
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            &clipped,
+            renderer,
+        )
+    }
+
+    fn overlay<'a>(
+        &'a mut self,
+        tree: &'a mut Tree,
+        layout: Layout<'a>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'a, Message, Theme, iced::Renderer>> {
+        let clipped = clipped_bounds(layout.bounds(), viewport)?;
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            &clipped,
+            translation,
+        )
+    }
 }
 
 struct Frame<'a> {
@@ -255,5 +412,54 @@ mod tests {
             direction_at(bounds, iced::Point::new(15.9, 60.0)).map(code),
             Some(code(window::Direction::West))
         );
+    }
+
+    #[test]
+    fn the_body_clip_is_the_intersection_not_the_whole_window() {
+        let body = Rectangle::new(iced::Point::new(0.0, 41.0), Size::new(1280.0, 736.0));
+        let window = Rectangle::new(iced::Point::ORIGIN, Size::new(1280.0, 860.0));
+        assert_eq!(clipped_bounds(body, &window), Some(body));
+
+        let damaged = Rectangle::new(iced::Point::new(0.0, 0.0), Size::new(1280.0, 100.0));
+        assert_eq!(
+            clipped_bounds(body, &damaged),
+            Some(Rectangle::new(
+                iced::Point::new(0.0, 41.0),
+                Size::new(1280.0, 59.0)
+            ))
+        );
+    }
+
+    #[test]
+    fn every_place_crosses_one_physical_body_scissor_before_the_bars() {
+        let frame = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/window_frame.rs"),
+        )
+        .expect("frame source");
+        assert!(
+            frame.contains("renderer.with_layer(clipped"),
+            "a viewport rectangle alone cannot clip iced images"
+        );
+        assert!(
+            frame.contains("mouse::Cursor::Unavailable"),
+            "off-body content can still claim pointer input through chrome"
+        );
+
+        let app = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("app source");
+        let clip = app
+            .find("let screen = crate::window_frame::body_clip(screen);")
+            .expect("shared body clip");
+        let app_bar = app[clip..]
+            .find("views::app_bar::view(")
+            .expect("resident app bar")
+            + clip;
+        let bottom = app[app_bar..]
+            .find("views::bottom_bar::view(")
+            .expect("resident bottom bar")
+            + app_bar;
+        assert!(clip < app_bar && app_bar < bottom);
     }
 }

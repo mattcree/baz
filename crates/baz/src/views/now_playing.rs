@@ -128,7 +128,8 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
 }
 
 /// What the placard under the work needs with an album line: the gap off the
-/// sleeve, three identity lines, and every gap between them — **96**.
+/// sleeve, three identity lines, and every gap between them — **96**. The
+/// optional feed adds [`FACT_BELOW`] only while it has a real fact to draw.
 ///
 /// It summed [`theme::TRANSPORT_HIT`] as well until the merge, which was the
 /// unspent half of ADR-0029's first step: the duplicated transport widget came
@@ -154,10 +155,8 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
 /// So it is spelled as the layout, term by term, rather than as a total that
 /// has to be re-derived by hand every time a line moves.
 ///
-/// It grows again when the surface does: doc 12 §5.5's figure of 190 is a
-/// number of this kind plus the momentary meter's 24, the feed's 20 and one
-/// [`theme::GAP_LG`] — none of which are built yet (they are steps A5 and A9),
-/// and none of which may reserve height before they exist.
+/// The feed now spends its one line plus one gap through [`FACT_BELOW`]; no
+/// absent fact reserves a blank slot. The momentary meter remains unbuilt.
 const BELOW: f32 = theme::GAP_XL                                  // work → placard
     + theme::LINE_HEADING + theme::GAP_XS                         // artist
     + theme::LINE_HERO + theme::GAP_XS                            // title
@@ -293,6 +292,7 @@ pub(crate) fn view<'a>(
     height: f32,
     source: Option<Source>,
     visual: Visual<'_>,
+    fact: Option<&String>,
 ) -> Element<'a, Message> {
     let Some(now) = player.now_playing() else {
         // **A start in flight is not silence.** `Resume` on the Home place
@@ -325,13 +325,13 @@ pub(crate) fn view<'a>(
     // line where that distinction is useful.
     let show_album = show_album_line(now.album.as_deref(), source.as_ref());
     if !visual.foreground.draws_art() {
-        return without_album_object(now, width, height, source, show_album, visual.audio);
+        return without_album_object(now, width, height, source, show_album, visual.audio, fact);
     }
     // **The source's own pixels**, which is what bounds the work now that
     // `NOW_PLAYING_MAX` is gone. Resolved only for a foreground that draws it,
     // so None pays neither hero composition nor jewel-case texture work.
     let work = work(shelf, Some(now));
-    let below = placard_below(show_album);
+    let below = placard_below(show_album) + fact.map_or(0.0, |_| FACT_BELOW);
     let edge = art_edge_with_below(
         width,
         height,
@@ -352,10 +352,14 @@ pub(crate) fn view<'a>(
         t,
     );
     let insert = rear_insert(shelf, now);
-    let song = container(record_column(
-        &work, t, now, edge, show_album, &insert, visual,
-    ))
-    .center(Length::Fill);
+    let layout = RecordLayout {
+        edge,
+        show_album,
+        insert: &insert,
+        visual,
+        fact: fact.map(String::as_str),
+    };
+    let song = container(record_column(&work, t, now, layout)).center(Length::Fill);
     let body: Element<'a, Message> = match source {
         Some(source) => column![song, source_link(source)]
             .height(Length::Fill)
@@ -383,9 +387,10 @@ fn without_album_object<'a>(
     source: Option<Source>,
     show_album: bool,
     audio: Option<&baz_core::engine::VisualizationFrame>,
+    fact: Option<&String>,
 ) -> Element<'a, Message> {
     let (mask_width, identity_width) = objectless_measures(width);
-    let identity = placard(now, show_album, identity_width);
+    let identity = identity(now, show_album, identity_width, fact.map(String::as_str));
     let calm = placard_mask(identity, mask_width);
     let song = container(calm).center(Length::Fill);
     let body: Element<'a, Message> = match source {
@@ -716,20 +721,27 @@ fn field_layer(
 }
 
 /// The record column: the work at `edge`, and the placard under it.
+#[derive(Clone, Copy)]
+struct RecordLayout<'a> {
+    edge: f32,
+    show_album: bool,
+    insert: &'a crate::jewel_case::Insert,
+    visual: Visual<'a>,
+    fact: Option<&'a str>,
+}
+
 fn record_column<'a>(
     work: &Work,
     t: f32,
     now: &'a crate::player::NowPlaying,
-    edge: f32,
-    show_album: bool,
-    insert: &crate::jewel_case::Insert,
-    visual: Visual<'_>,
+    layout: RecordLayout<'_>,
 ) -> Element<'a, Message> {
-    let cover = plain_cover(work, t, edge, insert.album_id);
-    let jewel_case = sleeve(work, t, edge, visual.rotation, insert);
-    let sleeve = crate::visualizer::foreground(visual.foreground, edge, cover, jewel_case);
+    let cover = plain_cover(work, t, layout.edge, layout.insert.album_id);
+    let jewel_case = sleeve(work, t, layout.edge, layout.visual.rotation, layout.insert);
+    let sleeve =
+        crate::visualizer::foreground(layout.visual.foreground, layout.edge, cover, jewel_case);
 
-    let placard = placard(now, show_album, edge);
+    let placard = identity(now, layout.show_album, layout.edge, layout.fact);
 
     // **No transport here.** The bar is under every place, this one included,
     // and it already carries play/pause and the two skips — so the page drew
@@ -745,6 +757,43 @@ fn record_column<'a>(
         .align_x(alignment::Horizontal::Center)
         .width(Length::Shrink)
         .into()
+}
+
+const FACT_BELOW: f32 = theme::GAP_LG + theme::LINE_BODY;
+
+fn identity<'a>(
+    now: &'a crate::player::NowPlaying,
+    show_album: bool,
+    width: f32,
+    fact: Option<&str>,
+) -> Element<'a, Message> {
+    let mut identity = column![placard(now, show_album, width)]
+        .width(Length::Fixed(width))
+        .align_x(alignment::Horizontal::Center);
+    if let Some(fact) = fact {
+        identity = identity.push(fact_line(fact, width));
+    }
+    identity.spacing(theme::GAP_LG).into()
+}
+
+fn fact_line(fact: &str, width: f32) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        text(fact.to_owned())
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Length::Fixed(width))
+    .height(Length::Fixed(theme::LINE_BODY))
+    .padding(0)
+    .style(move |_theme, _status| button::Style {
+        text_color: room.paper_dim,
+        ..button::Style::default()
+    })
+    .on_press(Message::AdvanceFact)
+    .into()
 }
 
 fn placard(now: &crate::player::NowPlaying, show_album: bool, width: f32) -> Element<'_, Message> {

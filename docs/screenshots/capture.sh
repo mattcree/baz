@@ -248,7 +248,8 @@ park()  { xdotool mousemove 140 620; sleep 0.8; }
 # layout — the app bar's 41 px moved all of them once already.
 #
 #   app bar          y 0…41
-#   lane rows        Home 125 · Library 165 · Now playing 205 · a playlist 293
+#   lane rows        Home 85 · Library 125 · Playlists 165 · Now playing 205
+#                    · the first playlist/recent list row 350
 #   wall shelf 1     tiles y 156…355, `Seagrass` x 313…513, `Werkbund` x 548…748
 #   wall shelf 2     tiles y 479…678, `Violet Ledger` x 313…513,
 #                    `Meadowgrass` x 783…983
@@ -287,6 +288,9 @@ click 596 $PLAY_1
 
 # 1 · the wall, with that record playing: its tile lit, the band in the lane's
 #     `RECENT`, and the bottom bar a live readout rather than `Nothing playing`.
+# Deliberate playback now lands on Now Playing only after TrackStarted; return
+# through the resident Library row before photographing the wall.
+click 105 125
 park
 shot library
 
@@ -299,13 +303,13 @@ shot now-playing
 # 3 · Home: `All songs` with its collage sleeve, what arrived recently, and the
 #     size of the collection. The one place that is about the library rather
 #     than about a record.
-click 105 125
+click 105 85
 park
 shot home
 
 # 4 · the playlist, opened from the lane row it earned by existing: a list that
 #     is thirty-five songs off four records and one `.m3u8` file on disk.
-click 140 293
+click 140 350
 park
 shot playlist
 

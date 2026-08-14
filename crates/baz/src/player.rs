@@ -755,6 +755,77 @@ pub struct SignalNote {
     pub detail: String,
 }
 
+/// An actionable explanation of Baz's active sample-rate conversion.
+///
+/// Unlike [`SignalNote`], which is deliberately quiet enough for the resident
+/// transport, this is warning copy for Settings and the canonical event log.
+/// Keeping it beside the event-derived path makes both surfaces use exactly
+/// the same rates, cause and remedy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalWarning {
+    pub title: String,
+    pub detail: String,
+}
+
+/// Session-scoped deduplication for the signal-path warning history.
+#[derive(Debug, Default)]
+pub struct SignalWarningState {
+    active: Option<SignalPath>,
+}
+
+impl SignalWarningState {
+    /// Observe the engine's newest path. Returns copy for the event history
+    /// only when a Baz-owned conversion begins or materially changes.
+    pub fn observe(&mut self, path: SignalPath) -> Option<SignalWarning> {
+        let warning = path.warning();
+        if warning.is_none() {
+            self.active = None;
+            return None;
+        }
+        if self.active == Some(path) {
+            return None;
+        }
+        self.active = Some(path);
+        warning
+    }
+
+    /// End the continuing condition when playback itself ends.
+    pub fn clear(&mut self) {
+        self.active = None;
+    }
+}
+
+impl SignalPath {
+    /// Describe an active Baz-owned boundary conversion. A direct path returns
+    /// nothing even if an operating-system mixer may convert after Baz's
+    /// stream: that downstream behavior is neither observed nor owned here.
+    #[must_use]
+    pub fn warning(self) -> Option<SignalWarning> {
+        let reason = self.chain.conversion_reason()?;
+        let source = vm::format_sample_rate(self.source_rate_hz);
+        let output = vm::format_sample_rate(self.output_rate_hz);
+        let remedy = match reason {
+            ConversionReason::DeviceRateUnavailable => format!(
+                "The selected audio device has no {source} mode. Select an output device that \
+                 supports {source}, then restart Baz to restore a direct path."
+            ),
+            ConversionReason::FixedOutputRate => format!(
+                "The output boundary is fixed at {output}. Use follow-source output instead to \
+                 restore a direct path at the next track boundary."
+            ),
+            _ => "Choose a follow-source output path at the source rate to restore a direct path."
+                .to_owned(),
+        };
+        Some(SignalWarning {
+            title: format!("Baz is resampling {source} → {output}"),
+            detail: format!(
+                "{remedy} This warning describes Baz's boundary resampler; conversion later in \
+                 the operating-system mixer is outside Baz and is not reported here."
+            ),
+        })
+    }
+}
+
 /// The event-derived playback state behind every playback widget.
 ///
 /// `PartialEq` but not `Eq`: pointer geometry is measured in floating-point
@@ -1279,6 +1350,19 @@ impl PlayerState {
         // (ADR-0023 §3), so nothing here ever writes back and nothing ever
         // decides the run has become its file again.
         self.queue_edited = true;
+    }
+
+    /// Record the same edit while pinning one absolute row as the traversal's
+    /// immediate successor, mirroring `Command::UpdateQueueNext`.
+    pub fn note_queue_edited_next(&mut self, queue: QueueVm, next: usize) {
+        let current_path = self.now_playing_path.clone();
+        self.note_queue_edited(queue);
+        let current = current_path.as_deref().and_then(|path| {
+            self.queue
+                .as_ref()
+                .and_then(|queue| queue.items.iter().position(|item| item.path == path))
+        });
+        baz_core::traversal::force_next(&mut self.order, current, next);
     }
 
     /// Record that a transport command (Play/Pause/Next) was accepted by
@@ -2162,15 +2246,6 @@ impl PlayerState {
 
     /// The chain the engine last reported, whatever it is — the whole
     /// reading, for anything that wants the direct case too.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the bar renders only the converting case through signal_note(); the \
-                      full reading is kept because the state is the honest thing to hold \
-                      and a diagnostics readout is ADR-0009's next step"
-        )
-    )]
     #[must_use]
     pub fn signal_path(&self) -> Option<SignalPath> {
         self.signal
@@ -2196,7 +2271,7 @@ impl PlayerState {
     #[must_use]
     pub fn signal_note(&self) -> Option<SignalNote> {
         let path = self.signal?;
-        let SignalChain::Converting { reason } = path.chain else {
+        let Some(reason) = path.chain.conversion_reason() else {
             if !self.bit_exact() {
                 return None;
             }
@@ -2226,6 +2301,12 @@ impl PlayerState {
             label: format!("{} → {output}", strip_unit(&source)),
             detail: format!("Playing at {output} — {because}"),
         })
+    }
+
+    /// Settings' active, actionable signal-path warning.
+    #[must_use]
+    pub fn signal_warning(&self) -> Option<SignalWarning> {
+        self.signal?.warning()
     }
 
     /// ReplayGain exactly as the engine last reported it — what the settings
@@ -3689,6 +3770,65 @@ mod tests {
             note.detail,
             "Playing at 44.1 kHz — the output is set to a fixed 44.1 kHz"
         );
+    }
+
+    #[test]
+    fn conversion_warning_names_owner_rates_and_action() {
+        let path = SignalPath {
+            source_rate_hz: 48_000,
+            source_channels: 2,
+            source_bits: Some(24),
+            output_rate_hz: 44_100,
+            chain: SignalChain::Converting {
+                reason: ConversionReason::DeviceRateUnavailable,
+            },
+        };
+        let warning = path.warning().expect("Baz is converting");
+        assert_eq!(warning.title, "Baz is resampling 48 kHz → 44.1 kHz");
+        assert!(warning.detail.contains("Select an output device"));
+        assert!(warning.detail.contains("supports 48 kHz"));
+        assert!(warning.detail.contains("operating-system mixer"));
+        assert!(
+            SignalPath {
+                chain: SignalChain::Direct,
+                ..path
+            }
+            .warning()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn continuing_conversion_warns_once_and_direct_clears_it() {
+        let converting = SignalPath {
+            source_rate_hz: 96_000,
+            source_channels: 2,
+            source_bits: Some(24),
+            output_rate_hz: 48_000,
+            chain: SignalChain::Exclusive {
+                conversion: Some(ConversionReason::FixedOutputRate),
+            },
+        };
+        let mut state = SignalWarningState::default();
+        assert!(state.observe(converting).is_some());
+        assert!(
+            state.observe(converting).is_none(),
+            "continuation is deduplicated"
+        );
+        assert!(
+            state
+                .observe(SignalPath {
+                    chain: SignalChain::Exclusive { conversion: None },
+                    ..converting
+                })
+                .is_none()
+        );
+        assert!(
+            state.observe(converting).is_some(),
+            "a later condition is new"
+        );
+        let warning = converting.warning().expect("exclusive conversion counts");
+        assert!(warning.detail.contains("follow-source output"));
     }
 
     #[test]

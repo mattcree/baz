@@ -1369,6 +1369,20 @@ impl Library {
             .count()
     }
 
+    /// Exact paths behind [`Self::unrooted_tracks`], in stable index order.
+    ///
+    /// A front end may show these before an explicit [`Self::forget_paths`]
+    /// decision. Merely reading the list never adopts or deletes anything.
+    #[must_use]
+    pub fn unrooted_paths(&self) -> Vec<PathBuf> {
+        self.index
+            .tracks
+            .iter()
+            .filter(|track| track.root.is_none())
+            .map(|track| track.meta.path.clone())
+            .collect()
+    }
+
     /// Remove tracks by path: delete their rows and drop them from the
     /// in-RAM index. Paths the library does not hold are ignored. Returns
     /// the number of rows actually deleted.

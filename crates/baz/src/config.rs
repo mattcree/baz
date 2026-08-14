@@ -128,6 +128,10 @@ const LAST_PLACE: &str = "last_place";
 
 /// The foreground album object selected on Now Playing.
 const VISUALIZATION_FOREGROUND: &str = "visualization_foreground";
+/// Whether Now Playing's local fact feed is visible.
+const NOW_PLAYING_FACTS: &str = "now_playing_facts";
+/// Stable built-in code or `custom:<id>` for the room selected in Settings.
+const THEME: &str = "theme";
 
 /// The number of concurrent local Vibe model sessions.
 const VIBE_WORKERS: &str = "vibe_workers";
@@ -242,8 +246,13 @@ pub struct Config {
     /// View state, persisted beside density rather than exposed as a Settings
     /// row. The three radio-like marks live on the surface they change.
     pub(crate) visualization_foreground: crate::visualizer::Foreground,
+    /// Whether the one-line local fact feed is visible on Now Playing.
+    pub(crate) now_playing_facts: bool,
     /// Concurrent local CLAP model sessions used by a Vibe scan.
     pub vibe_workers: usize,
+    /// The selected visual room. A missing or invalid custom document falls
+    /// back safely at theme resolution without discarding this preference.
+    pub theme: String,
     /// The place restored on the next launch after a clean close.
     ///
     /// This is view state, not a Settings row. Subject places keep their
@@ -267,10 +276,29 @@ impl Default for Config {
             output_device: None,
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
+            now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Library,
         }
     }
+}
+
+fn write_music_dirs(out: &mut String, music_dirs: &[PathBuf]) {
+    use std::fmt::Write as _;
+
+    // One line per folder keeps hand edits readable. A fresh install omits an
+    // empty array rather than leaving a key that looks as though it needs work.
+    let dirs: Vec<&str> = music_dirs.iter().filter_map(|dir| dir.to_str()).collect();
+    if dirs.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "# the folders baz holds, scanned in this order");
+    let _ = writeln!(out, "{MUSIC_DIRS} = [");
+    for dir in dirs {
+        let _ = writeln!(out, "    {},", toml_string(dir));
+    }
+    let _ = writeln!(out, "]");
 }
 
 impl Config {
@@ -286,23 +314,7 @@ impl Config {
         // Writing into a `String` cannot fail, so every `write!` here is
         // infallible; the results are dropped rather than handled.
         let mut out = String::from("# baz configuration — written by baz, safe to edit\n");
-        // Written on one line per folder rather than as an inline array, so a
-        // list of four is readable and a hand edit is one line. An empty list
-        // omits the key entirely: a fresh install's file should not carry an
-        // empty array asking to be filled in.
-        let dirs: Vec<&str> = self
-            .music_dirs
-            .iter()
-            .filter_map(|dir| dir.to_str())
-            .collect();
-        if !dirs.is_empty() {
-            let _ = writeln!(out, "# the folders baz holds, scanned in this order");
-            let _ = writeln!(out, "{MUSIC_DIRS} = [");
-            for dir in dirs {
-                let _ = writeln!(out, "    {},", toml_string(dir));
-            }
-            let _ = writeln!(out, "]");
-        }
+        write_music_dirs(&mut out, &self.music_dirs);
         // **The comment lists `GroupKey::ALL`'s own codes**, built rather than
         // spelled out. It was spelled out, and it went stale the day a key was
         // added — a config file telling its reader that a word it does not
@@ -361,9 +373,20 @@ impl Config {
         );
         let _ = writeln!(
             out,
+            "# whether Now Playing shows the local one-line fact feed\n\
+             {NOW_PLAYING_FACTS} = {}",
+            self.now_playing_facts,
+        );
+        let _ = writeln!(
+            out,
             "# concurrent local CLAP model sessions for Vibe scans (1–{MAX_VIBE_WORKERS})\n\
              {VIBE_WORKERS} = {}",
             self.vibe_workers,
+        );
+        let _ = writeln!(
+            out,
+            "# visual room; a built-in code or custom:<theme-id>\n{THEME} = {}",
+            toml_string(&self.theme),
         );
         let _ = writeln!(
             out,
@@ -451,12 +474,23 @@ impl Config {
             .and_then(toml::Value::as_str)
             .and_then(crate::visualizer::Foreground::from_code)
             .unwrap_or(crate::visualizer::Foreground::JewelCase);
+        let now_playing_facts = table
+            .get(NOW_PLAYING_FACTS)
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
         let vibe_workers = table
             .get(VIBE_WORKERS)
             .and_then(toml::Value::as_integer)
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_VIBE_WORKERS).contains(value))
             .unwrap_or(DEFAULT_VIBE_WORKERS);
+        let theme = table
+            .get(THEME)
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(crate::theme_file::DEFAULT_SELECTION)
+            .to_owned();
         // A place this build cannot name is Library, and only Library: never
         // guess which screen a newer spelling meant. Subject existence is
         // checked later, once the library and playlists are available.
@@ -475,7 +509,9 @@ impl Config {
             output_device,
             shuffle,
             visualization_foreground,
+            now_playing_facts,
             vibe_workers,
+            theme,
             last_place,
         }
     }
@@ -714,6 +750,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_fact_feed_is_on_by_default_and_round_trips_off() {
+        assert!(Config::from_toml("").now_playing_facts);
+        let config = Config {
+            now_playing_facts: false,
+            ..Config::default()
+        };
+        let text = config.to_toml();
+        assert!(text.contains("now_playing_facts = false"));
+        assert_eq!(Config::from_toml(&text), config);
+    }
+
     /// One damaged volume value costs only the volume, never a neighbouring
     /// standing decision.
     #[test]
@@ -789,7 +837,9 @@ mod tests {
                 output_device: None,
                 shuffle: false,
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
+                now_playing_facts: true,
                 vibe_workers: DEFAULT_VIBE_WORKERS,
+                theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
                 last_place: Place::Library,
             };
             let back = Config::from_toml(&config.to_toml());
@@ -1137,7 +1187,9 @@ mod tests {
             output_device: None,
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
+            now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Library,
         };
         let text = config.to_toml();
@@ -1161,7 +1213,9 @@ mod tests {
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::None,
+            now_playing_facts: false,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Playlist(42),
         };
         store(&path, &config).expect("store creates parents and writes");
@@ -1318,7 +1372,9 @@ mod tests {
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
             visualization_foreground: crate::visualizer::Foreground::Cover,
+            now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::NowPlaying,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");

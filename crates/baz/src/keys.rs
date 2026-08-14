@@ -370,6 +370,12 @@ impl From<iced::event::Status> for Focus {
 /// is this match, and it is exhaustively unit-tested below — including the
 /// modifier variants that must *not* fire.
 pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Option<Message> {
+    // F11 is a window act, not a content shortcut. It remains available while
+    // the search field owns text focus, just as the platform's fullscreen key
+    // does in a browser.
+    if key == &Key::Named(key::Named::F11) && modifiers.is_empty() {
+        return Some(Message::ToggleFullscreen);
+    }
     // The focused text field already had this key and made its decision.
     if focus == Focus::TextField {
         return None;
@@ -621,6 +627,20 @@ mod tests {
         );
         // The character spelling, for backends that report it that way.
         assert_eq!(bind(&ch(" "), none()).as_deref(), Some("PlayPause"));
+    }
+
+    #[test]
+    fn f11_toggles_the_window_even_while_search_has_focus() {
+        let key = named(key::Named::F11);
+        assert_eq!(bind(&key, none()).as_deref(), Some("ToggleFullscreen"));
+        assert_eq!(
+            binding_for(&key, none(), Focus::TextField)
+                .as_ref()
+                .map(tag)
+                .as_deref(),
+            Some("ToggleFullscreen")
+        );
+        assert_eq!(bind(&key, Modifiers::SHIFT), None);
     }
 
     /// The rule the whole module exists for: a focused search well types a

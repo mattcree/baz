@@ -54,7 +54,7 @@ use crate::motion::{Control, Ink, Keyed, Tween};
 use crate::mpris::Mpris;
 use crate::place::{History as PlaceHistory, Place};
 use crate::playback::{OutputChoice, Playback, PlayerEvent};
-use crate::player::PlayerState;
+use crate::player::{PlayerState, SignalPath, SignalWarningState};
 use crate::scan::ScanUpdate;
 use crate::selection::{Content, Press};
 use crate::{
@@ -135,8 +135,12 @@ fn blur_search<T: Send + 'static>() -> Task<T> {
 /// every read of `theme::active()` in the process has to see the same answer
 /// (ADR-0017 §1.5).
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
-    let room = theme::install();
-    println!("[startup] room: {}", room.name);
+    let selected_theme = config::config_file().map_or_else(
+        || crate::theme_file::DEFAULT_SELECTION.to_owned(),
+        |path| config::load(&path).theme,
+    );
+    let room = theme::install(&selected_theme);
+    crate::baz_log!("[startup] room: {}", room.name);
     let mut app = iced::application(
         move || App::new(started, cli_dir.clone()),
         App::update,
@@ -314,7 +318,7 @@ fn note_message(message: &Message) {
         .iter()
         .map(|(name, n)| format!("{name} {n}"))
         .collect();
-    println!("[msg] {total}/s  {}", listed.join("  ·  "));
+    crate::baz_log!("[msg] {total}/s  {}", listed.join("  ·  "));
 }
 
 /// Top-level messages; one enum across both screens keeps the seams simple.
@@ -568,6 +572,12 @@ pub(crate) enum Message {
     OpenPlaylist(u64),
     /// Play a saved playlist directly from its collection tile.
     PlayPlaylist(u64),
+    /// Playlists overview: ask before moving this saved file to trash.
+    PlaylistOverviewDeleteStart(u64),
+    /// Playlists overview: cancel the pending deletion.
+    PlaylistOverviewDeleteCancel,
+    /// Playlists overview: confirm the trash-backed deletion.
+    PlaylistOverviewDelete,
     /// **The album page's breadcrumb was pressed**: open that artist's page.
     ///
     /// The owner's *"we could add an Artist > album breadcrumb though. and
@@ -845,6 +855,10 @@ pub(crate) enum Message {
     /// it. One control and one message, because `window::toggle_maximize` is
     /// one action — the button's *drawing* is what carries the state.
     WindowMaximiseToggled,
+    /// F11: fill the window's current monitor, or return to its windowed size.
+    ToggleFullscreen,
+    /// The current mode read back before an F11 toggle.
+    WindowModeRead(window::Mode),
     /// Begin the compositor's native resize gesture from one window edge or
     /// corner. Emitted only by the borderless frame's narrow hit band.
     WindowResize(window::Direction),
@@ -900,6 +914,10 @@ pub(crate) enum Message {
     VisualizationForeground(crate::visualizer::Foreground),
     /// Show or hide the spectrum behind the Now Playing composition.
     ToggleSpectrum,
+    /// Show or hide the local one-line fact feed.
+    ToggleFacts,
+    /// Advance the sounding record's fixed fact cycle (timer or press).
+    AdvanceFact,
     /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -962,6 +980,22 @@ pub(crate) enum Message {
     OutputDeviceSelected(OutputChoice),
     /// Settings: choose how many local CLAP model sessions a Vibe scan may use.
     VibeWorkers(usize),
+    /// Settings → Appearance: persist one stable built-in selection code.
+    ThemeSelected(&'static str),
+    /// The local JSON paste field changed. No parsing or filesystem work yet.
+    ThemeJsonChanged(String),
+    /// Validate and install the JSON currently pasted into Settings.
+    ThemeImportPasted,
+    /// Open a local JSON theme file.
+    ThemePickFile,
+    /// The local theme file picker/read completed.
+    ThemeFilePicked(Result<String, String>),
+    /// Fill the paste field with a round-trippable v1 template.
+    ThemeLoadTemplate,
+    /// Export the selected room through a save dialog.
+    ThemeExport,
+    /// The local export completed.
+    ThemeExported(Result<PathBuf, String>),
     /// Settings place: show this section of the place (index into
     /// `views::settings::SECTIONS`).
     SettingsSection(usize),
@@ -993,8 +1027,27 @@ pub(crate) enum Message {
     /// Settings place: the confirming press. Stops holding the folder and
     /// forgets its tracks; the files on disk are untouched.
     RemoveMusicFolder(usize),
+    /// Settings: move one held music folder one slot earlier.
+    MoveMusicFolderUp(usize),
+    /// Settings: move one held music folder one slot later.
+    MoveMusicFolderDown(usize),
     /// Settings place: the armed removal was declined.
     CancelRemoveMusicFolder,
+    /// Settings: reveal the exact missing paths before any index change.
+    ConfirmPruneMissing,
+    /// Settings: forget the previewed missing paths, preserving first-seen
+    /// tombstones and touching no files, playlists, history or playback.
+    PruneMissing,
+    /// Settings: dismiss the missing-path confirmation unchanged.
+    CancelPruneMissing,
+    /// Settings: reveal legacy rows assigned to no configured folder.
+    ConfirmPruneUnrooted,
+    /// Settings: remove the previewed rootless rows from the index only.
+    PruneUnrooted,
+    /// Settings: dismiss the rootless-row confirmation unchanged.
+    CancelPruneUnrooted,
+    /// Settings: show the listener-owned playlists folder in the file manager.
+    OpenPlaylistsFolder,
     /// Settings place: **force sync** — re-read every file in every folder,
     /// ignoring stamps (ADR-0022 §3).
     ForceSync,
@@ -1007,7 +1060,7 @@ pub(crate) enum Message {
     /// keeps *no artwork is ever drawn larger than its source* true on the Now
     /// playing place before that record's hero has landed (see
     /// [`Shelf::thumb_px`]).
-    ThumbLoaded(u64, u32, Duration, Option<(f32, iced_image::Handle)>),
+    ThumbLoaded(u64, u32, Duration, Option<(f32, usize, iced_image::Handle)>),
     /// An off-thread **hero** decode finished — the Now playing place's own
     /// tier ([`art::load_hero`], doc 12 §5.2). `None` = no usable art, which
     /// is the same answer [`Self::ThumbLoaded`] gives and is recorded in the
@@ -1171,6 +1224,9 @@ struct App {
     /// [`Command::UpdateQueue`] and nothing else, so an undo can never
     /// sound.
     queue_undo: crate::undo::History<vm::QueueVm>,
+    /// Consecutive search `Next` presses append after the prior insertion
+    /// rather than reversing themselves at `cursor + 1`.
+    enqueue_next: crate::search::NextAnchor,
     /// The open context menu, if one stands (doc 09 §5.2) — `None` at rest.
     ///
     /// **One `Option` is the whole overlay state**, which is what makes
@@ -1210,6 +1266,8 @@ struct App {
     /// found the compositor had refused would be a control that lies about the
     /// window: on Wayland a maximise request is a request.
     window_maximized: bool,
+    /// Whether Baz most recently placed its sole window in fullscreen mode.
+    fullscreen: bool,
     /// When the app bar was last pressed, for the double-press that maximises
     /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
     /// double, so that three presses are a double and a single.
@@ -1218,6 +1276,8 @@ struct App {
     case_rotation: crate::jewel_case::Rotation,
     /// The foreground object and independent audio background in Now Playing.
     visualization: crate::visualizer::State,
+    /// Position in the sounding record's fixed local-fact cycle.
+    fact_index: usize,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -1225,10 +1285,17 @@ struct App {
     output_choices: Vec<OutputChoice>,
     /// The endpoint written in config (or the system default).
     output_choice: OutputChoice,
+    /// The endpoint this process actually opened. A picker change intentionally
+    /// does not tear the current run down; it becomes active only at launch.
+    active_output_choice: OutputChoice,
     /// Enumeration failure, shown in Settings and recorded in status.
     output_devices_error: Option<String>,
     /// Event-derived playback state; the only thing playback widgets read.
     player: PlayerState,
+    /// The Baz-owned rate conversion already admitted to the event history.
+    /// Repeated engine reports of the same continuing condition stay quiet;
+    /// a direct report clears it so a later conversion is a fresh warning.
+    signal_warning: SignalWarningState,
     /// Desktop media integration (Linux MPRIS2; a no-op elsewhere).
     mpris: Mpris,
     /// The current track's cover-art URL, with the
@@ -1305,7 +1372,7 @@ struct App {
     /// What [`Self::request_offscreen_art`] last asked for: the lane's stamps,
     /// the place, and the lane's first visible row, which together change
     /// exactly when one of the surfaces beside the wall changes what it draws.
-    art_mark: ((u64, u64), Place, usize),
+    art_mark: ((u64, u64), Place, usize, bool),
     /// Whether a scan was running when the last message was answered — the
     /// falling edge is when the lists are re-read (see
     /// [`Self::sync_lists_with_the_library`]).
@@ -1332,6 +1399,10 @@ struct App {
     /// and for `crate::panels`' reason: which section you last read is not a
     /// standing decision, so it is not in `config.toml`.
     settings_section: usize,
+    /// Settings → Appearance paste/import field; session-only until validated.
+    theme_json: String,
+    /// Exact result of the most recent local theme operation.
+    theme_notice: Option<String>,
     /// The density the wall opens at, read from the config for the same reason
     /// and handed to the shelf the same way (ADR-0017 step 6).
     density: shelf::Density,
@@ -1514,6 +1585,24 @@ impl Blocked {
 }
 
 impl App {
+    /// Validate and install the Settings paste field as a local custom theme.
+    /// Selection is persisted only after the complete document is safe and on
+    /// disk, so a failed import cannot strand the next launch.
+    fn import_theme_json(&mut self) -> Task<Message> {
+        match crate::theme_file::import(&self.theme_json) {
+            Ok((selection, path)) => {
+                let saved = selection.clone();
+                persist(move |config| config.theme = saved);
+                self.theme_notice = Some(format!(
+                    "Imported {} and selected it for the next launch.",
+                    path.display()
+                ));
+            }
+            Err(error) => self.theme_notice = Some(error),
+        }
+        Task::none()
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "a launch is one composition of independent restores — the \
@@ -1529,6 +1618,7 @@ impl App {
             .as_ref()
             .and_then(|config| config.output_device.as_deref());
         let output_choice = OutputChoice::from_config(configured_output);
+        let active_output_choice = output_choice.clone();
         let (output_choices, output_devices_error) =
             crate::playback::output_choices(configured_output);
         // Engine first: open failure must not kill the app — it becomes
@@ -1595,12 +1685,12 @@ impl App {
         let history_ledger = match HistoryLedger::open_default() {
             Ok(ledger) => {
                 let ledger = Arc::new(ledger);
-                println!("[history] recording to {}", ledger.path().display());
+                crate::baz_log!("[history] recording to {}", ledger.path().display());
                 playback.set_history(Some(Arc::clone(&ledger)));
                 Some(ledger)
             }
             Err(error) => {
-                println!("[history] not recording: {error}");
+                crate::baz_log!("[history] not recording: {error}");
                 None
             }
         };
@@ -1674,11 +1764,13 @@ impl App {
             _history_ledger: history_ledger,
             group_key,
             settings_section: 0,
+            theme_json: String::new(),
+            theme_notice: None,
             density,
             lane_open,
             lane: crate::lane::Lane::default(),
             lane_mark: (u64::MAX, u64::MAX),
-            art_mark: ((u64::MAX, u64::MAX), Place::Settings, usize::MAX),
+            art_mark: ((u64::MAX, u64::MAX), Place::Settings, usize::MAX, false),
             was_scanning: true,
             resume: resume.clone(),
             written: (0, None, 0),
@@ -1690,6 +1782,7 @@ impl App {
             place: Place::default(),
             place_history: PlaceHistory::new(Place::default()),
             hovered_queue_row: None,
+            enqueue_next: crate::search::NextAnchor::default(),
             queue_scroll: 0.0,
             lane_scroll: 0.0,
             show_on_start: None,
@@ -1704,17 +1797,24 @@ impl App {
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
+            fullscreen: false,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
                 foreground: saved_visualization_foreground,
+                facts: stored
+                    .as_ref()
+                    .is_none_or(|config| config.now_playing_facts),
                 ..crate::visualizer::State::default()
             },
+            fact_index: 0,
             playback,
             output_choices,
             output_choice,
+            active_output_choice,
             output_devices_error,
             player,
+            signal_warning: SignalWarningState::default(),
             mpris,
             mpris_art: (0, None),
             ink: Keyed::new(),
@@ -2040,6 +2140,52 @@ impl App {
                 persist(move |config| config.vibe_workers = workers);
                 Task::none()
             }
+            Message::ThemeSelected(selection) => {
+                persist(move |config| selection.clone_into(&mut config.theme));
+                self.theme_notice = Some(format!(
+                    "{} will be used the next time baz starts.",
+                    crate::theme_file::preview(selection)
+                        .map_or_else(|_| selection.to_owned(), |preview| preview.name)
+                ));
+                Task::none()
+            }
+            Message::ThemeJsonChanged(text) => {
+                self.theme_json = text;
+                self.theme_notice = None;
+                Task::none()
+            }
+            Message::ThemeLoadTemplate => {
+                self.theme_json = crate::theme_file::template();
+                self.theme_notice = Some(
+                    "Template loaded below; edit its id, name and colours, then import it."
+                        .to_owned(),
+                );
+                Task::none()
+            }
+            Message::ThemeImportPasted => self.import_theme_json(),
+            Message::ThemePickFile => pick_theme_file(),
+            Message::ThemeFilePicked(Ok(text)) => {
+                self.theme_json = text;
+                self.import_theme_json()
+            }
+            Message::ThemeFilePicked(Err(error)) => {
+                self.theme_notice = Some(error);
+                Task::none()
+            }
+            Message::ThemeExport => {
+                let selection = config::config_file().map_or_else(
+                    || crate::theme_file::DEFAULT_SELECTION.to_owned(),
+                    |path| config::load(&path).theme,
+                );
+                export_theme(selection)
+            }
+            Message::ThemeExported(result) => {
+                self.theme_notice = Some(match result {
+                    Ok(path) => format!("Theme exported to {}.", path.display()),
+                    Err(error) => error,
+                });
+                Task::none()
+            }
             Message::WindowResized(size) => {
                 let playlist_before = match self.place {
                     Place::Playlist(_) => Some((
@@ -2055,7 +2201,7 @@ impl App {
                     _ => None,
                 };
                 self.window = size;
-                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX);
+                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX, false);
                 let laid_out = match &mut self.screen {
                     Screen::Shelf(state) => state.update(Message::WindowResized(size)),
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
@@ -2153,6 +2299,25 @@ impl App {
             // drawing the bar rather than the behaviour.
             Message::WindowMinimised => latest_window(|id| window::minimize(id, true)),
             Message::WindowMaximiseToggled => latest_window(window::toggle_maximize),
+            Message::ToggleFullscreen => latest_window(window::mode).map(Message::WindowModeRead),
+            Message::WindowModeRead(mode) => {
+                let target = fullscreen_target(mode);
+                self.fullscreen = target == window::Mode::Fullscreen;
+                latest_window(move |id| window::set_mode(id, target))
+            }
+            Message::OpenPlaylistsFolder => {
+                if let Some(path) = self.playlists.folder_path()
+                    && let Err(error) = crate::desktop::open_folder(path)
+                    && let Screen::Shelf(state) = &mut self.screen
+                {
+                    state.health.record(
+                        crate::health::Level::Error,
+                        "Could not open playlists folder",
+                        error,
+                    );
+                }
+                Task::none()
+            }
             Message::WindowResize(direction) => {
                 latest_window(move |id| window::drag_resize(id, direction))
             }
@@ -2192,7 +2357,7 @@ impl App {
                 // lane for its visible rows again first so their cache entries
                 // become recent and page scrolling evicts offscreen page art,
                 // not persistent chrome.
-                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX);
+                self.art_mark = ((u64::MAX, u64::MAX), Place::Settings, usize::MAX, false);
                 match &mut self.screen {
                     Screen::Shelf(state) => state.update(message),
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
@@ -2314,7 +2479,7 @@ impl App {
                 let roots = blocked.roots.clone();
                 match Shelf::open(roots, self.group_key, self.density, self.lane_open) {
                     Ok((state, task)) => {
-                        println!("[library] retry opened the library");
+                        crate::baz_log!("[library] retry opened the library");
                         self.screen = Screen::Shelf(Box::new(state));
                         task
                     }
@@ -2363,7 +2528,7 @@ impl App {
                 return Task::none();
             }
         };
-        println!("[library] set aside to {}", aside.display());
+        crate::baz_log!("[library] set aside to {}", aside.display());
         let roots = std::mem::take(&mut blocked.roots);
         match Shelf::open(roots.clone(), self.group_key, self.density, self.lane_open) {
             Ok((state, task)) => {
@@ -2545,7 +2710,12 @@ impl App {
     /// Put exactly one search answer in the list the current place presents.
     /// On a saved playlist page that means the playlist file; everywhere else
     /// it means the live run. Neither route starts playback.
-    fn enqueue_search_track(&mut self, album: u64, row: usize) -> Task<Message> {
+    fn enqueue_search_track(
+        &mut self,
+        album: u64,
+        row: usize,
+        position: crate::search::Action,
+    ) -> Task<Message> {
         let item = match &self.screen {
             Screen::Shelf(state) => state
                 .albums
@@ -2563,6 +2733,9 @@ impl App {
                     let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
                     self.playlists.append(id, entries, &state.library);
                 }
+                self.enqueue_next.clear();
+            } else if position == crate::search::Action::Next {
+                self.insert_items_next(vec![item]);
             } else {
                 self.append_items_to_run(vec![item]);
             }
@@ -2576,11 +2749,12 @@ impl App {
             state.search_action = action;
         }
         match (content, action) {
-            (Content::SearchTrack { album, row }, crate::search::Action::Enqueue) => {
-                self.enqueue_search_track(album, row)
-            }
+            (
+                Content::SearchTrack { album, row },
+                crate::search::Action::Next | crate::search::Action::End,
+            ) => self.enqueue_search_track(album, row, action),
             (_, crate::search::Action::Play) => self.activate_content(content),
-            (_, crate::search::Action::Enqueue) => Task::none(),
+            (_, crate::search::Action::Next | crate::search::Action::End) => Task::none(),
         }
     }
 
@@ -2626,7 +2800,9 @@ impl App {
                         } else {
                             1
                         };
-                        state.search_action = state.search_action.moved(delta);
+                        let split =
+                            !matches!(self.place, Place::Playlist(_)) && self.player.queued() > 0;
+                        state.search_action = state.search_action.moved(delta, split);
                     }
                     blur_search()
                 }
@@ -2795,11 +2971,20 @@ impl App {
             Message::ToggleSpectrum if self.place == Place::NowPlaying => {
                 self.visualization.spectrum = !self.visualization.spectrum;
             }
+            Message::ToggleFacts if self.place == Place::NowPlaying => {
+                self.visualization.facts = !self.visualization.facts;
+                persist(|config| config.now_playing_facts = self.visualization.facts);
+            }
+            Message::AdvanceFact if self.place == Place::NowPlaying && self.visualization.facts => {
+                self.fact_index = self.fact_index.wrapping_add(1);
+            }
             Message::CasePressed(_)
             | Message::CaseDragged(_)
             | Message::CaseReleased
             | Message::VisualizationForeground(_)
-            | Message::ToggleSpectrum => {}
+            | Message::ToggleSpectrum
+            | Message::ToggleFacts
+            | Message::AdvanceFact => {}
             _ => return None,
         }
         Some(Task::none())
@@ -2821,7 +3006,7 @@ impl App {
     fn log_first_frame(&mut self) -> Task<Message> {
         if !self.first_frame_logged {
             self.first_frame_logged = true;
-            println!(
+            crate::baz_log!(
                 "[startup] startup-to-interactive: {:.1} ms",
                 self.started.elapsed().as_secs_f64() * 1e3
             );
@@ -3135,6 +3320,35 @@ impl App {
                     self.playlists.hovered = None;
                 }
             }
+            Message::PlaylistOverviewDeleteStart(id) => {
+                self.playlists.confirming_overview_delete = Some(*id);
+                self.playlists.hovered = None;
+            }
+            Message::PlaylistOverviewDeleteCancel => {
+                self.playlists.confirming_overview_delete = None;
+            }
+            Message::PlaylistOverviewDelete => {
+                let Some(id) = self.playlists.confirming_overview_delete else {
+                    return Some(Task::none());
+                };
+                let before = self.playlists.rows.iter().position(|row| row.id == id);
+                let library = match &self.screen {
+                    Screen::Shelf(state) => Some(&state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
+                };
+                if self.playlists.delete_id(id, library)
+                    && let Screen::Shelf(state) = &mut self.screen
+                {
+                    if let Some(row) = before.and_then(|index| {
+                        let last = self.playlists.rows.len().saturating_sub(1);
+                        self.playlists.rows.get(index.min(last))
+                    }) {
+                        state.selection.select(Content::Playlist(row.id));
+                    } else {
+                        state.selection.clear();
+                    }
+                }
+            }
             Message::PickPlaylist(id) => {
                 if let Screen::Shelf(state) = &self.screen {
                     self.playlists.pick(*id, &state.library);
@@ -3242,7 +3456,10 @@ impl App {
                     Screen::Shelf(state) => Some(&state.library),
                     Screen::Setup(_) | Screen::Blocked(_) => None,
                 };
-                if self.playlists.delete_open(library) && matches!(self.place, Place::Playlist(_)) {
+                let id = self.playlists.open.as_ref().map(|open| open.id);
+                if id.is_some_and(|id| self.playlists.delete_id(id, library))
+                    && matches!(self.place, Place::Playlist(_))
+                {
                     // The page's subject is in the trash; its collection root
                     // is the honest answer.
                     let from = self.place;
@@ -3791,12 +4008,48 @@ impl App {
         });
     }
 
+    /// Insert after the sounding cursor, or after the preceding search `Next`
+    /// insertion while that same run/track still stands. The whole edited list
+    /// remains the protocol payload; the anchor only prevents repeated presses
+    /// from reversing one another locally.
+    fn insert_items_next(&mut self, items: Vec<vm::QueueItemVm>) {
+        if items.is_empty() {
+            return;
+        }
+        let Some(before) = self.player.queue().cloned() else {
+            self.append_items_to_run(items);
+            return;
+        };
+        let at = self.enqueue_next.insertion(
+            self.player.track_seq(),
+            self.player.playing_queue_row(),
+            before.items.len(),
+        );
+        let Some(edited) = queue_edit::inserted(&before, at, items) else {
+            self.enqueue_next.clear();
+            return;
+        };
+        let paths = edited.paths();
+        if self
+            .playback
+            .send(Command::UpdateQueueNext { paths, next: at })
+        {
+            self.player.note_queue_edited_next(edited, at);
+            self.queue_undo.push(before);
+        } else {
+            self.enqueue_next.clear();
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
     /// Append `addition` to the run through `UpdateQueue` — the one shape
     /// every queue-destination pick and the page's `Queue` share. The music
     /// keeps playing; appending to an empty stopped engine loads the queue
     /// without starting it, so nothing sounds unasked (`app.rs`'s own rule,
     /// cited by 09 §8.1).
     fn append_to_run(&mut self, mut addition: vm::QueueVm) {
+        self.enqueue_next.clear();
         // What the run held before the append — the empty list when it held
         // nothing — kept for the Queue place's `Undo` (doc 11 §5 P2: an
         // append is an edit a hand can take back, and taking back an append
@@ -4135,7 +4388,7 @@ impl App {
         };
         self.resume.clone_from(&snapshot);
         if let Err(error) = crate::session::store(&path, &snapshot) {
-            println!("[session] could not write {}: {error}", path.display());
+            crate::baz_log!("[session] could not write {}: {error}", path.display());
         }
     }
 
@@ -4185,7 +4438,12 @@ impl App {
     )]
     fn request_offscreen_art(&mut self) -> Task<Message> {
         let lane_first = (self.lane_scroll.max(0.0) / theme::SIDEBAR_ROW_H).floor() as usize;
-        let mark = (self.lane_mark, self.place, lane_first);
+        let mark = (
+            self.lane_mark,
+            self.place,
+            lane_first,
+            self.playlists.panel_open,
+        );
         if mark == self.art_mark {
             return Task::none();
         }
@@ -4210,7 +4468,7 @@ impl App {
             }
         }
         if std::env::var_os("BAZ_PERF_LOG").is_some() {
-            println!(
+            crate::baz_log!(
                 "[art] lane rows={} window={first}..{end} records={} collage-records={}",
                 self.lane.rows.len(),
                 lane_records.len(),
@@ -4234,12 +4492,39 @@ impl App {
         if self.place != Place::Library {
             state.thumbs.focus_wall(std::iter::empty());
         }
-        if !matches!(self.place, Place::Playlists | Place::Playlist(_)) {
+        if !matches!(
+            self.place,
+            Place::Playlists | Place::Playlist(_) | Place::Queue
+        ) {
             state.thumbs.focus_page(std::iter::empty());
         }
         let mut ids = lane_records;
         if self.place == Place::Home {
             ids.extend(state.home_art());
+            if let Some((path, _)) = crate::views::home::standing(&self.player, &self.resume)
+                && let Some(album) = state.albums.iter().find(|album| {
+                    album
+                        .editions
+                        .iter()
+                        .flat_map(|edition| &edition.tracks)
+                        .any(|track| track.path == path)
+                })
+            {
+                ids.push(album.id);
+            }
+        }
+        if self.playlists.panel_open {
+            // The panel is a real visible sleeve consumer layered over any
+            // non-Settings place. It has no independent cache and constructs
+            // its complete (normally short) directory in one scrollable, so
+            // pin the quotations it can expose, including All songs.
+            ids.extend(state.all_songs().art);
+            ids.extend(
+                self.playlists
+                    .rows
+                    .iter()
+                    .flat_map(|playlist| playlist.art.iter().copied()),
+            );
         }
         if let Some(id) = open_artist {
             let theirs: Vec<u64> = crate::views::artist::records(state, id)
@@ -4385,7 +4670,7 @@ impl App {
             self.playlists.note_played(id, at);
         }
         if runs > 0 {
-            println!("[history] {runs} list runs credited from the ledger");
+            crate::baz_log!("[history] {runs} list runs credited from the ledger");
         }
     }
 
@@ -4638,6 +4923,14 @@ impl App {
     /// documented two-press behaviour, and §4.6 of the design spec owns the
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
+        // Fullscreen is a window layer around every place. Leave it before
+        // changing the place or peeling any in-place layer, so the kiosk's
+        // first Escape returns the same Now Playing composition to its prior
+        // window instead of unexpectedly navigating away.
+        if self.fullscreen {
+            self.fullscreen = false;
+            return latest_window(|id| window::set_mode(id, window::Mode::Windowed));
+        }
         // A drag in flight peels before every layer: the hand is
         // mid-gesture, and Esc is the gesture's one explicit discard —
         // the lifted row goes back, nothing is sent ([`crate::drag`];
@@ -4730,7 +5023,8 @@ impl App {
                 let volume_confirmed = matches!(&event, Event::VolumeChanged { .. });
                 match &event {
                     Event::TrackStarted { path, position } => {
-                        println!(
+                        self.fact_index = 0;
+                        crate::baz_log!(
                             "[playback] track started (queue #{position}): {}",
                             path.display()
                         );
@@ -4773,7 +5067,7 @@ impl App {
                         }
                     }
                     Event::TrackFailed { path, reason } => {
-                        println!("[playback] track skipped: {} ({reason})", path.display());
+                        crate::baz_log!("[playback] track skipped: {} ({reason})", path.display());
                         if let Screen::Shelf(state) = &mut self.screen {
                             state.health.record(
                                 crate::health::Level::Warning,
@@ -4783,16 +5077,20 @@ impl App {
                         }
                     }
                     Event::QueueEnded => {
-                        println!("[playback] queue ended");
+                        crate::baz_log!("[playback] queue ended");
                         self.show_on_start = None;
+                        self.signal_warning.clear();
                         // The run the history described is over — the third
                         // of P2's three ends for an edit history (next
                         // edit, navigation, the run ending).
                         self.queue_undo.clear();
                     }
-                    // The signal-path readout, logged as plain information —
-                    // it says what the chain is doing, not that anything is
-                    // wrong (see crate::playback's "Signal path").
+                    Event::Stopped => {
+                        self.signal_warning.clear();
+                    }
+                    // The resident readout stays factual; an active Baz-owned
+                    // resampler is additionally an actionable, deduplicated
+                    // warning in the canonical event history.
                     Event::SignalPath {
                         source_rate_hz,
                         source_channels,
@@ -4800,6 +5098,22 @@ impl App {
                         output_rate_hz,
                         chain,
                     } => {
+                        let path = SignalPath {
+                            source_rate_hz: *source_rate_hz,
+                            source_channels: *source_channels,
+                            source_bits: *source_bits,
+                            output_rate_hz: *output_rate_hz,
+                            chain: *chain,
+                        };
+                        if let Some(warning) = self.signal_warning.observe(path)
+                            && let Screen::Shelf(state) = &mut self.screen
+                        {
+                            state.health.record(
+                                crate::health::Level::Warning,
+                                warning.title,
+                                warning.detail,
+                            );
+                        }
                         let depth =
                             source_bits.map_or_else(String::new, |bits| format!("/{bits}-bit"));
                         // Named only when there is something to say: a
@@ -4817,10 +5131,15 @@ impl App {
                             }
                             other => format!("{other:?}"),
                         };
-                        println!(
+                        crate::baz_log!(
                             "[playback] signal path: {source_rate_hz} Hz{depth}{fold} source -> \
                              {output_rate_hz} Hz output, {doing}"
                         );
+                    }
+                    Event::PlayRecorded { .. } => {
+                        if let Screen::Shelf(state) = &mut self.screen {
+                            state.history = read_history();
+                        }
                     }
                     _ => {}
                 }
@@ -4839,7 +5158,7 @@ impl App {
                 }
             }
             PlayerEvent::Closed => {
-                println!("[playback] engine shut down");
+                crate::baz_log!("[playback] engine shut down");
                 self.show_on_start = None;
                 self.volume_wheel_settles = None;
                 self.player.engine_closed();
@@ -5322,7 +5641,7 @@ impl App {
         }
         self.player.note_traversal(traversal);
         persist_shuffle(on);
-        println!(
+        crate::baz_log!(
             "[shuffle] {} \u{2014} the run keeps its own order; the walk changed",
             if on { "on" } else { "off" }
         );
@@ -5356,7 +5675,7 @@ impl App {
             // is claimed — the rule every play gesture in baz keeps.
             return;
         }
-        println!("[all-songs] play everything — {}", list.counts());
+        crate::baz_log!("[all-songs] play everything — {}", list.counts());
         self.start(list);
     }
 
@@ -5371,7 +5690,7 @@ impl App {
         if list.is_empty() {
             return;
         }
-        println!(
+        crate::baz_log!(
             "[artist-songs] play {} — {}",
             list.origin.name(),
             list.counts()
@@ -5769,7 +6088,7 @@ impl App {
     )]
     fn view(&self) -> Element<'_, Message> {
         if std::env::var_os("BAZ_FRAME_LOG").is_some() {
-            println!(
+            crate::baz_log!(
                 "[frame] {:.3}",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -5893,6 +6212,13 @@ impl App {
                     .visualization
                     .spectrum
                     .then(|| self.playback.visualization());
+                let fact = self
+                    .visualization
+                    .facts
+                    .then(|| crate::facts::current(state, &self.player))
+                    .and_then(|facts| {
+                        (!facts.is_empty()).then(|| facts[self.fact_index % facts.len()].clone())
+                    });
                 views::now_playing::view(
                     state,
                     &self.player,
@@ -5904,6 +6230,7 @@ impl App {
                         foreground: self.visualization.foreground,
                         audio: audio.as_ref(),
                     },
+                    fact.as_ref(),
                 )
             }
             (Screen::Shelf(state), Place::Settings) => {
@@ -5915,15 +6242,29 @@ impl App {
                     &self.player,
                     self.body_width(),
                     self.settings_section,
-                    state.library_view(),
+                    state.library_view(self.playlists.folder_path()),
                     views::settings::OutputView {
                         choices: &self.output_choices,
                         selected: &self.output_choice,
+                        active: &self.active_output_choice,
                         error: self.output_devices_error.as_deref(),
                     },
                     config::config_file().map_or(config::DEFAULT_VIBE_WORKERS, |path| {
                         config::load(&path).vibe_workers
                     }),
+                    views::settings::ThemeView {
+                        selected: config::config_file().map_or_else(
+                            || crate::theme_file::DEFAULT_SELECTION.to_owned(),
+                            |path| config::load(&path).theme,
+                        ),
+                        json: &self.theme_json,
+                        notice: self.theme_notice.as_deref(),
+                    },
+                    if self.settings_section == views::settings::DEBUG_SECTION {
+                        crate::diagnostic::snapshot()
+                    } else {
+                        Vec::new()
+                    },
                 )
             }
         };
@@ -5994,6 +6335,12 @@ impl App {
         } else {
             screen
         };
+        // **The body has one physical clip, outside every place and inside
+        // both resident bars.** A scrollable's cached active/inactive state is
+        // no longer trusted to be the only renderer scissor around images;
+        // navigation, resize, density and conditional overlay transitions all
+        // pass through this stable boundary for paint and pointer input.
+        let screen = crate::window_frame::body_clip(screen);
         // **The app bar, over everything** (ADR-0040): the band a platform
         // title bar occupies, drawn by baz, resident and identical in all
         // nine places.
@@ -6172,6 +6519,33 @@ impl App {
         Ink::new(self.ink, self.pressed_control)
     }
 
+    fn add_place_clocks(&self, subs: &mut Vec<Subscription<Message>>) {
+        if visualization_clock(
+            self.place,
+            self.player.now_playing().is_some(),
+            self.visualization,
+        ) {
+            subs.push(
+                iced::time::every(crate::jewel_case::TICK)
+                    .map(|_| Message::CaseTick(Instant::now())),
+            );
+        }
+        if fact_clock(
+            self.place,
+            self.player.now_playing().is_some(),
+            self.visualization.facts,
+        ) {
+            subs.push(iced::time::every(Duration::from_secs(20)).map(|_| Message::AdvanceFact));
+        }
+        if let Screen::Shelf(state) = &self.screen {
+            if state.scanning {
+                subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
+            } else {
+                subs.push(iced::time::every(REFRESH_TICK).map(|_| Message::RefreshTick));
+            }
+        }
+    }
+
     fn subscription(&self) -> Subscription<Message> {
         fn event_message(
             event: iced::Event,
@@ -6287,30 +6661,9 @@ impl App {
         // always absent away from this visible place or without a sounding
         // record. Keyboard focus is deliberately irrelevant: Now Playing is
         // ambient content meant to remain alive on a second monitor.
-        if visualization_clock(
-            self.place,
-            self.player.now_playing().is_some(),
-            self.visualization,
-        ) {
-            subs.push(
-                iced::time::every(crate::jewel_case::TICK)
-                    .map(|_| Message::CaseTick(Instant::now())),
-            );
-        }
-        // The scan channel is drained on a coarse tick — batching by design.
-        if let Screen::Shelf(state) = &self.screen {
-            if state.scanning {
-                subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
-            } else {
-                // The periodic refresh's only clock (ADR-0022 §3), and it runs
-                // **only while no scan is running** — the two are alternatives,
-                // never both. It ticks far more often than the interval so that
-                // "due" is answered by the arithmetic in `scan::Refresh` rather
-                // than by the timer's phase; at one wake a minute this is
-                // nothing beside the 10 Hz tick it replaces.
-                subs.push(iced::time::every(REFRESH_TICK).map(|_| Message::RefreshTick));
-            }
-        }
+        // Place-owned animation, facts and scan/refresh clocks are added only
+        // while their corresponding surface or operation is alive.
+        self.add_place_clocks(&mut subs);
         Subscription::batch(subs)
     }
 }
@@ -6450,11 +6803,18 @@ fn shortest_edge(w: u32, h: u32) -> f32 {
 /// the surfaces beside the wall, and the playlist collages — and three copies
 /// of *decode, measure, wrap* is three places for the measurement to drift
 /// away from the pixels it describes.
-fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, iced_image::Handle) {
+fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, usize, iced_image::Handle) {
+    let bytes = rgba.len();
     (
         shortest_edge(w, h),
+        bytes,
         iced_image::Handle::from_rgba(w, h, rgba),
     )
+}
+
+struct ThumbEntry {
+    handle: iced_image::Handle,
+    decoded_bytes: usize,
 }
 
 /// The thumbnail cache with an un-evictable resident tier for what the current
@@ -6467,8 +6827,15 @@ fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, iced_image::Handle) {
 /// for everything off screen and moves current targets into a separate map;
 /// leaving the target returns a handle to the LRU immediately.
 struct ThumbCache {
-    recent: LruCache<u64, iced_image::Handle>,
-    resident: HashMap<u64, iced_image::Handle>,
+    recent: LruCache<u64, ThumbEntry>,
+    resident: HashMap<u64, ThumbEntry>,
+    /// Handles that have actually reached a visible target in this process.
+    ///
+    /// Moving away must not turn an already-present sleeve back into a
+    /// gradient. Retaining only entries that were resident (rather than every
+    /// speculative completion) makes the cost proportional to artwork the
+    /// listener has visited; it is bounded above by the indexed collection.
+    retained: HashMap<u64, ThumbEntry>,
     wall: HashSet<u64>,
     chrome: HashSet<u64>,
     page: HashSet<u64>,
@@ -6479,6 +6846,7 @@ impl ThumbCache {
         Self {
             recent: LruCache::new(capacity),
             resident: HashMap::new(),
+            retained: HashMap::new(),
             wall: HashSet::new(),
             chrome: HashSet::new(),
             page: HashSet::new(),
@@ -6486,34 +6854,60 @@ impl ThumbCache {
     }
 
     fn peek(&self, id: u64) -> Option<&iced_image::Handle> {
-        self.resident.get(&id).or_else(|| self.recent.peek(&id))
+        self.resident
+            .get(&id)
+            .or_else(|| self.retained.get(&id))
+            .or_else(|| self.recent.peek(&id))
+            .map(|entry| &entry.handle)
     }
 
     fn touch(&mut self, id: u64) -> bool {
-        self.resident.contains_key(&id) || self.recent.get(&id).is_some()
+        self.resident.contains_key(&id)
+            || self.retained.contains_key(&id)
+            || self.recent.get(&id).is_some()
     }
 
-    fn put(&mut self, id: u64, handle: iced_image::Handle) {
+    fn put(&mut self, id: u64, handle: iced_image::Handle, decoded_bytes: usize) {
+        let entry = ThumbEntry {
+            handle,
+            decoded_bytes,
+        };
         if self.is_pinned(id) {
             self.recent.pop(&id);
-            self.resident.insert(id, handle);
+            self.retained.remove(&id);
+            self.resident.insert(id, entry);
         } else {
             self.resident.remove(&id);
-            self.recent.put(id, handle);
+            self.retained.remove(&id);
+            self.recent.put(id, entry);
         }
     }
 
     fn clear_handles(&mut self) {
         self.recent.clear();
         self.resident.clear();
+        self.retained.clear();
     }
 
     fn len(&self) -> usize {
-        self.recent.len() + self.resident.len()
+        self.recent.len() + self.resident.len() + self.retained.len()
     }
 
     fn resident_len(&self) -> usize {
         self.resident.len()
+    }
+
+    fn retained_len(&self) -> usize {
+        self.retained.len()
+    }
+
+    fn decoded_bytes(&self) -> usize {
+        self.resident
+            .values()
+            .chain(self.retained.values())
+            .chain(self.recent.iter().map(|(_, entry)| entry))
+            .map(|entry| entry.decoded_bytes)
+            .sum()
     }
 
     fn focus_wall(&mut self, ids: impl IntoIterator<Item = u64>) {
@@ -6535,6 +6929,20 @@ impl ThumbCache {
         self.wall.contains(&id) || self.chrome.contains(&id) || self.page.contains(&id)
     }
 
+    /// One ordered snapshot of every target the current composition can draw.
+    /// Wall and page work lead the resident chrome, but no category replaces
+    /// another category's queue.
+    fn targets(&self) -> Vec<u64> {
+        let mut seen = HashSet::new();
+        self.wall
+            .iter()
+            .chain(&self.page)
+            .chain(&self.chrome)
+            .copied()
+            .filter(|id| seen.insert(*id))
+            .collect()
+    }
+
     fn reconcile(&mut self) {
         let wanted: HashSet<u64> = self
             .wall
@@ -6550,15 +6958,18 @@ impl ThumbCache {
             .copied()
             .collect();
         for id in leaving {
-            if let Some(handle) = self.resident.remove(&id) {
-                self.recent.put(id, handle);
+            if let Some(entry) = self.resident.remove(&id) {
+                self.retained.insert(id, entry);
             }
         }
         for id in wanted {
-            if !self.resident.contains_key(&id)
-                && let Some(handle) = self.recent.pop(&id)
-            {
-                self.resident.insert(id, handle);
+            if self.resident.contains_key(&id) {
+                continue;
+            }
+            if let Some(entry) = self.retained.remove(&id) {
+                self.resident.insert(id, entry);
+            } else if let Some(entry) = self.recent.pop(&id) {
+                self.resident.insert(id, entry);
             }
         }
     }
@@ -6577,7 +6988,6 @@ impl ThumbCache {
 #[derive(Debug, Default)]
 struct ThumbJobs {
     foreground: VecDeque<u64>,
-    chrome: VecDeque<u64>,
     queued: HashSet<u64>,
     in_flight: HashSet<u64>,
     started: u64,
@@ -6594,34 +7004,20 @@ impl ThumbJobs {
             if self.in_flight.contains(&id) {
                 continue;
             }
-            if self.queued.remove(&id) {
-                self.chrome.retain(|queued| *queued != id);
-            }
             if self.queued.insert(id) {
                 self.foreground.push_back(id);
             }
         }
     }
 
-    fn focus_chrome(&mut self, ids: impl IntoIterator<Item = u64>) {
-        for id in self.chrome.drain(..) {
-            self.queued.remove(&id);
-        }
-        for id in ids {
-            if self.in_flight.contains(&id) || self.foreground.contains(&id) {
-                continue;
-            }
-            if self.queued.insert(id) {
-                self.chrome.push_back(id);
-            }
+    fn retry(&mut self, id: u64) {
+        if !self.in_flight.contains(&id) && self.queued.insert(id) {
+            self.foreground.push_front(id);
         }
     }
 
     fn pop(&mut self) -> Option<u64> {
-        let id = self
-            .foreground
-            .pop_front()
-            .or_else(|| self.chrome.pop_front())?;
+        let id = self.foreground.pop_front()?;
         self.queued.remove(&id);
         Some(id)
     }
@@ -6792,6 +7188,13 @@ pub(crate) struct Shelf {
     folder_error: Option<String>,
     /// Which folder's Remove is armed and waiting for its confirming press.
     folder_pending_removal: Option<usize>,
+    /// Paths under successfully scanned roots whose own parent directories
+    /// are absent. They require explicit confirmation and are never automatic.
+    prunable: Vec<PathBuf>,
+    /// Whether Settings is showing the exact bulk-prune consequence.
+    prune_pending: bool,
+    /// Whether Settings is showing the exact rootless-row consequence.
+    unrooted_pending: bool,
     /// Whether the scan worker is still running.
     pub(crate) scanning: bool,
     /// Files the scan could not read.
@@ -6923,6 +7326,13 @@ pub(crate) struct Shelf {
 }
 
 impl Shelf {
+    /// Current play-ledger snapshot for the local Now Playing fact feed.
+    pub(crate) fn history(&self) -> Option<&History> {
+        self.history.as_ref()
+    }
+}
+
+impl Shelf {
     /// Open the library DB, hydrate the shelf, persist the chosen folders, and
     /// kick off the scan worker.
     ///
@@ -7022,6 +7432,9 @@ impl Shelf {
             folder_input: String::new(),
             folder_error: None,
             folder_pending_removal: None,
+            prunable: Vec::new(),
+            prune_pending: false,
+            unrooted_pending: false,
             scanning: true,
             files_skipped: 0,
             problem: None,
@@ -7056,7 +7469,7 @@ impl Shelf {
         // built (ADR-0030 §4): once, here, and never again from the file.
         shelf.rebuild_shelves();
         let shelf_task = shelf.request_visible_thumbs();
-        println!(
+        crate::baz_log!(
             "[startup] library open + hydrate: {:.1} ms ({} albums / {} shelves by {} at {} / {} tracks) from {}",
             t0.elapsed().as_secs_f64() * 1e3,
             shelf.albums.len(),
@@ -7977,7 +8390,7 @@ impl Shelf {
             // already running always says no.
             Message::RefreshTick => {
                 if self.refresh.due(Instant::now(), self.scanning) {
-                    println!("[scan] periodic refresh");
+                    crate::baz_log!("[scan] periodic refresh");
                     self.start_scan(scan::ScanMode::Incremental);
                 }
             }
@@ -8000,9 +8413,17 @@ impl Shelf {
             }
             Message::CancelRemoveMusicFolder => self.folder_pending_removal = None,
             Message::RemoveMusicFolder(index) => return Some(self.remove_root(*index)),
+            Message::MoveMusicFolderUp(index) => self.move_root(*index, -1),
+            Message::MoveMusicFolderDown(index) => self.move_root(*index, 1),
+            Message::ConfirmPruneMissing => self.prune_pending = true,
+            Message::CancelPruneMissing => self.prune_pending = false,
+            Message::PruneMissing => return Some(self.prune_missing()),
+            Message::ConfirmPruneUnrooted => self.unrooted_pending = true,
+            Message::CancelPruneUnrooted => self.unrooted_pending = false,
+            Message::PruneUnrooted => return Some(self.prune_unrooted()),
             Message::ForceSync => {
                 if !self.scanning {
-                    println!("[scan] force sync requested");
+                    crate::baz_log!("[scan] force sync requested");
                     self.start_scan(scan::ScanMode::Force);
                 }
             }
@@ -8016,7 +8437,10 @@ impl Shelf {
     /// A projection built here rather than in the view, because it is the join
     /// of two things this struct holds: the folders the shell is scanning, and
     /// what the index records under each of them.
-    fn library_view(&self) -> views::settings::LibraryView<'_> {
+    fn library_view<'a>(
+        &'a self,
+        playlists: Option<&'a std::path::Path>,
+    ) -> views::settings::LibraryView<'a> {
         views::settings::LibraryView {
             folders: self
                 .roots
@@ -8035,7 +8459,11 @@ impl Shelf {
             error: self.folder_error.as_deref(),
             pending_removal: self.folder_pending_removal,
             scanning: self.scanning,
-            unrooted: self.library.unrooted_tracks(),
+            unrooted: self.library.unrooted_paths(),
+            unrooted_pending: self.unrooted_pending,
+            playlists,
+            prunable: &self.prunable,
+            prune_pending: self.prune_pending,
             now_ns: now_ns(),
         }
     }
@@ -8108,13 +8536,29 @@ impl Shelf {
         // pre-v8 population this is the only cure for. Claim them before the
         // scan, so the walk that follows can prune them if they are gone.
         adopt_roots(&mut self.library, std::slice::from_ref(&dir));
-        println!("[config] holding {}", dir.display());
+        crate::baz_log!("[config] holding {}", dir.display());
         self.roots.push(dir);
         persist_roots(&self.roots);
         // Incremental, not forced: a folder that overlaps one baz already holds
         // must not cost a re-read of every file in it.
         self.start_scan(scan::ScanMode::Incremental);
         Task::none()
+    }
+
+    fn move_root(&mut self, index: usize, delta: i8) {
+        if self.scanning || self.folder_pending_removal.is_some() {
+            return;
+        }
+        let Some(to) = shifted_index(self.roots.len(), index, delta) else {
+            return;
+        };
+        self.roots.swap(index, to);
+        persist_roots(&self.roots);
+        crate::baz_log!(
+            "[config] music folder moved from {} to {}",
+            index + 1,
+            to + 1
+        );
     }
 
     /// Stop holding a folder, and **forget its tracks** (ADR-0022 §4).
@@ -8134,9 +8578,11 @@ impl Shelf {
         self.unavailable.remove(&root);
         persist_roots(&self.roots);
         match self.library.forget_root(&root) {
-            Ok(count) => println!("[index] {count} tracks forgotten with {}", root.display()),
+            Ok(count) => {
+                crate::baz_log!("[index] {count} tracks forgotten with {}", root.display());
+            }
             Err(error) => {
-                println!("[index] could not forget {}: {error}", root.display());
+                crate::baz_log!("[index] could not forget {}: {error}", root.display());
                 self.problem = Some(format!("could not forget that folder: {error}"));
             }
         }
@@ -8148,6 +8594,81 @@ impl Shelf {
         self.no_artist_image.clear();
         self.rebuild_shelves();
         self.request_visible_thumbs()
+    }
+
+    /// Forget the exact missing-path preview the last completed scan produced.
+    /// `forget_paths` is one transactional source of truth with folder removal
+    /// and preserves first-seen tombstones, so a mistaken confirmation is
+    /// repaired by bringing the files back and scanning again.
+    fn prune_missing(&mut self) -> Task<Message> {
+        self.prune_pending = false;
+        if self.prunable.is_empty() {
+            return Task::none();
+        }
+        match self.library.forget_paths(&self.prunable) {
+            Ok(count) => {
+                crate::baz_log!("[index] {count} confirmed missing tracks forgotten");
+                self.health.record(
+                    crate::health::Level::Ready,
+                    "Missing albums pruned",
+                    format!(
+                        "{count} index entries removed. Audio, playlists and listening history were untouched."
+                    ),
+                );
+                self.prunable.clear();
+                self.opened = None;
+                self.no_art.clear();
+                self.no_artist_image.clear();
+                self.rebuild_shelves();
+                self.request_visible_thumbs()
+            }
+            Err(error) => {
+                self.problem = Some(format!("could not prune missing albums: {error}"));
+                self.health.record(
+                    crate::health::Level::Error,
+                    "Could not prune missing albums",
+                    error.to_string(),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// Forget rootless legacy rows after showing every path. Unlike a scan,
+    /// this is an explicit listener decision, so it can safely address rows
+    /// no configured root is able to prove absent.
+    fn prune_unrooted(&mut self) -> Task<Message> {
+        self.unrooted_pending = false;
+        let paths = self.library.unrooted_paths();
+        if paths.is_empty() {
+            return Task::none();
+        }
+        match self.library.forget_paths(&paths) {
+            Ok(count) => {
+                crate::baz_log!("[index] {count} rootless legacy tracks forgotten");
+                self.health.record(
+                    crate::health::Level::Ready,
+                    "Unheld tracks removed from the index",
+                    format!(
+                        "{count} index entries removed. Audio, playlists and listening history were untouched."
+                    ),
+                );
+                self.opened = None;
+                self.no_art.clear();
+                self.no_artist_image.clear();
+                self.rebuild_shelves();
+                self.request_visible_thumbs()
+            }
+            Err(error) => {
+                self.problem = Some(format!("could not prune unheld tracks: {error}"));
+                self.health.record(
+                    crate::health::Level::Error,
+                    "Could not remove unheld tracks",
+                    error.to_string(),
+                );
+                Task::none()
+            }
+        }
     }
 
     /// Start a scan of every folder baz holds, in `mode`, replacing whatever
@@ -8195,11 +8716,19 @@ impl Shelf {
         let Drained {
             fresh_tracks,
             vanished,
+            prunable,
             scanned,
             missing,
             finished,
         } = drained;
-        self.apply_scan(fresh_tracks, &vanished, scanned, missing, finished)
+        self.apply_scan(
+            fresh_tracks,
+            &vanished,
+            prunable,
+            scanned,
+            missing,
+            finished,
+        )
     }
 
     /// Take everything the worker has said since the last tick, without
@@ -8216,6 +8745,7 @@ impl Shelf {
         // several, and the order is the order they arrived in.
         let mut fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)> = Vec::new();
         let mut vanished: Vec<std::path::PathBuf> = Vec::new();
+        let mut prunable: Vec<std::path::PathBuf> = Vec::new();
         let mut scanned: Vec<(PathBuf, i64)> = Vec::new();
         let mut missing: Vec<(PathBuf, String)> = Vec::new();
         let mut finished = false;
@@ -8241,6 +8771,7 @@ impl Shelf {
                     }
                 }
                 Ok(ScanUpdate::Removed { paths }) => vanished.extend(paths),
+                Ok(ScanUpdate::Prunable { paths }) => prunable.extend(paths),
                 Ok(ScanUpdate::RootDone {
                     root,
                     at_ns,
@@ -8269,7 +8800,7 @@ impl Shelf {
                         reason = "track counts are far below f64's exact-integer range"
                     )]
                     let rate = if secs > 0.0 { read as f64 / secs } else { 0.0 };
-                    println!(
+                    crate::baz_log!(
                         "[scan] done: {added} added, {updated} updated, {unchanged} unchanged, \
                          {removed} removed, {failed} files skipped, \
                          {unavailable} folders unavailable, {secs:.1} s ({rate:.0} tracks/s)"
@@ -8290,7 +8821,7 @@ impl Shelf {
                     break;
                 }
                 Ok(ScanUpdate::Error(error)) => {
-                    println!("[scan] failed to start: {error}");
+                    crate::baz_log!("[scan] failed to start: {error}");
                     self.problem = Some(format!("scan failed: {error}"));
                     self.health
                         .record(crate::health::Level::Error, "Library scan failed", error);
@@ -8313,6 +8844,7 @@ impl Shelf {
         Some(Drained {
             fresh_tracks,
             vanished,
+            prunable,
             scanned,
             missing,
             finished,
@@ -8326,10 +8858,15 @@ impl Shelf {
         &mut self,
         fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)>,
         vanished: &[PathBuf],
+        prunable: Vec<PathBuf>,
         scanned: Vec<(PathBuf, i64)>,
         missing: Vec<(PathBuf, String)>,
         finished: bool,
     ) -> Task<Message> {
+        if !prunable.is_empty() || finished {
+            self.prunable = prunable;
+            self.prune_pending = false;
+        }
         // A folder that is not reachable right now: never a scan failure — the
         // pass carried on and pruned nothing from it (ADR-0022 §2).
         //
@@ -8342,7 +8879,7 @@ impl Shelf {
         // there is room to say it properly.
         let absent = missing.len();
         for (root, reason) in missing {
-            println!("[scan] {} is unavailable: {reason}", root.display());
+            crate::baz_log!("[scan] {} is unavailable: {reason}", root.display());
             self.health.record(
                 crate::health::Level::Warning,
                 "Folder unavailable",
@@ -8362,7 +8899,7 @@ impl Shelf {
         // last looked at it.
         for (root, at_ns) in scanned {
             if let Err(error) = self.library.record_scan(&root, at_ns) {
-                println!(
+                crate::baz_log!(
                     "[index] could not record the scan of {}: {error}",
                     root.display()
                 );
@@ -8378,7 +8915,7 @@ impl Shelf {
         if !fresh_tracks.is_empty() || !vanished.is_empty() {
             for (root, tracks) in fresh_tracks {
                 if let Err(error) = self.library.add_tracks_under(Some(&root), tracks) {
-                    println!("[index] write failed: {error}");
+                    crate::baz_log!("[index] write failed: {error}");
                     self.problem = Some(format!("library write failed: {error}"));
                     self.health.record(
                         crate::health::Level::Error,
@@ -8389,9 +8926,9 @@ impl Shelf {
             }
             if !vanished.is_empty() {
                 match self.library.remove_tracks(vanished) {
-                    Ok(count) => println!("[index] {count} vanished tracks removed"),
+                    Ok(count) => crate::baz_log!("[index] {count} vanished tracks removed"),
                     Err(error) => {
-                        println!("[index] removal failed: {error}");
+                        crate::baz_log!("[index] removal failed: {error}");
                         self.problem = Some(format!("library removal failed: {error}"));
                         self.health.record(
                             crate::health::Level::Error,
@@ -8404,7 +8941,7 @@ impl Shelf {
             self.rebuild_shelves();
             if self.last_scan_log.elapsed() > Duration::from_secs(2) {
                 self.last_scan_log = Instant::now();
-                println!(
+                crate::baz_log!(
                     "[scan] {} tracks / {} albums so far…",
                     self.library.len(),
                     self.albums.len()
@@ -8579,24 +9116,37 @@ impl Shelf {
 
     fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
         self.thumbs.focus_chrome(ids.iter().copied());
+        self.request_target_thumbs()
+    }
+
+    /// Re-aim the scheduler from one complete target snapshot. Updating the
+    /// wall, a page or resident chrome can no longer discard still-visible
+    /// work nominated by either of the other two.
+    fn request_target_thumbs(&mut self) -> Task<Message> {
         let mut wanted = Vec::new();
-        for &id in ids {
+        for id in self.thumbs.targets() {
             if self.thumbs.touch(id) || self.thumb_jobs.contains(id) || self.no_art.contains(&id) {
                 continue;
             }
             wanted.push(id);
         }
-        self.thumb_jobs.focus_chrome(wanted);
+        self.thumb_jobs.focus(wanted);
         self.start_queued_thumbs()
     }
 
-    /// The Home place's visible newest-record row. Lane rows are resolved by
-    /// the shell from the lane's exact mixed viewport.
+    /// Every thumbnail Home can draw: the All songs collage plus the visible
+    /// newest-record row. Lane rows are resolved separately by the shell from
+    /// the lane's exact mixed viewport.
     fn home_art(&self) -> Vec<u64> {
-        crate::views::home::newest(self, self.grid())
-            .iter()
-            .map(|album| album.id)
-            .collect()
+        let mut ids = self.everything().art;
+        ids.extend(
+            crate::views::home::newest(self, self.grid())
+                .iter()
+                .map(|album| album.id),
+        );
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     fn request_visible_thumbs(&mut self) -> Task<Message> {
@@ -8628,18 +9178,7 @@ impl Shelf {
             return Task::none();
         }
         self.last_requested = Some((start, end));
-        let mut wanted = Vec::new();
-        for id in visible_ids {
-            if self.thumbs.touch(id)
-                || self.thumb_jobs.in_flight.contains(&id)
-                || self.no_art.contains(&id)
-            {
-                continue;
-            }
-            wanted.push(id);
-        }
-        self.thumb_jobs.focus(wanted);
-        self.start_queued_thumbs()
+        self.request_target_thumbs()
     }
 
     /// Kick off off-thread decodes for the albums in `ids` whose thumbnail is
@@ -8651,18 +9190,7 @@ impl Shelf {
     /// honest reading a tile gives art that cannot be decoded.
     fn request_thumbs(&mut self, ids: &[u64]) -> Task<Message> {
         self.thumbs.focus_page(ids.iter().copied());
-        let mut wanted = Vec::new();
-        for &id in ids {
-            if self.thumbs.touch(id)
-                || self.thumb_jobs.in_flight.contains(&id)
-                || self.no_art.contains(&id)
-            {
-                continue;
-            }
-            wanted.push(id);
-        }
-        self.thumb_jobs.focus(wanted);
-        self.start_queued_thumbs()
+        self.request_target_thumbs()
     }
 
     fn finish_thumb(
@@ -8670,19 +9198,19 @@ impl Shelf {
         id: u64,
         requested_edge: u32,
         elapsed: Duration,
-        decoded: Option<(f32, iced_image::Handle)>,
+        decoded: Option<(f32, usize, iced_image::Handle)>,
     ) -> Task<Message> {
         self.thumb_jobs.finished(id);
         match decoded {
-            Some((px, handle)) if requested_edge >= self.density.art_max_px() => {
+            Some((px, bytes, handle)) if requested_edge >= self.density.art_max_px() => {
                 self.thumb_px.insert(id, px);
-                self.thumbs.put(id, handle);
+                self.thumbs.put(id, handle, bytes);
             }
             Some(_) => {
                 // Density grew while this blocking decode was in flight. The
                 // smaller result is correct data but no longer enough pixels
                 // for the active layout, so immediately replace the one job.
-                self.thumb_jobs.focus([id]);
+                self.thumb_jobs.retry(id);
             }
             None => {
                 self.no_art.insert(id);
@@ -8690,11 +9218,15 @@ impl Shelf {
         }
         let task = self.start_queued_thumbs();
         if std::env::var_os("BAZ_PERF_LOG").is_some() {
-            println!(
-                "[art] thumb {id} in {:.1} ms; cache={} resident={} queued={} in-flight={} completed={} peak={}",
+            let decoded_bytes = self.thumbs.decoded_bytes();
+            let decoded_mib = decoded_bytes / (1024 * 1024);
+            let decoded_tenths = (decoded_bytes % (1024 * 1024)) * 10 / (1024 * 1024);
+            crate::baz_log!(
+                "[art] thumb {id} in {:.1} ms; cache={} resident={} retained={} decoded={decoded_mib}.{decoded_tenths} MiB queued={} in-flight={} completed={} peak={}",
                 elapsed.as_secs_f64() * 1e3,
                 self.thumbs.len(),
                 self.thumbs.resident_len(),
+                self.thumbs.retained_len(),
                 self.thumb_jobs.queued.len(),
                 self.thumb_jobs.in_flight.len(),
                 self.thumb_jobs.completed,
@@ -8777,7 +9309,7 @@ impl Shelf {
 
 fn record_root_scan(health: &mut crate::health::Log, root: &std::path::Path, counts: [usize; 4]) {
     let [added, updated, unchanged, failed] = counts;
-    println!(
+    crate::baz_log!(
         "[scan] {}: {added} added, {updated} updated, {unchanged} unchanged, {failed} skipped",
         root.display()
     );
@@ -8807,6 +9339,8 @@ struct Drained {
     fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)>,
     /// Rows the removal pass proved are gone.
     vanished: Vec<PathBuf>,
+    /// Missing paths whose absent parent makes them manual-confirmation only.
+    prunable: Vec<PathBuf>,
     /// Roots whose walk finished, with the moment it did.
     scanned: Vec<(PathBuf, i64)>,
     /// Roots that could not be walked, with the reason.
@@ -8848,7 +9382,7 @@ fn message_for(request: mpris::Request) -> Message {
 fn persist_roots(roots: &[PathBuf]) {
     for root in roots {
         if root.to_str().is_none() {
-            println!(
+            crate::baz_log!(
                 "[config] {} is not valid UTF-8; it cannot be written to config.toml \
                  (this session is unaffected)",
                 root.display()
@@ -8856,6 +9390,14 @@ fn persist_roots(roots: &[PathBuf]) {
         }
     }
     persist(|config| config.music_dirs = roots.to_vec());
+}
+
+fn shifted_index(len: usize, index: usize, delta: i8) -> Option<usize> {
+    match delta {
+        -1 if index > 0 && index < len => Some(index - 1),
+        1 if index + 1 < len => Some(index + 1),
+        _ => None,
+    }
 }
 
 /// Why `dir` cannot join `roots`, in the words the Settings place shows — or
@@ -8911,12 +9453,58 @@ fn pick_folder() -> Task<Message> {
             match tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder()).await {
                 Ok(choice) => choice,
                 Err(err) => {
-                    println!("[config] folder picker failed: {err}");
+                    crate::baz_log!("[config] folder picker failed: {err}");
                     None
                 }
             }
         },
         Message::MusicFolderPicked,
+    )
+}
+
+/// Read a listener-selected JSON theme without blocking the event loop.
+fn pick_theme_file() -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(|| {
+                let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Baz theme", &["json"])
+                    .pick_file()
+                else {
+                    return Err("Theme import cancelled; nothing changed.".to_owned());
+                };
+                std::fs::read_to_string(&path)
+                    .map_err(|error| format!("Could not read {}: {error}", path.display()))
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("Theme picker failed: {error}")))
+        },
+        Message::ThemeFilePicked,
+    )
+}
+
+/// Save a round-trippable copy of the selected room locally.
+fn export_theme(selection: String) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let suggested = selection
+                    .strip_prefix("custom:")
+                    .unwrap_or(&selection)
+                    .to_owned();
+                let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Baz theme", &["json"])
+                    .set_file_name(format!("{suggested}.json"))
+                    .save_file()
+                else {
+                    return Err("Theme export cancelled; nothing changed.".to_owned());
+                };
+                crate::theme_file::write_export(&path, &selection)
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("Theme export failed: {error}")))
+        },
+        Message::ThemeExported,
     )
 }
 
@@ -8930,8 +9518,10 @@ fn adopt_roots(library: &mut Library, roots: &[PathBuf]) {
     for root in roots {
         match library.adopt_root(root) {
             Ok(0) => {}
-            Ok(count) => println!("[index] {count} rows now recorded under {}", root.display()),
-            Err(error) => println!(
+            Ok(count) => {
+                crate::baz_log!("[index] {count} rows now recorded under {}", root.display());
+            }
+            Err(error) => crate::baz_log!(
                 "[index] could not adopt rows under {}: {error}",
                 root.display()
             ),
@@ -9021,6 +9611,20 @@ fn visualization_clock(
     place == Place::NowPlaying
         && sounding
         && (visualization.spectrum || visualization.foreground.draws_case())
+}
+
+/// Whether the 20-second fact-feed clock exists. It is absent everywhere the
+/// line cannot be seen, so enabling it has no idle cost in other places.
+fn fact_clock(place: Place, sounding: bool, on: bool) -> bool {
+    place == Place::NowPlaying && sounding && on
+}
+
+fn fullscreen_target(mode: window::Mode) -> window::Mode {
+    if mode == window::Mode::Fullscreen {
+        window::Mode::Windowed
+    } else {
+        window::Mode::Fullscreen
+    }
 }
 
 /// Which record, if any, currently earns a hero decode.
@@ -9125,9 +9729,9 @@ fn read_snapshot() -> crate::session::Snapshot {
         .map(|path| crate::session::load(&path))
         .unwrap_or_default();
     if snapshot.is_empty() {
-        println!("[session] no interrupted run");
+        crate::baz_log!("[session] no interrupted run");
     } else {
-        println!(
+        crate::baz_log!(
             "[session] {} tracks held, cursor {} at {} ms",
             snapshot.paths.len(),
             snapshot.cursor,
@@ -9217,7 +9821,7 @@ fn read_history() -> Option<History> {
     let path = HistoryLedger::default_path()?;
     match History::read(&path) {
         Ok(history) => {
-            println!(
+            crate::baz_log!(
                 "[history] {} records over {} tracks from {}",
                 history.records(),
                 history.tracks().count(),
@@ -9226,7 +9830,7 @@ fn read_history() -> Option<History> {
             Some(history)
         }
         Err(error) => {
-            println!("[history] cannot read {}: {error}", path.display());
+            crate::baz_log!("[history] cannot read {}: {error}", path.display());
             None
         }
     }
@@ -9242,7 +9846,7 @@ fn read_history() -> Option<History> {
 /// as [`config::Config`] can represent it.
 fn persist(change: impl FnOnce(&mut config::Config)) {
     let Some(path) = config::config_file() else {
-        println!("[config] no config directory on this system; nothing is being remembered");
+        crate::baz_log!("[config] no config directory on this system; nothing is being remembered");
         return;
     };
     let stored = config::load(&path);
@@ -9252,8 +9856,8 @@ fn persist(change: impl FnOnce(&mut config::Config)) {
         return; // Unchanged.
     }
     match config::store(&path, &config) {
-        Ok(()) => println!("[config] saved to {}", path.display()),
-        Err(error) => println!("[config] could not save {}: {error}", path.display()),
+        Ok(()) => crate::baz_log!("[config] saved to {}", path.display()),
+        Err(error) => crate::baz_log!("[config] could not save {}: {error}", path.display()),
     }
 }
 
@@ -9301,6 +9905,7 @@ mod tests {
             let still = crate::visualizer::State {
                 foreground,
                 spectrum: false,
+                facts: false,
             };
             let spectral = crate::visualizer::State {
                 spectrum: true,
@@ -9325,10 +9930,35 @@ mod tests {
         let state = crate::visualizer::State {
             foreground: crate::visualizer::Foreground::None,
             spectrum: true,
+            facts: false,
         };
         // There is deliberately no focus argument: a visible Now Playing
         // remains live while another application owns the keyboard.
         assert!(visualization_clock(Place::NowPlaying, true, state));
+    }
+
+    #[test]
+    fn the_fact_clock_exists_only_for_a_visible_sounding_feed() {
+        assert!(fact_clock(Place::NowPlaying, true, true));
+        assert!(!fact_clock(Place::NowPlaying, true, false));
+        assert!(!fact_clock(Place::NowPlaying, false, true));
+        assert!(!fact_clock(Place::Library, true, true));
+    }
+
+    #[test]
+    fn f11_round_trips_windowed_and_fullscreen_modes() {
+        assert_eq!(
+            fullscreen_target(window::Mode::Windowed),
+            window::Mode::Fullscreen
+        );
+        assert_eq!(
+            fullscreen_target(window::Mode::Fullscreen),
+            window::Mode::Windowed
+        );
+        assert_eq!(
+            fullscreen_target(window::Mode::Hidden),
+            window::Mode::Fullscreen
+        );
     }
 
     #[test]
@@ -9384,10 +10014,9 @@ mod tests {
     }
 
     #[test]
-    fn visible_lane_art_follows_the_page_without_displacing_it() {
+    fn one_complete_target_snapshot_keeps_page_and_chrome_work() {
         let mut jobs = ThumbJobs::default();
-        jobs.focus_chrome([20, 21]);
-        jobs.focus([10, 11]);
+        jobs.focus([10, 11, 20, 21]);
 
         assert_eq!(jobs.pop(), Some(10));
         assert_eq!(jobs.pop(), Some(11));
@@ -9397,6 +10026,14 @@ mod tests {
 
     fn pixel_handle(red: u8) -> iced_image::Handle {
         iced_image::Handle::from_rgba(1, 1, vec![red, 0, 0, 255])
+    }
+
+    fn put_pixel(cache: &mut ThumbCache, id: u64) {
+        cache.put(
+            id,
+            pixel_handle(u8::try_from(id % 255).expect("bounded color")),
+            4,
+        );
     }
 
     #[test]
@@ -9411,12 +10048,12 @@ mod tests {
         );
 
         let mut cache = ThumbCache::new(NonZeroUsize::new(2).expect("a cache"));
-        cache.put(1, pixel_handle(1));
-        cache.put(2, pixel_handle(2));
+        put_pixel(&mut cache, 1);
+        put_pixel(&mut cache, 2);
         cache.focus_wall([1]);
 
         for id in 3..20 {
-            cache.put(id, pixel_handle(u8::try_from(id).expect("small id")));
+            put_pixel(&mut cache, id);
         }
 
         assert!(cache.peek(1).is_some(), "the visible handle disappeared");
@@ -9425,11 +10062,11 @@ mod tests {
     }
 
     #[test]
-    fn leaving_the_viewport_returns_a_pin_to_the_bounded_lru() {
+    fn leaving_the_viewport_retains_art_that_was_actually_displayed() {
         let mut cache = ThumbCache::new(NonZeroUsize::new(2).expect("a cache"));
         cache.focus_wall([1]);
         cache.focus_chrome([1]);
-        cache.put(1, pixel_handle(1));
+        put_pixel(&mut cache, 1);
 
         cache.focus_wall([]);
         assert_eq!(
@@ -9439,15 +10076,83 @@ mod tests {
         );
         cache.focus_chrome([]);
         assert_eq!(cache.resident_len(), 0);
+        assert_eq!(cache.retained_len(), 1);
         assert!(
             cache.peek(1).is_some(),
             "unpinning does not drop the handle"
         );
 
         for id in 2..5 {
-            cache.put(id, pixel_handle(u8::try_from(id).expect("small id")));
+            put_pixel(&mut cache, id);
         }
-        assert!(cache.peek(1).is_none(), "off-screen art is evictable again");
+        assert!(
+            cache.peek(1).is_some(),
+            "displayed art cannot become a gradient after unrelated churn"
+        );
+    }
+
+    #[test]
+    fn scroll_away_past_sixty_four_covers_and_return_keeps_every_shown_handle() {
+        let mut cache = ThumbCache::new(
+            NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).expect("the production bound"),
+        );
+        let first = 1..=18;
+        cache.focus_wall(first.clone());
+        for id in first.clone() {
+            put_pixel(&mut cache, id);
+        }
+
+        for page in 1..45 {
+            let start = page * 18 + 1;
+            let end = start + 17;
+            cache.focus_wall(start..=end);
+            for id in start..=end {
+                put_pixel(&mut cache, id);
+            }
+        }
+
+        cache.focus_wall(first.clone());
+        for id in first {
+            assert!(cache.peek(id).is_some(), "shown target {id} was evicted");
+        }
+        assert_eq!(cache.resident_len(), 18);
+        assert_eq!(cache.retained_len(), 44 * 18);
+        assert_eq!(cache.recent.len(), 0, "every fixture reached the viewport");
+        assert_eq!(cache.decoded_bytes(), 45 * 18 * 4);
+    }
+
+    #[test]
+    fn stale_density_retry_does_not_discard_other_visible_work() {
+        let mut jobs = ThumbJobs::default();
+        jobs.focus([10, 11, 12]);
+        assert_eq!(jobs.pop(), Some(10));
+        jobs.started(10);
+        jobs.finished(10);
+        jobs.retry(10);
+
+        assert_eq!(jobs.foreground, VecDeque::from([10, 11, 12]));
+    }
+
+    #[test]
+    fn queue_page_art_is_not_unpinned_by_the_resident_chrome_pass() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("app source");
+        assert!(
+            source.contains("Place::Playlists | Place::Playlist(_) | Place::Queue"),
+            "the after-message chrome pass can evict visible Queue-row sleeves"
+        );
+        assert!(
+            source.contains("ids.extend(state.all_songs().art)")
+                && source.contains("self.playlists.panel_open"),
+            "the floating playlist panel has visible collages but no residency supply"
+        );
+        assert!(
+            source.contains("self.playlists.panel_open,")
+                && source.contains("crate::views::home::standing"),
+            "panel-open and Home Continue must participate in the target snapshot"
+        );
     }
 
     /// The one non-effect decision on the add-a-folder path (ADR-0025): a
@@ -9462,6 +10167,16 @@ mod tests {
         );
         assert_eq!(folder_refusal(&roots, Path::new("/mnt/nas")), None);
         assert_eq!(folder_refusal(&[], Path::new("/m")), None);
+    }
+
+    #[test]
+    fn folder_order_moves_only_to_an_existing_neighbour() {
+        assert_eq!(shifted_index(3, 1, -1), Some(0));
+        assert_eq!(shifted_index(3, 1, 1), Some(2));
+        assert_eq!(shifted_index(3, 0, -1), None);
+        assert_eq!(shifted_index(3, 2, 1), None);
+        assert_eq!(shifted_index(3, 9, -1), None);
+        assert_eq!(shifted_index(3, 1, 0), None);
     }
 
     /// The typed door's validation, off the UI thread: a directory passes, a
@@ -10221,7 +10936,7 @@ mod tests {
             .find("Event::QueueEnded => {")
             .expect("the run's end is handled");
         assert!(
-            source[ended..ended + 400].contains("self.queue_undo.clear()"),
+            source[ended..ended + 600].contains("self.queue_undo.clear()"),
             "the run ending clears the run's edit history"
         );
     }

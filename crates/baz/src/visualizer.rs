@@ -65,6 +65,7 @@ impl Foreground {
 pub(crate) struct State {
     pub(crate) foreground: Foreground,
     pub(crate) spectrum: bool,
+    pub(crate) facts: bool,
 }
 
 impl Default for State {
@@ -72,6 +73,7 @@ impl Default for State {
         Self {
             foreground: Foreground::JewelCase,
             spectrum: false,
+            facts: true,
         }
     }
 }
@@ -107,7 +109,46 @@ pub(crate) fn foreground(
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
     row(Foreground::ALL.map(|choice| foreground_button(choice, state.foreground)))
         .push(spectrum_button(state.spectrum))
+        .push(facts_button(state.facts))
         .into()
+}
+
+fn facts_button(on: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let mark = container(
+        iced_image(crate::icon::inked(
+            crate::icon::Glyph::VisualFacts,
+            if on { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleFacts);
+    tooltip(
+        control,
+        text(if on {
+            "Fact feed is on — hide it"
+        } else {
+            "Fact feed is off — show it"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
 }
 
 fn foreground_button(choice: Foreground, selected: Foreground) -> Element<'static, Message> {

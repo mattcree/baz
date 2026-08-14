@@ -184,6 +184,13 @@ pub enum ScanUpdate {
         /// The paths whose rows must go.
         paths: Vec<PathBuf>,
     },
+    /// Rows unseen beneath roots whose walks completed, but whose missing
+    /// parent prevents automatic deletion. Settings previews these for an
+    /// explicit, reversible listener decision.
+    Prunable {
+        /// Missing paths, sorted for a stable preview.
+        paths: Vec<PathBuf>,
+    },
     /// The scan finished; totals for the throughput log and status line.
     Done {
         /// Files read for the first time.
@@ -376,6 +383,9 @@ struct Walked<'a> {
     /// an empty mount point must cost that folder its pruning and cost the
     /// others nothing.
     productive: HashSet<PathBuf>,
+    /// Roots whose walk completed, including a genuinely empty directory.
+    /// This is sufficient for a manual preview, never for automatic removal.
+    successful: HashSet<PathBuf>,
 }
 
 /// Worker body: walk each root through its own [`Batcher`] into `tx`, then run
@@ -400,6 +410,7 @@ fn run_scan(roots: &[PathBuf], known: &KnownFiles, mode: ScanMode, tx: &Sender<S
                 }
             }
             Walk::Walked(counts) => {
+                walked.successful.insert(root.clone());
                 totals.add(&counts);
                 if tx
                     .send(ScanUpdate::RootDone {
@@ -418,6 +429,10 @@ fn run_scan(roots: &[PathBuf], known: &KnownFiles, mode: ScanMode, tx: &Sender<S
         }
     }
 
+    let candidates = prunable(known, &walked);
+    if !candidates.is_empty() && tx.send(ScanUpdate::Prunable { paths: candidates }).is_err() {
+        return;
+    }
     let gone = vanished(known, &walked);
     totals.removed = gone.len();
     if !gone.is_empty() && tx.send(ScanUpdate::Removed { paths: gone }).is_err() {
@@ -492,7 +507,7 @@ fn walk_root<'a>(
         // seeing. See `docs/BACKLOG.md` for the surface inside baz that this
         // line is the floor of, not the answer to.
         if let ScanEntry::Failed { path, reason } = &entry {
-            println!("[scan] skipped {}: {reason}", path.display());
+            crate::baz_log!("[scan] skipped {}: {reason}", path.display());
         }
         record(&entry, known, walked, &mut counts);
         if let Some(update) = batcher.push(entry, Instant::now())
@@ -642,6 +657,35 @@ fn vanished(known: &KnownFiles, walked: &Walked<'_>) -> Vec<PathBuf> {
     gone
 }
 
+/// Missing rows that require a listener's confirmation because their parent
+/// directory is gone too. The root itself completed a scan and no unreadable
+/// ancestor hid the path, but an absent album directory is still
+/// indistinguishable from an unmounted nested share. These are therefore
+/// previewed, never fed to automatic [`baz_core::index::Library::remove_tracks`].
+fn prunable(known: &KnownFiles, walked: &Walked<'_>) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = known
+        .iter()
+        .filter(|(path, _)| !walked.seen.contains(path.as_path()))
+        .filter(|(_, known)| {
+            known
+                .root
+                .as_deref()
+                .is_some_and(|root| walked.successful.contains(root))
+        })
+        .map(|(path, _)| path)
+        .filter(|path| !has_unreadable_ancestor(path, &walked.unreadable))
+        .filter(|path| {
+            matches!(
+                std::fs::symlink_metadata(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            ) && !is_confirmed_gone(path)
+        })
+        .cloned()
+        .collect();
+    candidates.sort_unstable();
+    candidates
+}
+
 /// Whether any path the walk could not traverse is `path` itself or one of
 /// its ancestors.
 fn has_unreadable_ancestor(path: &Path, unreadable: &[PathBuf]) -> bool {
@@ -731,6 +775,7 @@ mod tests {
     struct Run {
         batched: Vec<(PathBuf, TrackMeta)>,
         removed: Vec<PathBuf>,
+        prunable: Vec<PathBuf>,
         roots_done: Vec<PathBuf>,
         unavailable: Vec<PathBuf>,
         done: Option<(usize, usize, usize, usize, usize, usize)>,
@@ -754,6 +799,7 @@ mod tests {
                     .batched
                     .extend(tracks.into_iter().map(|meta| (root.clone(), meta))),
                 ScanUpdate::Removed { paths } => run.removed.extend(paths),
+                ScanUpdate::Prunable { paths } => run.prunable.extend(paths),
                 ScanUpdate::RootDone { root, .. } => run.roots_done.push(root),
                 ScanUpdate::RootUnavailable { root, .. } => run.unavailable.push(root),
                 ScanUpdate::Done {
@@ -941,6 +987,10 @@ mod tests {
         let run = drive_one(&gone_root, known);
         assert_eq!(run.unavailable, vec![gone_root]);
         assert!(run.removed.is_empty());
+        assert!(
+            run.prunable.is_empty(),
+            "an unavailable root offers no manual deletion assertion either"
+        );
     }
 
     /// An unmounted share leaves its mount point behind as an empty
@@ -961,6 +1011,27 @@ mod tests {
             run.removed.is_empty(),
             "an empty scan is not evidence of an empty library"
         );
+        assert_eq!(
+            run.prunable,
+            vec![a],
+            "a completed empty-root scan may preview the missing path, but never remove it"
+        );
+    }
+
+    #[test]
+    fn a_deleted_album_directory_is_previewed_and_never_automatically_removed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let keep = wav(dir.path(), "Artist/Keep/01.wav");
+        let missing = wav(dir.path(), "Artist/Gone/01.wav");
+        let known = known_under(dir.path(), [keep.as_path(), missing.as_path()]);
+        fs::remove_dir_all(dir.path().join("Artist/Gone")).expect("delete album folder");
+
+        let run = drive_one(dir.path(), known);
+        assert!(
+            run.removed.is_empty(),
+            "an absent parent is not automatic evidence"
+        );
+        assert_eq!(run.prunable, vec![missing]);
     }
 
     #[test]
@@ -1221,6 +1292,7 @@ mod tests {
             seen: HashSet::new(),
             unreadable: vec![dir.path().join("Locked")],
             productive: HashSet::from([dir.path().to_path_buf()]),
+            successful: HashSet::from([dir.path().to_path_buf()]),
         };
 
         let gone = vanished(&known, &walked);

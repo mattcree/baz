@@ -4717,6 +4717,9 @@ fn a_v7_database_migrates_in_place_without_losing_anything() {
     // know which folder a v7 row came from — the front end holds that fact and
     // states it with `adopt_root`.
     assert_eq!(library.unrooted_tracks(), 5);
+    let unrooted = library.unrooted_paths();
+    assert_eq!(unrooted.len(), 5);
+    assert!(unrooted.iter().all(|path| path.starts_with("/m")));
     assert!(
         library
             .known_files()

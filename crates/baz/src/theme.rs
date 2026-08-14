@@ -80,9 +80,8 @@
 //! There is no longer one palette. ADR-0017 §1.5 adopts the critique's
 //! **room** model — a whole coordinated set of surfaces, inks and one accent,
 //! switched together — and every value below is a field on [`Palette`] rather
-//! than a `pub const Color`. Two rooms are defined: [`CLOSING_TIME`], the
-//! near-black gallery baz has always been, and [`READING_ROOM`], its light
-//! mirror. Stone and Plaster are deferred (§1.5).
+//! than a `pub const Color`. Four coordinated built-ins span the intended
+//! polarity: [`CLOSING_TIME`], [`STONE`], [`PLASTER`] and [`READING_ROOM`].
 //!
 //! The indirection lands **before** any per-surface styling is rewritten,
 //! which is the whole reason it is step 2 of the build plan: ~30 style
@@ -90,12 +89,10 @@
 //! written against a room once instead of against constants and then again
 //! against a room.
 //!
-//! [`READING_ROOM`] is **defined but not yet selectable** ([`follow`]), which
-//! is exactly what the plan's step-2 row says and what §1.5 gates: the light
-//! room ships only with an answer to "what happens to a pale sleeve on a paper
-//! ground that is not a border on artwork", and that answer is step 20's.
-//! The follow-the-OS resolution is written and tested here so that step is a
-//! one-constant change rather than a design of its own.
+//! The selectable room is resolved once before the first frame. A restart is
+//! intentional: the glyph sheet is a process-lifetime texture atlas whose ink
+//! belongs to that room. Settings can preview another room without pretending
+//! the already-rasterized chrome changed with it.
 //!
 //! # Contrast
 //!
@@ -110,7 +107,7 @@
 //! colours. `every_ink_and_every_surface_clears_its_floor` sweeps both, over
 //! every room.
 
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
 use iced::font::{self, Weight};
 use iced::widget::rule::FillMode;
@@ -128,22 +125,39 @@ use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mous
 /// accent — switched together, never mixed. Two ship as tokens; Stone and
 /// Plaster are deferred (ADR-0017 §1.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(
+    clippy::enum_variant_names,
+    reason = "Reading Room is the established listener-facing room name"
+)]
 pub enum Room {
     /// The near-black gallery after hours: cool room, warm paper.
     ClosingTime,
+    /// Dark-biased middle room: warm stone under pale ink.
+    Stone,
+    /// Light-biased middle room: plaster under dark ink.
+    Plaster,
     /// Its mirror: warm paper ground, cool ink, oxblood lamp.
     ReadingRoom,
+    /// A validated data-only palette loaded from the listener's theme folder.
+    Custom,
 }
 
 impl Room {
     /// Every room, in the order the tests sweep them.
-    pub const ALL: [Self; 2] = [Self::ClosingTime, Self::ReadingRoom];
+    pub const ALL: [Self; 4] = [
+        Self::ClosingTime,
+        Self::Stone,
+        Self::Plaster,
+        Self::ReadingRoom,
+    ];
 
     /// The room's resolved palette.
     #[must_use]
     pub const fn palette(self) -> &'static Palette {
         match self {
-            Self::ClosingTime => &CLOSING_TIME,
+            Self::ClosingTime | Self::Custom => &CLOSING_TIME,
+            Self::Stone => &STONE,
+            Self::Plaster => &PLASTER,
             Self::ReadingRoom => &READING_ROOM,
         }
     }
@@ -238,7 +252,7 @@ pub struct Palette {
     /// measures 3.80 : 1 in Closing Time at 45 % measures 2.67 : 1 in Reading
     /// Room. It is the only alpha-expressed mark with a floor to clear (§1.6's
     /// exemption list covers the others), so it is the only one that varies.
-    ring_alpha: f32,
+    pub(crate) ring_alpha: f32,
 }
 
 /// Opacity of [`Palette::hairline`]: the room's ink at **7 %**.
@@ -646,6 +660,54 @@ pub const CLOSING_TIME: Palette = Palette {
     ring_alpha: 0.45,
 };
 
+/// **Stone** — the dark-biased middle room. It stays safely below the visual
+/// dead zone while retaining Closing Time's light ink and amber playback mark.
+pub const STONE: Palette = Palette {
+    room: Room::Stone,
+    name: "Stone",
+    recess: Color::from_rgb(0.024, 0.027, 0.031),
+    wall: Color::from_rgb(0.153, 0.137, 0.122),
+    plinth: Color::from_rgb(0.216, 0.192, 0.169),
+    plinth_lit: Color::from_rgb(0.286, 0.255, 0.224),
+    paper: Color::from_rgb(0.969, 0.949, 0.910),
+    paper_dim: Color::from_rgb(0.898, 0.878, 0.839),
+    paper_faint: Color::from_rgb(0.827, 0.808, 0.773),
+    paper_muted: Color::from_rgb(0.690, 0.675, 0.643),
+    lamp: Color::from_rgb(0.945, 0.702, 0.302),
+    lamp_bright: Color::from_rgb(0.984, 0.776, 0.400),
+    lamp_deep: Color::from_rgb(0.824, 0.573, 0.196),
+    lamp_ink: Color::from_rgb(0.118, 0.086, 0.043),
+    alert: Color::from_rgb(1.000, 0.620, 0.553),
+    warning: Color::from_rgb(0.965, 0.796, 0.388),
+    success: Color::from_rgb(0.651, 0.824, 0.588),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    ring_alpha: 0.55,
+};
+
+/// **Plaster** — the light-biased middle room. Its wall stays above the dead
+/// zone and uses Reading Room's cool ink and oxblood playback mark.
+pub const PLASTER: Palette = Palette {
+    room: Room::Plaster,
+    name: "Plaster",
+    recess: Color::from_rgb(0.824, 0.800, 0.753),
+    wall: Color::from_rgb(0.718, 0.690, 0.643),
+    plinth: Color::from_rgb(0.655, 0.624, 0.576),
+    plinth_lit: Color::from_rgb(0.588, 0.557, 0.510),
+    paper: Color::from_rgb(0.039, 0.043, 0.051),
+    paper_dim: Color::from_rgb(0.075, 0.082, 0.094),
+    paper_faint: Color::from_rgb(0.118, 0.125, 0.141),
+    paper_muted: Color::from_rgb(0.200, 0.208, 0.227),
+    lamp: Color::from_rgb(0.400, 0.067, 0.027),
+    lamp_bright: Color::from_rgb(0.498, 0.118, 0.055),
+    lamp_deep: Color::from_rgb(0.298, 0.027, 0.008),
+    lamp_ink: Color::from_rgb(0.976, 0.957, 0.918),
+    alert: Color::from_rgb(0.325, 0.016, 0.027),
+    warning: Color::from_rgb(0.302, 0.176, 0.020),
+    success: Color::from_rgb(0.125, 0.353, 0.149),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.38),
+    ring_alpha: 0.62,
+};
+
 /// **Reading Room** — the mirror: a warm paper ground under a cool ink.
 ///
 /// Defined, and **not yet selectable** ([`follow`]). §1.5 ships it only with
@@ -699,15 +761,6 @@ pub const READING_ROOM: Palette = Palette {
     ring_alpha: 0.55,
 };
 
-/// Whether [`READING_ROOM`] may be resolved yet.
-///
-/// **The §1.5 gate, as one constant.** The light room ships when — and only
-/// when — the pale-sleeve-on-paper question has an answer that is not a border
-/// on artwork (build-plan step 20). Until then the room's tokens exist, every
-/// test sweeps them, and nothing selects them. Flipping this is the whole of
-/// what "ship the second room" costs in this module.
-const READING_ROOM_SHIPS: bool = false;
-
 /// What the desktop says it prefers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
@@ -730,6 +783,7 @@ pub enum Appearance {
 /// room remains item 17, so startup conservatively chooses Baz's shipped dark
 /// room until that work wires live system-theme changes into room selection.
 #[must_use]
+#[allow(dead_code, reason = "reserved for an eventual follow-system selection")]
 pub fn system_appearance() -> Appearance {
     // iced 0.14 reports the desktop preference asynchronously through
     // `iced::system::theme`; the light room is not selectable yet, so the
@@ -744,10 +798,14 @@ pub fn system_appearance() -> Appearance {
 /// Closing Time**. A machine with no portal, no session bus and no answer gets
 /// the room baz is, not the room a failed probe defaulted to.
 #[must_use]
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "reserved for an eventual follow-system selection")
+)]
 pub fn follow(appearance: Appearance) -> &'static Palette {
     match appearance {
-        Appearance::Light if READING_ROOM_SHIPS => &READING_ROOM,
-        _ => &CLOSING_TIME,
+        Appearance::Light => &READING_ROOM,
+        Appearance::Dark => &CLOSING_TIME,
     }
 }
 
@@ -761,14 +819,19 @@ static ACTIVE: OnceLock<&'static Palette> = OnceLock::new();
 /// sprite — sees the same room. Calling it twice is a no-op rather than a
 /// panic: the room is a startup fact, and a second opinion about it is not
 /// worth crashing a music player over.
-pub fn install() -> &'static Palette {
+pub fn install(selected: &str) -> &'static Palette {
     let room = match std::env::var("BAZ_ROOM").as_deref() {
         // A development hatch, not a product surface: there is no room picker
         // until step 22 and no second selectable room until step 20, and the
         // light room's surfaces still have to be *looked at* before either.
         Ok("closing-time") => &CLOSING_TIME,
         Ok("reading-room") => &READING_ROOM,
-        _ => follow(system_appearance()),
+        Ok("stone") => &STONE,
+        Ok("plaster") => &PLASTER,
+        _ => crate::theme_file::resolve(selected).unwrap_or_else(|error| {
+            crate::baz_log!("[theme] {error}; using Closing Time");
+            &CLOSING_TIME
+        }),
     };
     let _ = ACTIVE.set(room);
     active()
@@ -1875,6 +1938,11 @@ pub const NOW_PLAYING_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
 /// absent and the block is the pixels it has always been.
 pub const BAR_COVER: f32 = 52.0;
 
+/// Horizontal inset of the bottom bar's edge content. Derived from the
+/// sounding sleeve's vertical centring so its left and top edges spend exactly
+/// the same air; the right side uses the same inset for one compact band.
+pub const BAR_EDGE_PAD: f32 = (BAR_CONTENT_H - BAR_COVER) / 2.0;
+
 /// **The lead a band keeps around its tallest zone** (logical px) — the
 /// breathing rule, stated once and applied to both bars.
 ///
@@ -2140,7 +2208,11 @@ pub const CONTROL_INK_INSET: f32 = (TRANSPORT_HIT - ICON_PX) / 2.0;
 /// It is stated as a subtraction from `HANG` rather than as `32` so that the
 /// day `HANG` or [`TRANSPORT_HIT`] moves, this moves with them; a literal here
 /// would be a second grid.
-pub const APP_BAR_HANG_R: f32 = HANG - CONTROL_INK_INSET;
+/// App-bar ink gutter. `GAP_LG` keeps the borderless resize band outside the
+/// trailing control while bringing the resident chrome materially closer to
+/// the window edge than the collection's 40 px hang.
+pub const APP_BAR_EDGE: f32 = GAP_LG;
+pub const APP_BAR_HANG_R: f32 = APP_BAR_EDGE - CONTROL_INK_INSET;
 
 /// The app bar's padding: [`APP_BAR_PAD_V`] above and below, [`HANG`] on the
 /// left and [`APP_BAR_HANG_R`] on the right.
@@ -2155,7 +2227,7 @@ pub fn app_bar_pad() -> Padding {
         top: APP_BAR_PAD_V,
         right: APP_BAR_HANG_R,
         bottom: APP_BAR_PAD_V,
-        left: HANG,
+        left: APP_BAR_EDGE,
     }
 }
 
@@ -2194,7 +2266,10 @@ pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
 /// It is declared at all — rather than left to shrink to its content — because
 /// L9 wants every tenant of a strip to declare, and a fill next to an
 /// undeclared tenant is a region whose width nobody has written down.
-pub const APP_BAR_NAME_W: f32 = ICON_PX + GAP_SM;
+/// Larger application mark in the resident chrome. It remains a statement,
+/// not a control, and uses the committed 64 px raster at a crisp 24 logical px.
+pub const APP_MARK_PX: f32 = ICON_PX + GAP_SM;
+pub const APP_BAR_NAME_W: f32 = APP_MARK_PX + GAP_SM;
 
 /// The app bar's reserved slot for the **window controls** (logical px) —
 /// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **104**.
@@ -2641,9 +2716,6 @@ pub fn pad(vertical: f32, horizontal: f32) -> Padding {
 /// happened to be standing when the first frame drew — a `LazyLock` that read
 /// [`active`] would be a startup-order trap the day a second room becomes
 /// selectable.
-static THEMES: LazyLock<[Theme; Room::ALL.len()]> =
-    LazyLock::new(|| Room::ALL.map(|room| iced_theme(room.palette())));
-
 /// The iced `Theme` a room implies.
 ///
 /// baz styles every widget it draws itself, so this carries only the five
@@ -2668,7 +2740,7 @@ fn iced_theme(p: &Palette) -> Theme {
 /// are `Arc`-cheap).
 #[must_use]
 pub fn theme() -> Theme {
-    THEMES[active().room as usize].clone()
+    iced_theme(active())
 }
 
 /// A shelf tile's button chrome: **nothing, in every state**.
@@ -4496,7 +4568,7 @@ mod tests {
                 .replace('\\', "/");
             // This module defines the token and `font.rs` holds the bytes;
             // neither is a view setting a string in it.
-            if relative == "theme.rs" || relative == "font.rs" {
+            if relative == "theme.rs" || relative == "theme_file.rs" || relative == "font.rs" {
                 continue;
             }
             let source = std::fs::read_to_string(&path)
@@ -6642,35 +6714,23 @@ mod tests {
         // The theme cache is indexed by the room's discriminant, so the two
         // have to agree about which is which.
         assert_eq!(Room::ClosingTime as usize, 0);
-        assert_eq!(Room::ReadingRoom as usize, 1);
+        assert_eq!(Room::Stone as usize, 1);
+        assert_eq!(Room::Plaster as usize, 2);
+        assert_eq!(Room::ReadingRoom as usize, 3);
         for room in Room::ALL {
             assert_eq!(room.palette().room, room);
         }
     }
 
-    /// **Following the OS, and the gate that stops it.**
+    /// **Following the OS.**
     ///
     /// [`follow`] is pure, so the whole of "the rooms follow the desktop" is
-    /// testable without a desktop — and what it currently answers is
-    /// [`CLOSING_TIME`] either way, because §1.5 ships the light room only
-    /// with an answer to the pale-sleeve question. That is asserted rather
-    /// than left implicit: this test is the thing that will fail, loudly and
-    /// by name, on the day somebody flips the gate without meaning to.
+    /// testable without a desktop. Only a positive light answer leaves
+    /// [`CLOSING_TIME`].
     #[test]
     fn the_rooms_follow_the_desktop_once_the_second_one_ships() {
         assert_eq!(follow(Appearance::Dark), &CLOSING_TIME);
-        if READING_ROOM_SHIPS {
-            assert_eq!(follow(Appearance::Light), &READING_ROOM);
-        } else {
-            assert_eq!(
-                follow(Appearance::Light),
-                &CLOSING_TIME,
-                "the light room is defined, not selectable (ADR-0017 §1.5 and \
-                 build-plan step 20): it ships with an answer to the \
-                 pale-sleeve-on-paper question, and that answer may not be a \
-                 border on artwork"
-            );
-        }
+        assert_eq!(follow(Appearance::Light), &READING_ROOM);
         // A room nothing installed is the room baz is, so every other test in
         // the crate is deterministic without a desktop.
         assert_eq!(active(), &CLOSING_TIME);
@@ -6741,7 +6801,7 @@ mod tests {
             // This module *defines* the tokens; the font module is asset
             // bytes; the groove is a widget that is handed a style function
             // rather than a colour. None is a view.
-            if relative == "theme.rs" || relative == "font.rs" {
+            if relative == "theme.rs" || relative == "theme_file.rs" || relative == "font.rs" {
                 continue;
             }
             let source = std::fs::read_to_string(&path)
@@ -6997,12 +7057,14 @@ mod tests {
             "the app bar has gone back to a symmetric gutter, which puts its \
              trailing glyph 8 px inside the line the index rail draws on"
         );
-        // The now-playing bar. Its vertical padding is zero because the band is
-        // `BAR_CONTENT_H` and the lane that centres the transport is inside it.
+        // The now-playing bar deliberately spends the cover's vertical inset
+        // on its horizontal edge too, rather than inheriting the collection's
+        // much wider hang.
         assert!(
-            read("bottom_bar.rs").contains("theme::pad(0.0, theme::HANG)"),
-            "the bottom bar no longer hangs from HANG"
+            read("bottom_bar.rs").contains("theme::pad(0.0, theme::BAR_EDGE_PAD)"),
+            "the bottom bar no longer uses its equal artwork inset"
         );
+        const { assert!(BAR_EDGE_PAD == (BAR_CONTENT_H - BAR_COVER) / 2.0) }
         // The Settings **place** — a place fills the window, so its content
         // hangs from the window's gutter and not from a panel's padding.
         assert!(
@@ -7700,7 +7762,7 @@ mod tests {
         /// not spent at all — that is the fix of 2026-08-10, and it is asserted
         /// below rather than left to a reader to notice that the constant has
         /// two values.
-        const LINE: f32 = HANG
+        const LINE: f32 = APP_BAR_EDGE
             + APP_BAR_NAME_W
             + GAP_LG
             + SIDEBAR_MEASURE
@@ -7714,7 +7776,7 @@ mod tests {
 
         const { assert!(APP_BAR_MARKS_W == 96.0) }
         const { assert!(APP_BAR_BUTTONS_W == 104.0) }
-        const { assert!(LINE == 640.0) }
+        const { assert!(LINE == 600.0) }
         const { assert!(LINE <= FLOOR) }
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
@@ -7722,7 +7784,7 @@ mod tests {
         //
         // The app-bar amendment spends 248 px of the old 304 px slack on the
         // 232 px well and its 16 px seam, leaving 56 px at the minimum window.
-        const { assert!(FLOOR - LINE == 56.0) }
+        const { assert!(FLOOR - LINE == 96.0) }
         const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 
         // **The display options' slot is held in every place**, which is what
@@ -7737,8 +7799,8 @@ mod tests {
         // is no frame in which they appear and nothing can be seen to move.
         // Holding their 120 px open would be 120 px of dead gutter in every
         // build that ships.
-        const { assert!(GEAR_FROM_RIGHT == 152.0) }
-        const { assert!(MARKS_FROM_RIGHT == 200.0) }
+        const { assert!(GEAR_FROM_RIGHT == 128.0) }
+        const { assert!(MARKS_FROM_RIGHT == 176.0) }
 
         // **The band's height is a control row plus a named lead each side**
         // (law L4), and it is smaller than the place strip's on purpose: this
@@ -7807,7 +7869,7 @@ mod tests {
         // `app::owns_chrome` is false, the close button when it is true. Both
         // are a `TRANSPORT_HIT` box holding an `ICON_PX` sprite, both sit at
         // the row's trailing edge, so both read this one line.
-        const { assert!(trailing_ink_from_right(APP_BAR_HANG_R) == HANG) }
+        const { assert!(trailing_ink_from_right(APP_BAR_HANG_R) == APP_BAR_EDGE) }
         // …and that edge is the one the rail draws its letters on
         // (`crate::spine`: `bounds.x + bounds.width - theme::HANG`) and the one
         // the last column of covers hangs from. One line, three surfaces.
@@ -7820,7 +7882,7 @@ mod tests {
         // bar actually spends rather than off the tokens beside it.
         let pad = app_bar_pad();
         assert!(
-            (pad.left - HANG).abs() < f32::EPSILON,
+            (pad.left - APP_BAR_EDGE).abs() < f32::EPSILON,
             "the app bar's leading gutter is no longer the window's"
         );
         assert!(
@@ -7831,13 +7893,14 @@ mod tests {
             (pad.top - pad.bottom).abs() < f32::EPSILON,
             "the band's lead is no longer the same above and below"
         );
-        const { assert!(APP_BAR_HANG_R < HANG) }
-        const { assert!(HANG - APP_BAR_HANG_R == CONTROL_INK_INSET) }
+        const { assert!(APP_BAR_HANG_R < APP_BAR_EDGE) }
+        const { assert!(APP_BAR_EDGE - APP_BAR_HANG_R == CONTROL_INK_INSET) }
         const { assert!(CONTROL_INK_INSET == 8.0) }
-        const { assert!(APP_BAR_HANG_R == 32.0) }
+        const { assert!(APP_BAR_HANG_R == 8.0) }
+        const { assert!(APP_BAR_HANG_R >= crate::window_frame::RESIZE_BAND) }
         // The mark's slot leaves it hanging from the leading gutter with one
         // `GAP_SM` before the drag gap, so zone 1's ink starts on `HANG` too.
-        const { assert!(APP_BAR_NAME_W - ICON_PX == GAP_SM) }
+        const { assert!(APP_BAR_NAME_W - APP_MARK_PX == GAP_SM) }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

@@ -288,6 +288,16 @@ fn track_row<'a>(
         })
         .on_press(Message::SearchAction(content, action))
     };
+    let mut actions = row![action("Play", Action::Play)].spacing(theme::GAP_SM);
+    if adding_to_playlist {
+        actions = actions.push(action("Add to playlist", Action::End));
+    } else if player.queued() == 0 {
+        actions = actions.push(action("Enqueue", Action::End));
+    } else {
+        actions = actions
+            .push(action("Next", Action::Next))
+            .push(action("End", Action::End));
+    }
     button(
         row![
             container(column![
@@ -306,15 +316,7 @@ fn track_row<'a>(
             ])
             .width(Length::Fill)
             .clip(true),
-            action("Play", Action::Play),
-            action(
-                if adding_to_playlist {
-                    "Add to playlist"
-                } else {
-                    "Enqueue"
-                },
-                Action::Enqueue,
-            ),
+            actions,
             container(
                 text(song.duration.map(vm::format_duration).unwrap_or_default())
                     .size(theme::SIZE_META)

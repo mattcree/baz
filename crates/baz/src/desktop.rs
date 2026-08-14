@@ -1,11 +1,54 @@
 //! Small, host-owned desktop actions. Baz never fetches the URL itself.
 
+use std::path::Path;
+
 /// Open a Wikipedia search for `artist` in the listener's browser.
 pub fn look_up_artist(artist: &str) -> Result<(), String> {
     open(&format!(
         "https://en.wikipedia.org/wiki/Special:Search?search={}",
         encode_query(artist)
     ))
+}
+
+/// Ask the desktop's file manager to show a local folder.
+#[cfg(target_os = "linux")]
+pub fn open_folder(path: &Path) -> Result<(), String> {
+    open(&format!("file://{}", encode_path(path)))
+}
+
+#[cfg(target_os = "macos")]
+pub fn open_folder(path: &Path) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn open_folder(path: &Path) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn encode_path(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt as _;
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::new();
+    for &byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+            encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    encoded
 }
 
 fn encode_query(value: &str) -> String {
@@ -65,10 +108,22 @@ fn command(program: &str, arguments: &[&str]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::encode_query;
+    use super::*;
 
     #[test]
     fn wikipedia_query_is_utf8_percent_encoded() {
         assert_eq!(encode_query("AC/DC & Björk"), "AC%2FDC%20%26%20Bj%C3%B6rk");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn file_uri_paths_preserve_slashes_and_encode_private_bytes() {
+        use std::os::unix::ffi::OsStringExt as _;
+        assert_eq!(
+            encode_path(Path::new("/home/me/My Playlists")),
+            "/home/me/My%20Playlists"
+        );
+        let path = std::ffi::OsString::from_vec(b"/m/\xFF".to_vec());
+        assert_eq!(encode_path(Path::new(&path)), "/m/%FF");
     }
 }

@@ -24,8 +24,87 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-14
+
+The first release. Everything below is everything baz does; there is no
+earlier version to have changed from.
+
+**Status: public beta.** It scans the folders you name, shows the albums and
+plays them front to back, and nothing it does loses or corrupts anything. It is
+pre-1.0, the things it cannot do are listed in `README.md`, and nothing here is
+a promise about the next commit.
+
 ### Changed
 
+- **Music folders can be reordered directly in Settings.** Bounded Up/Down
+  controls persist the ordered root list, stand down during scans and removal
+  confirmation, and never move files or mutate indexed tracks.
+
+- **Settings now shows where Baz stores listener-owned playlist files.** An
+  `Open folder` action delegates to the desktop portal or native file manager;
+  it does not move or rewrite anything, and failures enter the health history.
+
+- **Legacy index rows outside every configured music folder can now be removed
+  safely.** Settings shows their exact paths before a second confirming press,
+  removes only Baz's index entries, preserves first-seen tombstones, and
+  leaves music files, playlists, listening history and the current run alone.
+
+- **F11 now turns Baz's sole window into a current-monitor kiosk.** Move the
+  window to the intended display and press F11 from any place; press it again
+  or use Escape to restore the window without navigating away. The shortcut
+  remains available while search has focus and uses the platform's native
+  fullscreen mode rather than creating a coupled second window.
+
+- **Now Playing has an optional local facts feed.** Its independent persisted
+  control reveals one fixed-height line drawn only from facts the sounding
+  file actually has. Track changes reset the fixed cycle; pressing the line or
+  waiting 20 seconds advances it. The feed can state play history, collection
+  context, the full engine-reported signal path, encoding and size, playlist
+  provenance, release tags and track position, while missing data stays absent
+  and no engagement rankings, streaks or totals are invented.
+
+- **Search can enqueue a track Next or at the End of the live run.** Existing
+  runs show `Play | Next | End`; no run collapses the duplicate positions to
+  `Play | Enqueue`, and saved-playlist pages retain `Add to playlist`.
+  Repeated Next presses keep their press order. The absolute queue edit pins
+  one successor even in shuffle mode, then continues the remaining shuffled
+  pass without interrupting or starting playback.
+
+- **Settings now exposes Baz's diagnostic session log.** The existing tagged
+  console diagnostics also enter a bounded 256-line in-memory stream, shown
+  newest first under Debug with elapsed time. It is distinct from the bell's
+  curated event history, persists nothing to disk, and makes launch/playback/
+  scan diagnostics visible in packaged Windows builds without a console.
+
+- **The resident bars now use compact, measured window edges.** The app mark
+  grows from 16 to 24 logical pixels and sits on a 16 px chrome edge; trailing
+  app/window controls land on the matching ink edge without entering the
+  borderless resize band. The bottom band moves to a 14 px edge derived from
+  its 52 px sounding sleeve, making that sleeve's left and top insets exactly
+  equal while leaving the Library rail and scrollbar geometry untouched.
+- **The audio-output picker now states its real restart boundary.** Settings
+  distinguishes the endpoint opened by this process from the persisted choice
+  for the next launch, so selecting a device never implies that the current
+  run moved. Startup open failures appear beside the picker with the action to
+  choose another output and restart; successful next-launch engine startup
+  remains the point at which signal-path events confirm the new endpoint.
+- **Active Baz-owned sample-rate conversion is now an actionable warning.**
+  Settings and the canonical event history name the negotiated source and
+  output rates, distinguish an unsupported device rate from a fixed output
+  boundary, and say which choice restores a direct path. A continuing
+  condition is logged once and clears when conversion or playback ends; the
+  explanation explicitly does not claim visibility into conversion performed
+  later by the operating-system mixer.
+- **Appearance now offers four coordinated visual rooms and safe local custom
+  themes.** Closing Time, Stone, Plaster and Reading Room can be selected and
+  persisted in Settings. Versioned JSON themes can be pasted or imported,
+  previewed, validated against Baz's contrast and elevation laws, and exported
+  again; malformed, unsafe or missing documents fall back to Closing Time
+  without blocking startup. The repository includes the v1 JSON Schema, all
+  four built-in examples and a concise prompt for external theme generation.
+  Whole-app changes apply on restart because the glyph atlas is deliberately
+  built once per process; Baz itself remains offline and executes no theme
+  content.
 - **Home's local Vibe feature is now a free-text Make a mix composer.** A
   listener describes the music in ordinary language and chooses a duration in
   minutes. Baz's bundled paired LAION CLAP model embeds both local track audio
@@ -97,6 +176,57 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **Album artwork no longer unloads after scrolling away.** Covers that have
+  actually appeared remain decoded for the session, while speculative work
+  stays in the bounded recent cache. Returning through dense walls therefore
+  reuses the displayed handle without a gradient/reload interval. Playlist
+  panels, Home Continue and density retries now participate in one complete
+  visible-target schedule as well.
+
+- **Release builds no longer embed the build machine's absolute workspace path
+  in Vibe's model lookup.** Development and packaged builds now discover the
+  model bundle from the executable or working-directory ancestry (with the
+  explicit environment override still first), preserving installed archives
+  and repository tests without leaking a runner or maintainer path.
+
+- **Pinned Library group headings no longer jump 56 px to the right.** The
+  ordinary grid is centered after reserving the index rail and scrollbar, but
+  its full-width pinned layer had centered against the outer wall. The pinned
+  field now retains its complete background while reserving that same 112 px
+  right lane before centering its heading. All group keys, widths and density
+  steps consequently keep one content edge before and after sticking.
+
+- **Scrolling artwork is physically contained beneath both resident bars.**
+  iced's inactive-scrollbar path could leave image paint governed only by a
+  logical viewport that image widgets do not consume, so navigation, resize or
+  density transitions could expose translated sleeves until a reset rebuilt
+  widget state. Baz now scissors the shared body at the renderer boundary on
+  every frame and uses the same bounds for input and body overlays; search,
+  status and menu dropovers remain intentional whole-window layers.
+
+- **Every visible sleeve consumer now participates in artwork residency.**
+  Queue-row handles are no longer unpinned by the later chrome pass, Home pins
+  its always-visible All songs collage as well as Recently added, and the
+  floating playlist panel nominates every collage it can expose. An 800-album
+  churn regression keeps wall, page, and chrome targets un-evictable while the
+  off-screen recent tier remains bounded at 64 entries.
+
+- **Deleted album folders can now be pruned without mistaking an offline root
+  for deletion.** Automatic scans retain their existing four evidence gates.
+  After a root's walk completes, paths whose parent directories are also gone
+  appear in Settings as a complete review list; explicit confirmation forgets
+  only that snapshot through the same reversible tombstone path as folder
+  removal. Cancel, unavailable roots, partial scans and permission failures
+  remove nothing. Audio, playlists, history and the current run are untouched,
+  while the wall/search/selection and artwork requests rebuild from the updated
+  index without starting playback.
+- **Saved playlists can now be deleted from the Playlists overview.** Each
+  tile's actions include Delete; the collection header and tile name the list
+  while `Move to Trash | Keep` is pending. Confirm and the existing detail-page
+  action share one platform-trash implementation, close transient state,
+  refresh the collection and select the next sensible tile without starting
+  playback. Cancel is inert, and foreign playlist files keep identical
+  semantics.
 - **The `RECENT` sounding lamp no longer reflows its row.** Every expanded
   row reserves the same far-trailing dot slot, while title and metadata keep
   fixed one-line lanes and gain measured end ellipses when they run long.
@@ -529,16 +659,6 @@ Every release is built from a tag by CI, gated on the full test suite — see
 - **`Play all`**, at the owner's request — the control and the action together.
   Home's `All songs` tile is unaffected; it plays the collection rather than
   the wall as arranged, and always did.
-
-## [0.1.0] - 2026-08-10
-
-The first release. Everything below is everything baz does; there is no
-earlier version to have changed from.
-
-**Status: public beta.** It scans the folders you name, shows the albums and
-plays them front to back, and nothing it does loses or corrupts anything. It is
-pre-1.0, the things it cannot do are listed in `README.md`, and nothing here is
-a promise about the next commit.
 
 ### Added
 

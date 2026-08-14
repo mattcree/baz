@@ -30,9 +30,16 @@ pub(crate) fn view<'a>(
 ) -> Element<'a, Message> {
     let room = theme::active();
     let count = playlists.rows.len();
-    let note = match count {
-        1 => "1 playlist".to_owned(),
-        count => format!("{count} playlists"),
+    let note = if let Some(id) = playlists.confirming_overview_delete {
+        playlists.rows.iter().find(|row| row.id == id).map_or_else(
+            || format!("{count} playlists"),
+            |row| format!("Delete “{}”?", row.name),
+        )
+    } else {
+        match count {
+            1 => "1 playlist".to_owned(),
+            count => format!("{count} playlists"),
+        }
     };
     let mut order = row![].spacing(theme::GAP_MD);
     for choice in PlaylistOrder::ALL {
@@ -71,6 +78,7 @@ pub(crate) fn view<'a>(
                 playlist,
                 hang,
                 playlists.hovered == Some(playlist.id),
+                playlists.confirming_overview_delete == Some(playlist.id),
                 player.engine_ready(),
             ));
         }
@@ -197,6 +205,7 @@ fn tile<'a>(
     playlist: &'a PanelRow,
     hang: Grid,
     hovered: bool,
+    confirming_delete: bool,
     engine: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -204,20 +213,38 @@ fn tile<'a>(
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
     let art = playlist_sleeve(shelf, &playlist.art, &playlist.name, work);
-    let art: Element<'_, Message> = if hovered || selected {
+    let art: Element<'_, Message> = if hovered || selected || confirming_delete {
         let mut options = Vec::new();
-        if engine && playlist.playable > 0 {
-            options.push(crate::views::shelf::VeilOption::accented(
-                crate::icon::Glyph::Play,
-                "Play",
-                Message::PlayPlaylist(playlist.id),
+        if confirming_delete {
+            options.push(crate::views::shelf::VeilOption::new(
+                crate::icon::Glyph::Close,
+                "Move to Trash",
+                Message::PlaylistOverviewDelete,
+            ));
+            options.push(crate::views::shelf::VeilOption::new(
+                crate::icon::Glyph::Open,
+                "Keep",
+                Message::PlaylistOverviewDeleteCancel,
+            ));
+        } else {
+            if engine && playlist.playable > 0 {
+                options.push(crate::views::shelf::VeilOption::accented(
+                    crate::icon::Glyph::Play,
+                    "Play",
+                    Message::PlayPlaylist(playlist.id),
+                ));
+            }
+            options.push(crate::views::shelf::VeilOption::new(
+                crate::icon::Glyph::Open,
+                "Open",
+                Message::OpenPlaylist(playlist.id),
+            ));
+            options.push(crate::views::shelf::VeilOption::new(
+                crate::icon::Glyph::Close,
+                "Delete",
+                Message::PlaylistOverviewDeleteStart(playlist.id),
             ));
         }
-        options.push(crate::views::shelf::VeilOption::new(
-            crate::icon::Glyph::Open,
-            "Open",
-            Message::OpenPlaylist(playlist.id),
-        ));
         stack![art, crate::views::shelf::veil(work, options)].into()
     } else {
         art

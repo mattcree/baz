@@ -1,6 +1,6 @@
 //! Keyboard state and geometry for the app-wide search dropover.
 //!
-//! The view owns no decisions: this module defines the two track actions and
+//! The view owns no decisions: this module defines the track actions and
 //! the clamped movement used by both the update loop and its tests.
 
 use iced::keyboard::{Key, Modifiers, key};
@@ -9,7 +9,43 @@ use iced::keyboard::{Key, Modifiers, key};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Action {
     Play,
-    Enqueue,
+    Next,
+    End,
+}
+
+/// Session anchor for consecutive `Next` insertions. Without it, inserting
+/// every answer at `cursor + 1` reverses the order of repeated presses.
+#[derive(Debug, Default)]
+pub(crate) struct NextAnchor {
+    armed: bool,
+    track_seq: u64,
+    expected_len: usize,
+    next_slot: usize,
+}
+
+impl NextAnchor {
+    #[must_use]
+    pub(crate) fn insertion(
+        &mut self,
+        track_seq: u64,
+        playing: Option<usize>,
+        len: usize,
+    ) -> usize {
+        let at = if self.armed && self.track_seq == track_seq && self.expected_len == len {
+            self.next_slot.min(len)
+        } else {
+            playing.map_or(0, |row| row.saturating_add(1).min(len))
+        };
+        self.armed = true;
+        self.track_seq = track_seq;
+        self.expected_len = len.saturating_add(1);
+        self.next_slot = at.saturating_add(1);
+        at
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// A bare arrow key. The shell gives it to the open result chooser first and
@@ -67,12 +103,23 @@ pub(crate) fn result_top(index: usize, tracks: usize) -> f32 {
 
 impl Action {
     #[must_use]
-    pub(crate) const fn moved(self, delta: i32) -> Self {
-        match (self, delta.signum()) {
-            (Self::Play, 1) => Self::Enqueue,
-            (Self::Enqueue, -1) => Self::Play,
-            _ => self,
-        }
+    pub(crate) fn moved(self, delta: i32, split: bool) -> Self {
+        let actions: &[Self] = if split {
+            &[Self::Play, Self::Next, Self::End]
+        } else {
+            &[Self::Play, Self::End]
+        };
+        let current = actions
+            .iter()
+            .position(|action| *action == self)
+            .unwrap_or(0);
+        let last = actions.len() - 1;
+        let target = match delta.cmp(&0) {
+            std::cmp::Ordering::Less => current.saturating_sub(1),
+            std::cmp::Ordering::Greater => current.saturating_add(1).min(last),
+            std::cmp::Ordering::Equal => current,
+        };
+        actions[target]
     }
 }
 
@@ -94,7 +141,7 @@ pub(crate) fn moved_index(selected: Option<usize>, len: usize, delta: i32) -> Op
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Direction, chooser_direction, moved_index};
+    use super::{Action, Direction, NextAnchor, chooser_direction, moved_index};
     use iced::keyboard::{Key, Modifiers, key};
 
     #[test]
@@ -123,10 +170,21 @@ mod tests {
     }
 
     #[test]
-    fn track_actions_are_a_two_stop_axis() {
-        assert_eq!(Action::Play.moved(1), Action::Enqueue);
-        assert_eq!(Action::Enqueue.moved(-1), Action::Play);
-        assert_eq!(Action::Play.moved(-1), Action::Play);
-        assert_eq!(Action::Enqueue.moved(1), Action::Enqueue);
+    fn track_actions_expand_only_when_a_run_makes_next_distinct() {
+        assert_eq!(Action::Play.moved(1, true), Action::Next);
+        assert_eq!(Action::Next.moved(1, true), Action::End);
+        assert_eq!(Action::End.moved(-1, true), Action::Next);
+        assert_eq!(Action::Play.moved(1, false), Action::End);
+        assert_eq!(Action::End.moved(-1, false), Action::Play);
+    }
+
+    #[test]
+    fn repeated_next_insertions_keep_the_order_the_listener_pressed() {
+        let mut anchor = NextAnchor::default();
+        assert_eq!(anchor.insertion(7, Some(2), 5), 3);
+        assert_eq!(anchor.insertion(7, Some(2), 6), 4);
+        assert_eq!(anchor.insertion(7, Some(2), 7), 5);
+        // A track boundary starts a new sequence immediately after its cursor.
+        assert_eq!(anchor.insertion(8, Some(6), 8), 7);
     }
 }

@@ -167,6 +167,20 @@ impl Traversal {
     }
 }
 
+/// Move one queue position to the immediate successor slot (or the top when
+/// there is no current position), retaining every other position's order.
+pub fn force_next(order: &mut Vec<usize>, current: Option<usize>, next: usize) {
+    let Some(next_slot) = order.iter().position(|position| *position == next) else {
+        return;
+    };
+    order.remove(next_slot);
+    let at = current
+        .and_then(|current| order.iter().position(|position| *position == current))
+        .map_or(0, |slot| slot + 1)
+        .min(order.len());
+    order.insert(at, next);
+}
+
 /// **Fisher–Yates over a list of positions.**
 ///
 /// In place, unbiased, and deterministic: the same seed over the same list is
@@ -268,5 +282,17 @@ mod tests {
         let order = Traversal::Shuffled { seed: 7 }.play_order(40_000);
         let seen: HashSet<usize> = order.iter().copied().collect();
         assert_eq!(seen.len(), 40_000);
+    }
+
+    #[test]
+    fn an_explicit_next_overrides_one_slot_without_unshuffling_the_rest() {
+        let mut order = vec![4, 1, 3, 0, 2];
+        force_next(&mut order, Some(3), 2);
+        assert_eq!(order, [4, 1, 3, 2, 0]);
+        let seen: HashSet<usize> = order.iter().copied().collect();
+        assert_eq!(seen, HashSet::from([0, 1, 2, 3, 4]));
+
+        force_next(&mut order, None, 0);
+        assert_eq!(order[0], 0, "without a cursor, explicit next is the top");
     }
 }

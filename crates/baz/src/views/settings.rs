@@ -67,7 +67,7 @@
 //! NAS greyed out needs to know their library is intact. And the confirming
 //! press of Remove names what goes: *the tracks*, not the files.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use iced::widget::{
     Column, Space, button, checkbox, column, container, image as iced_image, pick_list, row, rule,
@@ -80,7 +80,7 @@ use crate::playback::OutputChoice;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
 use crate::views::place_header_with;
-use crate::{icon, theme};
+use crate::{icon, theme, theme_file};
 
 /// One music folder, as the Library section draws it (ADR-0022).
 ///
@@ -120,7 +120,16 @@ pub(crate) struct LibraryView<'a> {
     pub(crate) scanning: bool,
     /// Rows belonging to no folder at all: pre-v8 rows nothing adopted, from a
     /// folder baz was pointed at once and is not pointed at now.
-    pub(crate) unrooted: usize,
+    pub(crate) unrooted: Vec<PathBuf>,
+    /// Whether every rootless path is exposed for the confirming press.
+    pub(crate) unrooted_pending: bool,
+    /// Baz's listener-owned playlist directory, when available.
+    pub(crate) playlists: Option<&'a Path>,
+    /// Missing rows beneath successfully scanned roots whose parent directory
+    /// is absent, making automatic removal unsafe.
+    pub(crate) prunable: &'a [PathBuf],
+    /// Whether the bulk removal's exact consequence is exposed for confirm.
+    pub(crate) prune_pending: bool,
     /// Now, in nanoseconds since the Unix epoch — so "scanned four minutes ago"
     /// is arithmetic the view does rather than a clock it reads.
     pub(crate) now_ns: i64,
@@ -131,7 +140,17 @@ pub(crate) struct LibraryView<'a> {
 pub(crate) struct OutputView<'a> {
     pub(crate) choices: &'a [OutputChoice],
     pub(crate) selected: &'a OutputChoice,
+    /// Endpoint opened by this process, which may differ from the persisted
+    /// next-launch selection.
+    pub(crate) active: &'a OutputChoice,
     pub(crate) error: Option<&'a str>,
+}
+
+/// Settings → Appearance state owned by the shell.
+pub(crate) struct ThemeView<'a> {
+    pub(crate) selected: String,
+    pub(crate) json: &'a str,
+    pub(crate) notice: Option<&'a str>,
 }
 
 /// Inner padding of the place's content area (logical px).
@@ -154,12 +173,16 @@ const PLACE_PAD: f32 = theme::HANG;
 ///
 /// Playback stays first because it was first; a listener who opens Settings out
 /// of habit finds what they left.
-const SECTIONS: [&str; 3] = ["Playback", "Library", "Vibe"];
+const SECTIONS: [&str; 5] = ["Playback", "Library", "Appearance", "Vibe", "Debug"];
 
 /// The index of the Library section in [`SECTIONS`].
 pub(crate) const LIBRARY_SECTION: usize = 1;
 /// The index of the Vibe section in [`SECTIONS`].
-pub(crate) const VIBE_SECTION: usize = 2;
+pub(crate) const APPEARANCE_SECTION: usize = 2;
+/// The index of the Vibe section in [`SECTIONS`].
+pub(crate) const VIBE_SECTION: usize = 3;
+/// The index of the session diagnostic stream in [`SECTIONS`].
+pub(crate) const DEBUG_SECTION: usize = 4;
 
 /// The Settings place: a header with the way back, a list of sections, and the
 /// current section's content.
@@ -169,6 +192,14 @@ pub(crate) const VIBE_SECTION: usize = 2;
 /// the left and the content sits beside it; below it the two stack, because
 /// under a thousand pixels the list and a 640 px form cannot both have their
 /// width and the form is the one being used.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "ThemeView groups one settings form's borrowed and owned projection at the view boundary"
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the Settings place receives one explicit projection per independent section"
+)]
 pub(crate) fn view<'a>(
     player: &'a PlayerState,
     window_width: f32,
@@ -176,13 +207,22 @@ pub(crate) fn view<'a>(
     library: LibraryView<'a>,
     output: OutputView<'a>,
     vibe_workers: usize,
+    theme_view: ThemeView<'a>,
+    diagnostic_lines: Vec<String>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
+    let place_note = if section == DEBUG_SECTION {
+        "Session diagnostics; nothing here is written to disk."
+    } else {
+        "Kept in config.toml, and remembered next time."
+    };
     let blocks = match section {
         LIBRARY_SECTION => vec![library_section(library)],
+        APPEARANCE_SECTION => vec![appearance_section(&theme_view)],
         VIBE_SECTION => vec![vibe_section(vibe_workers)],
-        _ => vec![output_section(output), replay_gain_section(player)],
+        DEBUG_SECTION => vec![debug_section(diagnostic_lines)],
+        _ => vec![output_section(output, player), replay_gain_section(player)],
     };
     let content = container(
         scrollable(
@@ -219,15 +259,176 @@ pub(crate) fn view<'a>(
         // with this place's own name and note. Back sends
         // [`Message::LeavePlace`] — the same landing as the gear's toggle
         // and <kbd>Esc</kbd>'s peel: the Library.
-        place_header_with(
-            "Settings",
-            Some("Kept in config.toml, and remembered next time."),
-        ),
+        place_header_with("Settings", Some(place_note),),
         container(body)
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(PLACE_PAD),
     ]
+    .into()
+}
+
+/// The existing tagged console stream, retained only for this process.
+fn debug_section(lines: Vec<String>) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut section = column![section_heading(
+        "Diagnostic log",
+        "This session only · newest first · the notification bell remains the event history.",
+    )]
+    .spacing(theme::GAP_MD);
+    if lines.is_empty() {
+        section = section.push(
+            text("No diagnostics have been recorded in this session.")
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .color(room.paper_faint),
+        );
+    } else {
+        for line in lines {
+            section = section.push(
+                text(line)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::SANS)
+                    .color(room.paper_dim),
+            );
+        }
+    }
+    section.into()
+}
+
+/// Four coordinated built-ins plus the bounded local JSON extension surface.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one small form is clearest as one composition beside its validation workflow"
+)]
+fn appearance_section<'a>(view: &ThemeView<'a>) -> Element<'a, Message> {
+    let room = theme::active();
+    let mut choices = column![].spacing(theme::GAP_XXS);
+    for (code, name) in theme_file::BUILTINS {
+        let selected = view.selected == code;
+        choices = choices.push(
+            button(
+                container(
+                    text(if selected {
+                        format!("{name} · selected")
+                    } else {
+                        name.to_owned()
+                    })
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY),
+                )
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center),
+            )
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .width(Length::Fill)
+            .padding(theme::pad(0.0, theme::GAP_MD))
+            .style(move |_theme, status| theme::segment(room, status, selected))
+            .on_press(Message::ThemeSelected(code)),
+        );
+    }
+
+    let preview: Element<'_, Message> = match theme_file::preview(&view.selected) {
+        Ok(preview) => {
+            let mut swatches = row![].spacing(theme::GAP_XXS);
+            for color in preview.colors {
+                swatches = swatches.push(
+                    container(Space::new())
+                        .width(Length::Fill)
+                        .height(Length::Fixed(theme::TRANSPORT_HIT))
+                        .style(move |_theme| iced::widget::container::Style {
+                            background: Some(color.into()),
+                            ..Default::default()
+                        }),
+                );
+            }
+            column![
+                text(format!("Preview · {}", preview.name))
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim),
+                swatches,
+            ]
+            .spacing(theme::GAP_XS)
+            .into()
+        }
+        Err(error) => text(format!(
+            "Selected theme unavailable: {error}. Closing Time will be used."
+        ))
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .color(room.alert)
+        .into(),
+    };
+
+    let json = text_input("Paste a complete v1 theme JSON document", view.json)
+        .on_input(Message::ThemeJsonChanged)
+        .on_submit(Message::ThemeImportPasted)
+        .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .style(move |_theme, status| theme::input(room, status));
+
+    let actions = row![
+        word_action("Import pasted", Message::ThemeImportPasted),
+        word_action("Import file…", Message::ThemePickFile),
+        word_action("Load template", Message::ThemeLoadTemplate),
+        word_action("Export selected…", Message::ThemeExport),
+    ]
+    .spacing(theme::GAP_XS)
+    .wrap();
+
+    let mut section = column![
+        section_heading(
+            "Visual room",
+            "Four safe built-ins, or a validated local JSON room. Whole-app changes apply on restart.",
+        ),
+        choices,
+        preview,
+        text("Custom JSON is data only: colours and focus opacity. No code, URLs, paths, fonts, layout or behaviour.")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint),
+        json,
+        actions,
+    ]
+    .spacing(theme::GAP_SM);
+    if let Some(notice) = view.notice {
+        section = section.push(
+            text(notice)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(
+                    if notice.contains("must")
+                        || notice.contains("invalid")
+                        || notice.contains("Could not")
+                    {
+                        room.alert
+                    } else {
+                        room.paper_dim
+                    },
+                ),
+        );
+    }
+    section.into()
+}
+
+fn word_action(label: &'static str, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(label)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(message)
     .into()
 }
 
@@ -264,7 +465,7 @@ fn vibe_section(workers: usize) -> Element<'static, Message> {
 /// Shared-mode endpoint selection. The engine owns a cpal stream for its
 /// lifetime, so this standing decision is applied at the next launch rather
 /// than tearing a playing run out from under the listener.
-fn output_section(output: OutputView<'_>) -> Element<'_, Message> {
+fn output_section<'a>(output: OutputView<'a>, player: &'a PlayerState) -> Element<'a, Message> {
     let room = theme::active();
     let picker = pick_list(
         output.choices,
@@ -286,7 +487,7 @@ fn output_section(output: OutputView<'_>) -> Element<'_, Message> {
         container(picker)
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .align_y(alignment::Vertical::Center),
-        text("A change takes effect the next time baz starts.")
+        text(output_status(output.active, output.selected))
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_faint),
@@ -300,7 +501,46 @@ fn output_section(output: OutputView<'_>) -> Element<'_, Message> {
                 .color(room.alert),
         );
     }
+    if let Some(reason) = player.availability_note() {
+        section = section.push(
+            text(format!(
+                "Could not open {}: {reason}. Select another output and restart Baz.",
+                output.active
+            ))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.alert),
+        );
+    }
+    if let Some(warning) = player.signal_warning() {
+        section = section.push(
+            container(
+                column![
+                    text(warning.title)
+                        .size(theme::SIZE_BODY)
+                        .line_height(theme::LEADING_BODY)
+                        .font(theme::MEDIUM)
+                        .color(room.alert),
+                    text(warning.detail)
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper),
+                ]
+                .spacing(theme::GAP_XS),
+            )
+            .padding(theme::GAP_MD)
+            .style(move |_theme| theme::panel(room)),
+        );
+    }
     section.into()
+}
+
+fn output_status(active: &OutputChoice, selected: &OutputChoice) -> String {
+    if active == selected {
+        format!("In use now: {active}.")
+    } else {
+        format!("In use now: {active}. Selected for next launch: {selected}.")
+    }
 }
 
 /// How wide the form gets: what the window has left for it, capped at
@@ -518,9 +758,17 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
                 .color(room.paper_faint),
         );
     }
+    let folder_count = library.folders.len();
     for (index, folder) in library.folders.into_iter().enumerate() {
         let pending = library.pending_removal == Some(index);
-        section = section.push(folder_block(index, &folder, pending, library.now_ns));
+        section = section.push(folder_block(
+            index,
+            folder_count,
+            &folder,
+            pending,
+            library.scanning,
+            library.now_ns,
+        ));
     }
 
     section = section.push(add_folder_row(library.input));
@@ -541,6 +789,41 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
         ))
         .push(force_sync_row(library.scanning));
 
+    if let Some(playlists) = library.playlists {
+        section = section
+            .push(Space::new().height(Length::Fixed(theme::GAP_MD)))
+            .push(section_heading(
+                "Playlists folder",
+                "Baz stores the playlist files you own here.",
+            ))
+            .push(
+                row![
+                    container(
+                        text(playlists.display().to_string())
+                            .size(theme::SIZE_META)
+                            .line_height(theme::LEADING_META)
+                            .color(room.paper_faint)
+                            .wrapping(text::Wrapping::None),
+                    )
+                    .width(Length::Fill)
+                    .clip(true),
+                    word_control("Open folder", true, Message::OpenPlaylistsFolder),
+                ]
+                .spacing(theme::GAP_MD)
+                .align_y(iced::Alignment::Center),
+            );
+    }
+
+    if !library.prunable.is_empty() {
+        section = section
+            .push(Space::new().height(Length::Fixed(theme::GAP_MD)))
+            .push(prune_block(
+                library.prunable,
+                library.prune_pending,
+                library.scanning,
+            ));
+    }
+
     // What the index has to say about itself, in the slot this place reserves
     // for the machine's own report. Two lines at most, and each is present only
     // when it is true.
@@ -548,20 +831,127 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
     if library.scanning {
         readings.push(("Scanning now.".to_owned(), room.paper));
     }
-    if library.unrooted > 0 {
-        readings.push((
-            format!(
-                "{} not in any folder above — from a folder baz no longer holds. \
-                 Add it back to refresh them.",
-                tracks_phrase(library.unrooted)
-            ),
-            room.paper_faint,
-        ));
+    if !library.unrooted.is_empty() {
+        section = section
+            .push(Space::new().height(Length::Fixed(theme::GAP_MD)))
+            .push(unrooted_block(
+                &library.unrooted,
+                library.unrooted_pending,
+                library.scanning,
+            ));
     }
     if !readings.is_empty() {
         section = section.push(readout_block(readings));
     }
     section.into()
+}
+
+fn unrooted_block(paths: &[PathBuf], pending: bool, scanning: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut block = column![section_heading(
+        "Outside held folders",
+        "Legacy index rows assigned to no folder cannot be refreshed or pruned by a scan.",
+    )]
+    .spacing(theme::GAP_XS);
+    if pending {
+        block = block.push(
+            text(format!(
+                "Remove {} from Baz's index? Files on disk, playlists, listening history and the current run are untouched.",
+                tracks_phrase(paths.len())
+            ))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper),
+        );
+        for path in paths {
+            block = block.push(
+                text(path.display().to_string())
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint),
+            );
+        }
+        block = block.push(
+            row![
+                word_control("Remove from index", true, Message::PruneUnrooted),
+                word_control("Keep", true, Message::CancelPruneUnrooted),
+            ]
+            .spacing(theme::GAP_XXS),
+        );
+    } else {
+        block = block
+            .push(
+                text(format!(
+                    "{}. Add their folder back to refresh them, or review the exact paths before removing only the stale index entries.",
+                    tracks_phrase(paths.len())
+                ))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.warning),
+            )
+            .push(word_control(
+                "Review unheld paths",
+                !scanning,
+                Message::ConfirmPruneUnrooted,
+            ));
+    }
+    block.into()
+}
+
+/// Preview and confirm rows whose album directory disappeared. The complete
+/// path list is intentionally visible before the destructive press: its shape
+/// is how a listener recognizes an unmounted nested share and chooses Keep.
+fn prune_block(paths: &[PathBuf], pending: bool, scanning: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut block = column![section_heading(
+        "Missing albums",
+        "A completed scan could not find these paths, but their parent folders are absent too.",
+    )]
+    .spacing(theme::GAP_XS);
+
+    if pending {
+        block = block.push(
+            text(format!(
+                "Remove {} from Baz's index? Audio files, playlist files, listening history and the current run are untouched. Bringing the files back restores their original added dates.",
+                tracks_phrase(paths.len())
+            ))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper),
+        );
+        for path in paths {
+            block = block.push(
+                text(path.display().to_string())
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint),
+            );
+        }
+        block = block.push(
+            row![
+                word_control("Prune index", true, Message::PruneMissing),
+                word_control("Keep", true, Message::CancelPruneMissing),
+            ]
+            .spacing(theme::GAP_XXS),
+        );
+    } else {
+        block = block
+            .push(
+                text(format!(
+                    "{} retained for safety. Preview them before deciding.",
+                    tracks_phrase(paths.len())
+                ))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.warning),
+            )
+            .push(word_control(
+                "Review missing paths",
+                !scanning,
+                Message::ConfirmPruneMissing,
+            ));
+    }
+    block.into()
 }
 
 /// One folder: its path on a control-height line with its Remove, and one quiet
@@ -583,8 +973,10 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
 /// after.
 fn folder_block(
     index: usize,
+    count: usize,
     folder: &FolderRow,
     pending: bool,
+    scanning: bool,
     now_ns: i64,
 ) -> Element<'static, Message> {
     let room = theme::active();
@@ -596,7 +988,25 @@ fn folder_block(
         .spacing(theme::GAP_XXS)
         .into()
     } else {
-        word_control("Remove", true, Message::ConfirmRemoveMusicFolder(index))
+        row![
+            word_control(
+                "Up",
+                !scanning && index > 0,
+                Message::MoveMusicFolderUp(index),
+            ),
+            word_control(
+                "Down",
+                !scanning && index + 1 < count,
+                Message::MoveMusicFolderDown(index),
+            ),
+            word_control(
+                "Remove",
+                !scanning,
+                Message::ConfirmRemoveMusicFolder(index),
+            ),
+        ]
+        .spacing(theme::GAP_XXS)
+        .into()
     };
     let note = if pending {
         (forget_phrase(folder.tracks), room.paper)
@@ -1048,6 +1458,20 @@ mod tests {
         assert_eq!(tracks_phrase(0), "0 tracks");
         assert_eq!(tracks_phrase(1), "1 track");
         assert_eq!(tracks_phrase(3_214), "3214 tracks");
+    }
+
+    #[test]
+    fn output_status_distinguishes_this_process_from_the_next_launch() {
+        let system = OutputChoice::SystemDefault;
+        let dac = OutputChoice::Device("USB DAC".to_owned());
+        assert_eq!(
+            output_status(&system, &system),
+            "In use now: System default."
+        );
+        assert_eq!(
+            output_status(&system, &dac),
+            "In use now: System default. Selected for next launch: USB DAC."
+        );
     }
 
     /// The confirming press's sentence, pinned where it is decided. It has to

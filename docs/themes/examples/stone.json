@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "stone",
+  "name": "Stone",
+  "colors": {
+    "recess": "#060708", "wall": "#27231F", "plinth": "#37312B", "plinth_lit": "#494139",
+    "ink": "#F7F2E8", "ink_dim": "#E5E0D6", "ink_faint": "#D3CEC5", "ink_muted": "#B0ACA4",
+    "playback": "#F1B34D", "playback_bright": "#FBC666", "playback_deep": "#D29232", "playback_ink": "#1E160B",
+    "alert": "#FF9E8D", "warning": "#F6CB63", "success": "#A6D296", "shadow": "#00000073"
+  },
+  "focus_opacity": 0.55
+}

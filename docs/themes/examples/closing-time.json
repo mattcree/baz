@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "closing-time",
+  "name": "Closing Time",
+  "colors": {
+    "recess": "#060708", "wall": "#0C0D0E", "plinth": "#141517", "plinth_lit": "#1C1D20",
+    "ink": "#E8E4DB", "ink_dim": "#ABA8A1", "ink_faint": "#888680", "ink_muted": "#6C6A66",
+    "playback": "#E3A14E", "playback_bright": "#F1B362", "playback_deep": "#C7883D", "playback_ink": "#1B140B",
+    "alert": "#D9776B", "warning": "#D2B35E", "success": "#86A97C", "shadow": "#00000073"
+  },
+  "focus_opacity": 0.45
+}

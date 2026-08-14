@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mattcree/baz/blob/main/docs/themes/theme.schema.json",
+  "title": "Baz custom theme v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "colors", "focus_opacity"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$", "maxLength": 48 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "focus_opacity": { "type": "number", "minimum": 0.35, "maximum": 0.85 },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recess", "wall", "plinth", "plinth_lit", "ink", "ink_dim", "ink_faint", "ink_muted", "playback", "playback_bright", "playback_deep", "playback_ink", "alert", "warning", "success", "shadow"],
+      "properties": {
+        "recess": { "$ref": "#/$defs/rgb" },
+        "wall": { "$ref": "#/$defs/rgb" },
+        "plinth": { "$ref": "#/$defs/rgb" },
+        "plinth_lit": { "$ref": "#/$defs/rgb" },
+        "ink": { "$ref": "#/$defs/rgb" },
+        "ink_dim": { "$ref": "#/$defs/rgb" },
+        "ink_faint": { "$ref": "#/$defs/rgb" },
+        "ink_muted": { "$ref": "#/$defs/rgb" },
+        "playback": { "$ref": "#/$defs/rgb" },
+        "playback_bright": { "$ref": "#/$defs/rgb" },
+        "playback_deep": { "$ref": "#/$defs/rgb" },
+        "playback_ink": { "$ref": "#/$defs/rgb" },
+        "alert": { "$ref": "#/$defs/rgb" },
+        "warning": { "$ref": "#/$defs/rgb" },
+        "success": { "$ref": "#/$defs/rgb" },
+        "shadow": { "$ref": "#/$defs/rgba" }
+      }
+    }
+  },
+  "$defs": {
+    "rgb": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "rgba": { "type": "string", "pattern": "^#[0-9A-Fa-f]{8}$" }
+  }
+}
