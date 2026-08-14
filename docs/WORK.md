@@ -592,6 +592,39 @@ Phase A is complete only when all twelve items are implemented and verified;
     way this was ever going to be found was by reading the sentence and asking
     whether it was still true.
 
+42. **Done 2026-08-14 — a little air between the lane's rows.** The owner,
+    reading the tightened lane: *"can we add a tiny bit of a gap between items
+    in the top sidebar and the recent history part of the sidebar. basically
+    make things have just a little bit of air."*
+
+    **This is not item 39's ask reversed.** That one — *"the vertical padding
+    on the sidebar recent list… there doesn't need to be any"* — was about
+    padding **inside** the row, which made the card the pointer lights 16 px
+    taller than the only thing drawn in it. At the resulting 48 the cards
+    *touch*, and a column of touching cards reads as one block the pointer cuts
+    a slice out of rather than as a list of things. Two different quantities,
+    both readings right: padding inside a row makes the card bigger, a gap
+    between rows leaves the card its content's size and separates it from its
+    neighbour.
+
+    `SIDEBAR_ROW_GAP` is `GAP_XS` **4**, the smallest step on the 4 px lattice
+    — *"a tiny bit"* without reaching for `GAP_XXS`, which the ladder keeps as
+    its one named exception. The ask names both halves of the lane, so it is
+    one rhythm rather than two numbers, and the test asserts the two columns
+    carry the **same token** rather than measuring each: the failure worth
+    guarding is them drifting apart, which would look right in a screenshot of
+    the head and wrong in a screenshot of the lane. `SIDEBAR_ROW_PITCH` 52 is
+    declared because `App::request_offscreen_art` counts rows against a pitch,
+    and one that read the row's own height would be asking for the wrong covers
+    four rows down the list.
+
+    Verified by eye for the head. **The `RECENT` half is held by the shared
+    token and its test rather than by a render**, and that is worth stating
+    rather than glossing: the lane's recency is session-scoped, so a headless
+    run with no confirmable playback shows an empty list, and seeding the play
+    ledger does not fill it because the ledger only supplies the order key.
+    Evidence: `docs/design/impl/lane-row-air/`.
+
 ### Phase F — a stated memory budget for artwork, and honest queue semantics
 
 37. **Done 2026-08-14 — a stated memory budget for artwork, and the scheduler
@@ -670,7 +703,7 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- Nothing active — items 1–41 are complete, and the numbered execution order is
+- Nothing active — items 1–42 are complete, and the numbered execution order is
   exhausted. Nothing is waiting on the owner: the rail ask that was is now
   item 41. What remains in `BACKLOG.md` is roadmap-scale (`VISION.md` staging),
   upstream symphonia bounds baz has decided not to work around, and two CI

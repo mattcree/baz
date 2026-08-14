@@ -83,7 +83,11 @@ pub(crate) fn view<'a>(
     // The rows fill the lane's content box, open and collapsed, so the column
     // has to offer them its whole width rather than shrinking to the widest
     // word.
-    let mut head = column![].width(Length::Fill);
+    // The head's four destinations, on the lane's one row rhythm — the same
+    // seam the list below the rule stands on ([`theme::SIDEBAR_ROW_GAP`]).
+    let mut head = column![]
+        .width(Length::Fill)
+        .spacing(theme::SIDEBAR_ROW_GAP);
     for to in Destination::ALL {
         head = head.push(destination_row(to, place, open, sounding));
     }
@@ -349,7 +353,7 @@ fn sections<'a>(
     // An empty history draws an empty column — there is no longer a heading
     // that would otherwise stand over nothing, so the emptiness needs no
     // special case to stay honest.
-    let mut body = column![];
+    let mut body = column![].spacing(theme::SIDEBAR_ROW_GAP);
     for entry in &lane.rows {
         // **Which row is sounding** — doc 13 §2.6's claim, delivered.
         //
@@ -811,6 +815,42 @@ mod tests {
             "the persisted intent should be read only where `open` and `width` \
              are resolved from it — every other part of the lane takes `open`"
         );
+    }
+
+    /// **Both halves of the lane spend the same air between their rows** —
+    /// the owner's *"a tiny bit of a gap between items in the top sidebar and
+    /// the recent history part of the sidebar"*, which names both and is
+    /// therefore one rhythm rather than two numbers.
+    ///
+    /// It is asserted as *the same token in both columns* rather than as a
+    /// measurement, because the failure this guards is the two drifting apart:
+    /// a later edit that gave the head its own spacing would look right in a
+    /// screenshot of the head and wrong in a screenshot of the lane.
+    ///
+    /// The gap is **between** the rows and not inside them, which is why the
+    /// row's own height is untouched — see [`theme::SIDEBAR_ROW_GAP`], where
+    /// the distinction between this ask and the one that removed the row's
+    /// padding is argued.
+    #[test]
+    fn the_head_and_the_list_stand_on_one_row_rhythm() {
+        let source = source();
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        let sections = body(&source, "fn sections<'a>(");
+        assert!(
+            view.contains(".spacing(theme::SIDEBAR_ROW_GAP)"),
+            "the head's destinations lost the air between them"
+        );
+        assert!(
+            sections.contains(".spacing(theme::SIDEBAR_ROW_GAP)"),
+            "the list of touched things lost the air between its rows"
+        );
+        // The row itself is still exactly what is drawn in it: the air is a
+        // seam, not padding, and a card that grew would be the earlier ask
+        // coming back.
+        const {
+            assert!(theme::SIDEBAR_ROW_H == theme::SIDEBAR_SLEEVE);
+            assert!(theme::SIDEBAR_DEST_H == theme::SIDEBAR_GLYPH_BOX);
+        }
     }
 
     /// **Both of the lane's lamps sit against ink rather than against a box.**

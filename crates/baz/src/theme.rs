@@ -1198,7 +1198,54 @@ pub const SIDEBAR_SLEEVE: f32 = PANEL_SLEEVE + GAP_SM;
 /// [`LINE_BODY`] 20 + [`GAP_XXS`] 2 + [`LINE_META`] 16 = **38**, which 48 holds
 /// centred with 5 px over and under; and 48 is above the hit-target floor with
 /// room to spare, being the transport's own [`TRANSPORT_HIT`] 40 and then some.
+///
+/// The air the list needs is [`SIDEBAR_ROW_GAP`], **between** the rows rather
+/// than inside them — see that token for why the two are not the same thing.
 pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE;
+
+/// **The air between one lane row and the next: [`GAP_XS`] 4.**
+///
+/// # Between the cards, not inside them
+///
+/// The owner asked twice and did not contradict himself. First, of the
+/// original 64 px row: *"the vertical padding on the sidebar recent list
+/// should not be like that… there doesn't need to be any."* That padding was
+/// **inside** the row — [`SIDEBAR_ROW_H`] carried a [`GAP_SM`] above and below
+/// its own sleeve — so the card the pointer lights was 16 px taller than the
+/// only thing drawn in it, and the list read as loosely spaced rather than as
+/// generous. Removing it made the row its sleeve.
+///
+/// Then, of the result: *"can we add a tiny bit of a gap between items in the
+/// top sidebar and the recent history part of the sidebar. basically make
+/// things have just a little bit of air."* At 48 the cards **touch**, and a
+/// column of touching cards reads as one block that the pointer cuts a slice
+/// out of rather than as a list of things.
+///
+/// These are different quantities and the distinction is the whole point:
+/// padding inside a row makes the *card* bigger, and a gap between rows leaves
+/// the card exactly the size of its content and separates it from its
+/// neighbour. The first was air the row was pretending to need; this is air the
+/// list needs.
+///
+/// # Four
+///
+/// [`GAP_XS`], the smallest step on the 4 px lattice (law L2) — *"a tiny
+/// bit"*, and the smallest amount that can be spent without reaching for
+/// [`GAP_XXS`], which the ladder keeps as its one named exception. It applies
+/// to **both** halves of the lane, which is what the ask names: the head's four
+/// destinations and the list of touched things below the rule stand on one
+/// rhythm, as they have since the row pitch became the sleeve.
+pub const SIDEBAR_ROW_GAP: f32 = GAP_XS;
+
+/// **What one lane row costs the column it is in**: [`SIDEBAR_ROW_H`] 48 plus
+/// [`SIDEBAR_ROW_GAP`] 4 = **52**.
+///
+/// Declared because the lane's virtualization counts rows against a pitch
+/// (`App::request_offscreen_art`), and a pitch that read the row's own height
+/// would drift by the gap once per row — four rows down the list it would be
+/// asking for the wrong covers. The drawn pitch and the counted pitch are one
+/// number here so they cannot disagree.
+pub const SIDEBAR_ROW_PITCH: f32 = SIDEBAR_ROW_H + SIDEBAR_ROW_GAP;
 
 /// The stable trailing slot in every expanded `RECENT` row: exactly the lamp
 /// dot's six pixels, present whether the row is sounding or quiet.
@@ -1244,11 +1291,15 @@ pub const SIDEBAR_ROW_TEXT_W: f32 =
 /// wherever a string yields.
 pub const ELLIPSIS_SLOT_W: f32 = GAP_LG;
 
-/// The head's destination rows' pitch: **48**, the tile's own size — when the
-/// row became the control ([`SIDEBAR_GLYPH_BOX`]) it gained no air of its own,
-/// so the pitch is the tile itself and three of them stack tight under the
-/// rule, the owner's *"the padding on hover is above and below the item… it
-/// should be a square around them"* made geometry.
+/// The head's destination **row**: **48**, the tile's own size — when the row
+/// became the control ([`SIDEBAR_GLYPH_BOX`]) it gained no air of its own, so
+/// the card is the tile itself, the owner's *"the padding on hover is above
+/// and below the item… it should be a square around them"* made geometry.
+///
+/// The four of them are separated by [`SIDEBAR_ROW_GAP`], not stacked flush:
+/// the air is between the cards rather than inside them, which is the
+/// distinction that token exists to hold. So the row is 48 and its pitch is
+/// [`SIDEBAR_ROW_PITCH`] 52, exactly as a `RECENT` row's is.
 pub const SIDEBAR_DEST_H: f32 = SIDEBAR_GLYPH_BOX;
 
 /// **The width below which the lane is always collapsed**: **940**.
@@ -5528,15 +5579,26 @@ mod tests {
         const { assert!(SIDEBAR_SLEEVE == 48.0 && SIDEBAR_ROW_H == 48.0) }
         // **A `RECENT` row is its sleeve and no air** — the owner's *"there
         // doesn't need to be any"* vertical padding — which puts it at the
-        // head's destination pitch, so the lane has one rhythm above and below
-        // its one rule. Both of the claims the old 64 carried are re-derived
-        // here rather than taken on trust: the two-line block still fits
-        // centred, and the row still clears the hit-target floor.
+        // head's destination row height, so the lane has one rhythm above and
+        // below its one rule. Both of the claims the old 64 carried are
+        // re-derived here rather than taken on trust: the two-line block still
+        // fits centred, and the row still clears the hit-target floor.
         const {
             assert!(SIDEBAR_ROW_H == SIDEBAR_SLEEVE);
             assert!(SIDEBAR_ROW_H == SIDEBAR_DEST_H);
             assert!(LINE_BODY + GAP_XXS + LINE_META <= SIDEBAR_ROW_H);
             assert!(SIDEBAR_ROW_H >= TRANSPORT_HIT);
+        }
+        // **And the air the list needs is between the rows, not inside them**
+        // — the owner's second reading of the same list, *"just a little bit
+        // of air"*. The row stays the size of what is drawn in it; the gap
+        // separates one card from the next. Both halves of the lane spend it,
+        // and the pitch the virtualization counts against is the drawn pitch.
+        const {
+            assert!(SIDEBAR_ROW_GAP == GAP_XS);
+            assert!(SIDEBAR_ROW_PITCH == SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+            assert!(SIDEBAR_ROW_PITCH == 52.0);
+            assert!(SIDEBAR_ROW_GAP < SIDEBAR_ROW_H);
         }
         // The destination tile is the sleeve's own footprint, its glyph one
         // `GAP_SM` smaller on **both** sides (centred, not hung from the lead)
@@ -5575,6 +5637,8 @@ mod tests {
                     && SIDEBAR_RAIL_W % 4.0 == 0.0
                     && SIDEBAR_SLEEVE % 4.0 == 0.0
                     && SIDEBAR_ROW_H % 4.0 == 0.0
+                    && SIDEBAR_ROW_GAP % 4.0 == 0.0
+                    && SIDEBAR_ROW_PITCH % 4.0 == 0.0
                     && SIDEBAR_DEST_H % 4.0 == 0.0
                     && SIDEBAR_FLOOR % 4.0 == 0.0
             );

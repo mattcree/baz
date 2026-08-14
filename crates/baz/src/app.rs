@@ -4738,7 +4738,7 @@ impl App {
         reason = "finite non-negative pixel counts are clamped before becoming row indices"
     )]
     fn request_offscreen_art(&mut self) -> Task<Message> {
-        let lane_first = (self.lane_scroll.max(0.0) / theme::SIDEBAR_ROW_H).floor() as usize;
+        let lane_first = (self.lane_scroll.max(0.0) / theme::SIDEBAR_ROW_PITCH).floor() as usize;
         let mark = (
             self.lane_mark,
             self.place,
@@ -4754,7 +4754,7 @@ impl App {
         // either side (the heading is intentionally absorbed by that slack)
         // and ask for exactly those rows' covers or collages.
         let first = lane_first.saturating_sub(2).min(self.lane.rows.len());
-        let visible = (self.body_height().max(0.0) / theme::SIDEBAR_ROW_H).ceil() as usize + 5;
+        let visible = (self.body_height().max(0.0) / theme::SIDEBAR_ROW_PITCH).ceil() as usize + 5;
         let end = (first + visible).min(self.lane.rows.len());
         let mut quoted: Vec<u64> = Vec::new();
         let mut lane_records = Vec::new();
