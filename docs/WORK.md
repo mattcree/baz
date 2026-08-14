@@ -527,6 +527,35 @@ Phase A is complete only when all twelve items are implemented and verified;
     describes. Evidence for all of it:
     `docs/design/impl/backlog-pass-2026-08-14/`.
 
+40. **Done 2026-08-14 — the notification bell, and the two things hiding it.**
+    Backlogged out of item 39's verification and picked up immediately after.
+    Three faults were stacked in one 20 px square, each of which made the next
+    invisible.
+
+    `views::status` painted the health dot on a container that also carried
+    `align_right(Length::Fill)` and `align_bottom(Length::Fill)` — and those
+    two calls set that container's bounds to `Fill`, while a container paints
+    its **own** bounds, so `theme::status_dot`'s 999 px corner radius was
+    painted across the whole glyph box. The app bar's health indicator has been
+    a plain coloured circle for as long as it has existed. Two containers now,
+    and a test pins which one the paint is on.
+
+    What the disc was covering was not the bell: item 39's sheet-ordering fix
+    was what let the real `BELL` outlines reach the screen at all. They turned
+    out to be a blob too — 0.56 by 0.60 with near-vertical sides and a base
+    flush with the body, so there was no mouth to read, and the doc comment's
+    claim that it was drawn *"at the shared icon stroke"* had never been true.
+    It is a silhouette on `HOME`'s precedent, reshaped so the ratio does the
+    work: a 0.30 dome flaring into a 0.68 mouth, a crown proud of the dome, a
+    clapper across a real gap. The badge overlaps the rim rather than the rim
+    being cut short to clear it — a lopsided bell would read as badly drawn in
+    the three tones out of four where the badge is quiet ink.
+
+    Worth keeping as a shape of defect rather than a defect: **a covered thing
+    cannot be seen to be wrong.** Two of these three had been shipped for
+    months behind the third, and the only reason any of them surfaced is that
+    fixing the outermost one exposed the next.
+
 ### Phase F — a stated memory budget for artwork, and honest queue semantics
 
 37. **State a memory budget for decoded artwork and repair the thumbnail
@@ -558,11 +587,9 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- Nothing active — items 1–36, 38 and 39 are complete; item 37 is recorded in
-  `## Next` and ready to start. Two things wait on the owner rather than on
-  work: what *"the right hand rail is acting strangely"* means, and whether the
-  notification bell is redrawn as a stroke or reshaped as a silhouette (both in
-  `BACKLOG.md`).
+- Nothing active — items 1–36 and 38–40 are complete; item 37 is recorded in
+  `## Next` and ready to start. One thing waits on the owner rather than on
+  work: what *"the right hand rail is acting strangely"* means (`BACKLOG.md`).
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

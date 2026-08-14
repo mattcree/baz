@@ -1242,22 +1242,75 @@ const HISTORY_BACK: &[Outline] = &[
     ],
 ];
 
-/// Notification bell: a dome, clapper and short base at the shared icon stroke.
+/// **Notification bell** — a narrow dome flaring into a wide mouth, with a
+/// crown above it and a detached clapper below.
+///
+/// # It drew a disc, and nobody could see that it did
+///
+/// This shape did not reach the screen until 2026-08-14. `Glyph::ALL` and
+/// `Glyph::index` disagreed, so the app bar's bell was being handed
+/// [`HISTORY_FORWARD`]'s sprite; fixing that ordering drew these outlines for
+/// the first time and they are **a circle**. The old form was 0.56 wide and
+/// 0.60 tall with near-vertical sides — square enough that its rounded top
+/// closed it into a blob at [`ICON_PX`] 20 — and its "short base" was flush
+/// with the body rather than a rim, so there was no mouth to read.
+///
+/// # A silhouette, and why that is not a departure
+///
+/// The comment here used to claim *"at the shared icon stroke"*, which it
+/// never was. It stays a filled silhouette now on [`HOME`]'s precedent rather
+/// than being converted: the sheet's stroke rule is about **open angles** —
+/// [`OPEN`] and the history arrows are strokes so they cannot be read as
+/// [`PLAY`]'s solid mass — and a bell has no such twin to be confused with.
+/// What a bell needs is a *profile*, and a profile drawn at 0.145 with four
+/// parts is a tangle at 20 px where a silhouette is instant.
+///
+/// So the ratio does the work: the dome is **0.30** across and the mouth is
+/// **0.68**, more than twice it, where the old shape's were 0.34 and 0.56.
+/// The mouth is a rim with its own step, the crown sits proud of the dome, and
+/// the clapper is separated by a real gap — four decisions the eye resolves
+/// before it counts anything.
+///
+/// `views::status` stacks the health dot on this glyph's bottom-right corner,
+/// where it **overlaps the rim** — deliberately, and symmetry is why. A bell
+/// whose mouth was cut short on one side to clear a badge would read as a
+/// badly drawn bell in the three tones out of four where the badge is quiet
+/// ink; a badge sitting on the rim is the convention every notification bell
+/// in the field uses, and it is legible because the dot is a solid disc in a
+/// tone of its own rather than more of the same ink.
 const BELL: &[Outline] = &[
+    // The body: dome, flare, rim.
     &[
-        (0.22, 0.68),
-        (0.30, 0.58),
-        (0.30, 0.43),
-        (0.36, 0.25),
-        (0.50, 0.16),
-        (0.64, 0.25),
-        (0.70, 0.43),
-        (0.70, 0.58),
-        (0.78, 0.68),
-        (0.78, 0.76),
-        (0.22, 0.76),
+        (0.500, 0.180),
+        (0.575, 0.215),
+        (0.630, 0.300),
+        (0.650, 0.420),
+        (0.655, 0.560),
+        (0.700, 0.640),
+        (0.840, 0.690),
+        (0.840, 0.740),
+        (0.160, 0.740),
+        (0.160, 0.690),
+        (0.300, 0.640),
+        (0.345, 0.560),
+        (0.350, 0.420),
+        (0.370, 0.300),
+        (0.425, 0.215),
     ],
-    &[(0.42, 0.80), (0.58, 0.80), (0.55, 0.88), (0.45, 0.88)],
+    // The crown, standing proud of the dome and unioned into it.
+    &[
+        (0.455, 0.105),
+        (0.545, 0.105),
+        (0.545, 0.190),
+        (0.455, 0.190),
+    ],
+    // The clapper, across a real gap.
+    &[
+        (0.430, 0.800),
+        (0.570, 0.800),
+        (0.540, 0.895),
+        (0.460, 0.895),
+    ],
 ];
 
 impl Glyph {

@@ -22,12 +22,33 @@ pub(crate) fn bell(summary: Summary) -> Element<'static, Message> {
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
             .opacity(theme::glyph_ink(true, false, 0.0, false)),
+        // **The dot is painted on a [`DOT`]-sized box, and *that* box is
+        // aligned** — two containers, not one, and the difference is the whole
+        // of the bell.
+        //
+        // It was one: a `Space` of `DOT` inside a container that carried both
+        // `theme::status_dot` **and** `align_right(Length::Fill)` /
+        // `align_bottom(Length::Fill)`. Those two calls set the container's
+        // width and height to `Fill`, and a container paints its **own**
+        // bounds — so the style landed on a 20 × 20 box with a 999 px corner
+        // radius, which is a disc exactly the size of the glyph box, drawn
+        // over the top of the glyph. The health indicator has been a plain
+        // coloured circle in the app bar for as long as it has existed, and
+        // the bell beneath it was never visible at any tone.
+        //
+        // That also hid a second defect: the glyph the disc was covering was
+        // not the bell either (`Glyph::ALL` and `Glyph::index` disagreed), and
+        // when the ordering was fixed on 2026-08-14 the real `BELL` outlines
+        // turned out to draw a blob of their own. Three faults stacked in one
+        // 20 px square, each of which made the next invisible.
         container(
-            Space::new()
-                .width(Length::Fixed(DOT))
-                .height(Length::Fixed(DOT))
+            container(
+                Space::new()
+                    .width(Length::Fixed(DOT))
+                    .height(Length::Fixed(DOT))
+            )
+            .style(move |_theme| theme::status_dot(tone))
         )
-        .style(move |_theme| theme::status_dot(tone))
         .align_right(Length::Fill)
         .align_bottom(Length::Fill),
     ])
@@ -223,5 +244,62 @@ fn tone(room: &theme::Palette, level: Level) -> Color {
         Level::Working => room.paper_faint,
         Level::Warning => room.warning,
         Level::Error => room.alert,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DOT;
+    use crate::theme;
+
+    /// **The health dot is painted on a dot-sized box.**
+    ///
+    /// A `container` paints its **own** bounds, and `align_right(Length::Fill)`
+    /// / `align_bottom(Length::Fill)` set those bounds to `Fill`. Carrying
+    /// `theme::status_dot` and those two calls on one container therefore
+    /// painted a 999 px-radius background across the whole glyph box — a disc
+    /// exactly the size of the bell, drawn over the bell. The app bar's health
+    /// indicator was that disc for as long as it existed.
+    ///
+    /// The fix is two containers, and this pins the split: the styled one must
+    /// carry no `Fill`, and the aligning one must carry no style. It is a
+    /// source scan because both halves build iced widgets and there is nothing
+    /// else to interrogate — but *which container the style is on* is a fact
+    /// about where the code is, which is the one kind of fact this form is
+    /// good for.
+    #[test]
+    fn the_health_dot_is_painted_on_a_dot_sized_box() {
+        let source = include_str!("status.rs").replace("\r\n", "\n");
+        let bell = {
+            let rest = source
+                .split_once("pub(crate) fn bell(")
+                .expect("the bell exists")
+                .1;
+            &rest[..rest.find("\n}\n").expect("a function ends")].to_owned()
+        };
+        let styled = bell
+            .find(".style(move |_theme| theme::status_dot(tone))")
+            .expect("the dot is styled");
+        let aligned = bell
+            .find(".align_right(Length::Fill)")
+            .expect("the dot is aligned into the corner");
+        assert!(
+            styled < aligned,
+            "the dot's paint and its Fill alignment are on one container again, \
+             so the tone is drawn across the whole glyph box and the bell is \
+             underneath it"
+        );
+        let between = &bell[styled..aligned];
+        assert!(
+            between.contains(')'),
+            "the styled container is no longer closed before the aligning one \
+             begins"
+        );
+        // And the box it paints is the dot's own size, not the glyph's.
+        assert!(
+            bell.contains("Length::Fixed(DOT)"),
+            "the dot no longer declares its own size"
+        );
+        const { assert!(DOT < theme::ICON_PX) }
     }
 }

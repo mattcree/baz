@@ -104,3 +104,33 @@ measure idle cost the documented way will find a phantom.
 Every run took all six XDG redirections. `[mpris] no session bus` is in each
 log as the receipt. The fixture is `mkfixture.sh`'s silent FLACs; the scratch
 `HOME` routes ALSA's default PCM to `null`.
+
+## The bell: three faults in one 20 px square
+
+`bell.png` is the health indicator at 6×, after. Before, it was a plain
+coloured disc — and had been for as long as it existed.
+
+1. **The dot painted the whole glyph box.** `views::status` carried
+   `theme::status_dot` *and* `align_right(Length::Fill)` /
+   `align_bottom(Length::Fill)` on one container. Those two calls set that
+   container's bounds to `Fill`; a container paints its **own** bounds; the
+   999 px corner radius therefore became a disc exactly the size of the glyph
+   underneath it.
+2. **The glyph underneath was the forward arrow**, from the `Glyph::ALL` /
+   `Glyph::index` disagreement above.
+3. **The real `BELL` outlines were a blob too** — 0.56 wide by 0.60 tall with
+   near-vertical sides, and a "base" flush with the body rather than a rim, so
+   there was no mouth. The doc comment's *"at the shared icon stroke"* had
+   never been true of them.
+
+Each fault hid the next, which is the part worth keeping: two of the three had
+shipped for months behind the third, and the only reason any surfaced is that
+fixing the outermost exposed the one below it.
+
+The bell is a silhouette on `HOME`'s precedent rather than a stroke. The
+sheet's stroke rule is about **open angles** — `OPEN` and the history arrows
+are strokes so they cannot read as `PLAY`'s solid mass — and a bell has no such
+twin. What a bell needs is a profile, and a profile drawn at 0.145 with four
+parts is a tangle at 20 px where a silhouette is instant. So the ratio does the
+work: a 0.30 dome flaring into a 0.68 mouth, where the old shape's were 0.34
+and 0.56.
