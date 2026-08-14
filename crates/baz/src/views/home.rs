@@ -273,6 +273,9 @@ fn vibe_playlist<'a>(
     .style(move |_theme, status| theme::output_picker(room, status))
     .menu_style(move |_theme| theme::output_menu(room));
     let busy = state.preparing || state.analyzing;
+    let can_create = !state.preparing
+        && !state.prompt.trim().is_empty()
+        && (!state.analyzing || state.has_features());
     composer = composer.push(prompt).push(
         row![
             column![
@@ -285,10 +288,7 @@ fn vibe_playlist<'a>(
             ]
             .spacing(theme::GAP_XS),
             Space::new().width(Length::Fill),
-            word_button_maybe(
-                "Create mix",
-                (!busy && !state.prompt.trim().is_empty()).then_some(Message::VibeCreate),
-            )
+            word_button_maybe("Create mix", can_create.then_some(Message::VibeCreate))
         ]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::End),
@@ -339,6 +339,20 @@ fn vibe_playlist<'a>(
                 .line_height(theme::LEADING_META)
                 .color(room.paper_dim),
             )
+            .push(if state.has_features() {
+                text(format!(
+                    "A mix can use the {} tracks analysed so far; the scan will continue in the background.",
+                    state.done.saturating_sub(state.failed)
+                ))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim)
+            } else {
+                text("Create mix will become available after the first track is analysed.")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim)
+            })
             .push(word_button("Cancel analysis", Message::VibeAnalysisCancel));
     }
     if let Some(error) = state.failure_note() {

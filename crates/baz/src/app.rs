@@ -3326,14 +3326,11 @@ impl App {
                 if !self.playlists.available() {
                     return Some(Task::none());
                 }
-                if state.vibe.prompt.trim().is_empty()
-                    || state.vibe.preparing
-                    || state.vibe.analyzing
-                {
+                if state.vibe.prompt.trim().is_empty() || state.vibe.preparing {
                     return Some(Task::none());
                 }
                 state.vibe.begin_request();
-                if state.vibe.has_features() && !state.vibe.preparing && !state.vibe.analyzing {
+                if state.vibe.has_features() {
                     state.vibe.create(
                         config::vibe_db_file().as_deref(),
                         &state.albums,
