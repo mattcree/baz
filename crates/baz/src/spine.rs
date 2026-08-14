@@ -15,8 +15,10 @@
 //! [`crate::needle`] (ADR-0017 §5 records why that is the norm for pointer
 //! semantics now). Unlike those two it borrows nothing from
 //! [`crate::pointer`]: it has no gesture — no drag, no held state, nothing to
-//! lose with the pointer — and therefore **no state at all**. A press either
-//! lands on a shelf and says so, or it does not and says nothing.
+//! lose with the pointer — and **almost no state**: one `bool` recording
+//! whether the pointer was in the lane last event, which exists solely to draw
+//! the snap-back frame (see below). A press either lands on a shelf and says
+//! so, or it does not and says nothing.
 //!
 //! # The deformation contract (ADR-0020's amendment)
 //!
@@ -24,10 +26,38 @@
 //! is right now — [`theme::magnify`] and [`theme::magnify_shift`] of the
 //! distance from the pointer to the slot's rest centre — read in `draw` from
 //! the live cursor. There is no tween, no clock, no subscription and no
-//! message: iced requests a redraw for every window event, so the lens moves
-//! exactly while the pointer does and costs nothing while it rests. When the
-//! pointer leaves the lane the input is gone and the next frame is the rest
-//! frame — the snap back is a hard cut, argued in the ADR.
+//! message. When the pointer leaves the lane the input is gone and the next
+//! frame is the rest frame — the snap back is a hard cut, argued in the ADR.
+//!
+//! ## The frame has to be **asked for**, and for one release it was not
+//!
+//! This paragraph used to end *"iced requests a redraw for every window event,
+//! so the lens moves exactly while the pointer does"*. That was true of iced
+//! 0.13 and is **false of 0.14**, which baz migrated to: `Shell`'s redraw
+//! request now defaults to [`iced::window::RedrawRequest::Wait`], and a widget
+//! that wants a frame has to say so.
+//!
+//! Nothing said so here, because this widget's whole design is *no state, no
+//! message* — and a widget that publishes neither gives the runtime no reason
+//! to draw. [`crate::groove`] and [`crate::needle`] were unaffected for
+//! exactly that reason: they publish a message on cursor motion, so their
+//! frames arrive as a consequence of the shell's own update.
+//!
+//! The owner: *"when mousing over the rail on the playlist and library view
+//! the zoom doesn't really seem to work. it sometimes zooms and the other
+//! times it doesn't."* Measured, at 1280 × 860 with nothing else on screen
+//! moving: the lens drew **once**, when the pointer entered the lane, and then
+//! froze — a sweep from y = 200 to y = 480 down the rail produced seven
+//! consecutive pixel-identical frames. The "sometimes" is other work: entering
+//! the lane changes [`mouse::Interaction`], a scroll or a tooltip forces a
+//! frame, and the lens updates on the way past.
+//!
+//! So [`update`](Spine::update) requests a redraw while the pointer is in the
+//! lane — **and for one event after it leaves**, which is what draws the snap
+//! back. That last clause is the whole of the widget's state: one `bool`, and
+//! the reason the sentence about having none is now qualified rather than
+//! deleted. The cost is unchanged at rest: a pointer that is not in this lane
+//! and was not in it last event asks for nothing.
 //!
 //! # The strip spreads under the lens — the dock's own mechanism
 //!
@@ -80,7 +110,7 @@
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph, Text};
-use iced::advanced::widget::Tree;
+use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{
     Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Theme, alignment, mouse, touch,
@@ -317,10 +347,30 @@ fn label_text<Content>(
     }
 }
 
+/// The whole of the rail's state: was the pointer in this lane at the last
+/// event?
+///
+/// It exists for one frame — the one that draws the snap back after the
+/// pointer leaves. Without it the lens would stay swollen at whatever the last
+/// in-lane position was until some other widget happened to ask for a frame,
+/// which is the defect this widget was reported for, in its exit form.
+#[derive(Debug, Default)]
+struct Lensing {
+    inside: bool,
+}
+
 impl<Message, Renderer> Widget<Message, Theme, Renderer> for Spine<'_, Message>
 where
     Renderer: renderer::Renderer + text::Renderer<Font = Font>,
 {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Lensing>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Lensing::default())
+    }
+
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(theme::INDEX_LANE_W), Length::Fill)
     }
@@ -336,7 +386,7 @@ where
 
     fn update(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -345,10 +395,28 @@ where
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
+        let bounds = layout.bounds();
+        // **Ask for the frame the lens is drawn in.** iced 0.14 waits by
+        // default (module docs), and this widget publishes no message, so
+        // without this the fisheye draws only when some *other* widget happens
+        // to want a frame — which is the owner's *"it sometimes zooms and the
+        // other times it doesn't"*.
+        //
+        // The condition is `in the lane, or in it last event`. The second
+        // clause is the exit: one more frame after the pointer leaves, which
+        // is the one that draws the snap back. A pointer that is in neither
+        // asks for nothing, so a mouse crossing the wall costs what it did.
+        if matches!(event, Event::Mouse(_) | Event::Touch(_)) {
+            let inside = over(cursor, bounds).is_some();
+            let lensing = tree.state.downcast_mut::<Lensing>();
+            if inside || lensing.inside {
+                shell.request_redraw();
+            }
+            lensing.inside = inside;
+        }
         if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         | Event::Touch(touch::Event::FingerPressed { .. }) = event
         {
-            let bounds = layout.bounds();
             let shown = self.visible(bounds.height);
             if let Some((_, shelf)) = target_at(self, &shown, bounds, cursor) {
                 shell.publish((self.jump)(shelf));
@@ -506,7 +574,6 @@ where
 #[cfg(test)]
 mod tests {
     use iced::advanced::clipboard;
-    use iced::advanced::widget::tree;
 
     use super::*;
     use iced::event;
@@ -562,7 +629,7 @@ mod tests {
         mouse::Cursor::Available(Point::new(ORIGIN.x + into, slot_center(top, index) + off))
     }
 
-    /// One spine, its (stateless) tree and its layout, driven event by event.
+    /// One spine, its tree and its layout, driven event by event.
     struct Lane {
         spine: Spine<'static, Msg>,
         tree: Tree,
@@ -579,7 +646,10 @@ mod tests {
             Self {
                 tree: Tree {
                     tag: Widget::<Msg, Theme, ()>::tag(&spine),
-                    state: tree::State::None,
+                    // The widget's real state, not `None`: it holds the one
+                    // bool the redraw request reads (`Lensing`), and a `None`
+                    // here would be a harness that cannot exercise it.
+                    state: Widget::<Msg, Theme, ()>::state(&spine),
                     children: Vec::new(),
                 },
                 spine,
@@ -606,6 +676,26 @@ mod tests {
                 event::Status::Ignored
             };
             (status, messages)
+        }
+
+        /// Feed one pointer move and report whether the widget asked for a
+        /// frame — which is the whole of whether the lens will be seen to
+        /// move.
+        fn moved(&mut self, cursor: mouse::Cursor) -> bool {
+            let mut messages = Vec::new();
+            let mut shell = Shell::new(&mut messages);
+            let position = cursor.position().unwrap_or(Point::ORIGIN);
+            self.spine.update(
+                &mut self.tree,
+                &Event::Mouse(mouse::Event::CursorMoved { position }),
+                Layout::new(&self.node),
+                cursor,
+                &(),
+                &mut clipboard::Null,
+                &mut shell,
+                &Rectangle::with_size(Size::new(1280.0, 860.0)),
+            );
+            shell.redraw_request() != iced::window::RedrawRequest::Wait
         }
 
         fn cursor(&self, cursor: mouse::Cursor) -> mouse::Interaction {
@@ -887,6 +977,58 @@ mod tests {
             &Rectangle::with_size(Size::new(1280.0, 860.0)),
         );
         sheet
+    }
+
+    /// **The lens asks for the frame it is drawn in** — the owner's *"it
+    /// sometimes zooms and the other times it doesn't"*.
+    ///
+    /// This widget is a pure function of the live cursor read in `draw`, which
+    /// under iced 0.13 was enough: the runtime redrew on every window event.
+    /// **iced 0.14 waits by default**, and this is the one widget in baz that
+    /// depended on the old behaviour — `groove` and `needle` publish a message
+    /// on cursor motion, so their frames arrive as a consequence of the
+    /// shell's update, and this one publishes nothing.
+    ///
+    /// Measured before the fix at 1280 × 860 with nothing else on screen
+    /// moving: the lens drew once, when the pointer entered the lane, and then
+    /// froze — a sweep from y = 200 to y = 480 down the rail gave seven
+    /// consecutive pixel-identical frames, and a one-pixel nudge changed
+    /// nothing. The "sometimes" was other work forcing frames the lens
+    /// happened to be redrawn in.
+    ///
+    /// Three claims, and the third is the one that needed the widget's only
+    /// piece of state:
+    #[test]
+    fn the_lens_asks_for_a_frame_while_the_pointer_is_in_the_lane() {
+        let mut lane = Lane::new();
+        // Off the lane, and not on it a moment ago: nothing is asked for, so
+        // a pointer crossing the wall costs what it always did.
+        let away = mouse::Cursor::Available(Point::new(ORIGIN.x - 100.0, ORIGIN.y + 40.0));
+        assert!(
+            !lane.moved(away),
+            "a pointer outside the lane asked for a frame"
+        );
+
+        // In the lane: every move is a frame, which is what makes the lens
+        // follow the pointer instead of freezing where it entered.
+        assert!(lane.moved(at(30.0, 1, 0.0)));
+        assert!(lane.moved(at(30.0, 2, 0.0)));
+        assert!(
+            lane.moved(at(30.0, 2, 1.0)),
+            "a one-pixel move inside the lane must still redraw: the fisheye is              continuous in the pointer, so every pixel is a different frame"
+        );
+
+        // **Leaving asks for exactly one more.** That frame is the snap back;
+        // without it the lens stays swollen at wherever the pointer left until
+        // something else wants a frame. The event after that asks for nothing.
+        assert!(
+            lane.moved(away),
+            "leaving the lane did not draw the rest frame"
+        );
+        assert!(
+            !lane.moved(away),
+            "the widget kept asking for frames after the pointer had gone"
+        );
     }
 
     /// **Hover highlight, drawn and measured**: the wash chip sits behind the

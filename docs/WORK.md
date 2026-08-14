@@ -556,6 +556,42 @@ Phase A is complete only when all twelve items are implemented and verified;
     months behind the third, and the only reason any of them surfaced is that
     fixing the outermost one exposed the next.
 
+41. **Done 2026-08-14 — the index rail's lens drew once and then froze.** The
+    owner's *"the right hand rail is acting strangely"*, which item 39 had to
+    leave open, and then the detail that made it findable: *"when mousing over
+    the rail on the playlist and library view the zoom doesn't really seem to
+    work. it sometimes zooms and the other times it doesn't."*
+
+    `spine.rs` stated its own premise and the premise had expired: *"there is
+    no tween, no clock, no subscription and no message: iced requests a redraw
+    for every window event."* True of iced 0.13, **false of 0.14** — `Shell`'s
+    redraw request defaults to `Wait` now, and a widget that wants a frame has
+    to ask. The spine never asked, because its whole design is *no state, no
+    message*, and a widget that publishes neither gives the runtime no reason
+    to draw. It is the only widget in baz whose own appearance is a function of
+    the live cursor with nothing published; `groove` and `needle` publish on
+    cursor motion, so their frames arrive as a consequence of the shell's own
+    update, which is why the 0.14 migration passed over this.
+
+    Measured at 1280 × 860 with nothing else on screen moving: the lens drew
+    **once**, on entering the lane, and then froze — a sweep down the rail gave
+    seven consecutive pixel-identical frames and a one-pixel nudge changed
+    nothing. The *"sometimes"* is other work forcing frames the lens happened
+    to be redrawn in.
+
+    `update` requests a redraw while the pointer is in the lane **and for one
+    event after it leaves**; that last clause is the snap back, and it is the
+    whole of the widget's new state — one `bool`, so the module's claim to have
+    *"no state at all"* is qualified rather than deleted. At rest nothing is
+    asked for. Evidence: `docs/design/impl/rail-lens-redraw/`.
+
+    Worth keeping: **the comment was the bug.** It was not stale documentation
+    beside working code — it was the reasoning the code rested on, and it went
+    false under a dependency upgrade that changed nothing in this file. A
+    premise borrowed from a toolkit is worth naming as one, because the only
+    way this was ever going to be found was by reading the sentence and asking
+    whether it was still true.
+
 ### Phase F — a stated memory budget for artwork, and honest queue semantics
 
 37. **Done 2026-08-14 — a stated memory budget for artwork, and the scheduler
@@ -634,9 +670,11 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- Nothing active — items 1–40 are complete. One thing waits on the owner rather
-  than on work: what *"the right hand rail is acting strangely"* means
-  (`BACKLOG.md`).
+- Nothing active — items 1–41 are complete, and the numbered execution order is
+  exhausted. Nothing is waiting on the owner: the rail ask that was is now
+  item 41. What remains in `BACKLOG.md` is roadmap-scale (`VISION.md` staging),
+  upstream symphonia bounds baz has decided not to work around, and two CI
+  flakes that need a recurrence to be worth chasing.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices
