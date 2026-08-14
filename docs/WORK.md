@@ -221,10 +221,13 @@ Phase A is complete only when all twelve items are implemented and verified;
     chose the existing GitHub Release archives. Baz stays offline; discovery,
     download, checksum verification, replacement and rollback are explicit
     user actions. Automatic signed updating and managed stores are deferred.
-15. **Ready for owner release authority — Ship the public beta through GitHub
-    Releases.** The corrected non-publishing rehearsal and all three platform
-    builds are green. Creating the `v0.1.0` tag and public GitHub Release is the
-    remaining external boundary; do not assume a Flathub submission.
+15. **Done 2026-08-14 — Ship the public beta through GitHub Releases.** Tag
+    `v0.1.0` resolves to release commit `5f12daa`; the tagged workflow passed
+    the complete gate and built Linux x86-64, Windows x86-64 and universal
+    Intel/Apple Silicon macOS archives with Vibe included. All three downloaded
+    archives verify against the published `SHA256SUMS`, their roots and payloads
+    were inspected, and the prerelease is public. No Flathub submission was
+    made or implied.
 
 ### Phase D — accepted follow-on work
 
@@ -347,30 +350,7 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Doing
 
-- **Item 15 — GitHub public beta.** Item 14 chose GitHub Release
-  archives only for the beta. Updates are manual and user-initiated: Baz never
-  contacts a service, checks, downloads, overwrites itself or replaces its own
-  files. A listener explicitly downloads the new Baz archive, verifies its
-  published SHA-256 checksum, quits Baz, replaces the application files, and
-  relaunches; config, library data and playlists remain in their existing data
-  directories. The corrected locked CI release rehearsal and all three
-  platform builds are green. The 2026-08-14 local gate passed warnings-denied
-  clippy, all workspace tests (including 806 Baz tests), rustdoc, cargo-deny,
-  packaging validation, the 14-test Vibe evaluator harness and the locked
-  explicit-feature Linux release build. Its binary was also checked for
-  absolute workspace leakage; Vibe's locator now remains runtime-relative.
-  The current staged 0.1.0 Linux archive is 154 MB with the deliberately
-  bundled 156 MB Vibe model set, contains the expected desktop assets and
-  verifies against its generated SHA-256. GitHub
-  Actions rehearsal [31751846915](https://github.com/mattcree/baz/actions/runs/31751846915)
-  then passed the complete CI gate, built Linux x86-64, Windows x86-64 and
-  universal macOS archives from commit `8f5c1cf`, and completed its guarded
-  checksums-and-release job without publishing. The artifacts were downloaded
-  again as a consumer: all three match the generated `SHA256SUMS`, and each
-  archive has the expected Baz executable, README, changelog and licence (plus
-  Linux desktop metadata and icons). Next: obtain the owner's explicit
-  authority to create the `v0.1.0` tag and public release. Flathub, MSIX/App
-  Installer, Sparkle, signing identities and a self-updater remain deferred.
+- Nothing active.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

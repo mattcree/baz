@@ -311,8 +311,8 @@ jobs:
 
           Built from this tag by GitHub Actions with the toolchain pinned in
           \`rust-toolchain.toml\` and \`--locked\` against the committed
-          \`Cargo.lock\`, with the \`device-output\` feature enabled. No artifact
-          here was built on a developer machine.
+          \`Cargo.lock\`, with the \`device-output\` and \`vibe-analysis\`
+          features enabled. No artifact here was built on a developer machine.
           EOF
 
       # A draft, deliberately: the maintainer publishes after looking at what

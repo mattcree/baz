@@ -1,8 +1,8 @@
 # Releasing baz
 
-> This is the machinery and the checklist. Everything v0.1.0 needs is done
-> except the tag — see §"What is left for the owner"; **the maintainer decides
-> when the first tag happens** and no agent cuts one.
+> This is the machinery and the checklist. The first public beta, `v0.1.0`,
+> shipped through it on 2026-08-14 after explicit owner authority. Future tags
+> remain external release boundaries and require the same explicit authority.
 
 `docs/ENGINEERING.md`: *"Releases are built, signed, and
 reproducible-where-possible from CI only — no artifacts from developer
@@ -135,7 +135,7 @@ python3 packaging/flatpak/check-cargo-sources.py
 toolbox run -c baz-dev env CARGO_INCREMENTAL=0 \
   RUSTFLAGS="--remap-path-prefix=$PWD=/build/baz" \
   cargo build --release --locked --target x86_64-unknown-linux-gnu \
-              -p baz
+              -p baz --features device-output,vibe-analysis
 ```
 
 That last one takes about eight minutes from cold and currently produces a
@@ -207,46 +207,29 @@ of scratch space, and keep it off a tmpfs.
     `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
     `packaging/flatpak/README.md` has the commands.
 
-## What is left for the owner, for v0.1.0, in order
+## v0.1.0 release record
 
-Steps 2 to 6 above are **done and on the `release/v0.1.0` branch**: the
-workspace is at `0.1.0` in `Cargo.toml`, `Cargo.lock` and the `baz-core`
-dependency entry; `CHANGELOG.md` has a dated `[0.1.0]` section with an empty
-`[Unreleased]` above it; the metainfo carries the real release entry and two
-screenshots; and `docs/screenshots/` holds the frames those URLs point at.
-Nothing has been tagged, pushed or published, and nothing below can be done by
-an agent — every line needs either a push, your eye, or an account.
+The public beta shipped on 2026-08-14 from annotated tag `v0.1.0`, resolving
+to commit `5f12daa4c5e26d7abcd034762916138ce38f0f40`. The final dry run was
+[31790687891](https://github.com/mattcree/baz/actions/runs/31790687891); the
+tagged publish run was
+[31791950764](https://github.com/mattcree/baz/actions/runs/31791950764). Both
+passed the complete CI gate and all three archive builds.
 
-```sh
-# 1 · land it. The branch is local; it has never been pushed.
-git checkout main && git merge --ff-only release/v0.1.0
-git push origin main
+The draft's Linux x86-64, Windows x86-64 and universal macOS archives were
+downloaded again, verified against their published `SHA256SUMS`, and inspected
+for one correctly named root, expected documentation and the complete Vibe
+model set. The macOS executable was independently identified as a two-slice
+`x86_64`/`arm64` Mach-O before the draft was published. The public prerelease is
+<https://github.com/mattcree/baz/releases/tag/v0.1.0>.
 
-# 2 · the dry run, on the release commit this time. It uses the same CI gate
-#     as a tag and builds all three platform artifacts without publishing.
-#     The sleep is for the run to be listed at all; a dispatch returns
-#     before the run exists.
-gh workflow run release.yml --ref main
-sleep 10 && gh run watch "$(gh run list --workflow=release.yml -L1 \
-  --json databaseId -q '.[0].databaseId')"
-
-# 3 · the screenshot URLs, which only resolve once step 1 has happened.
-#     No offline flag: the point is the fetch.
-appstreamcli validate packaging/flatpak/io.github.mattcree.baz.metainfo.xml
-
-# 4 · the tag. This is the whole of cutting the release.
-git tag -a v0.1.0 -m "baz 0.1.0" && git push origin v0.1.0
-```
-
-Then, by hand and in a browser:
-
-5. **Review the draft release and press publish.** The workflow creates it as a
-   draft on purpose; look at the three archives and `SHA256SUMS` first.
-6. **Flathub.** `packaging/flatpak/README.md` has the submission; it needs a
-   Flathub account and a PR to `flathub/flathub`, so it was never an agent's to
-   do. Set the manifest's `tag` to `v0.1.0` and its `commit` to
-   `git rev-parse v0.1.0` — Flathub wants both, so that a moved tag cannot
-   change what is built.
+The first archive rehearsal exposed a Windows history-test ordering assumption;
+the second exposed that `ort` rc.13 no longer distributed an Intel macOS
+runtime. The former now waits only on the event whose contract it proves. The
+latter is why the release pins rc.10, whose real bundled-model inference was
+verified locally before the final matrix. Flathub remains unsubmitted; the
+repository manifest now pins the released tag and commit so a later submission
+cannot move underneath review.
 
 **Why the old dry run stopped before it built anything.**
 
@@ -266,20 +249,10 @@ found is a permanent test in `crates/baz-core/tests/hostile_media.rs`. Thus a
 dry run and a tag have the same pre-build gate, while fuzzing continues to look
 for the next input independently.
 
-The corrected dry run has not yet run on GitHub. Re-run step 2 after pushing
-the release commit: green now means it reached all three platform builds and
-the checksum self-check, which is the evidence the rehearsal was intended to
-provide.
-
-## What a tag will prove that nothing else can
-
-The dry run in step 7 exercises everything except the four things that only a
-real tag reaches: the tag-versus-manifest check's success path, `gh release
-create --verify-tag`, the release-notes generation, and the upload of assets to
-a release. Expect to fix something the first time.
-
-Once the corrected dry run is green, the build matrix and checksum step are no
-longer unexercised. Those four tag-only paths, and only those four, then remain.
+The corrected dry run and the first tag have now exercised the build matrix,
+checksum self-check, tag-versus-manifest success path, verified-tag release
+creation, generated notes and asset upload. Future rehearsals retain their
+purpose: runner images and upstream platform distributions can still change.
 
 The local rehearsal above has now been done once, end to end, and found two
 things — both fixed in the change that added this section. The first was
