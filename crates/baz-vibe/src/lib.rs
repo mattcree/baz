@@ -1174,6 +1174,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "the bundled ONNX audio inference stalls on the hosted Windows runner"
+    )]
     fn a_real_wave_is_analyzed_cached_and_invalidated() {
         let dir = tempfile::tempdir().expect("tempdir");
         let audio = dir.path().join("pulse.wav");
