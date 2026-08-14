@@ -641,8 +641,11 @@ Phase A is complete only when all twelve items are implemented and verified;
 
 ## Detailed briefs, later work, and genuine unresolved choices
 
-- **State a real memory budget for decoded artwork and repair the thumbnail
-  scheduler's replace semantics.** Recorded 2026-08-14. The owner's words: the
+- **Done 2026-08-14 as item 37 — state a real memory budget for decoded artwork
+  and repair the thumbnail scheduler's replace semantics.** The brief is kept
+  below because its diagnosis was exact and its reproduction is the harness
+  that shipped (`docs/design/impl/art-memory-budget/`); both halves and both
+  acceptance criteria are met. Recorded 2026-08-14. The owner's words: the
   tiered art machinery — the resident wall/page/chrome union, the 64-entry
   speculative LRU, the two-worker `ThumbJobs` queue and the density-aware decode
   edge — *"was introduced to try to keep RAM usage down but we never specified a

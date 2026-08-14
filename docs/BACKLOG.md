@@ -543,14 +543,27 @@ Newest first. Each was asked for in conversation and is now in the product.
   own — this is `symphonia-format-isomp4`, that one is `symphonia-metadata`
   and `symphonia-format-riff`.
 
-- **The density cache still decodes one size for three steps.** `02` §2.7
-  prices it: at `Dense` the LRU holds 320² thumbnails for ~200 px tiles —
-  2.5× the pixels needed. The density-aware decode size stays deliberately
-  untaken (it would make the cache's contents depend on the setting, which
-  means invalidating the whole cache on a step change), and ADR-0028's
-  visible detents make the step easier to reach without changing that
-  arithmetic. What would reverse it: a measured decode-latency or memory
-  problem on a real large library at `Dense`.
+- ~~**The density cache still decodes one size for three steps.**~~ **Closed
+  2026-08-14 — it had already been taken, and this entry had gone stale.** `02`
+  §2.7 priced it (at `Dense` the LRU held 320² thumbnails for ~200 px tiles,
+  2.5× the pixels needed) and this entry said the density-aware decode size
+  *"stays deliberately untaken"*, on the argument that it would make the
+  cache's contents depend on the setting. Both halves were answered without
+  this line being updated: `app.rs` requests
+  `density.art_max_px().min(art::THUMB_PX)`, so Dense asks for 200 and
+  Spacious for 320; and the objection is handled by **retry rather than
+  invalidation** — a decode that completes too small after the step loosened is
+  re-queued for that one id (`ThumbJobs::retry`, which prepends rather than
+  replacing), so a step change costs the covers that are actually short of
+  pixels and not the cache.
+
+  Kept as a closed entry rather than deleted, because *why it was closable* is
+  the useful part: the reversal this line asked for was *"a measured
+  decode-latency or memory problem on a real large library at Dense"*, and
+  item 37 supplies the measurement it was waiting for — Dense is now the
+  **most** expensive density for resident art (336 tiles at 200 px = 51 MiB at
+  a 4K window) precisely because it hangs the most tiles, which is the opposite
+  of the arithmetic this entry was written against.
 
 - **A rare flake in `the_play_recorded_event_follows_the_line_into_the_file`**
   (`crates/baz-core/tests/history.rs:125`), **Windows only, observed once** —

@@ -10661,9 +10661,8 @@ mod tests {
     /// `trim_to_budget` will not evict art the current frame can draw — item
     /// 20's rule, and the reason this whole tier exists. That means a window
     /// whose *visible wall alone* exceeded [`art::THUMB_BUDGET_BYTES`] would
-    /// exceed it. It cannot: the widest window baz supports, at the loosest
-    /// density's smallest work and the largest decode edge, holds two orders
-    /// of magnitude less than the budget.
+    /// exceed it. It cannot: the widest window baz supports pins **51 MiB** at
+    /// its worst density, a little under a third of the budget.
     ///
     /// The bound is deliberately generous — a full 4K window, every tile at
     /// the density's *smallest* work so the count is maximal, no room taken by
