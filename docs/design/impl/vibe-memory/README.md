@@ -63,6 +63,45 @@ trade. It is the one change the measurement justifies on its own.
 
 None of those is a guess-and-ship: this file exists because the last one was.
 
+## The live count bought a second text tower — plan 22's ship gate, 2026-08-15
+
+Design 21 §6 adds a live match count under the field, and §10 names its cost
+honestly: *the text tower is roughly 350 MiB, paid once*. **Paid once was the
+claim and twice was the fact.** Re-running this harness against the rebuilt
+page was the ship gate's own item, and it is the reason the gate exists.
+
+The count's embedding runs on a tokio blocking thread; a compose's runs on the
+interface thread. The tower was a `thread_local!` alongside the audio tower —
+correct for the audio tower, which wants to be per-worker — so a page whose
+count had settled and then composed held **two**.
+
+Same fixture, same four workers, two runs back to back, each with its
+`[mpris] no session bus` receipt:
+
+| text tower | idle | peak while composing | two minutes later |
+|---|---|---|---|
+| thread-local, one per thread | 252 MiB | **1 732 MiB** | 776 MiB |
+| **one shared, behind a mutex** | 252 MiB | **1 363 MiB** | 823 MiB |
+
+**369 MiB**, which is one tower and its arena, and the difference is the whole
+finding. The mutex costs wall-clock only when two text embeddings race, and
+they cannot: there is one debounced count and one compose, and a text
+embedding is tens of milliseconds. This is `WORK.md` item 60's remaining half
+— *"one shared model session behind a mutex"* — made necessary rather than
+optional by the readout that needed it.
+
+### And 1 363 is still 234 MiB above the old baseline, on purpose
+
+The 1 129 MiB in the table above was measured on the **old page**, which had no
+live count at all: nothing embedded text until a compose, and a compose happens
+*after* the scan. The tower's cost therefore followed the workers' peak instead
+of overlapping it.
+
+With a live count it necessarily overlaps — that is what *live* means, and it
+is exactly the cost design 21 §10 said this readout would have. 234 MiB is the
+real price of the count; 603 would have been the price of not noticing which
+thread it ran on.
+
 ## How long listening actually takes — plan 22 item 0.4
 
 Design 21 §10 recorded that **nobody had measured a per-track analysis rate on

@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::f32::consts::TAU;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use baz_core::playback::{DecodedAudio, resample_interleaved};
 use ort::session::Session;
@@ -45,27 +46,52 @@ pub(crate) struct Model {
 
 thread_local! {
     // Each bounded scan worker owns a session so independent tracks can use
-    // the model concurrently without sharing a mutex. The GUI caps the
-    // number of workers; keeping sessions thread-local avoids cross-thread
-    // inference contention while making the memory trade-off explicit.
+    // the **audio** model concurrently without sharing a mutex. The GUI caps
+    // the number of workers; keeping audio sessions thread-local avoids
+    // cross-thread inference contention while making the memory trade-off
+    // explicit.
     static MODEL: RefCell<Option<Model>> = const { RefCell::new(None) };
 }
 
+/// **One text tower for the whole process**, behind a mutex.
+///
+/// The audio tower is 34 MB and wants to be per-thread; the text tower is
+/// 126 MB on disk and roughly 350 MiB resident once ONNX Runtime has its
+/// arena, and it wants to be *one*. It used to be thread-local like its
+/// sibling, which cost nothing while the only text embedding in the product
+/// happened on whichever thread ran a compose.
+///
+/// **The live match count made it cost 350 MiB.** That embedding runs on a
+/// tokio blocking thread and a compose's runs on the interface thread, so a
+/// page whose count had settled and then composed held *two* towers. Measured
+/// rather than reasoned about: the compose peak at four workers went from
+/// 1 129 MiB to 1 731 MiB the first time `docs/design/impl/vibe-memory/`'s
+/// harness was re-run against the new page, and there is nowhere else for
+/// 600 MiB to have come from.
+///
+/// A mutex costs wall-clock only when two text embeddings race, and they
+/// cannot: there is one debounced count and one compose, and the count is
+/// tens of milliseconds. This is `WORK.md` item 60's remaining half, made
+/// necessary rather than optional by the readout that needed it.
+static TEXT: Mutex<Option<Model>> = Mutex::new(None);
+
 pub(crate) fn embed_text(prompt: &str) -> Result<Vec<f32>, String> {
-    with_model(|model| model.text(prompt))
+    let mut held = TEXT
+        .lock()
+        .map_err(|_| "the local Vibe text model is in a failed state".to_owned())?;
+    if held.is_none() {
+        *held = Some(Model::load()?);
+    }
+    held.as_mut().expect("model inserted above").text(prompt)
 }
 
 pub(crate) fn embed_audio(decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
-    with_model(|model| model.audio(decoded))
-}
-
-fn with_model<T>(run: impl FnOnce(&mut Model) -> Result<T, String>) -> Result<T, String> {
     MODEL.with(|slot| {
         let mut model = slot.borrow_mut();
         if model.is_none() {
             *model = Some(Model::load()?);
         }
-        run(model.as_mut().expect("model inserted above"))
+        model.as_mut().expect("model inserted above").audio(decoded)
     })
 }
 
