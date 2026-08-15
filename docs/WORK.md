@@ -1342,23 +1342,46 @@ because a player without it is missing a floor rather than a feature.
     an album onto the wall, files onto a playlist — which is the half people
     would use.
 
-71. **Not started — the store screenshots' playlist sequence.** The harness
+71. **Done 2026-08-15 — the store screenshots' playlist sequence.** The harness
     builds a playlist by hand in the running app (a dozen presses through the
     picker panel) so the frame is a picture of the feature rather than of a
     file dropped into a folder. Those coordinates drifted with the lane and
     the panel, silently: the run still succeeds and the list is never made,
     which is why the shipped playlists frame is honest but empty.
 
-    Re-derive them frame by frame, and mark in the script which numbers are
-    layout-derived (the lane's rows are arithmetic) and which are photographed
-    (the wall's tiles, the panel's rows). The four store frames are correct
-    without this; the playlists one is just thinner than it should be.
+    Re-derived frame by frame, and every number in the script now says which
+    kind it is — `[arithmetic]` for the lane's rows, `[photograph]` for the
+    wall's tiles, the tile veil's four options, the panel's rows and the new
+    playlist place's field and Save.
+
+    **The route itself had changed and nothing said so.** The panel's `New
+    playlist` no longer takes a name in the panel: it opens the canonical New
+    playlist place with the record already in the draft, and the name and the
+    Save live there. The old three lines typed `Sunday Morning` into the
+    *app-bar search* — type-anywhere took the keystrokes, because no field had
+    focus — and then pressed a `Save` that did not exist. Every press after
+    that missed, and the run reported success.
+
+    So the script now **fails loudly**: if `Sunday Morning.m3u8` is missing or
+    holds fewer than twenty tracks it prints what to re-derive and exits 1. A
+    capture that cannot tell a built list from an empty place is not a
+    verification, which is the whole lesson of this item.
+
+    Two more things the re-shoot caught, both *pictures of the pointer* rather
+    than of the composition: the parking spot (1400, 780) sat inside Home's
+    recently-added row and raised that tile's four choices, and the newly saved
+    list stood **selected**, which raises a playlist tile's options too — so
+    the run now parks at (1400, 430), dead ground on all four frames, and puts
+    the selection on a record's caption before it leaves the wall. And the
+    jewel case turns once every 32 s: shot on arrival it was caught edge-on, a
+    black bar where the cover should be, so the Now Playing frame waits for it
+    to come round.
 
 ## Doing
 
-- Nothing active — items 1–51, 53, 55, 56, 61 and 63 are complete, and the parity run
+- Nothing active — items 1–51, 53, 55, 56, 61, 63 and 71 are complete, and the parity run
   shipped two of its own findings (repeat-the-list and the sleep timer).
-  **Items 52, 54, 57–60, 62 and 64–71 are recorded and not started**: each is a
+  **Items 52, 54, 57–60, 62 and 64–70 are recorded and not started**: each is a
   decision with a real fork in it (where a playlist's authored image lives; how
   a row's card widens without nesting its controls; what live theme switching
   does to the process-cached sprite sheets; whether a rule-based list is a

@@ -240,46 +240,89 @@ rest()  { xdotool mousemove "$1" "$2"; sleep 1.5; }
 # Dead ground in the lane, below its rows: the wall's tiles and the run's rows
 # both reveal controls under the pointer, and a picture of the composition must
 # not be a picture of the pointer.
-park()  { xdotool mousemove 140 620; sleep 0.8; }
+# **Park off every tile, and move twice.** A tile's four choices are raised by
+# the pointer, and a picture of the composition must not be a picture of the
+# pointer. Two moves rather than one because a widget only re-reads the cursor
+# when the cursor reports itself: a single jump out of a tile whose row has
+# just reflowed can leave the veil standing.
+#
+# (1400, 430) is dead ground on **all four** frames, which is the only kind of
+# park worth having: right of the wall's last column and left of the A–Z rail
+# on the Library and Playlists places, between Home's `NEW PLAYLIST` block and
+# its `RECENTLY ADDED` row, and open background on Now Playing. (1400, 780)
+# looked safe and was not — it sits inside Home's recently-added row and
+# raised that tile's four choices in the frame.
+park()  { xdotool mousemove 1400 430; sleep 0.5; xdotool mousemove 1402 432; sleep 0.9; }
 
 # ------------------------------------------------------------- the geometry
 # Every number below was read off a frame of *this* build at 1600 × 900 with
 # `compact` and the app bar. They are constants of a photograph, not of the
 # layout — the app bar's 41 px moved all of them once already.
 #
-#   app bar          y 0…41
-#   lane rows        Home 81 · Library 133 · Playlists 185 · Now playing 237
-#                    — SIDEBAR_DEST_H 48 on a SIDEBAR_ROW_GAP 4 seam, from the
-#                    app bar's 49. These were 85/125/165/205 until 2026-08-15,
-#                    which is the pitch the lane had *before* its rows became
-#                    their own sleeves; the stale numbers photographed Home
-#                    twice and called one of them `playlist`.
-#   wall shelf 1     tiles y 156…355, `Seagrass` x 313…513, `Werkbund` x 548…748
-#   wall shelf 2     tiles y 479…678, `Violet Ledger` x 313…513,
-#                    `Meadowgrass` x 783…983
-#   tile overlay     `Play` +24, `Queue` +74, `Add to…` +124, `Open` +174 from
-#                    the tile's top, inked ~48 px in from its left
-#   playlists panel  `New playlist` y 244 with `Save` at x 1546; in pick mode a
-#                    named list sits at y 296 with its `Add` at x 1556
-ADD_TO_1=280; ADD_TO_2=603; PLAY_1=180
+# **Re-derived frame by frame on 2026-08-15** (item 71). The previous set was
+# stale in three independent ways at once and the run still *succeeded*: the
+# playlist was never created, and the frame it was for photographed an empty
+# place. Each number below is marked with where it comes from, because the two
+# kinds rot differently — arithmetic follows a token, a photograph follows a
+# layout.
+#
+#   app bar          y 0…49                                    [arithmetic]
+#   lane rows        Home 81 · Library 133 · Playlists 185 ·    [arithmetic]
+#                    Now playing 237 — SIDEBAR_DEST_H 48 on a
+#                    SIDEBAR_ROW_GAP 4 seam, from the app bar's 49
+#   wall shelf 1     tiles y 172…381, `Seagrass` x 265…475,     [photograph]
+#                    `Werkbund` x 510…720
+#   wall shelf 2     tiles y 505…714, `Violet Ledger`           [photograph]
+#                    x 265…475, `Meadowgrass` x 755…965
+#   tile overlay     `Play` +26, `Queue` +78, `Add to…` +130,   [photograph]
+#                    `Open` +182 from the tile's top
+#   new-playlist     name field y 258, `Save playlist` at       [photograph]
+#   place            (315, 667) under a six-track draft
+#   playlists panel  `New playlist` row y 252; once a list      [photograph]
+#                    exists its row sits at y 303 with its
+#                    `Add` at x 1556
+ADD_TO_1=302; ADD_TO_2=635; PLAY_1=198
 
 # ------------------------------------------------------------ the playlist
 # Four records into one list, each through its own tile's `Add to…`. The first
 # press opens the panel with nowhere to put anything, which is the honest empty
 # state and also the door: `New playlist` takes a name and the list exists.
-rest 413 255;   click 361 $ADD_TO_1     # Seagrass
-click 1400 244                          # New playlist
+# **The route changed under this script and nobody noticed**, which is the
+# whole of item 71: the panel's `New playlist` no longer takes a name in the
+# panel — it opens the canonical New playlist place with the record already in
+# the draft, and the name and the Save live there. The old three lines typed
+# `Sunday Morning` into the app-bar search (type-anywhere took the keystrokes,
+# because no field had focus) and pressed a `Save` that was not there.
+rest 370 270;   click 361 $ADD_TO_1     # Seagrass → its own `Add to…`
+click 1400 252                          # `New playlist` — the draft place opens
+click 900 258                           # the name field, which must be focused
 xdotool type --clearmodifiers --delay 60 "Sunday Morning"
 sleep 1.0
-click 1546 244                          # Save — the list is a .m3u8 from here on
+click 315 667                           # `Save playlist` — a .m3u8 from here on
+click 105 133                           # back to the wall
+sleep 1.0
 
-for tile in "648 255 596 $ADD_TO_1" "883 578 831 $ADD_TO_2" "413 578 361 $ADD_TO_2"; do
+for tile in "615 270 596 $ADD_TO_1" "860 600 831 $ADD_TO_2" "370 600 361 $ADD_TO_2"; do
   set -- $tile
   rest "$1" "$2"; click "$3" "$4"       # Werkbund, Meadowgrass, Violet Ledger
-  click 1556 296                        # `Add`, on the row the list now has
+  click 1556 303                        # `Add`, on the row the list now has
 done
 xdotool key --clearmodifiers Escape     # the panel closes; the lane keeps the list
 sleep 1.2
+
+# **Say so if the list was not made.** The whole of item 71 was a run that
+# succeeded while building nothing: every press missed, the frames were taken
+# anyway, and the shipped picture of the playlists place was honest and empty.
+# A capture that cannot tell those apart is not a verification.
+made="$S/data/baz/playlists/Sunday Morning.m3u8"
+if [[ ! -s $made ]]; then
+  echo "THE PLAYLIST WAS NEVER MADE — the picture would be of an empty place."
+  echo "Re-derive the coordinates above from a frame; see docs/WORK.md item 71."
+  exit 1
+fi
+tracks=$(grep -c '\.flac$' "$made" || true)
+echo "== playlist: $tracks tracks in $(basename "$made")"
+[[ $tracks -ge 20 ]] || { echo "only $tracks tracks — expected four records"; exit 1; }
 
 # --------------------------------------------------------------- the frames
 # Put a record on. Resting on a tile raises its own four choices — `Play`,
@@ -298,9 +341,26 @@ click 105 133
 park
 shot library
 
+# **Put the selection on a record before leaving the wall.** The list built
+# above is selected from having just been made, and a selected playlist tile
+# raises its own four options — right in the app, and a picture of the pointer
+# on a store page. Selection is one content item app-wide (ADR-0017's
+# select-then-activate), so selecting a record here puts the tile down. The
+# **caption** is the safe press: the sleeve carries the hover veil's options,
+# the caption carries only select and activate. Nothing after this frame shows
+# the wall, so the record's own selection is in no picture.
+click 1042 741
+
 # 2 · Now playing, by the lane's own row — the record and the rest of the run,
 #     side by side, which is the whole of that place.
 click 105 237
+# **Wait for the case to come round.** It turns once every 32 s
+# (`jewel_case::TURN`) and starts a shade off square (`yaw` 0.18 rad), and the
+# clock runs from the moment this place opens. Shot on arrival it is caught
+# edge-on, which photographs as a black bar. Park and shoot cost ~2.4 s, so
+# 28 s here puts the frame near the top of the second turn — the cover facing
+# the reader, a few degrees open, which is what the caption promises.
+sleep 28
 park
 shot now-playing
 
