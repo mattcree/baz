@@ -688,6 +688,12 @@ pub(crate) enum Message {
     NewPlaylistOpen,
     /// Open the creation place with Vibe already chosen (Home shortcut).
     NewPlaylistOpenVibe,
+    /// Leave the door with an empty request, to write your own words.
+    VibeStartBlank,
+    /// **The smart playlist's own door.** Lands on the moods rather than on
+    /// the form, and on a library Baz has never heard it lands on the one
+    /// step that has to come first.
+    NewSmartPlaylistOpen,
     PlaylistCreationMode(crate::playlists::CreationMode),
     PlaylistCreationBack,
     PlaylistCreationName(String),
@@ -2365,6 +2371,18 @@ impl App {
                 Task::none()
             }
             Message::NewPlaylistOpen => self.open_playlist_creation(None),
+            Message::VibeStartBlank => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.choosing = false;
+                }
+                Task::none()
+            }
+            Message::NewSmartPlaylistOpen => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.begin_choosing();
+                }
+                self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
+            }
             Message::NewPlaylistOpenVibe => {
                 self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
             }

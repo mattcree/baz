@@ -262,6 +262,15 @@ impl PanelRow {
 pub(crate) enum Cell<'a> {
     /// The ghost tile: press it to open the creation place.
     New,
+    /// **The second ghost**: a playlist Baz composes from how the music
+    /// sounds, rather than one you fill by hand.
+    ///
+    /// The owner: *"can we add a second New Playlist option specifically for
+    /// these Smart playlists?"* It is a door of its own rather than a mode
+    /// inside the first, because the two make different things and one of
+    /// them has a first step — Baz has to have listened — that a listener
+    /// should meet at the door rather than three screens in.
+    Smart,
     /// A saved playlist, or the built-in `Favourites` row.
     List(&'a PanelRow),
 }
@@ -975,7 +984,7 @@ impl Playlists {
     /// category with one member forever). It is the run the pinned layer must
     /// never draw: see [`Wall::pinned`].
     pub(crate) fn wall(&self) -> Wall<'_> {
-        let mut cells = vec![Cell::New, Cell::List(&self.favourite)];
+        let mut cells = vec![Cell::New, Cell::Smart, Cell::List(&self.favourite)];
         let mut headers: Vec<Option<GroupHeaderVm>> = vec![None];
         let mut counts = vec![cells.len()];
         for playlist in self.ordered_saved() {
@@ -2174,6 +2183,7 @@ mod tests {
                 .iter()
                 .map(|cell| match cell {
                     Cell::New => "+".to_owned(),
+                    Cell::Smart => "~".to_owned(),
                     Cell::List(row) => row.name.clone(),
                 })
                 .collect::<Vec<_>>()
@@ -2182,13 +2192,13 @@ mod tests {
         playlists.order = PlaylistOrder::Alphabetical;
         assert_eq!(
             names(&playlists),
-            ["+", "Favourites", "Alpha", "beta", "Imported"]
+            ["+", "~", "Favourites", "Alpha", "beta", "Imported"]
         );
 
         playlists.order = PlaylistOrder::Created;
         assert_eq!(
             names(&playlists),
-            ["+", "Favourites", "beta", "Alpha", "Imported"],
+            ["+", "~", "Favourites", "beta", "Alpha", "Imported"],
             "creation order is newest first, with unknown dates last"
         );
 
@@ -2197,7 +2207,7 @@ mod tests {
         playlists.order = PlaylistOrder::Played;
         assert_eq!(
             names(&playlists),
-            ["+", "Favourites", "beta", "Alpha", "Imported"],
+            ["+", "~", "Favourites", "beta", "Alpha", "Imported"],
             "played order is most recent first, with never-played lists last"
         );
     }
@@ -2225,8 +2235,10 @@ mod tests {
         playlists.order = PlaylistOrder::Alphabetical;
         let wall = playlists.wall();
 
-        // Runs: [+ , Favourites] · A(2) · B(1) · Z(1).
-        assert_eq!(wall.counts, vec![2, 2, 1, 1]);
+        // Runs: [+ , ~ , Favourites] · A(2) · B(1) · Z(1). The lead run holds
+        // both ghosts — the ordinary playlist and the smart one — because
+        // neither is a name and neither belongs under a letter.
+        assert_eq!(wall.counts, vec![3, 2, 1, 1]);
         assert_eq!(wall.cells.len(), wall.counts.iter().sum::<usize>());
         assert_eq!(wall.headers[0], None, "the lead run carries no heading");
         assert!(
@@ -2254,7 +2266,7 @@ mod tests {
         // Favourites is **not** filed under F. It is a built-in with no
         // creation stamp and no alphabetical place among the listener's own
         // lists, and the lead run is where the wall says so.
-        assert!(matches!(wall.cells[1], Cell::List(row) if row.name == "Favourites"));
+        assert!(matches!(wall.cells[2], Cell::List(row) if row.name == "Favourites"));
         assert!(
             !wall
                 .rail_headers()

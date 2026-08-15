@@ -65,7 +65,17 @@ pub(crate) fn view<'a>(
     // for, and *start with an empty list* is a quiet act inside it. A fork
     // asked every listener to classify themselves before seeing anything; this
     // asks nobody anything and takes one press either way.
-    let header = views::place_header_with("New playlist", None);
+    // The place names what it is making. A smart playlist is a different
+    // thing from a hand-made one — it is composed from how the music sounds —
+    // and a header that called both *New playlist* would be the fork's
+    // ambiguity back without the fork.
+    let header = views::place_header_with(
+        match draft.mode {
+            Some(CreationMode::Manual) => "New playlist",
+            None | Some(CreationMode::Vibe) => "New smart playlist",
+        },
+        None,
+    );
     let body: Element<'a, Message> = match draft.mode {
         Some(CreationMode::Manual) => manual_form(shelf, playlists, width),
         // The composing route is a place of its own now, not a section of this

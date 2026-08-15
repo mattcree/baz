@@ -46,6 +46,7 @@ use crate::playlists::Playlists;
 use crate::{theme, views};
 
 pub(crate) mod ask;
+pub(crate) mod door;
 pub(crate) mod result;
 pub(crate) mod shape;
 
@@ -128,6 +129,18 @@ pub(crate) fn view<'a>(
         return views::hint(
             "This is the light build. Install the full build to compose from your music.",
         );
+    }
+
+    // **The door, when it is the door.** Entering by the smart playlist's own
+    // tile stands here until a mood is pressed; entering any other way goes
+    // straight to the page, because those routes have already chosen.
+    if vibe.choosing {
+        return scrollable(container(door::view(shelf, stage, layout)).padding(views::place_pad()))
+            .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
+            .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
 
     let ask = ask::view(shelf, stage, layout);

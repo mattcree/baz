@@ -200,7 +200,22 @@ fn cells_row<'a>(
     let mut cells = row![].spacing(hang.gutter);
     for offset in 0..len {
         match wall.cells.get(first + offset) {
-            Some(Cell::New) => cells = cells.push(ghost_tile(hang)),
+            Some(Cell::New) => {
+                cells = cells.push(ghost_tile(
+                    hang,
+                    icon::Glyph::Plus,
+                    "New playlist",
+                    Message::NewPlaylistOpen,
+                ));
+            }
+            Some(Cell::Smart) => {
+                cells = cells.push(ghost_tile(
+                    hang,
+                    icon::Glyph::Queue,
+                    "New smart playlist",
+                    Message::NewSmartPlaylistOpen,
+                ));
+            }
             Some(Cell::List(playlist)) => {
                 cells = cells.push(tile(
                     shelf,
@@ -276,12 +291,17 @@ fn rail(
 ///
 /// The mark is drawn at [`theme::GHOST_MARK_PX`], which is the sprite's own
 /// raster edge — so it is pixel-exact rather than an upscale of a 20 px glyph.
-fn ghost_tile<'a>(hang: Grid) -> Element<'a, Message> {
+fn ghost_tile<'a>(
+    hang: Grid,
+    glyph: icon::Glyph,
+    name: &'static str,
+    press: Message,
+) -> Element<'a, Message> {
     let room = theme::active();
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
     let field = container(
-        iced_image(icon::handle(icon::Glyph::Plus))
+        iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::GHOST_MARK_PX))
             .height(Length::Fixed(theme::GHOST_MARK_PX))
             .opacity(theme::GLYPH_OPACITY),
@@ -300,7 +320,7 @@ fn ghost_tile<'a>(hang: Grid) -> Element<'a, Message> {
         sleeve,
         column![caption_lane(
             edge,
-            text("New Playlist")
+            text(name)
                 .size(theme::SIZE_BODY)
                 .line_height(theme::LEADING_BODY)
                 .font(theme::MEDIUM)
@@ -316,7 +336,7 @@ fn ghost_tile<'a>(hang: Grid) -> Element<'a, Message> {
     button(body)
         .padding(0)
         .style(move |_theme, status| theme::tile(room, status, false))
-        .on_press(Message::NewPlaylistOpen)
+        .on_press(press)
         .into()
 }
 

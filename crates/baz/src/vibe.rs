@@ -857,6 +857,16 @@ pub(crate) struct State {
     /// When the words have been still long enough to be worth embedding.
     /// `None` means there is nothing waiting.
     count_due: Option<std::time::Instant>,
+    /// **Whether the page is standing at its door** — the moods, rather than
+    /// the form behind them.
+    ///
+    /// The owner: *"can we have maybe 5-6 presets at that level as tiles
+    /// where when a user selects it, it creates a new one."* So the smart
+    /// door lands here; pressing a tile composes, and the form appears behind
+    /// the result where it is useful. It is not a wizard step — there is no
+    /// *next* — it is the difference between being asked to fill something in
+    /// and being offered six things to press.
+    pub(crate) choosing: bool,
     /// **Which of the two depths the page is showing.**
     ///
     /// The owner: *"we should have a simple and advanced mode I think."* The
@@ -944,6 +954,7 @@ impl Default for State {
             counting: false,
             varied: false,
             count_due: None,
+            choosing: false,
             depth: Depth::Simple,
             expanded: false,
             shape_touched: false,
@@ -1068,6 +1079,7 @@ impl State {
     /// that throws away a line somebody drew — is the kind of thing that
     /// teaches people not to press anything.
     pub(crate) fn start_from(&mut self, recipe: Recipe) {
+        self.choosing = false;
         self.set_prompt(recipe.prompt);
         if !self.shape_touched {
             let touched = self.shape_touched;
@@ -1077,6 +1089,12 @@ impl State {
         if !self.length_touched {
             self.length = recipe.length;
         }
+    }
+
+    /// Enter by the smart playlist's own door: stand at the moods.
+    pub(crate) fn begin_choosing(&mut self) {
+        self.choosing = true;
+        self.open = true;
     }
 
     /// **Open or close the per-dimension lines.**
