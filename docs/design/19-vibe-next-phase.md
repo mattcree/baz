@@ -266,7 +266,59 @@ The build order, if it is a yes: the two panes and the measure; the shape
 control; the words vocabulary; the result; the first run; then the fork's
 removal, last, so it lands on a page that is already right.
 
-## 8. Not on the table
+## 8. Mood and words are one question (note 21a)
+
+The owner, on note 21: *"I don't really get the 'mood' and 'words' and how they
+interact… this will probably confuse people."* He is right, and it is a model
+defect rather than a labelling one.
+
+**Pressing a mood does four things at once** — lights the chip, fills the words
+field, replaces the curve, sets the length — and three of them happen somewhere
+else on screen from the thing that was pressed. Worse, two controls then state
+the same request twice, a lit chip and a filled field, with nothing saying
+which one the engine reads. The questions a listener is left with have no
+answer on screen: does the mood *add* to my words or replace them? If I edit
+the words, is the mood still applied? If I press a second mood, do I have two?
+
+**There is one request.** A mood is not a second input; it is a shortcut that
+writes into the only input there is. So the page asks **two questions in the
+listener's own words** and neither of them is jargon:
+
+- **What do you want to hear?** — the field at the head of the band, with
+  *"this is exactly what Baz searches for"* under it. Beneath that, the
+  starting points that fill it, and beneath those, the vocabulary chips that
+  append to it. One line, three ways to write it.
+- **How should it move?** — the curve and its presets, about movement and
+  nothing else.
+
+The rules, which are behaviours rather than modes:
+
+| The listener | Then |
+|---|---|
+| presses a starting point | its words **replace the line**, visibly, and are editable at once |
+| edits the line | the starting point's light goes out — not a mode switching off, a label ceasing to be true |
+| presses a second starting point | it replaces the line; there is no way to have two, because there is one line. Undo restores |
+| presses a word chip | it appends to the line, with a comma |
+
+And the fourth silent effect is bounded: **a starting point sets the curve and
+the length only while the listener has not set them themselves.** Drag a point
+once and they are yours; from then on a mood changes the words and nothing
+else. Invisible when it is right.
+
+Three alternatives were rejected: dropping moods (redundant against the
+vocabulary, but a first press that produces a whole playlist is the best moment
+in the feature); making them genuinely two inputs (the engine has one text
+embedding, so combining them *is* concatenation, which is what filling the
+field already does — only hidden); and keeping two bands with a better
+explanation (if it needs explaining it is wrong, and the explanation would have
+to be re-read every time).
+
+This also settles the naming question without a separate decision: the place is
+*New playlist › From a mood*, its first question is what you want to hear, and
+**Vibe** stays the feature's name in conversation and in the changelog rather
+than a word anybody must understand in order to use it.
+
+## 9. Not on the table
 
 - **The engine.** The contour still steers position against a
   collection-relative rank axis, and retrieval still runs per position. That
