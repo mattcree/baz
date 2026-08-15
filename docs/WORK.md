@@ -1456,11 +1456,58 @@ because a player without it is missing a floor rather than a feature.
     black bar where the cover should be, so the Now Playing frame waits for it
     to come round.
 
+### Phase J — the 2026-08-15 Vibe review
+
+`docs/design/19-vibe-next-phase.md` is the design note; the mockups were
+delivered to the owner as a page. **72 and 73 are blocked on his word**, which
+is the point of the note: *"create some designs which we can actually approve
+or not."*
+
+72. **Designed, awaiting approval — the Vibe page becomes a place.** *"the ui
+    layout for the vibe playlist isn't great… we have to scroll to see the
+    playlist. it should work on both wide and narrow layouts."*
+
+    Eight defects in doc 19 §3, six of them the same one: the page is a form
+    and should be a place. Three layouts drawn (§4); **A** — ask on the left,
+    list on the right, stacking below ~1180 px, with a mood press composing
+    immediately — is recommended. Carries with it: the strip sentence removed,
+    the hero collapsed into the breadcrumb, chips that look pressable, words
+    with a rule and two example chips, **one blended shape line** with *Tune
+    each dimension separately* as a disclosure seeded from the blend, and the
+    `−`/`+` stepper deleted.
+
+    Photographed before anything moves:
+    `docs/design/impl/vibe-next-phase/` at 1600 × 900 and 1000 × 700.
+
+73. **Blocked on a decision — one section-header treatment.** *"the home page
+    section headers and this pages section does not match the library and
+    playlist. i prefer the library and homepage."*
+
+    The sentence reads two ways and the cost of guessing is a pass over four
+    places, so doc 19 §5 asks it as decision 2. The facts: Home and the Vibe
+    page both use `views::section_rule` (11 px letter-spaced caps over a
+    hairline); Library and Playlists use `shelf::group_band`. Proposed — the
+    band everywhere, including Home.
+
+74. **Not started — the bell, again.** *"the bell icon is still weirdly
+    skinny… backlog it."*
+
+    **Item 48 measured the wrong thing and its test passed.** It widened the
+    glyph to 0.78 of the box *at the widest point*, and the widest point is the
+    **rim** — one hairline at the foot. The mass a reader sees is the **dome**,
+    0.30 in item 40 and about **0.34** after item 48's uniform 1.147 scale,
+    against the gear's 0.84 disc in the same box.
+    `the_bell_is_as_wide_as_the_cluster_it_stands_in` takes the *maximum* run
+    width with 0.07 of slack, so a wide rim under a narrow dome satisfies it.
+    Widen the dome and let the flare follow; assert the body's **median** width
+    instead — a glyph is read by its mass, not by its widest scanline.
+
 ## Doing
 
-- Nothing active. **Items 1–56, 61, 63 and 71 are complete**, `v0.2.0` is
-  tagged and its draft release is built and verified, and item 60 is measured
-  with its cheapest repair shipped.
+- **Waiting on the owner for two decisions** (items 72 and 73 — doc 19 §5),
+  which is where the Vibe review stops until he answers. Items 1–56, 61, 63
+  and 71 are complete, `v0.2.0` is tagged and its draft release is built and
+  verified, and item 60 is measured with its cheapest repair shipped.
 
   **What is left is the big stuff, and the owner has asked to pick it up
   tomorrow**: 57 (smart shuffle, investigation first), 58 (an equaliser and
