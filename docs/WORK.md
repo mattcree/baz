@@ -1120,7 +1120,7 @@ in `BACKLOG.md`.
     of the fixture library rather than a seeded state, because every claim the
     control makes needs an analysed collection to be true.
 
-56. **Not started — five or six standard recipes.** *"we should have like 5-6
+56. **Done 2026-08-15 — six recipes, asked before anything is typed.** *"we should have like 5-6
     standard recipes -- as part of the wizard we should be asking users if
     they want to make a preset one."*
 
@@ -1137,6 +1137,20 @@ in `BACKLOG.md`.
     degrade to something rather than to nothing. The pool note already tells
     that truth (`N of M tracks analysed`), and item 55's field behind the line
     now shows it before the press.
+
+    **What shipped.** `Recipe` is words + a shape + a length — the whole of a
+    request — offered in a `Start from` block above the words. Pressing one
+    fills the form and touches nothing else, so what it leaves behind is the
+    form a listener would have filled in themselves; the row lights the recipe
+    the request currently matches and stops the moment a word, a point or the
+    length changes, because from then on the request is theirs. The six are
+    `Late-night drive`, `Sunday morning`, `Focus`, `Workout`, `Wind down` and
+    `Party`.
+
+    They live as a `const` table in the source for now. The *"data beside the
+    themes"* option is still the better end state — a listener writing their
+    own without a build — and it is a small follow-on once the shape of a
+    recipe has been lived with.
 
 57. **Not started — smart shuffle, investigation first.** *"I also thought
     that shuffle might be one of those things where instead of shuffle, we
@@ -1224,15 +1238,28 @@ in `BACKLOG.md`.
 order it argues for. Item 2.1 (repeat the list) shipped inside the run itself,
 because a player without it is missing a floor rather than a feature.
 
-61. **Not started — a README for listeners.** *"remember the audience is just
-    general music listeners not coders, so no need to make it really wordy."*
+61. **Done 2026-08-15 — a README for listeners.** *"remember the audience is
+    just general music listeners not coders, so no need to make it really
+    wordy."*
 
-    Today's README is written for someone reading the repository: build
-    instructions, dependency reasoning, per-codec known limitations. Aim at:
-    what baz is in two lines, one picture, the eight or so things a listener
-    would choose it *for*, how to install it per platform, and a link to the
-    engineering documents. What is really about *how it is built* moves to
-    `docs/`, which already has homes for all of it.
+    341 lines → 190. It opens with **what you get** — ten bullets a listener
+    would choose baz *for*, in their words rather than the engine's ("it just
+    plays", "nothing touches your files", "draw a shape and baz builds a list
+    that follows it") — and the download link comes before the `cargo` line,
+    which is only honest now that `v0.1.0` is tagged with binaries on it.
+
+    **Nothing was deleted.** Everything cut — the bit-exact gapless argument,
+    the BS.775 downmix matrix, EBU R128 verification, the full key table, the
+    per-codec edges, the build charter — moved to the new
+    `docs/FEATURES.md`, "the long version", linked from three places in the
+    README.
+
+    **Known limitations stayed on the front page**, trimmed from fifteen to the
+    five a listener can actually hit. They are the section that makes the rest
+    of the page worth believing, and `release.yml` deep-links
+    `#known-limitations` in every release body, so the anchor had to survive
+    anyway. `NEXT-STEPS.md` §1 said the releases page was empty; that is now
+    marked closed rather than left to contradict the front page.
 
 62. **Not started — multi-select and bulk actions.** The workflow floor every
     other list feature stands on: shift/ctrl over rows and tiles, then queue,
@@ -1305,11 +1332,17 @@ because a player without it is missing a floor rather than a feature.
 
 ## Doing
 
-- Nothing active — items 1–51 and 55 are complete. **Items 52–54, 56–60 and 61–70 are
-  recorded and not started**: each is a decision with a real fork in it (where a playlist's
-  authored image lives; how a row's card widens without nesting its controls;
-  what live theme switching does to the process-cached sprite sheets), and none
-  is blocked on anything but that decision. Phase G shipped on 2026-08-15 and was **rendered** rather
+- Nothing active — items 1–51, 55, 56, 61 and 63 are complete, and the parity run
+  shipped two of its own findings (repeat-the-list and the sleep timer).
+  **Items 52–54, 57–60, 62 and 64–71 are recorded and not started**: each is a
+  decision with a real fork in it (where a playlist's authored image lives; how
+  a row's card widens without nesting its controls; what live theme switching
+  does to the process-cached sprite sheets; whether a rule-based list is a
+  saved query or a materialised `.m3u8`), and none is blocked on anything but
+  that decision. The owner has asked to *"pick up the big stuff tomorrow"*, and
+  §4 of `docs/design/18-feature-parity.md` states the order: multi-select
+  (item 62) first, because it is the floor tag editing and bulk actions stand
+  on. Phase G shipped on 2026-08-15 and was **rendered** rather
   than argued: `docs/design/impl/second-review-pass/` holds eight frames from
   the real binary at 1280 × 860 and 1280 × 620, both runs carrying the
   `[mpris] no session bus` isolation receipt. Two of the fixes were wrong in
