@@ -145,6 +145,23 @@
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
+    <release version="0.2.0" date="2026-08-15" type="stable">
+      <description>
+        <p>
+          Repeat now repeats the list as well as the track. The playlist page
+          groups A–Z like the library does, and a new playlist starts from a
+          tile on it rather than a button.
+        </p>
+        <p>
+          Vibe playlists are drawn: a line over your own collection says how
+          energetic the music should be as the playlist goes on, and after
+          composing you can see exactly where every chosen track landed
+          against it. Tempo, brightness, dynamics and texture can each be
+          drawn as lines of their own. Everything is still analysed on this
+          device, and your audio never leaves it.
+        </p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-08-14" type="stable">
       <description>
         <p>

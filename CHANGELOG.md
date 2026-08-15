@@ -24,6 +24,89 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-15
+
+The first release after the public beta. Everything here is the answer to a
+week of reading Baz on a real library: the playlist wall grouped like the
+Library, a record page whose details you can reach, two bars that keep one
+rhythm, repeat that repeats the list, and a Vibe route you draw rather than
+describe.
+
+### Added
+
+- **Repeat the list.** Baz had *repeat this track* and nothing else, which
+  left it the one player without the state most people mean by the word. One
+  control cycles **off → the list → this track**; the two lit states carry
+  different marks, so which one is on does not rest on colour alone. A
+  shuffled run repeats the order it drew rather than jumping back to whichever
+  file is first in the list.
+- **A playlist you draw.** The Vibe route's shape is now a line over your own
+  library: position across the finished playlist, and how energetic a track
+  should be when it gets there — measured against the rest of your collection
+  rather than against an absolute. Six shapes are offered as pictures rather
+  than names, the library's own distribution is drawn behind the line so a
+  request nothing can answer is visible before you spend a minute on it, and
+  after composing, every chosen track appears on the line with a tick showing
+  how far it landed from what you asked for. Hovering a row lights that
+  track's place on the line and says the same thing in words.
+- **More than one line at a time.** Energy rolls tempo, loudness and loudness
+  variation into one number; **Tempo**, **Brightness**, **Dynamics** and
+  **Texture** can each be drawn as a line of their own, up to three at once.
+  Every one is a stated combination of measurements — Baz can tell you how
+  fast, how loud and how bright a recording is, and does not pretend to know
+  how it feels.
+
+### Changed
+
+- **The saved-playlist wall groups like the Library's**, with the Library's own
+  layout engine, heading bands and pinned heading. `New Playlist` is a ghost
+  tile on the wall rather than a button in the strip, beside `Favourites` in an
+  unlabelled leading run. The strip no longer names the place or counts the
+  tiles, and a tile's caption is its name.
+- **The record page's aside scrolls below its cover.** In the two-column form
+  the `DETAILS` block was unreachable on a short window: nothing scrolled it
+  and the body clip cut it. The cover itself stays put — a scrollbar down the
+  artwork is not a fix — so everything under it is what turns.
+- **`Favourites` wears a heart** where it has no records to quote, in every
+  surface that draws a playlist's sleeve, instead of its own name in a box.
+- **Both bars keep two control seams** — 8 inside a cluster, 16 between — where
+  the app bar had three. The bottom bar's reserved signal-path slot leads the
+  trailing cluster instead of standing between `Shuffle` and the mute button,
+  so an ordinary direct path no longer shows a 96 px hole there. The window's
+  minimum width moved 860 → 864 as the app bar's line was re-derived.
+- **The Vibe creation flow was rebuilt**: one vocabulary, the journey's shape
+  above the control that spends it, the playlist's name above `Save`, the
+  first-run consent above the press it consents to rather than as a second
+  button after it, and one row anatomy shared with the manual route.
+- **The notification bell** is drawn at its cluster's optical width.
+- **The New playlist place was redrawn** to look like the rest of Baz: the
+  same identity block every page wears, the same section rules, one primary
+  action with its own mark, `+`/`−` marks where there were sentences, and a
+  line of explanation over every block.
+- **Vibe uses much less memory.** The local model's two halves are opened only
+  where they are used: an analysis worker loads the audio half, and the text
+  half is opened once, by whichever thread reads your words. A first scan held
+  up to eight copies of both.
+
+### Fixed
+
+- **Composing a playlist did nothing at all on a first run.** Vibe's one press
+  refused to read the library unless its analysis index already existed — and
+  on a first run it never does. It reads the library and composes, as the
+  button says.
+- **The generated list ignored the shape it was given.** Two causes: the axis
+  was the span between your loudest and quietest records, so a normal library
+  crowded into the middle of it and every chosen track came out at the same
+  height; and the candidates were picked by one overall ranking, which could
+  return nothing at the heights the shape asked for. The axis is now a place
+  in your collection — the median track sits in the middle — and a shaped
+  request retrieves candidates for every part of the line.
+- The bottom bar and Now playing drew **no artist at all** for a record with no
+  named album artist — a compilation, or an untagged rip — whose file also
+  carried no artist tag, where the album page, the wall tile and the picker
+  panel all name it. MPRIS still publishes no `albumArtist` in that case,
+  which is the honest answer for the desktop.
+
 ## [0.1.0] - 2026-08-14
 
 The first release. Everything below is everything baz does; there is no
@@ -2808,5 +2891,6 @@ a promise about the next commit.
   output (which is also what puts hardware volume out of reach).
   `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/compare/v0.1.0...main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.2.0...main
+[0.2.0]: https://github.com/mattcree/baz/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mattcree/baz/releases/tag/v0.1.0

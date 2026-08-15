@@ -20,7 +20,8 @@ use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig};
 #[cfg(feature = "device-output")]
 use baz_core::playback::PlaybackError;
 use baz_core::protocol::{
-    Command, ConversionReason, Event, ReplayGainMode, ReplayGainSource, SignalChain, VolumePath,
+    Command, ConversionReason, Event, Repeat, ReplayGainMode, ReplayGainSource, SignalChain,
+    VolumePath,
 };
 use baz_core::replaygain::{ComputedGains, MAX_PREAMP_CENTIDB, ReplayGainTags};
 use baz_core::traversal::Traversal;
@@ -4051,6 +4052,68 @@ fn a_shuffled_pass_plays_every_entry_once_and_then_ends() {
     engine.shutdown();
 }
 
+/// **Repeat All takes the run back to the top of its own walk** when it runs
+/// out, instead of ending it — the state most listeners mean by *repeat*, and
+/// the one baz shipped without until 2026-08-15.
+///
+/// It repeats the *list*, not the track: the whole plan is walked again, so
+/// every gapless splice inside it is unchanged and only the boundary at the
+/// end is new. And it is the traversal's top rather than queue position zero,
+/// so a shuffled run repeats the order it drew rather than jumping to
+/// whichever file happens to be first in the list.
+#[test]
+fn repeat_all_walks_the_run_again_from_the_top() {
+    let f = fixtures();
+    let capacity = (f.a_ref.len() + f.b_ref.len()) * 2 + f.a_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+            origin: None,
+        })
+        .expect("send");
+    engine
+        .send(Command::SetRepeat {
+            repeat: Repeat::All,
+        })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::RepeatChanged {
+            repeat: Repeat::All
+        }
+    );
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    // …and round again, rather than `QueueEnded`.
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    engine
+        .send(Command::SetRepeat {
+            repeat: Repeat::Off,
+        })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::RepeatChanged {
+            repeat: Repeat::Off
+        }
+    );
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+
+    let out = collect(output);
+    let pass = f.a_ref.len() + f.b_ref.len();
+    assert_samples_eq(&out[..f.a_ref.len()], &f.a_ref, "first track");
+    assert_samples_eq(&out[f.a_ref.len()..pass], &f.b_ref, "second track");
+    assert_samples_eq(
+        &out[pass..pass + f.a_ref.len()],
+        &f.a_ref,
+        "and round again",
+    );
+}
+
 /// Repeat One overrides only natural completion. Explicit Next still follows
 /// the active traversal and the newly selected entry becomes the repeated one.
 #[test]
@@ -4065,11 +4128,15 @@ fn repeat_one_restarts_natural_ends_but_explicit_next_still_navigates() {
         })
         .expect("send");
     engine
-        .send(Command::SetRepeatOne { enabled: true })
+        .send(Command::SetRepeat {
+            repeat: Repeat::One,
+        })
         .expect("send");
     assert_eq!(
         next_transport_event(&events),
-        Event::RepeatOneChanged { enabled: true }
+        Event::RepeatChanged {
+            repeat: Repeat::One
+        }
     );
     engine.send(Command::Play).expect("send");
     assert_eq!(next_transport_event(&events), started(&f.a, 0));
@@ -4079,11 +4146,15 @@ fn repeat_one_restarts_natural_ends_but_explicit_next_still_navigates() {
     engine.send(Command::Next).expect("send");
     assert_eq!(next_transport_event(&events), started(&f.b, 1));
     engine
-        .send(Command::SetRepeatOne { enabled: false })
+        .send(Command::SetRepeat {
+            repeat: Repeat::Off,
+        })
         .expect("send");
     assert_eq!(
         next_transport_event(&events),
-        Event::RepeatOneChanged { enabled: false }
+        Event::RepeatChanged {
+            repeat: Repeat::Off
+        }
     );
     assert_eq!(next_transport_event(&events), Event::QueueEnded);
     engine.shutdown();

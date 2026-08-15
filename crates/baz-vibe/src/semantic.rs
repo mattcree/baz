@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::f32::consts::TAU;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use baz_core::playback::{DecodedAudio, resample_interleaved};
 use ort::session::Session;
@@ -22,9 +22,24 @@ const MEL_BINS: usize = 64;
 const FRAMES: usize = WINDOW_SAMPLES / HOP + 1;
 const EMBEDDING_SIZE: usize = 512;
 
+/// **The two towers, each opened only where it is used.**
+///
+/// The owner: *"figure out why we are using so much memory… I see 1.8GB."*
+/// This held both towers eagerly, per thread: the text model is 126 MB on
+/// disk and the audio model 34 MB, the model is a `thread_local!`, and the
+/// default scan runs **eight** workers — so a first analysis materialised up
+/// to `8 × 160 MB` of weights before ONNX Runtime's own arenas, and every one
+/// of those workers loaded the *text* tower it never calls. A worker embeds
+/// audio; the prompt is embedded once, on whichever thread carries the
+/// request.
+///
+/// Opened lazily, the same scan holds `8 × 34 MB` of audio weights and one
+/// copy of the text tower — a little over 400 MB where it was over a
+/// gigabyte, with no change to how anything is scheduled.
 pub(crate) struct Model {
-    audio: Session,
-    text: Session,
+    directory: PathBuf,
+    audio: Option<Session>,
+    text: Option<Session>,
     tokenizer: Tokenizer,
 }
 
@@ -60,16 +75,6 @@ impl Model {
             "The bundled local Vibe model could not be found. Reinstall Baz's full build."
                 .to_owned()
         })?;
-        let session = |name: &str| {
-            let builder = Session::builder()
-                .map_err(|error| format!("could not start local Vibe model: {error}"))?;
-            let builder = builder
-                .with_intra_threads(2)
-                .map_err(|error| format!("could not configure local Vibe model: {error}"))?;
-            builder
-                .commit_from_file(directory.join(name))
-                .map_err(|error| format!("could not open local Vibe model: {error}"))
-        };
         let mut tokenizer = Tokenizer::from_file(directory.join("tokenizer.json"))
             .map_err(|error| format!("could not open local Vibe vocabulary: {error}"))?;
         tokenizer
@@ -85,10 +90,21 @@ impl Model {
             ..PaddingParams::default()
         }));
         Ok(Self {
-            audio: session("audio_model_quantized.onnx")?,
-            text: session("text_model_quantized.onnx")?,
+            directory,
+            audio: None,
+            text: None,
             tokenizer,
         })
+    }
+
+    /// Open one tower, once, on this thread.
+    fn session(directory: &Path, name: &str) -> Result<Session, String> {
+        Session::builder()
+            .map_err(|error| format!("could not start local Vibe model: {error}"))?
+            .with_intra_threads(2)
+            .map_err(|error| format!("could not configure local Vibe model: {error}"))?
+            .commit_from_file(directory.join(name))
+            .map_err(|error| format!("could not open local Vibe model: {error}"))
     }
 
     pub(crate) fn text(&mut self, prompt: &str) -> Result<Vec<f32>, String> {
@@ -106,8 +122,11 @@ impl Model {
             .iter()
             .map(|value| i64::from(*value))
             .collect();
-        let output = self
-            .text
+        if self.text.is_none() {
+            self.text = Some(Self::session(&self.directory, "text_model_quantized.onnx")?);
+        }
+        let text = self.text.as_mut().expect("text tower opened above");
+        let output = text
             .run(ort::inputs! {
                 "input_ids" => Tensor::from_array(([1_usize, 77], ids))
                     .map_err(|error| error.to_string())?,
@@ -128,11 +147,17 @@ impl Model {
             .chunks_exact(CHANNELS)
             .map(|frame| (frame[0] + frame[1]) * 0.5)
             .collect();
+        if self.audio.is_none() {
+            self.audio = Some(Self::session(
+                &self.directory,
+                "audio_model_quantized.onnx",
+            )?);
+        }
+        let audio = self.audio.as_mut().expect("audio tower opened above");
         let mut vectors = Vec::new();
         for start in sampled_starts(mono.len()) {
             let features = mel_window(&mono, start);
-            let output = self
-                .audio
+            let output = audio
                 .run(ort::inputs! {
                     "input_features" => Tensor::from_array(
                         ([1_usize, 1, FRAMES, MEL_BINS], features),

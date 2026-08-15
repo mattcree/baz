@@ -43,12 +43,13 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use baz_core::index::{AlbumArtist, Library};
+use baz_core::history::Recency;
+use baz_core::index::{AlbumArtist, GroupKey, Initial, Library};
 use baz_core::playlist::{Entry, ExtInf, Folder, Item, Note, Playlist, PlaylistError};
 
-use crate::vm::{self, QueueItemVm, QueueVm, RunSource, TrackVm};
+use crate::vm::{self, GroupHeaderVm, QueueItemVm, QueueVm, RunSource, TrackVm};
 
 /// What the record page's transfer affordances need to know, bundled so the
 /// view signatures stay readable: whether playlists can exist at all, and
@@ -191,6 +192,17 @@ impl PlaylistOrder {
             Self::Played => "Played",
         }
     }
+
+    /// The Library group key this ordering projects onto, which is what the
+    /// shared index rail is built from. `A–Z` is the alphabet; the two
+    /// chronological orderings are the Library's own elapsed buckets.
+    pub(crate) const fn key(self) -> GroupKey {
+        match self {
+            Self::Alphabetical => GroupKey::Alphabet,
+            Self::Created => GroupKey::Added,
+            Self::Played => GroupKey::Played,
+        }
+    }
 }
 
 impl PanelRow {
@@ -227,6 +239,94 @@ impl PanelRow {
             ),
             None => format!("Playlist · {}", self.entries),
         }
+    }
+}
+
+/// One cell on the saved-playlist wall.
+///
+/// The create affordance is a *cell* rather than a control in the strip
+/// (the owner: *"the new playlist should be like a ghost playlist with a + in
+/// the middle called 'New Playlist' on the playlist page, not a button"*), so
+/// the wall's layout has to be able to say "a tile that is not a list" — which
+/// is the whole of this type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cell<'a> {
+    /// The ghost tile: press it to open the creation place.
+    New,
+    /// A saved playlist, or the built-in `Favourites` row.
+    List(&'a PanelRow),
+}
+
+/// **The saved-playlist wall's layout, derived once.**
+///
+/// Built by [`Playlists::wall`]; laid out by [`crate::shelf::Shelves`], which
+/// is the Library's own layout engine and takes exactly this — a count per
+/// run. The view draws it and `App::request_playlist_art` reads the same
+/// projection to decide which collages to decode, so the two cannot disagree
+/// about which tile is in view.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Wall<'a> {
+    /// Every cell, in wall order, across all runs.
+    pub(crate) cells: Vec<Cell<'a>>,
+    /// One entry per run. `None` is the unlabelled lead run.
+    pub(crate) headers: Vec<Option<GroupHeaderVm>>,
+    /// How many cells each run holds, in run order — [`crate::shelf::Shelves`]'
+    /// own input.
+    pub(crate) counts: Vec<usize>,
+    /// The group key the rail is drawn from — the active ordering's
+    /// projection ([`PlaylistOrder::key`]).
+    pub(crate) key: GroupKey,
+}
+
+impl Wall<'_> {
+    /// The headers the index rail indexes: every labelled run, in order.
+    ///
+    /// The lead run is skipped, so a rail entry's index is one less than its
+    /// run's — [`Self::run_of`] is the way back, and the only way back.
+    pub(crate) fn rail_headers(&self) -> Vec<GroupHeaderVm> {
+        self.headers.iter().flatten().cloned().collect()
+    }
+
+    /// The run a rail entry jumps to: the lead run holds no heading, so every
+    /// indexed run is one past it.
+    pub(crate) const fn run_of(rail_entry: usize) -> usize {
+        rail_entry + 1
+    }
+
+    /// **Whether a run's heading may be pinned to the top of the viewport.**
+    ///
+    /// The lead run's may not: it has no heading, and the pinned layer paints
+    /// an opaque band, so pinning nothing would draw a blank strip over the
+    /// covers scrolling under it.
+    pub(crate) fn pinned(&self, run: usize) -> bool {
+        self.headers.get(run).is_some_and(Option::is_some)
+    }
+}
+
+/// Map a filesystem or session timestamp to the Library's honest age buckets.
+///
+/// `Unrecorded` describes an unavailable creation stamp; `Never` describes a
+/// playlist that has not been played in this run. They are deliberately not
+/// collapsed into the same quiet label.
+fn recency(timestamp: Option<u64>, created: bool) -> Recency {
+    let Some(timestamp) = timestamp else {
+        return if created {
+            Recency::Unrecorded
+        } else {
+            Recency::Never
+        };
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = now.saturating_sub(timestamp) / 86_400;
+    match days {
+        0 => Recency::Today,
+        1..=6 => Recency::ThisWeek,
+        7..=30 => Recency::ThisMonth,
+        31..=364 => Recency::MonthsAgo(u32::try_from((days / 30).max(1)).unwrap_or(u32::MAX)),
+        _ => Recency::YearsAgo(u32::try_from((days / 365).max(1)).unwrap_or(u32::MAX)),
     }
 }
 
@@ -381,62 +481,12 @@ pub(crate) enum CreationMode {
     Vibe,
 }
 
-/// A small, discrete journey shape. These are listener-facing composition
-/// choices, not model controls; generation receives their textual reading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum EnergyShape {
-    #[default]
-    Steady,
-    Build,
-    PeakAndSettle,
-    CoolDown,
-}
-
-impl EnergyShape {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::Steady,
-        Self::Build,
-        Self::PeakAndSettle,
-        Self::CoolDown,
-    ];
-
-    #[must_use]
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Steady => "Steady",
-            Self::Build => "Build",
-            Self::PeakAndSettle => "Peak & settle",
-            Self::CoolDown => "Cool down",
-        }
-    }
-}
-
-impl CreationDraft {
-    #[must_use]
-    pub(crate) fn journey_instruction(&self) -> String {
-        let mut parts = vec![format!("energy shape: {}", self.energy.label())];
-        let points: Vec<_> = self
-            .waypoints
-            .iter()
-            .map(|point| point.trim())
-            .filter(|point| !point.is_empty())
-            .collect();
-        if !points.is_empty() {
-            parts.push(format!("journey: {}", points.join(" then ")));
-        }
-        parts.join("; ")
-    }
-}
-
 /// Session-only state for the shallow, resumable creation flow.
 #[derive(Debug)]
 pub(crate) struct CreationDraft {
     pub(crate) mode: Option<CreationMode>,
     pub(crate) name: String,
     pub(crate) name_is_suggested: bool,
-    pub(crate) shape_open: bool,
-    pub(crate) energy: EnergyShape,
-    pub(crate) waypoints: [String; 3],
     pub(crate) items: Vec<QueueItemVm>,
     pub(crate) error: Option<String>,
     pub(crate) saved: bool,
@@ -448,9 +498,6 @@ impl Default for CreationDraft {
             mode: None,
             name: String::new(),
             name_is_suggested: true,
-            shape_open: false,
-            energy: EnergyShape::default(),
-            waypoints: [String::new(), String::new(), String::new()],
             items: Vec::new(),
             error: None,
             saved: false,
@@ -848,8 +895,14 @@ impl Playlists {
             .collect();
     }
 
-    /// Every saved playlist in the full page's selected order.
-    pub(crate) fn ordered_rows(&self) -> Vec<&PanelRow> {
+    /// Every saved playlist in the full page's selected order, **without** the
+    /// pinned built-in row.
+    ///
+    /// This is the half the wall groups. `Favourites` is deliberately not in
+    /// it: it is not alphabetically placed, it has no creation stamp, and
+    /// filing it under `F` would put a built-in row inside a run of the
+    /// listener's own lists (see [`Self::wall`]).
+    pub(crate) fn ordered_saved(&self) -> Vec<&PanelRow> {
         let mut saved: Vec<&PanelRow> = self.rows.iter().collect();
         let by_name = |a: &&PanelRow, b: &&PanelRow| {
             (a.name.to_lowercase(), a.name.as_str()).cmp(&(b.name.to_lowercase(), b.name.as_str()))
@@ -878,10 +931,66 @@ impl Playlists {
                 .then_with(|| by_name(a, b))
             }),
         }
-        let mut rows = Vec::with_capacity(saved.len() + 1);
-        rows.push(&self.favourite);
-        rows.extend(saved);
-        rows
+        saved
+    }
+
+    /// **The wall, as it is laid out** — the projection both the view and the
+    /// artwork scheduler read, so neither can disagree with the other about
+    /// which tile is where.
+    ///
+    /// The shape is the Library's, deliberately (the owner: *"a-z playlists
+    /// should group alphabetically — use the exact same pattern as the
+    /// library please"*): a list of cells in wall order plus a count per run,
+    /// which is exactly what [`crate::shelf::Shelves`] lays out for the record
+    /// wall. What differs is only what a cell and a header *mean*.
+    ///
+    /// **The lead run has no heading and holds two cells**: the create tile
+    /// and `Favourites`. Neither belongs in a letter — one is a control and
+    /// the other is a built-in — and an unlabelled leading run is how a wall
+    /// says so without inventing a heading (`BUILT-IN` over one tile names a
+    /// category with one member forever). It is the run the pinned layer must
+    /// never draw: see [`Wall::pinned`].
+    pub(crate) fn wall(&self) -> Wall<'_> {
+        let mut cells = vec![Cell::New, Cell::List(&self.favourite)];
+        let mut headers: Vec<Option<GroupHeaderVm>> = vec![None];
+        let mut counts = vec![cells.len()];
+        for playlist in self.ordered_saved() {
+            let header = self.header_of(playlist);
+            if headers.last() != Some(&Some(header.clone())) {
+                headers.push(Some(header));
+                counts.push(0);
+            }
+            if let Some(count) = counts.last_mut() {
+                *count += 1;
+            }
+            cells.push(Cell::List(playlist));
+        }
+        Wall {
+            cells,
+            headers,
+            counts,
+            key: self.order.key(),
+        }
+    }
+
+    /// Which group a saved playlist falls in, under the active ordering.
+    ///
+    /// The vocabulary is the Library's own [`GroupHeaderVm`], so one rail, one
+    /// header band and one set of labels serve both collections — an A–Z rail
+    /// is never painted over a date-sorted wall, and a heading always names
+    /// the run it stands on.
+    fn header_of(&self, playlist: &PanelRow) -> GroupHeaderVm {
+        match self.order {
+            PlaylistOrder::Alphabetical => {
+                GroupHeaderVm::Initial(Initial::of(AlbumArtist::Named(&playlist.name)))
+            }
+            PlaylistOrder::Created => {
+                GroupHeaderVm::Recency(recency(playlist.created_unix_s, true))
+            }
+            PlaylistOrder::Played => {
+                GroupHeaderVm::Recency(recency(self.played_at(playlist.id), false))
+            }
+        }
     }
 
     /// The timestamp that defines the active `Played` ordering. Kept beside
@@ -1933,24 +2042,30 @@ mod tests {
             row("Imported", None),
         ];
 
+        // The wall's own reading, which is what the page draws: the create
+        // tile, then the pinned built-in, then the ordering.
+        let names = |playlists: &Playlists| {
+            playlists
+                .wall()
+                .cells
+                .iter()
+                .map(|cell| match cell {
+                    Cell::New => "+".to_owned(),
+                    Cell::List(row) => row.name.clone(),
+                })
+                .collect::<Vec<_>>()
+        };
+
         playlists.order = PlaylistOrder::Alphabetical;
         assert_eq!(
-            playlists
-                .ordered_rows()
-                .iter()
-                .map(|row| row.name.as_str())
-                .collect::<Vec<_>>(),
-            ["Favourites", "Alpha", "beta", "Imported"]
+            names(&playlists),
+            ["+", "Favourites", "Alpha", "beta", "Imported"]
         );
 
         playlists.order = PlaylistOrder::Created;
         assert_eq!(
-            playlists
-                .ordered_rows()
-                .iter()
-                .map(|row| row.name.as_str())
-                .collect::<Vec<_>>(),
-            ["Favourites", "beta", "Alpha", "Imported"],
+            names(&playlists),
+            ["+", "Favourites", "beta", "Alpha", "Imported"],
             "creation order is newest first, with unknown dates last"
         );
 
@@ -1958,14 +2073,86 @@ mod tests {
         playlists.note_played(playlist_id("beta"), 20);
         playlists.order = PlaylistOrder::Played;
         assert_eq!(
-            playlists
-                .ordered_rows()
-                .iter()
-                .map(|row| row.name.as_str())
-                .collect::<Vec<_>>(),
-            ["Favourites", "beta", "Alpha", "Imported"],
+            names(&playlists),
+            ["+", "Favourites", "beta", "Alpha", "Imported"],
             "played order is most recent first, with never-played lists last"
         );
+    }
+
+    /// **The wall groups like the Library's**, and its lead run is the one
+    /// exception, stated: the create tile and the built-in row stand together
+    /// under no heading, and every other run is a letter or a bucket with its
+    /// own.
+    #[test]
+    fn the_wall_groups_alphabetically_under_a_leading_unheaded_run() {
+        let (_keep, folder) = folder();
+        let mut playlists = Playlists::over(folder);
+        let row = |name: &str| PanelRow {
+            id: playlist_id(name),
+            name: name.to_owned(),
+            entries: 0,
+            seconds: None,
+            playable: 0,
+            created_unix_s: None,
+            touched_unix_s: None,
+            art: Vec::new(),
+        };
+        playlists.rows = vec![row("Aubade"), row("apples"), row("Bricolage"), row("Zed")];
+        playlists.order = PlaylistOrder::Alphabetical;
+        let wall = playlists.wall();
+
+        // Runs: [+ , Favourites] · A(2) · B(1) · Z(1).
+        assert_eq!(wall.counts, vec![2, 2, 1, 1]);
+        assert_eq!(wall.cells.len(), wall.counts.iter().sum::<usize>());
+        assert_eq!(wall.headers[0], None, "the lead run carries no heading");
+        assert!(
+            !wall.pinned(0),
+            "and therefore may never be pinned — an opaque band with nothing in \
+             it is a blank strip over the covers under it"
+        );
+        assert_eq!(
+            wall.rail_headers()
+                .iter()
+                .map(GroupHeaderVm::label)
+                .collect::<Vec<_>>(),
+            ["A", "B", "Z"],
+            "the rail indexes the lettered runs and not the lead"
+        );
+        for (entry, run) in [(0, 1), (1, 2), (2, 3)] {
+            assert_eq!(
+                Wall::run_of(entry),
+                run,
+                "a rail entry names the run one past the lead"
+            );
+            assert!(wall.pinned(run));
+        }
+
+        // Favourites is **not** filed under F. It is a built-in with no
+        // creation stamp and no alphabetical place among the listener's own
+        // lists, and the lead run is where the wall says so.
+        assert!(matches!(wall.cells[1], Cell::List(row) if row.name == "Favourites"));
+        assert!(
+            !wall
+                .rail_headers()
+                .iter()
+                .any(|header| header.label() == "F"),
+            "no letter run exists for a list that is not in one"
+        );
+    }
+
+    /// The two unavailable-timestamp states stay distinct, because one is
+    /// "the filesystem could not say" and the other is "you have not played
+    /// it", and a wall that collapsed them would claim the first about the
+    /// second.
+    #[test]
+    fn unavailable_timestamps_keep_created_and_played_honest() {
+        assert_eq!(recency(None, true), Recency::Unrecorded);
+        assert_eq!(recency(None, false), Recency::Never);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        assert_eq!(recency(Some(now), true), Recency::Today);
     }
 
     /// An absolute fixture path by the platform's own rule — the same lesson
@@ -2058,6 +2245,7 @@ mod tests {
                 .to_owned(),
             request: "ambient music that slowly gathers momentum".to_owned(),
             items: vec![item("An Ending", "/m/eno/ascent.flac")],
+            levels: Vec::new(),
             pool_tracks: 1,
             analyzed_tracks: 1,
             tempo_span: Some((72.0, 72.0)),

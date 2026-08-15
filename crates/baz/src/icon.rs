@@ -230,6 +230,7 @@ pub enum Glyph {
     Shuffle,
     /// Repeat current track: a loop arrow around one upright stroke.
     RepeatOne,
+    Repeat,
     /// Outline heart: the track is not in Favourites.
     Heart,
     /// Filled heart: the track is in Favourites.
@@ -1113,6 +1114,21 @@ const SHUFFLE: &[Outline] = &[
     &[(0.55, 0.90), (0.84, 0.76), (0.55, 0.62)],
 ];
 
+/// **Repeat the list**: two bars and two heads, a loop drawn open.
+///
+/// It is [`REPEAT_ONE`] with the `1` taken out, and that is the whole
+/// relationship — the two states of one control, so the pair reads as *the
+/// same loop, once around or once over*. Drawing a second, unrelated loop
+/// would make repeat-the-list and repeat-the-track look like different
+/// features rather than two settings of one.
+const REPEAT: &[Outline] = &[
+    &[(0.18, 0.22), (0.70, 0.22), (0.70, 0.31), (0.18, 0.31)],
+    &[(0.62, 0.12), (0.88, 0.27), (0.62, 0.42)],
+    &[(0.30, 0.69), (0.82, 0.69), (0.82, 0.78), (0.30, 0.78)],
+    &[(0.38, 0.58), (0.12, 0.73), (0.38, 0.88)],
+];
+
+/// **Repeat this track**: the loop, with a `1` standing in it.
 const REPEAT_ONE: &[Outline] = &[
     &[(0.18, 0.22), (0.70, 0.22), (0.70, 0.31), (0.18, 0.31)],
     &[(0.62, 0.12), (0.88, 0.27), (0.62, 0.42)],
@@ -1265,11 +1281,29 @@ const HISTORY_BACK: &[Outline] = &[
 /// What a bell needs is a *profile*, and a profile drawn at 0.145 with four
 /// parts is a tangle at 20 px where a silhouette is instant.
 ///
-/// So the ratio does the work: the dome is **0.30** across and the mouth is
-/// **0.68**, more than twice it, where the old shape's were 0.34 and 0.56.
+/// So the ratio does the work: the dome is **0.34** across and the mouth is
+/// **0.78**, more than twice it, where the old shape's were 0.34 and 0.56.
 /// The mouth is a rim with its own step, the crown sits proud of the dome, and
 /// the clapper is separated by a real gap — four decisions the eye resolves
 /// before it counts anything.
+///
+/// # It was narrower than everything beside it
+///
+/// The first drawing of this profile was 0.68 at the mouth, and the owner read
+/// the bar: *"the bell icon is a little bit narrow/skinny."* That is
+/// measurable rather than a matter of taste — every neighbour in the same
+/// [`ICON_PX`] 20 box is wider ([`GEAR`] 0.84, [`HOME`] and [`NOW_PLAYING`]
+/// 0.88), so the bell laid about 13.6 px of ink where the gear one seam away
+/// laid 16.8, and it was the narrowest mark in the app bar's right cluster.
+///
+/// The mouth is **0.78** now. It is a scale about the vertical axis — 1.147 on
+/// every x, so the dome, the flare's shoulders and the rim keep their
+/// proportions to each other exactly — rather than a redrawing, because the
+/// profile was right and only its width was wrong. The height is untouched at
+/// 0.79 (crown 0.105 to clapper 0.895): a bell wants to be no wider than it is
+/// tall, and 0.78 × 0.79 is the widest this silhouette goes while that holds.
+/// `the_bell_is_as_wide_as_the_cluster_it_stands_in` keeps it in the
+/// neighbours' range from below.
 ///
 /// `views::status` stacks the health dot on this glyph's bottom-right corner,
 /// where it **overlaps the rim** — deliberately, and symmetry is why. A bell
@@ -1282,34 +1316,34 @@ const BELL: &[Outline] = &[
     // The body: dome, flare, rim.
     &[
         (0.500, 0.180),
-        (0.575, 0.215),
-        (0.630, 0.300),
-        (0.650, 0.420),
-        (0.655, 0.560),
-        (0.700, 0.640),
-        (0.840, 0.690),
-        (0.840, 0.740),
-        (0.160, 0.740),
-        (0.160, 0.690),
-        (0.300, 0.640),
-        (0.345, 0.560),
-        (0.350, 0.420),
-        (0.370, 0.300),
-        (0.425, 0.215),
+        (0.586, 0.215),
+        (0.649, 0.300),
+        (0.672, 0.420),
+        (0.678, 0.560),
+        (0.729, 0.640),
+        (0.890, 0.690),
+        (0.890, 0.740),
+        (0.110, 0.740),
+        (0.110, 0.690),
+        (0.271, 0.640),
+        (0.322, 0.560),
+        (0.328, 0.420),
+        (0.351, 0.300),
+        (0.414, 0.215),
     ],
     // The crown, standing proud of the dome and unioned into it.
     &[
-        (0.455, 0.105),
-        (0.545, 0.105),
-        (0.545, 0.190),
-        (0.455, 0.190),
+        (0.450, 0.105),
+        (0.550, 0.105),
+        (0.550, 0.190),
+        (0.450, 0.190),
     ],
     // The clapper, across a real gap.
     &[
-        (0.430, 0.800),
-        (0.570, 0.800),
-        (0.540, 0.895),
-        (0.460, 0.895),
+        (0.420, 0.800),
+        (0.580, 0.800),
+        (0.546, 0.895),
+        (0.454, 0.895),
     ],
 ];
 
@@ -1355,10 +1389,11 @@ impl Glyph {
         Self::Heart,
         Self::HeartFilled,
         Self::RepeatOne,
+        Self::Repeat,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 39;
+    const COUNT: usize = 40;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1403,6 +1438,7 @@ impl Glyph {
             Self::Heart => HEART,
             Self::HeartFilled => HEART_FILLED,
             Self::RepeatOne => REPEAT_ONE,
+            Self::Repeat => REPEAT,
         }
     }
 
@@ -1448,6 +1484,7 @@ impl Glyph {
             Self::Heart => 36,
             Self::HeartFilled => 37,
             Self::RepeatOne => 38,
+            Self::Repeat => 39,
         }
     }
 
@@ -1846,6 +1883,11 @@ mod tests {
         // into, or the "@2x" argument in the module docs stops holding.
         assert!((index_to_f32(ICON_WHOLE_PX) - theme::ICON_PX).abs() < f32::EPSILON);
         assert_eq!(RASTER_PX, ICON_WHOLE_PX * SUPERSCALE);
+        // **The one place a sprite is drawn bigger than its box**: the ghost
+        // tile's `+` on the saved-playlist wall. It is the raster's own edge,
+        // so it is pixel-exact rather than an upscale — a soft mark in the
+        // middle of a wall of sharp covers is exactly what it may not be.
+        assert!((index_to_f32(RASTER_PX) - theme::GHOST_MARK_PX).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -2258,6 +2300,70 @@ mod tests {
             }
             seen.push((glyph, pixels));
         }
+    }
+
+    /// **The bell is as wide as the cluster it stands in.**
+    ///
+    /// The owner, reading the app bar hours after the bell first drew at all:
+    /// *"the bell icon is a little bit narrow/skinny."* Every mark in that
+    /// right cluster is drawn into the identical [`theme::ICON_PX`] box, so a
+    /// glyph that fills less of its box than its neighbours *is* thinner ink
+    /// on screen — this pins the bell into their range from below rather than
+    /// leaving it to whoever next edits the outline.
+    ///
+    /// The ceiling is the other half: a bell wider than it is tall stops being
+    /// a bell.
+    #[test]
+    fn the_bell_is_as_wide_as_the_cluster_it_stands_in() {
+        let widest = |glyph: Glyph| {
+            let mut widest = 0.0_f32;
+            let mut y = 0.0;
+            while y <= 1.0 {
+                if let (Some((start, _)), Some(&(last_start, last_width))) =
+                    (runs_along(glyph, y).first(), runs_along(glyph, y).last())
+                {
+                    widest = widest.max(last_start + last_width - start);
+                }
+                y += 1.0 / 512.0;
+            }
+            widest
+        };
+        let bell = widest(Glyph::Bell);
+        // Its neighbours in the same box: the gear one seam away, and the two
+        // round marks the lane draws at the same size.
+        let neighbours = [
+            widest(Glyph::Gear),
+            widest(Glyph::Home),
+            widest(Glyph::NowPlaying),
+        ];
+        let narrowest = neighbours.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            bell >= narrowest - 0.07,
+            "the bell is {bell:.3} of its box against the narrowest neighbour's \
+             {narrowest:.3} — it reads as skinny beside them, which is exactly \
+             what the owner saw"
+        );
+        // Height: crown to clapper. It may not be a squat bell either.
+        let mut tallest = 0.0_f32;
+        let mut top = f32::MAX;
+        let mut x = 0.0;
+        while x <= 1.0 {
+            let mut y = 0.0;
+            while y <= 1.0 {
+                if Glyph::Bell.covers(x, y) {
+                    top = top.min(y);
+                    tallest = tallest.max(y);
+                }
+                y += 1.0 / 512.0;
+            }
+            x += 1.0 / 512.0;
+        }
+        let height = tallest - top;
+        assert!(
+            bell <= height + 0.01,
+            "the bell is {bell:.3} wide against {height:.3} tall — wider than \
+             it is tall, which is a pot rather than a bell"
+        );
     }
 
     /// The solid runs a horizontal line at unit-square height `y` crosses,

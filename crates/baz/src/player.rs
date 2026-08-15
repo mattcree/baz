@@ -331,8 +331,41 @@ pub struct NowPlaying {
     pub track_artist: Option<String>,
     /// Album title, when resolved.
     pub album: Option<String>,
+    /// **Who the record is filed under**, in the words every other surface
+    /// uses — [`crate::vm::AlbumArtistVm::label`], so a compilation reads
+    /// `Various Artists` and an untagged record reads `Unknown Artist`
+    /// instead of reading as nothing. Empty only when the path resolved to no
+    /// album at all.
+    ///
+    /// It is **not** [`Self::artist`] and the two may not be merged: `artist`
+    /// is the library's own answer or `None`, and MPRIS publishes it as
+    /// `albumArtist`, where baz's placeholder words would be a lie told to the
+    /// desktop. This one is for drawing.
+    pub filed_under: String,
     /// Track number within its disc, when the tags declared one.
     pub track_number: Option<u32>,
+}
+
+impl NowPlaying {
+    /// **The one artist line every surface draws**, in falling preference:
+    /// the track's own tag, the album's artist, then who the record is filed
+    /// under. `None` only for a sounding file the library holds no row for,
+    /// where every candidate is genuinely unknown.
+    ///
+    /// It exists because the bar and the Now playing placard both stopped at
+    /// the second step and drew nothing for a record filed under `Various
+    /// Artists` or `Unknown Artist` whose file carried no artist tag — the
+    /// owner's *"some albums do not show the album details in the bottom bar
+    /// now playing even though the album page shows it"*. The album page,
+    /// the wall tile and the panel all draw `label()`, which always says
+    /// something; these two reached for `name()`, which does not.
+    #[must_use]
+    pub fn artist_line(&self) -> Option<&str> {
+        self.track_artist
+            .as_deref()
+            .or(self.artist.as_deref())
+            .or(Some(self.filed_under.as_str()).filter(|filed| !filed.is_empty()))
+    }
 }
 
 /// Resolve a queue path against the shelf's view model: the engine
@@ -355,6 +388,7 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
                     artist: album.artist.name().map(str::to_owned),
                     track_artist: track.artist.clone(),
                     album: album.title.clone(),
+                    filed_under: album.artist.label().to_owned(),
                     track_number: track.number,
                 };
             }
@@ -368,6 +402,7 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
         artist: None,
         track_artist: None,
         album: None,
+        filed_under: String::new(),
         track_number: None,
     }
 }
@@ -933,7 +968,7 @@ pub struct PlayerState {
     /// on exactly the terms [`Self::volume`] is.
     traversal: Traversal,
     /// Engine-confirmed Repeat current track property.
-    repeat_one: bool,
+    repeat: baz_core::protocol::Repeat,
     /// [`Self::traversal`] resolved against the queue this process last sent:
     /// the run's positions, in the order they will play.
     ///
@@ -1071,7 +1106,7 @@ impl PlayerState {
             // In order, over no run at all. `seed_traversal` replaces it from
             // the config at start-up, for `seed_volume`'s reason.
             traversal: Traversal::default(),
-            repeat_one: false,
+            repeat: baz_core::protocol::Repeat::Off,
             order: Vec::new(),
         }
     }
@@ -1093,13 +1128,13 @@ impl PlayerState {
 
     /// Whether natural completion repeats the current queue entry.
     #[must_use]
-    pub fn repeat_one(&self) -> bool {
-        self.repeat_one
+    pub fn repeat(&self) -> baz_core::protocol::Repeat {
+        self.repeat
     }
 
     /// Seed the persisted standing mode before the first engine event.
-    pub fn seed_repeat_one(&mut self, enabled: bool) {
-        self.repeat_one = enabled;
+    pub fn seed_repeat(&mut self, repeat: baz_core::protocol::Repeat) {
+        self.repeat = repeat;
     }
 
     /// Record the traversal the engine has been sent, and re-derive the plan.
@@ -1289,7 +1324,7 @@ impl PlayerState {
             // a track boundary where the resolved figure changes, and each
             // arrival replaces the whole reading (ADR-0013).
             Event::ReplayGainChanged { .. } => self.replay_gain.apply(event),
-            Event::RepeatOneChanged { enabled } => self.repeat_one = *enabled,
+            Event::RepeatChanged { repeat } => self.repeat = *repeat,
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
         }
@@ -3091,6 +3126,48 @@ mod tests {
         assert_eq!(now.title, "a.wav");
         assert_eq!(now.album_id, Some(22));
         assert_eq!(now.artist, None);
+    }
+
+    /// **A record the library files under its own words still draws them.**
+    ///
+    /// The owner: *"some albums do not show the album details in the bottom
+    /// bar now playing even though the album page shows it."* The albums it
+    /// happened to were the ones with no *named* album artist — a compilation
+    /// (`Various Artists`) or an untagged rip (`Unknown Artist`) — whose file
+    /// also carried no artist tag of its own. `AlbumArtistVm::name()` is
+    /// `None` for both, and the bar and the Now playing placard stopped there
+    /// and drew an empty lane, while the page, the tile and the panel all draw
+    /// `label()`, which always says something.
+    ///
+    /// Three assertions, because the fix must not leak into the fourth
+    /// consumer: MPRIS publishes `artist` as the desktop's `albumArtist`, and
+    /// baz's placeholder words are not an artist's name.
+    #[test]
+    fn a_record_with_no_named_album_artist_still_has_an_artist_line() {
+        let now = resolve_now_playing(&albums(), Path::new("/m/strays/a.wav"));
+        assert_eq!(now.artist, None, "the library named nobody, and says so");
+        assert_eq!(
+            now.filed_under, "Unknown Artist",
+            "…but the record is filed under baz's own words, as everywhere else"
+        );
+        assert_eq!(now.artist_line(), Some("Unknown Artist"));
+
+        // A compilation, the case this actually bites on a real library.
+        let mut albums = albums();
+        albums[1].artist = AlbumArtistVm::Various;
+        let now = resolve_now_playing(&albums, Path::new("/m/strays/a.wav"));
+        assert_eq!(now.artist_line(), Some("Various Artists"));
+
+        // The track's own tag still wins where there is one.
+        albums[1].editions[0].tracks[0].artist = Some("Nina Simone".to_owned());
+        let now = resolve_now_playing(&albums, Path::new("/m/strays/a.wav"));
+        assert_eq!(now.artist_line(), Some("Nina Simone"));
+
+        // And a file the library holds no row for names nobody, rather than
+        // inventing a placeholder for a record that does not exist.
+        let stray = resolve_now_playing(&albums, Path::new("/gone/deleted.flac"));
+        assert_eq!(stray.artist_line(), None);
+        assert!(stray.filed_under.is_empty());
     }
 
     #[test]

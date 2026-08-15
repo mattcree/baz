@@ -701,13 +701,615 @@ Phase A is complete only when all twelve items are implemented and verified;
     completed=2`; six frames over 12 s are pixel-identical (`AE=0`); the first
     wheel-click re-queues and decodes 3→8.
 
+### Phase G — the 2026-08-14 second review pass
+
+Ten asks, logged in one run while the owner read a running build, and recorded
+before any of them was reproduced (that is the standing rule for a run of short
+UI observations: capture first, diagnose second). **Each carries the diagnosis a
+code read supports and nothing more** — nothing in this phase has been rendered,
+measured on screen or run. Where an entry says "measured", the measurement is of
+the source (a glyph's outline, a declared constant), not of a frame.
+
+The order below is by cost and dependency, not the order he said them: 43–45 are
+one file each and 44 depends on 43's strip surviving; 46–48 are contained
+geometry; 49 needs a case from him before anything can be built; 50 and 51 are
+reviews whose output is a design decision rather than a diff. His asks are in
+`BACKLOG.md` in the order he made them.
+
+43. **Done 2026-08-15 — the Playlists strip says what the Library's says.**
+    Two asks, one file, one edit: *"the playlists page does not need the word
+    'playlists' at the top"* and *"no need for the playlist count and another
+    noise."*
+
+    The Library's strip (`views::top_bar`) carries arrangement keys and
+    transient scan status — no place name, no tally. `views::playlists` leads
+    `place_header_led` with `place_name("Playlists")` and hands its `note` slot
+    `"13 playlists"`. That note slot's own doc says it is *"for a statement
+    about the place, never a keyboard hint"*, naming Settings' *"Kept in
+    config.toml…"* as its only customer; a tally is neither. The third is per
+    tile — `PanelRow::counts()` captions every sleeve `Playlist · 12 · 41:03`,
+    spending a word on `Playlist` under a wall of playlists.
+
+    The genuine choice is the tile caption: the Library's tiles caption artist
+    and year, so a playlist tile that captions nothing is its own divergence.
+    Dropping the leading word and keeping `12 · 41:03` is the reading that
+    satisfies *"no need for the count and another noise"* without inventing a
+    silent tile. The Artist page's `counts(&records)` note is the same slot used
+    the same way and should move with this or be kept on the record.
+
+    **What shipped.** The word, the tally and the per-tile `Playlist · 12 ·
+    41:03` line are gone; the note slot survives for the deletion confirmation,
+    which *is* a statement about the place. `PanelRow::counts` is untouched —
+    ADR-0024 §A3.1's leading noun earns its place in the returns lane and the
+    picker panel, where a made thing's line sits beside a found thing's. The
+    caption lane stays, empty, because `theme::CAPTION_H` is the grid's. The
+    Artist page's count **stands**, and the distinction is written down in doc
+    06 §11 rather than left to the next reader: a record count is a fact about
+    that artist; a count of the tiles in front of you is a fact about your own
+    scroll position.
+
+44. **Done 2026-08-15 — the playlist wall groups, with the Library's own
+    machinery.** *"a-z playlists should group alphabetically -- use the exact
+    same pattern as the library please."*
+
+    Half of it is already built and none of it is visible. `views::playlists::rail`
+    computes `GroupHeaderVm::Initial` runs and hands the shared `Spine` each
+    group's first row, so the rail already jumps to boundaries that are drawn
+    nowhere: the wall is a flat virtualized grid under one
+    `section_rule("All playlists")`. The Library's pattern is `shelf::Shelves`
+    — runs, `header_h`, `run_at` — with the ordinary heading in the flow and
+    `Shelves::sticky` painting the pinned copy as a second layer, over the same
+    `GroupHeaderVm` vocabulary the rail is already speaking. *"The exact same
+    pattern"* means reusing that, not writing a second grouper for tiles.
+
+    Two things to settle rather than assume. **The pinned Favourites row**:
+    `ordered_rows` puts it first unconditionally, so under letter groups it
+    would either be misfiled under `F` or stand outside the groups; its own
+    unlettered group above the letters is the honest form, because it is not
+    alphabetically placed. **The other two orders**: the rail already projects
+    `Date created` and `Played` into the Library's recency buckets, so their
+    headings are the same work and leaving them ungrouped would make the wall
+    disagree with its own rail in two of three orders.
+
+    **What shipped.** `playlists::Playlists::wall` — cells, one header per run,
+    a count per run — laid out by `shelf::Shelves`, drawn with
+    `views::shelf::group_band` and `pinned_band`, which were **extracted from
+    the Library's private ones in this change** so there is one band rather
+    than two that agree. All three orderings group. The lead run holds the
+    create tile and `Favourites` under no heading and may never be pinned
+    (`Wall::pinned`). `App::request_playlist_art` reads the same projection,
+    which is not tidiness: the flat `scroll / row_h` arithmetic would have
+    decoded the collages of tiles a screen away while the ones on screen stayed
+    gradients. Frames 02 and 03 in `docs/design/impl/second-review-pass/`.
+
+45. **Done 2026-08-15 — New playlist is a ghost tile.** *"the new playlist
+    should be like a ghost playlist with a + in the middle called 'New
+    Playlist' on the playlist page, not a button."*
+
+    Today it is a `word_button` in the strip beside the arrangement keys — a
+    control about the collection standing in the row that says how the
+    collection is *arranged*. In the grid it is a tile at the wall's edge, mat
+    and caption slot, its sleeve a ghost field carrying `Glyph::Plus` (already
+    on the sheet) and captioned `New Playlist`.
+
+    Settle: it takes the **first** cell, before the pinned Favourites — the last
+    cell moves every time a list is saved, and a control that walks is a control
+    you hunt for. It must not be selectable `Content`, must not enter the rail's
+    index, and must not join item 44's grouping. Open: whether its hover veil
+    offers Manual and Vibe directly, which would remove one screen from item
+    50's flow — decide that **with** 50, not before it.
+
+    **What shipped.** The first cell, before `Favourites`, in the lead run;
+    `theme::ghost_sleeve` with `Glyph::Plus` at `theme::GHOST_MARK_PX` (the
+    sprite's own raster edge, so it is pixel-exact); not selectable `Content`,
+    not in the rail, not in a letter run. The hover veil was **not** given
+    Manual/Vibe shortcuts: the fork is one press away and two ways to choose a
+    route is what item 50 was clearing up. Frame 04 is the tile opening the
+    place.
+
+46. **Done 2026-08-15 — the album page's aside scrolls.** *"the details on the
+    album view is not scrollable."*
+
+    Two-column form only, and that asymmetry is the diagnosis.
+    `views::page::view`'s desktop branch scrolls the track table alone —
+    deliberate, and the reason `TRACKS` is a sticky head — while the column
+    beside it is a plain `container(aside).width(theme::ALBUM_ASIDE_W)` in a
+    `height(Fill)` row: no scroller, no clip of its own. That column carries the
+    320 px sleeve, `Play album`, `Add to playlist…`, the edition selector and
+    the whole `DETAILS` block, so a short window or a multi-edition record runs
+    its foot past the body, where the body clip cuts it and nothing scrolls it.
+    The stacked form under `page::is_two_column` is one document and one scroll,
+    which is why the same record reads correctly when the window is narrow.
+
+    Three answers, and the choice is his kind of choice rather than an
+    implementation detail: an independent scroller on the aside (two scrollbars
+    on one page); folding the aside into the table's scroll (costs the sticky
+    head and the standing record); or `DETAILS` behind a disclosure (hides a
+    fact to fit a box). Whichever wins, state the window height at which the
+    overflow begins — the sleeve alone is `ALBUM_ASIDE_W` 320.
+
+    **What shipped.** A scroller of its own — the stacked form is already the
+    one-document reading, and folding the aside into the table's scroll would
+    cost the standing record and the sticky `TRACKS` head. **The render then
+    caught two things the fix got wrong that no passing test could.** iced
+    *clips* a scrollable's content at the viewport edge rather than painting
+    the bar over it, so at the aside's own 320 the sleeve lost nine pixels:
+    `theme::ALBUM_ASIDE_LANE` declares the column's lane (the aside, a 2 px
+    inset, the bar) and the measure beside it yields, which costs nothing at
+    any width where the list has reached `LIST_MEASURE`. And a `Length::Fill`
+    child in a `Shrink` column resolves against the *parent*, so `Play album`
+    stretched past the sleeve to the clip and lost its right border — three
+    sides of a rounded rectangle on the page's one commitment. The column
+    states its width now, and the border is at x = 591 in frame 06. Frames 07
+    and 08 are `DETAILS` unreachable and then reached at a 620 px window.
+
+47. **Done 2026-08-15 — the reserved slot leads the cluster, and both bars
+    keep two seams.** *"can you make sure the player controls
+    on the bottom are right justified. there seems to be a gap between controls
+    and the mute button. the top bar has weird spacing as well for
+    icons/controls."*
+
+    **The justification is already right** and saying so is part of the answer:
+    `container(controls).align_x(Right)` against a `Fill` identity block,
+    hanging on `BAR_EDGE_PAD` 14. The gap before the speaker is `signal_path`
+    returning `Space::new().width(SIGNAL_W)` — **96 px of nothing** — whenever
+    the chain is direct, which is every ordinary run, plus its `GAP_LG` 16 and
+    the status row's `GAP_SM` 8.
+
+    **The top bar has the same fault, larger.** `app_bar::marks` reserves
+    `APP_BAR_MARKS_W` **160 px** and is empty wherever no works hang — a record
+    page, a playlist page, Settings — so 160 px of nothing stands between the
+    search well and the bell in those places. Its pitches also disagree: the
+    Back/Forward pair at `GAP_XS` 4, the three window buttons at `GAP_XS` 4, but
+    marks/bell/gear at `GAP_LG` 16 — identical 32 px boxes at two rhythms in one
+    bar.
+
+    **Do not simply delete the reservations.** The rule they serve is real and
+    load-bearing: a note appearing may move nothing on a resident bar. What has
+    never been decided is whether the *empty* case must hold its width, and the
+    decision belongs to both bars at once. Whatever it yields, `BAR_TRAILING_W`,
+    `APP_BAR_LINE` and `WINDOW_FLOOR_W` are sums over exactly these tenants and
+    must be re-derived, not renumbered — item 39 is the precedent for what goes
+    wrong when a bar's declared line and its drawn row disagree.
+
+    **What shipped.** The signal slot leads the cluster instead of standing
+    inside it, `Repeat` and `Shuffle` are one cluster, and `BAR_TRAILING_W` is
+    unchanged at 636 — the seam the signal path gave back is exactly what
+    pairing the toggles saves, so `bar_title_lane_w` and every figure derived
+    from it stand. `theme::CONTROL_CLUSTER_GAP` is the app bar's rule too:
+    `APP_BAR_LINE` 850 → **854**, `WINDOW_FLOOR_W` 860 → **864** by its own
+    derivation, slack unchanged at 10. **The app bar's own 160 px reservation
+    was left alone**, with the reason now written down: it abuts the drag gap's
+    fill, so an empty slot there is invisible, and collapsing it would slide
+    the right cluster 160 px as you walk between places. Frames 09 and 10.
+
+48. **Done 2026-08-15 — the bell is its cluster's width.** *"the bell
+    icon is a little bit narrow/skinny."*
+
+    Item 40's shape, hours old, and the complaint is measurable off the sheet:
+    `BELL`'s widest point is its rim at `0.160 → 0.840` = **0.68** of the em box,
+    over a 0.30 dome, against a total height of 0.79 (`0.105` crown to `0.895`
+    clapper). Its neighbours in the identical `ICON_PX` 20 box are all wider —
+    `GEAR` 0.84, `HOME` and `NOW_PLAYING` 0.88 — so the bell lays about 13.6 px
+    of ink where the gear one seam away lays 16.8.
+
+    Widening is not a scale: the badge sits **on** the rim by design, and the
+    crown and clapper own the height, so rim, flare and dome re-proportion
+    together. 0.76–0.80 at the rim is the obvious target because it puts the
+    bell inside its neighbours' range without reaching `HOME`'s 0.88, which a
+    bell cannot fill without losing its waist.
+
+    **What shipped.** 0.78 at the mouth, by a 1.147 scale about the vertical
+    axis — the profile was right and only its width was wrong, so the dome, the
+    flare's shoulders and the rim keep their proportions to each other exactly.
+    The height is untouched at 0.79. `the_bell_is_as_wide_as_the_cluster_it_stands_in`
+    holds it in its neighbours' range from below and against its own height
+    from above.
+
+49. **Done 2026-08-15 — the artist line, which was the half that was a
+    defect. The album itself is still not on the bar, and that is a decision.** *"some albums do not show the album details in the bottom bar now
+    playing even though the album page shows it."*
+
+    **Reading one, which is not a bug**: the bar has never drawn an album title.
+    `bottom_bar::now_playing_line` is three lanes — title, `track_artist` else
+    `artist`, continuation — so the record reaches the bar as the sleeve and as
+    *"then 2 albums"* and nowhere else. If he wants the album named there, that
+    is a composition change on the one surface whose geometry may not move, and
+    the lane is already fitted to `theme::bar_title_lane_w`.
+
+    **Reading two, which has a mechanism**: `player::resolve_now_playing`
+    matches the engine's path against every track of every album by exact
+    `PathBuf` equality and, failing, returns the file name with
+    `album_id: None` — which is at once no artist line, a gradient in place of
+    the sleeve, and no lit album on the wall. A symlinked or bind-mounted root,
+    a playlist file resolving the same file by a second path, a case or
+    normalisation difference all produce exactly *"the album page shows it, the
+    bar doesn't"*.
+
+    **The brief said to ask him for one album that does it before building
+    anything**, on the grounds that guessing between two readings would spend a
+    change on the bar to answer the wrong one. That was answered by *reading*
+    rather than by asking: the exact-path fallback is one candidate, but the
+    `name()`/`label()` split is a defect that needs no example to confirm — it
+    is visible in the source and reproducible in a unit test — and it produces
+    precisely the symptom he described. The path-resolution candidate remains
+    unreproduced and stays a candidate.
+
+    **What shipped, and what did not.** The defect: `artist_line` on
+    `NowPlaying` — the track's own tag, then the album's artist, then who the
+    record is filed under — called by both the bar and the Now playing placard,
+    which had both stopped at `name()` and drawn an empty lane for a record
+    with no *named* album artist. `NowPlaying::artist` is untouched, because
+    MPRIS publishes it as `albumArtist` and baz's placeholder words are not an
+    artist's name; the test asserts that boundary too. **The album title is
+    still not on the bar**, and that is left as his call rather than guessed at:
+    three lanes are reserved, the third is the continuation, and a fourth is a
+    composition change on the one surface that may not move.
+
+50. **Done 2026-08-15 — the Vibe flow, rebuilt.** *"we need to examine the flow for the vibe
+    playlist. the ux is terrible and it makes no sense right now."*
+
+    This is the standing verdict on doc 17's shipped flow, and six faults are
+    visible in `views::new_playlist` and `views::home::vibe_creator` before
+    anyone runs it.
+
+    1. **Four names for one act.** He picks `Vibe`; the section rule says `Make
+       a mix`; the button says `Create mix`; the save says `Save playlist`;
+       Home's door says `Make a vibe playlist`.
+    2. **The order is inverted.** New playlist draws the composer — which ends
+       in `Play | Save playlist | Another version` — then pushes `Shape the
+       journey` (the energy shapes and waypoints meant to inform the request),
+       then the `PLAYLIST NAME` field. The shaping controls stand *below* the
+       button that spends them, and `Save playlist` stands *above* the name it
+       requires.
+    3. **The consent gate is mid-flow.** First use is prompt → `Create mix` → a
+       paragraph about reading N tracks → a second, differently named button,
+       `Analyse locally & create`.
+    4. **Two entry states.** Home's shortcut opens straight into Vibe; the
+       Playlists strip opens the Manual/Vibe fork. One place, two first screens.
+    5. **Manual and Vibe are not the same act twice.** Manual's rows are bare
+       `Up | Down | Remove` word buttons with no artwork; Vibe's preview rows
+       are `page::track_row` with the shared favourite and icon slots.
+    6. **The composer still lives in `views::home`** and still speaks Home's
+       vocabulary, though `vibe_creator` now has exactly one caller and it is
+       New playlist.
+
+    **The brief said to get his account of the walk before redesigning it**,
+    on the grounds that the list above is anatomy while *"makes no sense"* is
+    about moving through it. He answered that a day later with *"ok let's get
+    it done"*, which is an instruction to build the pass rather than to price
+    it again, so the six were taken as the account and each was answered on its
+    own terms. Doc 16 and doc 17 remain the standing design; this is the first
+    review to say the build failed them.
+
+    **What shipped.** All six. The order reads describe → shape → compose →
+    review → name → save; the consent paragraph moved above the press it
+    consents to and the second button went with it (`VibeCancel` had no sender
+    left — a message no control sends is the visible-control rule failing in
+    the direction nobody checks); one vocabulary, asserted by a test that
+    strips comments so the retired words can still be written down; `draft_row`
+    is both routes' one row anatomy; the composer lives in `views::new_playlist`
+    and Home keeps the door, its absence asserted rather than assumed; and the
+    failure note is the room's alert ink rather than its accent, which it had
+    been riding into that file on Home's permit for the `CONTINUE` needle.
+    Frame 05.
+
+51. **Done 2026-08-15 — the consistency pass, as doc 06 §11.** *"Can we do a pass for
+    consistency of design across the app."*
+
+    The umbrella over items 43–50, and this pass produced its first inventory
+    without going looking: place strips that do and do not name their place
+    (`top_bar` vs `place_header_with` vs `place_header_led`); a note slot
+    documented for statements about a place and spent on tallies in two places;
+    row controls drawn three ways (`page::icon_slot`, `word_button`, New
+    playlist's bare `Up | Down | Remove`); reserved empty slots that read as
+    holes on both bars; and identical 32 px control boxes at `GAP_XS` in one
+    cluster and `GAP_LG` in the next.
+
+    Doc 06 (`design/06-composition-audit.md`) is the existing home for exactly
+    this and should be extended rather than joined by a second document. The
+    output is an inventory with a verdict per divergence — *one of these is
+    right, and here is which* — because an audit that only lists differences
+    hands the decisions back to him, and several of these (the tile caption in
+    43, the reserved slots in 47) are decisions the audit is the right place to
+    settle.
+
+    **What shipped.** Doc 06 §11: eight divergences closed by items 43–50 and
+    three left open with reasons — the bar naming no album, the app bar's
+    160 px reservation, and `place_header_with`/`place_header_led` being two
+    functions over one geometry. The verdict column is the point: an audit that
+    only lists differences hands the decisions back.
+
+### Phase H — the 2026-08-15 asks, recorded while Phase G was being built
+
+Three asks arrived during the pass and are **recorded rather than started**;
+each is a decision with a real fork in it rather than an edit. Their rows are
+in `BACKLOG.md`.
+
+52. **Not started — set and remove a playlist's image.** *"lets allow setting
+    an image/removing the image for a playlist."*
+
+    A playlist's sleeve is a **generated collage** of the records it holds
+    (ADR-0024 §A1), which is why it can never disagree with the tiles it
+    quotes. An authored image is a second kind of sleeve, and the fork is
+    where the bytes live: a sibling file beside the `.m3u8` (visible in the
+    listener's own folder, survives a reinstall, and is a file baz writes into
+    a directory it otherwise only reads playlists from), or a row in baz's
+    database (invisible to everything else, lost with the cache). The format
+    itself has no cover field to use. Settle that first; the view work is
+    small either way, and the picker is the platform dialog Settings already
+    opens for music folders.
+
+    Also decide what removal restores — the collage, or a blank tile — and
+    whether an authored image replaces the collage everywhere or only on the
+    wall.
+
+53. **Not started — the row's controls stand inside the row's own card.**
+    *"can we make sure the playlist row controls are inside the highlighted
+    row as well."*
+
+    The hover/selection card is `views::page::track_row`'s button; the
+    Favourites heart and the ▲▼✕/`+` slots are its **siblings** in the
+    enclosing `row!`, so the paint stops short of controls that belong to the
+    row. **Do not fix it by nesting them in the button**: iced runs the inner
+    control's press first, so a control inside the row's button is how one
+    press comes to mean two things depending on which pixel it lands on —
+    `views::bottom_bar`'s Favourites slot carries the same note, and it is
+    there because that bug shipped once. The card is what should widen; the
+    press targets stay separate.
+
+    Open: whether the trailing slots need their own hover treatment adjusted
+    once they light *inside* a lit card.
+
+54. **Not started — more rooms, and apply them on selection.** *"lets create
+    more interesting themes for the app too, and ideally can we apply them
+    upon selection."*
+
+    Two asks with different costs. **More rooms** is design work against an
+    existing machine: `docs/themes/` has the v1 schema, four examples and the
+    validator, and the constraint a new room must clear is the one that stops
+    *interesting* from becoming *unreadable* — the Oklab elevation law, the
+    dead zone and the WCAG ink/status floors.
+
+    **Applying on selection** is the structural half, and it is the reason the
+    picker says *next launch* today: `crate::icon`'s two sprite sheets are
+    `LazyLock` statics rasterized once per process **in the room's glyph ink**,
+    and everything else reads `theme::active()` per frame. Live switching means
+    the sheets become swappable — or the ink moves to the draw call — and
+    anything else that baked a colour (the jewel case's textures, the
+    visualizer) has to be invalidated with them. That is the decision to take
+    before any of it is worth starting.
+
+55. **Done 2026-08-15 — the contour.** *"lets try something else with the vibe
+    thing… work through a way to create an interesting contoured playlist"*,
+    after *"the vibe flow just looks crap… I wanted something more graphical,
+    like tuning it via curves and so on."*
+
+    **The finding that made it cheap.** The four shape buttons appended
+    `"energy shape: Slow build"` to the *text* prompt, and `select_semantic`
+    had no position term at all — `0.72 · relevance + 0.23 · continuity +
+    0.05 · noise` — so nothing about them could move a track by one place.
+    Meanwhile `select_journey` interpolated targets across the list and had no
+    caller but its own tests. The interface was decorative and the engine was
+    dead code; they were each other's missing half.
+
+    **The engine.** `baz_vibe::Contour` is points of position × level on the
+    collection's own −2…+2 scale, and `select_contour` is now the one walk the
+    other two are written in terms of: words choose the pool, the shape chooses
+    the walk, either may be absent. The cost weights are a table with a row per
+    kind of request, so the free-text and profile behaviours are bit-for-bit
+    what they were. `Selection::levels` reports where each chosen track landed,
+    and `levels()` exposes the same scale for the whole pool — which is what
+    lets a surface draw the library and the result on the axes the request was
+    made on, without holding a second opinion about what "energetic" means.
+
+    **The control** (`crate::contour`) is in the family of `groove`, `needle`
+    and `spine`: a widget drawn in quads, holding only which point the pointer
+    has hold of. It draws the library's own distribution behind the line, the
+    line as a filled band, the composed tracks as dots with a thread between
+    them, and the hovered row's track larger and on a guide — the owner's
+    *"when we hover the playlist items it is showing where on the curve it's
+    meant to be… so a person can see it really worked."* Six presets are drawn
+    rather than named, `Any` among them.
+
+    **What went with it**: `EnergyShape`, the three semantic waypoints, the
+    `journey` string, and `Message::PlaylistCreationToggleShape`/`Energy`/
+    `Waypoint`. A shape travels as a shape now.
+
+    Evidence: `docs/design/impl/contour/`, captured against a **real** analysis
+    of the fixture library rather than a seeded state, because every claim the
+    control makes needs an analysed collection to be true.
+
+56. **Not started — five or six standard recipes.** *"we should have like 5-6
+    standard recipes -- as part of the wizard we should be asking users if
+    they want to make a preset one."*
+
+    A recipe is a named mood carrying **words + a contour + a length** —
+    `Late-night drive`, `Sunday morning`, `Focus`, `Workout`, `Wind down`,
+    `Party` — offered *before* the fork, filling the whole form and remaining
+    editable. Item 55 shipped the shapes as pictures, which is the machinery a
+    recipe's contour half needs; what is left is the words, the naming, and
+    where they live (a `const` table, or data beside the themes so a listener
+    can write their own without a build).
+
+    The honesty question is the interesting one: a recipe promises a result
+    from *your* library, and `Workout` over a library of chamber music must
+    degrade to something rather than to nothing. The pool note already tells
+    that truth (`N of M tracks analysed`), and item 55's field behind the line
+    now shows it before the press.
+
+57. **Not started — smart shuffle, investigation first.** *"I also thought
+    that shuffle might be one of those things where instead of shuffle, we
+    have some sort of smart shuffle?"*
+
+    Shuffle today is an honest seeded draw over the run's own entries. A
+    *smart* shuffle claims the order is **better**, which needs a definition of
+    better and a way to tell what happened. baz owns the machinery to do it
+    well — `baz-vibe`'s continuity term is exactly *"do not put these two next
+    to each other"*, and item 55's walk is that term with a shape over it — so
+    the shape most likely to be right is **shuffle-with-flow**: the same set,
+    ordered so adjacent tracks are close and artists do not clump. What it must
+    not become is a second recommender that quietly changes *what* you are
+    listening to.
+
+    Investigate: a mode beside Shuffle or a replacement for it; every run or
+    only large ones; the cost on a 9,000-track All songs run (the walk is
+    O(limit × shortlist), and a shuffle's limit is the whole run); and what the
+    control says, since `Shuffle` currently means one thing and would then mean
+    two.
+
+58. **Not started — an equaliser, and saved presets over it.** *"we probably
+    want a way to allow users to create and save EQ presets."*
+
+    baz has **no equaliser at all** today, so this is two features. The filter
+    is `baz-core`'s — a biquad chain between the decoder and the volume stage —
+    and it lands in the place this project has been most careful about: the
+    **signal path**. An EQ is a conversion, so Settings' *direct path* readout
+    and the resampling warning learn a second reason a path is not direct, and
+    **exclusive output's bit-perfect promise and an active EQ cannot both be
+    true** (off by default, stated when on, refused or stated-as-refused on an
+    exclusive device). The presets are then ordinary: named curves in the
+    config directory beside the themes, with the same paste-some-JSON route the
+    rooms already have.
+
+    **The control surface already exists in family**: `crate::contour` is a
+    line over bands with draggable points, which is what a graphic EQ is drawn
+    as — frequency across instead of position.
+
+59. **Not started — how the engine is prompted.** *"part of how this will work
+    is in how we prompt the underlying engine here."*
+
+    Measurable rather than a matter of taste: `crates/baz-vibe/src/bin/vibe-baseline.rs`
+    exists to score retrieval against a corpus of requests. Two threads.
+    **The template** — `semantic::embed_text` embeds the listener's words
+    verbatim, and CLAP-family text towers answer natural-sentence framing
+    differently from the bare noun phrases baz's own examples are. **The arc** —
+    the baseline corpus already describes `arc: [{ at, query }]`, a different
+    text at different positions interpolated in embedding space, which is the
+    honest version of the semantic waypoints item 55 deleted: the contour
+    steers energy by position, and this would steer *meaning* by position.
+
+    Neither ships without a scored run against the corpus. A prompt change that
+    cannot be measured is a superstition.
+
+60. **Not started — 1.8 GB, and where it goes.** *"figure out why we are using
+    so much memory… I see 1.8GB."*
+
+    **First diagnosis, from the source and one measurement.**
+    `baz-vibe`'s `semantic::Model::load` opens *both* ONNX towers — the text
+    tower is 126 MB on disk and the audio tower 34 MB — and the model is a
+    `thread_local!` created lazily per analysis worker and never released.
+    `DEFAULT_VIBE_WORKERS` is **8**, so a scan can materialise `8 × 160 MB` =
+    **1.28 GB of weights** before ONNX Runtime's own arenas, and **every
+    worker loads the text tower it never uses**: a worker only calls
+    `audio()`, and the prompt is embedded once on the request's own thread.
+
+    Measured beside that: three idle baz processes over a 206-track fixture,
+    no analysis, at **~260 MB** RSS each — the ordinary baseline (the stated
+    170 MiB artwork budget, the index, wgpu's mappings). 260 MB + 1.28 GB
+    lands on his 1.8 GB.
+
+    **Confirm before building.** Settings → Debug reports this process's RSS
+    (item 39): if it reads ~250–300 MB before a Vibe scan and over a gigabyte
+    after, this entry is right; if it is already high before any scan, the
+    suspect is artwork or the renderer and this diagnosis is wrong.
+
+    Then, cheapest first: load each tower where it is used; release sessions
+    when a scan ends; cap workers against memory rather than cores; and price
+    ORT's arena and memory-pattern options with a measurement.
+
+### Phase I — the 2026-08-15 parity run
+
+`docs/design/18-feature-parity.md` is the analysis; these are its queue, in the
+order it argues for. Item 2.1 (repeat the list) shipped inside the run itself,
+because a player without it is missing a floor rather than a feature.
+
+61. **Not started — a README for listeners.** *"remember the audience is just
+    general music listeners not coders, so no need to make it really wordy."*
+
+    Today's README is written for someone reading the repository: build
+    instructions, dependency reasoning, per-codec known limitations. Aim at:
+    what baz is in two lines, one picture, the eight or so things a listener
+    would choose it *for*, how to install it per platform, and a link to the
+    engineering documents. What is really about *how it is built* moves to
+    `docs/`, which already has homes for all of it.
+
+62. **Not started — multi-select and bulk actions.** The workflow floor every
+    other list feature stands on: shift/ctrl over rows and tiles, then queue,
+    add-to-playlist or remove applied to the set. baz's selection is
+    deliberately one content item (ADR-0017's select-then-activate), which is
+    right for activation and wrong for building a list by hand. Medium.
+
+63. **Not started — a sleep timer.** A bounded countdown that pauses at zero,
+    with the remaining time visible and a cancel. Small, universal, and the
+    one feature a listener asks for at midnight and cannot improvise.
+
+64. **Not started — lyrics.** Embedded `USLT` and sidecar `.lrc`, both
+    offline, which is what makes this the one metadata feature that fits baz's
+    promises without a network request. Timed `.lrc` can follow the playhead;
+    plain text is a panel. Medium.
+
+65. **Not started — ratings.** baz has a binary heart; the comparison set
+    carries 0–5 stars, and listeners with large libraries build lists from
+    them. Decide whether it is a second axis beside Favourites or replaces it.
+
+66. **Not started — rule-based playlists.** *Everything added this year, over
+    four stars, not played in six months.* baz holds all of that already (the
+    index, the ledger, favourites). The biggest capability gap in the parity
+    list. Large: a rule model, a place, and the question of whether such a list
+    is a saved query or a materialised `.m3u8`.
+
+67. **Not started — tag editing.** VISION names *"mass-capable tagging"* as
+    inherited identity, and this is the largest and riskiest item on the list:
+    it is the first time baz writes to the listener's own files. Do it after
+    62 (a bulk edit needs a bulk selection) and not before the backup/undo
+    story is written down.
+
+68. **Not started — a folder view.** Browse by directory beside browse by
+    tags, for libraries organised by hand. baz's wall is entirely tag-derived.
+
+69. **Not started — crossfade.** Expected by listeners coming from the
+    streaming clients. baz is album-first and gapless, where crossfade is
+    actively wrong, so the interaction has to be *stated* — probably: never
+    within an album's own sequence, optional between unrelated tracks.
+
+70. **Not started — drag and drop from the file manager.** Dropping a folder
+    onto the window is how many people first try a player; baz has internal
+    drag and accepts nothing from outside.
+
+71. **Not started — the store screenshots' playlist sequence.** The harness
+    builds a playlist by hand in the running app (a dozen presses through the
+    picker panel) so the frame is a picture of the feature rather than of a
+    file dropped into a folder. Those coordinates drifted with the lane and
+    the panel, silently: the run still succeeds and the list is never made,
+    which is why the shipped playlists frame is honest but empty.
+
+    Re-derive them frame by frame, and mark in the script which numbers are
+    layout-derived (the lane's rows are arithmetic) and which are photographed
+    (the wall's tiles, the panel's rows). The four store frames are correct
+    without this; the playlists one is just thinner than it should be.
+
 ## Doing
 
-- Nothing active — items 1–42 are complete, and the numbered execution order is
-  exhausted. Nothing is waiting on the owner: the rail ask that was is now
-  item 41. What remains in `BACKLOG.md` is roadmap-scale (`VISION.md` staging),
-  upstream symphonia bounds baz has decided not to work around, and two CI
-  flakes that need a recurrence to be worth chasing.
+- Nothing active — items 1–51 and 55 are complete. **Items 52–54, 56–60 and 61–70 are
+  recorded and not started**: each is a decision with a real fork in it (where a playlist's
+  authored image lives; how a row's card widens without nesting its controls;
+  what live theme switching does to the process-cached sprite sheets), and none
+  is blocked on anything but that decision. Phase G shipped on 2026-08-15 and was **rendered** rather
+  than argued: `docs/design/impl/second-review-pass/` holds eight frames from
+  the real binary at 1280 × 860 and 1280 × 620, both runs carrying the
+  `[mpris] no session bus` isolation receipt. Two of the fixes were wrong in
+  their first form and the frames are what said so — see item 46.
+
+  **Two things are waiting on the owner rather than on work**, and neither
+  blocks anything: whether the bottom bar should name the *album* (item 49
+  fixed the artist line, which was the half that was a defect; naming the album
+  needs a fourth lane on the one bar that may not move), and whether the
+  playlist tile's now-empty second caption line should carry a fact instead of
+  nothing (item 43 read *"no need for the playlist count and another noise"*
+  strictly). What remains in `BACKLOG.md` beyond Phase G is roadmap-scale
+  (`VISION.md` staging), upstream symphonia bounds baz has decided not to work
+  around, and two CI flakes that need a recurrence to be worth chasing.
 
 
 ## Detailed briefs, later work, and genuine unresolved choices

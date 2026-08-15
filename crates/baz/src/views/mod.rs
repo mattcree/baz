@@ -108,7 +108,7 @@ use iced::widget::{Space, button, column, container, image as iced_image, row, r
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::{font, theme, vm};
+use crate::{font, icon, theme, vm};
 
 /// The bundled Regular face, for measuring a string before Iced sets it.
 pub(crate) static FIT_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
@@ -322,8 +322,60 @@ pub(crate) fn playlist_sleeve(
     name: &str,
     edge: f32,
 ) -> Element<'static, Message> {
+    playlist_sleeve_marked(shelf, art, name, edge, None)
+}
+
+/// **The default mark a built-in list wears** where it has no records to
+/// quote — today only `Favourites`, and its mark is the heart every row in
+/// the product hearts a song with.
+///
+/// The owner: *"can we create a default heart image on the playlists."* A
+/// list with nothing in it draws the rest tile, and for a list the listener
+/// *made* the honest thing to put there is its name — there is nothing else
+/// true about it yet. `Favourites` is not that: it is a built-in whose
+/// subject is known before it holds anything, and the mark says so at every
+/// size, in every surface that draws a list's sleeve.
+#[must_use]
+pub(crate) fn default_playlist_mark(id: u64) -> Option<icon::Glyph> {
+    (id == crate::playlists::FAVOURITES_ID).then_some(icon::Glyph::HeartFilled)
+}
+
+/// [`playlist_sleeve`], with a mark to wear instead of the name where the
+/// list has no records to quote.
+pub(crate) fn playlist_sleeve_marked(
+    shelf: &Shelf,
+    art: &[u64],
+    name: &str,
+    edge: f32,
+    mark: Option<icon::Glyph>,
+) -> Element<'static, Message> {
     let room = theme::active();
     match art {
+        // A built-in list wears its mark rather than its name: see
+        // [`default_playlist_mark`]. The ground is the rest tile's, so this is
+        // the same *surface* the name would have stood on — a mark instead of
+        // a word, not a decorated tile.
+        [] if mark.is_some() => {
+            let glyph = mark.unwrap_or(icon::Glyph::HeartFilled);
+            let px = if edge >= theme::ART_MIN {
+                theme::GHOST_MARK_PX
+            } else {
+                theme::ICON_PX
+            };
+            container(
+                iced_image(icon::handle(glyph))
+                    .width(Length::Fixed(px))
+                    .height(Length::Fixed(px))
+                    .opacity(theme::GLYPH_OPACITY),
+            )
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+            .clip(true)
+            .style(move |_theme| theme::playlist_rest_tile(room))
+            .into()
+        }
         [] => {
             // The rest tile: the name whole at page scale, its initial at
             // panel scale — a 40 px tile has no room for words and needs

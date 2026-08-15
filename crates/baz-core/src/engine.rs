@@ -533,7 +533,7 @@ use crate::playback::{
     AudioSource, BoundaryPolicy, CHANNELS, DecodedAudio, EngineConfig, OfflineSink, PlaybackError,
     Sink,
 };
-use crate::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
+use crate::protocol::{Command, ConversionReason, Event, Repeat, SignalChain, VolumePath};
 use crate::replaygain::{
     ComputedGains, ReplayGainDecision, ReplayGainSettings, ReplayGainState, ReplayGainTags,
     SharedReplayGain,
@@ -1303,10 +1303,6 @@ pub fn spawn_device_with(
 // Engine (control + pump) thread
 // ---------------------------------------------------------------------------
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "paused, repeat, resume and sink capability are independent engine properties"
-)]
 struct Control<S: Sink> {
     commands: Receiver<Command>,
     events: Sender<Event>,
@@ -1330,7 +1326,7 @@ struct Control<S: Sink> {
     traversal: Traversal,
     /// Whether natural completion restarts the current queue entry. Kept
     /// separate from traversal because it overrides only one boundary.
-    repeat_one: bool,
+    repeat: Repeat,
     /// [`Self::traversal`] resolved against the queue's length: the queue
     /// positions to visit, in the order to visit them.
     ///
@@ -1503,7 +1499,7 @@ impl<S: Sink> Control<S> {
             instruments,
             queue: Vec::new(),
             traversal: Traversal::default(),
-            repeat_one: false,
+            repeat: Repeat::Off,
             order: Vec::new(),
             position: 0,
             edited_index: None,
@@ -1767,10 +1763,17 @@ impl<S: Sink> Control<S> {
             }
             self.report_session(true);
             let resume_at = self.session.as_ref().and_then(Session::rate_change_at);
-            let repeat_at = (self.repeat_one
-                && resume_at.is_none()
+            // **What a finished run does next**, in one place: repeat the
+            // track, repeat the list, or end. A rate change owns the boundary
+            // ahead of all three — it is the same music continuing on a
+            // reopened device rather than a decision about what to play.
+            let repeat_at = (resume_at.is_none()
                 && self.session.as_ref().is_some_and(Session::started))
-            .then(|| self.playing_index())
+            .then(|| match self.repeat {
+                Repeat::One => self.playing_index(),
+                Repeat::All => (!self.queue.is_empty()).then(|| self.top()),
+                Repeat::Off => None,
+            })
             .flatten();
             // The last of this session's audio has been delivered; count it
             // before the session it is counted from goes away (ADR-0018).
@@ -1897,21 +1900,21 @@ impl<S: Sink> Control<S> {
                 }
             }
             Command::SetTraversal { traversal } => self.set_traversal(traversal),
-            Command::SetRepeatOne { enabled } => self.set_repeat_one(enabled),
+            Command::SetRepeat { repeat } => self.set_repeat(repeat),
         }
     }
 
-    fn set_repeat_one(&mut self, enabled: bool) {
-        if self.repeat_one == enabled {
+    fn set_repeat(&mut self, repeat: Repeat) {
+        if self.repeat == repeat {
             return;
         }
-        self.repeat_one = enabled;
+        self.repeat = repeat;
         // Reconsider the successor at the current track boundary. The
         // sounding track is not interrupted and no decoded sample is lost.
         if let Some(session) = &mut self.session {
             session.cut_after_current();
         }
-        let _ = self.events.send(Event::RepeatOneChanged { enabled });
+        let _ = self.events.send(Event::RepeatChanged { repeat });
     }
 
     /// Re-derive [`Self::order`] from the traversal and the queue's length.
@@ -2374,7 +2377,7 @@ impl<S: Sink> Control<S> {
         let next = self.playing_index().map_or_else(
             || self.top(),
             |current| {
-                if self.repeat_one {
+                if self.repeat == Repeat::One {
                     current
                 } else {
                     self.successor(current)
@@ -2615,7 +2618,11 @@ impl<S: Sink> Control<S> {
             let _ = self.events.send(Event::QueueEnded);
             return;
         };
-        let end = if self.repeat_one {
+        // **Repeat one is the only state that shortens the plan.** Repeating
+        // the *list* changes what happens after the plan runs out, not what
+        // the plan is, so it stays the whole remaining walk and keeps every
+        // gapless splice inside it.
+        let end = if self.repeat == Repeat::One {
             slot + 1
         } else {
             self.order.len()

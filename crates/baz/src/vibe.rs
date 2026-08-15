@@ -19,6 +19,361 @@ type SonicFeatures = baz_vibe::Features;
 #[cfg(not(feature = "vibe-analysis"))]
 type SonicFeatures = u8;
 
+/// **One musical dimension a contour line can be drawn over.**
+///
+/// Mirrors `baz_vibe::Dimension` — the engine is an optional dependency, so
+/// the vocabulary the interface is written in cannot live behind that
+/// feature — and the conversion happens at the one gated call site.
+///
+/// The owner: *"can we have more than one of these for different musical
+/// dimensions — this obviously kinda rolls up several aspects of a song into
+/// one value."* He is describing [`Dimension::Energy`], which is exactly that
+/// roll-up. It stays, because it is what most people mean by *a mix that
+/// builds*; the others are its parts and its neighbours, each on a line of
+/// its own, and **each is a stated combination of measurements rather than a
+/// mood**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Dimension {
+    Energy,
+    Tempo,
+    Brightness,
+    Dynamics,
+    Texture,
+}
+
+impl Dimension {
+    /// Every dimension, in the order the interface offers them.
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Energy,
+        Self::Tempo,
+        Self::Brightness,
+        Self::Dynamics,
+        Self::Texture,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Energy => "Energy",
+            Self::Tempo => "Tempo",
+            Self::Brightness => "Brightness",
+            Self::Dynamics => "Dynamics",
+            Self::Texture => "Texture",
+        }
+    }
+
+    /// The two ends of its axis, low first — the words beside the line.
+    pub(crate) const fn ends(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Energy => ("calmer", "louder"),
+            Self::Tempo => ("slower", "faster"),
+            Self::Brightness => ("darker", "brighter"),
+            Self::Dynamics => ("steadier", "swingier"),
+            Self::Texture => ("cleaner", "noisier"),
+        }
+    }
+
+    /// What it is measured from, plainly enough to put on screen.
+    pub(crate) const fn measured_from(self) -> &'static str {
+        match self {
+            Self::Energy => "tempo, loudness, and how much the loudness moves",
+            Self::Tempo => "beats per minute",
+            Self::Brightness => "spectral centroid, rolloff and zero crossings",
+            Self::Dynamics => "how much the loudness moves within a track",
+            Self::Texture => "spectral flatness — tonal against noisy",
+        }
+    }
+}
+
+/// **One point on a line** — how far through the finished playlist, and the
+/// level the music should be at when it gets there.
+///
+/// `at` is `0.0` for the opening track and `1.0` for the last; `level` is the
+/// collection-relative −2…+2 scale the engine scores against, where −2 is the
+/// low end of *this* library on that dimension and +2 its high end.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ContourPoint {
+    pub(crate) at: f32,
+    pub(crate) level: f32,
+}
+
+/// One dimension, and the shape asked of it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Lane {
+    pub(crate) dimension: Dimension,
+    pub(crate) points: Vec<ContourPoint>,
+}
+
+/// **The shape the next generated playlist is asked to follow** — a line per
+/// dimension.
+///
+/// A dimension with no lane is *unconstrained*: it does not enter the cost at
+/// all, so a contour over energy alone lets everything else fall where the
+/// music does.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Contour {
+    pub(crate) lanes: Vec<Lane>,
+}
+
+impl Contour {
+    /// Smallest gap between neighbouring points, as a fraction of the list.
+    /// Two points at one position would ask for two levels at once.
+    const MIN_GAP: f32 = 0.06;
+    /// The most points one line may carry. Six is four turns — more shape
+    /// than a playlist of tens of tracks can express.
+    const MAX_POINTS: usize = 6;
+    /// **The most lines at once.** Every line is another thing the library
+    /// must satisfy *simultaneously*, and a request nothing can answer is
+    /// worse than a coarse one: three is enough to say something specific
+    /// while leaving the collection room to answer.
+    pub(crate) const MAX_LANES: usize = 3;
+
+    /// One line over one dimension.
+    pub(crate) fn of(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
+        Self {
+            lanes: vec![Lane { dimension, points }],
+        }
+    }
+
+    pub(crate) fn lane(&self, index: usize) -> Option<&Lane> {
+        self.lanes.get(index)
+    }
+
+    pub(crate) fn has(&self, dimension: Dimension) -> bool {
+        self.lanes.iter().any(|lane| lane.dimension == dimension)
+    }
+
+    /// The level one lane asks for at `fraction`.
+    pub(crate) fn level_at(&self, lane: usize, fraction: f32) -> Option<f32> {
+        level_at(&self.lanes.get(lane)?.points, fraction)
+    }
+
+    /// **Move one point of one line**, within what a line may be: the ends
+    /// stay at the ends — a playlist has a first track and a last — and an
+    /// interior point stays between its neighbours.
+    pub(crate) fn drag(&mut self, lane: usize, index: usize, at: f32, level: f32) {
+        let Some(lane) = self.lanes.get_mut(lane) else {
+            return;
+        };
+        let last = lane.points.len().saturating_sub(1);
+        let Some(point) = lane.points.get_mut(index) else {
+            return;
+        };
+        point.level = level.clamp(-LEVEL_LIMIT, LEVEL_LIMIT);
+        if index == 0 || index == last {
+            return;
+        }
+        let low = lane.points[index - 1].at + Self::MIN_GAP;
+        let high = lane.points[index + 1].at - Self::MIN_GAP;
+        if low <= high {
+            lane.points[index].at = at.clamp(low, high);
+        }
+    }
+
+    /// Add a turn where there is most room for one, at the level the line
+    /// already stands at there — so the shape does not jump when it gains a
+    /// handle.
+    pub(crate) fn add_point(&mut self, lane: usize) {
+        let Some(points) = self.lanes.get(lane).map(|lane| lane.points.clone()) else {
+            return;
+        };
+        if points.len() >= Self::MAX_POINTS || points.len() < 2 {
+            return;
+        }
+        let Some((index, at)) = points
+            .windows(2)
+            .enumerate()
+            .max_by(|left, right| {
+                (left.1[1].at - left.1[0].at).total_cmp(&(right.1[1].at - right.1[0].at))
+            })
+            .map(|(index, pair)| (index, f32::midpoint(pair[0].at, pair[1].at)))
+        else {
+            return;
+        };
+        let level = level_at(&points, at).unwrap_or(0.0);
+        if let Some(lane) = self.lanes.get_mut(lane) {
+            lane.points.insert(index + 1, ContourPoint { at, level });
+        }
+    }
+
+    /// Take the last turn back out. The two ends are the line and never go.
+    pub(crate) fn remove_point(&mut self, lane: usize) {
+        if let Some(lane) = self.lanes.get_mut(lane)
+            && lane.points.len() > 2
+        {
+            let index = lane.points.len() - 2;
+            lane.points.remove(index);
+        }
+    }
+
+    /// Give a dimension a line of its own, at the same shape the first lane
+    /// carries — a second line that started flat would look like a mistake,
+    /// and one that started at a random shape would be one.
+    pub(crate) fn add_lane(&mut self, dimension: Dimension) {
+        if self.has(dimension) || self.lanes.len() >= Self::MAX_LANES {
+            return;
+        }
+        let points = self
+            .lanes
+            .first()
+            .map_or_else(|| Shape::DEFAULT.points(), |lane| lane.points.clone());
+        self.lanes.push(Lane { dimension, points });
+    }
+
+    /// Take a dimension's line away, leaving it unconstrained. The first lane
+    /// stays: a contour with no lines at all is `Any`, which is a *shape*
+    /// choice made in the shape row rather than by emptying the control.
+    pub(crate) fn remove_lane(&mut self, dimension: Dimension) {
+        if self.lanes.len() > 1 {
+            self.lanes.retain(|lane| lane.dimension != dimension);
+        }
+    }
+}
+
+/// The line's level over `fraction`, from its points alone.
+///
+/// A free function so the drawing can ask it per column without owning a
+/// contour — the widget reads a borrowed slice at 4 px steps and an
+/// allocation per column would be a per-frame cost for arithmetic.
+pub(crate) fn level_at(points: &[ContourPoint], fraction: f32) -> Option<f32> {
+    let fraction = fraction.clamp(0.0, 1.0);
+    let first = points.first()?;
+    if points.len() == 1 || fraction <= first.at {
+        return Some(first.level);
+    }
+    let last = points.last()?;
+    if fraction >= last.at {
+        return Some(last.level);
+    }
+    let pair = points
+        .windows(2)
+        .find(|pair| fraction >= pair[0].at && fraction <= pair[1].at)?;
+    let span = pair[1].at - pair[0].at;
+    if span.abs() <= f32::EPSILON {
+        return Some(pair[1].level);
+    }
+    let mix = (fraction - pair[0].at) / span;
+    Some(pair[0].level + (pair[1].level - pair[0].level) * mix)
+}
+
+/// The furthest a contour may reach on either axis: the collection's own
+/// extremes, which is what the engine clamps its targets to.
+const LEVEL_LIMIT: f32 = 2.0;
+
+/// **A named shape, offered as a picture rather than as a word.**
+///
+/// The owner asked for *"a few defaults"* beside free text, and got four
+/// buttons whose labels were the whole of the information. These are drawn:
+/// each is the contour widget at thumbnail size, so what a preset does is
+/// visible before it is pressed.
+///
+/// `Any` is first and is not a shape at all — it is the honest way to say
+/// *the words alone*, which has to remain reachable now that a shape is the
+/// default.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Shape {
+    pub(crate) label: &'static str,
+    points: &'static [(f32, f32)],
+}
+
+impl Shape {
+    /// Words alone: no line, nothing steered by position.
+    pub(crate) const ANY: Self = Self {
+        label: "Any",
+        points: &[],
+    };
+
+    /// What a fresh Vibe request starts from. A rise is the commonest arc a
+    /// listener means by *a mix*, and starting from it teaches the control in
+    /// one glance — a flat line would draw a shape that says nothing about
+    /// what dragging it would do.
+    pub(crate) const DEFAULT: Self = Self {
+        label: "Slow build",
+        points: &[(0.0, -1.6), (1.0, 1.6)],
+    };
+
+    /// Every shape the wizard offers, in the order it offers them.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::ANY,
+        Self {
+            label: "Steady",
+            points: &[(0.0, 0.0), (1.0, 0.0)],
+        },
+        Self::DEFAULT,
+        Self {
+            label: "Peak and fall",
+            points: &[(0.0, -1.2), (0.55, 1.8), (1.0, -0.8)],
+        },
+        Self {
+            label: "Wind down",
+            points: &[(0.0, 1.4), (1.0, -1.8)],
+        },
+        Self {
+            label: "Waves",
+            points: &[
+                (0.0, -1.0),
+                (0.25, 1.2),
+                (0.5, -0.6),
+                (0.75, 1.4),
+                (1.0, -1.0),
+            ],
+        },
+    ];
+
+    /// The points this shape stands for.
+    pub(crate) fn points(self) -> Vec<ContourPoint> {
+        self.points
+            .iter()
+            .map(|&(at, level)| ContourPoint { at, level })
+            .collect()
+    }
+}
+
+/// How many bands the library's own distribution is drawn in behind the line.
+///
+/// Only the full build has a library to describe — a light one has no
+/// analyser at all — so the histogram and its bucket count belong to it. The
+/// contour itself is drawn either way: a shape is a request, and a request
+/// does not need an analyser to be made.
+#[cfg(feature = "vibe-analysis")]
+/// Sixteen over four levels is a band per quarter-level: enough to show where
+/// a collection sits, coarse enough that one loud record is not a spike.
+pub(crate) const FIELD_BUCKETS: usize = 16;
+
+/// Bucket a set of levels into the field the contour draws behind itself,
+/// lowest band first, each normalised against the fullest.
+///
+/// Pure, so the shape of a collection's own histogram is testable without an
+/// analyser, a window or a library.
+#[cfg(feature = "vibe-analysis")]
+pub(crate) fn field_of(levels: impl Iterator<Item = f32>) -> Vec<f32> {
+    let mut buckets = vec![0.0_f32; FIELD_BUCKETS];
+    let mut seen = 0.0_f32;
+    for level in levels {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "the fraction is clamped into the unit interval before the cast, over a \
+                      bucket count that is a small literal"
+        )]
+        let index = (((level + LEVEL_LIMIT) / (2.0 * LEVEL_LIMIT)).clamp(0.0, 1.0)
+            * (FIELD_BUCKETS - 1) as f32)
+            .round() as usize;
+        if let Some(bucket) = buckets.get_mut(index.min(FIELD_BUCKETS - 1)) {
+            *bucket += 1.0;
+        }
+        seen += 1.0;
+    }
+    if seen == 0.0 {
+        return Vec::new();
+    }
+    let fullest = buckets.iter().copied().fold(0.0_f32, f32::max).max(1.0);
+    for bucket in &mut buckets {
+        *bucket /= fullest;
+    }
+    buckets
+}
+
 /// Listening-time targets offered beside the ordinary-language request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum MixLength {
@@ -59,6 +414,11 @@ pub(crate) struct Generated {
     pub(crate) description: String,
     pub(crate) request: String,
     pub(crate) items: Vec<QueueItemVm>,
+    /// Where each chosen track landed, **one row per drawn line** in lane
+    /// order, each holding a level per track in listening order — the result
+    /// in the request's own units, so each line can draw what it got over
+    /// what it asked for.
+    pub(crate) levels: Vec<Vec<f32>>,
     pub(crate) pool_tracks: usize,
     pub(crate) analyzed_tracks: usize,
     pub(crate) tempo_span: Option<(f32, f32)>,
@@ -128,7 +488,6 @@ pub(crate) struct AnalysisResult {
 pub(crate) struct State {
     pub(crate) open: bool,
     pub(crate) prompt: String,
-    journey: String,
     pub(crate) length: MixLength,
     pub(crate) awaiting_create: bool,
     pub(crate) preparing: bool,
@@ -139,6 +498,21 @@ pub(crate) struct State {
     pub(crate) current: Option<PathBuf>,
     pub(crate) error: Option<String>,
     pub(crate) preview: Option<Generated>,
+    /// **The shape the next list is asked to follow**, in the same
+    /// collection-relative units `baz_vibe` scores against. Empty means the
+    /// words alone decide, which is a first-class choice rather than a
+    /// missing one ([`Shape::ANY`]).
+    pub(crate) contour: Contour,
+    /// How much of the analysed library sits at each height of a dimension's
+    /// axis, lowest bucket first, normalised against the fullest — what each
+    /// line draws behind itself, so a request the collection cannot fill is
+    /// visible before it is spent. One entry per dimension that has ever been
+    /// drawn.
+    field: HashMap<Dimension, Vec<f32>>,
+    /// **Which row of the preview the pointer is on**, so the contour can
+    /// light that track's own dot. Session state about a pointer and nothing
+    /// else: it is cleared by leaving the row, and no decision reads it.
+    pub(crate) hovered_row: Option<usize>,
     features: HashMap<PathBuf, SonicFeatures>,
     pending: VecDeque<PathBuf>,
     recently_offered: VecDeque<PathBuf>,
@@ -152,7 +526,6 @@ impl Default for State {
         Self {
             open: false,
             prompt: String::new(),
-            journey: String::new(),
             length: MixLength::Hour,
             awaiting_create: false,
             preparing: false,
@@ -163,6 +536,9 @@ impl Default for State {
             current: None,
             error: None,
             preview: None,
+            contour: Contour::of(Dimension::Energy, Shape::DEFAULT.points()),
+            field: HashMap::new(),
+            hovered_row: None,
             features: HashMap::new(),
             pending: VecDeque::new(),
             recently_offered: VecDeque::new(),
@@ -174,6 +550,137 @@ impl Default for State {
 }
 
 impl State {
+    /// The library's own distribution over one dimension, for the line that
+    /// draws it. Empty until something has been analysed.
+    pub(crate) fn field_of(&self, dimension: Dimension) -> &[f32] {
+        self.field.get(&dimension).map_or(&[], Vec::as_slice)
+    }
+
+    /// How many tracks the local index holds features for.
+    pub(crate) fn analyzed(&self) -> usize {
+        self.features.len()
+    }
+
+    /// The pointer entered or left one row of the preview.
+    pub(crate) fn hover_row(&mut self, row: Option<usize>) {
+        self.hovered_row = row;
+    }
+
+    /// **Load a named shape onto every line.** A shape is a shape: asking for
+    /// `Peak and fall` with tempo and brightness drawn means both of them
+    /// peak and fall, which is what the picture then shows. Lines are shaped
+    /// apart by dragging them apart.
+    pub(crate) fn set_shape(&mut self, shape: Shape) {
+        let points = shape.points();
+        if points.is_empty() {
+            self.contour.lanes.clear();
+            return;
+        }
+        if self.contour.lanes.is_empty() {
+            self.contour = Contour::of(Dimension::Energy, points);
+            return;
+        }
+        for lane in &mut self.contour.lanes {
+            lane.points.clone_from(&points);
+        }
+    }
+
+    /// Move one point of one line, by the widget's raw geometry.
+    pub(crate) fn drag_contour(&mut self, lane: usize, index: usize, at: f32, level: f32) {
+        self.contour.drag(lane, index, at, level);
+    }
+
+    /// Whether a line can gain or lose a turn, so the two controls can be
+    /// inert rather than absent at the ends of their range.
+    pub(crate) fn can_add_point(&self, lane: usize) -> bool {
+        self.contour
+            .lane(lane)
+            .is_some_and(|lane| (2..Contour::MAX_POINTS).contains(&lane.points.len()))
+    }
+
+    pub(crate) fn can_remove_point(&self, lane: usize) -> bool {
+        self.contour
+            .lane(lane)
+            .is_some_and(|lane| lane.points.len() > 2)
+    }
+
+    pub(crate) fn add_contour_point(&mut self, lane: usize) {
+        self.contour.add_point(lane);
+    }
+
+    pub(crate) fn remove_contour_point(&mut self, lane: usize) {
+        self.contour.remove_point(lane);
+    }
+
+    /// Give a dimension a line of its own, or take its line away.
+    pub(crate) fn toggle_dimension(&mut self, dimension: Dimension) {
+        if self.contour.has(dimension) {
+            self.contour.remove_lane(dimension);
+        } else {
+            self.contour.add_lane(dimension);
+        }
+    }
+
+    /// Whether another line can be drawn at all.
+    pub(crate) fn can_add_lane(&self) -> bool {
+        self.contour.lanes.len() < Contour::MAX_LANES
+    }
+
+    /// **Rebuild the library's own distribution** behind the line, from
+    /// whatever has been analysed so far.
+    ///
+    /// It is derived rather than kept: analysis lands a track at a time, and
+    /// each arrival can move the collection's extremes — which moves every
+    /// other track's place on a collection-relative axis. Recomputing on
+    /// arrival is a pass over a few thousand floats and keeps the picture
+    /// honest at every moment of a scan.
+    #[cfg(feature = "vibe-analysis")]
+    pub(crate) fn rebuild_field(&mut self) {
+        for dimension in Dimension::ALL {
+            let engine = match dimension {
+                Dimension::Energy => baz_vibe::Dimension::Energy,
+                Dimension::Tempo => baz_vibe::Dimension::Tempo,
+                Dimension::Brightness => baz_vibe::Dimension::Brightness,
+                Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
+                Dimension::Texture => baz_vibe::Dimension::Texture,
+            };
+            let values: Vec<f32> = self
+                .features
+                .values()
+                .map(|features| features.value(engine))
+                .collect();
+            // The same rank scale the engine scores against: a track's place
+            // in the collection, not its fraction of the distance between the
+            // two most extreme records.
+            let mut sorted = values.clone();
+            sorted.sort_by(f32::total_cmp);
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a library's track count is far below f32's exact-integer range"
+            )]
+            let level = |value: f32| {
+                if sorted.is_empty() {
+                    return 0.0;
+                }
+                let below = sorted.partition_point(|held| *held < value);
+                let through = sorted.partition_point(|held| *held <= value);
+                let rank = ((below + through) as f32 / 2.0) / sorted.len() as f32;
+                rank.clamp(0.0, 1.0)
+                    .mul_add(2.0 * LEVEL_LIMIT, -LEVEL_LIMIT)
+            };
+            let field = field_of(values.iter().map(|value| level(*value)));
+            if field.is_empty() {
+                self.field.remove(&dimension);
+            } else {
+                self.field.insert(dimension, field);
+            }
+        }
+    }
+
+    /// The light build has no analyser, so it has no collection to draw.
+    #[cfg(not(feature = "vibe-analysis"))]
+    pub(crate) fn rebuild_field(&mut self) {}
+
     pub(crate) fn begin_request(&mut self) {
         self.open = true;
         self.awaiting_create = true;
@@ -205,6 +712,7 @@ impl State {
         match result {
             Ok(prepared) => {
                 self.features = prepared.ready;
+                self.rebuild_field();
                 self.pending = prepared.pending.into();
                 self.recently_offered = prepared.recently_offered.into();
                 self.total = self.features.len() + self.pending.len();
@@ -245,6 +753,7 @@ impl State {
         match result.features {
             Ok(features) => {
                 self.features.insert(result.path, features);
+                self.rebuild_field();
                 self.done = self.done.saturating_add(1);
             }
             Err(error) => {
@@ -273,16 +782,17 @@ impl State {
         self.prompt = prompt.chars().take(240).collect();
     }
 
-    pub(crate) fn set_journey(&mut self, journey: String) {
-        self.journey = journey;
-    }
-
+    /// **The words, and only the words.**
+    ///
+    /// A `journey: String` used to be appended here — *"energy shape: Slow
+    /// build; journey: X then Y"* — so that a shape reached the engine as
+    /// *text*, embedded by a model that was being asked to match audio. That
+    /// was the whole of what the old shaping controls did, and it is why
+    /// they could not move a track by a position. The shape travels as a
+    /// contour now, on its own axis, and the prompt says what it always
+    /// meant.
     fn effective_request(&self) -> String {
-        if self.journey.is_empty() {
-            self.prompt.trim().to_owned()
-        } else {
-            format!("{}; {}", self.prompt.trim(), self.journey)
-        }
+        self.prompt.trim().to_owned()
     }
 
     pub(crate) fn set_length(&mut self, length: MixLength) {
@@ -303,6 +813,7 @@ impl State {
         let request = self.effective_request();
         let generated = generate(
             &request,
+            &self.contour,
             self.length,
             self.variation,
             &recently_offered,
@@ -506,13 +1017,45 @@ pub(crate) fn analyze(
     })
 }
 
+/// baz's contour in the engine's own vocabulary — one lane per lane, one
+/// dimension per dimension.
+#[cfg(feature = "vibe-analysis")]
+fn engine_contour(contour: &Contour) -> baz_vibe::Contour {
+    baz_vibe::Contour {
+        lanes: contour
+            .lanes
+            .iter()
+            .filter(|lane| !lane.points.is_empty())
+            .map(|lane| baz_vibe::Lane {
+                dimension: match lane.dimension {
+                    Dimension::Energy => baz_vibe::Dimension::Energy,
+                    Dimension::Tempo => baz_vibe::Dimension::Tempo,
+                    Dimension::Brightness => baz_vibe::Dimension::Brightness,
+                    Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
+                    Dimension::Texture => baz_vibe::Dimension::Texture,
+                },
+                points: lane
+                    .points
+                    .iter()
+                    .map(|point| baz_vibe::ContourPoint {
+                        at: point.at,
+                        level: point.level,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
 #[cfg(feature = "vibe-analysis")]
 #[expect(
     clippy::too_many_lines,
+    clippy::too_many_arguments,
     reason = "candidate projection, duration convergence and result construction form one generation boundary"
 )]
 fn generate(
     prompt: &str,
+    contour: &Contour,
     length: MixLength,
     variation: u64,
     recently_offered: &HashSet<PathBuf>,
@@ -571,9 +1114,19 @@ fn generate(
         .clamp(1, PLAYLIST_CAP.min(candidates.len()));
     let mut best = None;
     for _ in 0..4 {
-        let selection =
-            baz_vibe::select_semantic(prompt, &candidates, limit, variation, recently_offered)
-                .map_err(|error| error.to_string())?;
+        // **The words choose the pool; the shape chooses the walk.** Either
+        // may be absent, and `select_contour` is the one selector both the
+        // older entry points are written in terms of — so a request with no
+        // line still behaves exactly as the free-text one always did.
+        let selection = baz_vibe::select_contour(
+            prompt,
+            &engine_contour(contour),
+            &candidates,
+            limit,
+            variation,
+            recently_offered,
+        )
+        .map_err(|error| error.to_string())?;
         let selected_seconds = selection
             .paths
             .iter()
@@ -606,10 +1159,29 @@ fn generate(
     let Some((selection, _)) = best else {
         return Ok(None);
     };
-    let selected = selection
+    // The chosen tracks and their levels stay in step: a path the projection
+    // no longer holds drops it from every lane's row too, so a dot on a line
+    // is always the track beside it rather than the one that used to be
+    // there.
+    let kept: Vec<usize> = selection
         .paths
         .iter()
-        .filter_map(|path| items.remove(path))
+        .enumerate()
+        .filter(|(_, path)| items.contains_key(*path))
+        .map(|(index, _)| index)
+        .collect();
+    let selected: Vec<QueueItemVm> = kept
+        .iter()
+        .filter_map(|&index| items.remove(&selection.paths[index]))
+        .collect();
+    let levels: Vec<Vec<f32>> = selection
+        .levels
+        .iter()
+        .map(|lane| {
+            kept.iter()
+                .filter_map(|&index| lane.get(index).copied())
+                .collect()
+        })
         .collect();
     let description = format!(
         "{} · {} minutes · local semantic model",
@@ -620,6 +1192,7 @@ fn generate(
         description,
         request: prompt.trim().to_owned(),
         items: selected,
+        levels,
         pool_tracks,
         analyzed_tracks: selection.pool_tracks,
         tempo_span: selection.tempo_span,
@@ -634,6 +1207,7 @@ fn generate(
 )]
 fn generate(
     _prompt: &str,
+    _contour: &Contour,
     _length: MixLength,
     _variation: u64,
     _recently_offered: &HashSet<PathBuf>,
@@ -686,6 +1260,172 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    /// The first lane's points, which is what these tests are about.
+    fn points(state: &State) -> Vec<ContourPoint> {
+        state
+            .contour
+            .lane(0)
+            .map(|lane| lane.points.clone())
+            .unwrap_or_default()
+    }
+
+    /// **The line is a line**: its ends are the playlist's ends, an interior
+    /// turn stays between its neighbours, and no point may be dragged past
+    /// the collection's own extremes.
+    ///
+    /// This is the whole of what a drag may do, and it lives here rather than
+    /// in the widget because it is a rule about *a request*, not about a
+    /// pointer — `crate::contour` reports raw geometry and this decides what
+    /// it means.
+    #[test]
+    fn a_drag_cannot_make_a_shape_a_playlist_could_not_have() {
+        let mut state = State::default();
+        state.set_shape(Shape::DEFAULT);
+        // The ends hold their positions however far the pointer wanders.
+        state.drag_contour(0, 0, 0.9, 0.5);
+        assert!((points(&state)[0].at - 0.0).abs() < f32::EPSILON);
+        assert!((points(&state)[0].level - 0.5).abs() < f32::EPSILON);
+        let last = points(&state).len() - 1;
+        state.drag_contour(0, last, 0.1, -0.5);
+        assert!((points(&state)[last].at - 1.0).abs() < f32::EPSILON);
+
+        // Levels clamp to the collection's own ends rather than running off
+        // the top of the box.
+        state.drag_contour(0, 0, 0.0, 9.0);
+        assert!((points(&state)[0].level - LEVEL_LIMIT).abs() < f32::EPSILON);
+        state.drag_contour(0, 0, 0.0, -9.0);
+        assert!((points(&state)[0].level + LEVEL_LIMIT).abs() < f32::EPSILON);
+
+        // An interior turn stays between its neighbours, with a gap either
+        // side: two points at one position would ask for two levels at once.
+        state.add_contour_point(0);
+        assert_eq!(points(&state).len(), 3);
+        state.drag_contour(0, 1, 5.0, 0.0);
+        assert!(points(&state)[1].at <= 1.0 - Contour::MIN_GAP);
+        state.drag_contour(0, 1, -5.0, 0.0);
+        assert!(points(&state)[1].at >= Contour::MIN_GAP);
+        assert!(
+            points(&state)
+                .windows(2)
+                .all(|pair| pair[1].at > pair[0].at)
+        );
+    }
+
+    /// **A turn arrives where there is room for it, at the level the line
+    /// already stands at** — so gaining a handle changes the shape by
+    /// nothing, and the listener can drag it deliberately rather than
+    /// recovering from a jump.
+    #[test]
+    fn a_new_turn_lands_on_the_line_it_joins() {
+        let mut state = State::default();
+        state.set_shape(Shape::DEFAULT);
+        let before: Vec<f32> = (0..=10)
+            .map(|step| {
+                state
+                    .contour
+                    .level_at(0, f32::from(u8::try_from(step).unwrap_or(0)) / 10.0)
+                    .expect("a line")
+            })
+            .collect();
+        state.add_contour_point(0);
+        for (step, level) in before.iter().enumerate() {
+            let at = f32::from(u8::try_from(step).unwrap_or(0)) / 10.0;
+            let after = state.contour.level_at(0, at).expect("still a line");
+            assert!((after - level).abs() < 0.001, "the shape moved at {at}");
+        }
+        // The ends never go, however many times the control is pressed.
+        for _ in 0..8 {
+            state.remove_contour_point(0);
+        }
+        assert_eq!(points(&state).len(), 2);
+        assert!(!state.can_remove_point(0));
+        // …and the cap holds at the other end.
+        for _ in 0..8 {
+            state.add_contour_point(0);
+        }
+        assert_eq!(points(&state).len(), Contour::MAX_POINTS);
+        assert!(!state.can_add_point(0));
+    }
+
+    /// **The line the interface draws is the line the engine scores.**
+    ///
+    /// The arithmetic exists twice on purpose — `baz-vibe` is an optional
+    /// dependency and the light build has no engine to ask — so the two are
+    /// pinned together here, in the build that has both. Sampled rather than
+    /// reasoned about: a lerp is easy to get subtly wrong at the ends, which
+    /// is exactly where a playlist's first and last track live.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn the_drawn_line_is_the_scored_line() {
+        for shape in Shape::ALL {
+            let drawn = Contour::of(Dimension::Energy, shape.points());
+            let scored = engine_contour(&drawn);
+            for step in 0_u8..=20 {
+                let at = f32::from(step) / 20.0;
+                let ours = drawn.level_at(0, at);
+                let theirs = scored
+                    .lanes
+                    .first()
+                    .and_then(|lane| baz_vibe::Contour::level_at(&lane.points, at));
+                match (ours, theirs) {
+                    (None, None) => {}
+                    (Some(ours), Some(theirs)) => assert!(
+                        (ours - theirs).abs() < 0.0001,
+                        "{} disagrees at {at}: drawn {ours}, scored {theirs}",
+                        shape.label
+                    ),
+                    _ => panic!("{} is a line on one side only at {at}", shape.label),
+                }
+            }
+        }
+    }
+
+    /// **`Any` is a shape in the offered set and no line at all**, which is
+    /// how the words alone stay reachable now that a line is the default.
+    #[test]
+    fn the_offered_shapes_include_no_shape() {
+        assert_eq!(Shape::ALL[0].label, "Any");
+        assert!(Shape::ANY.points().is_empty());
+        assert!(level_at(&Shape::ANY.points(), 0.5).is_none());
+        for shape in Shape::ALL.iter().skip(1) {
+            let contour = shape.points();
+            assert!(
+                contour.len() >= 2,
+                "{} is drawn as a line and needs two ends",
+                shape.label
+            );
+            assert!(
+                contour.windows(2).all(|pair| pair[1].at > pair[0].at),
+                "{}'s points run backwards",
+                shape.label
+            );
+            assert!(
+                contour.iter().all(|point| point.level.abs() <= LEVEL_LIMIT),
+                "{} reaches past the collection's own ends",
+                shape.label
+            );
+        }
+    }
+
+    /// **The library's own distribution**, bucketed: the picture behind the
+    /// line is a count of what there is, normalised against its fullest band
+    /// so an enormous collection and a small one read the same.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn the_field_is_the_collections_own_shape() {
+        let field = field_of([-2.0, -2.0, -2.0, 0.0, 2.0].into_iter());
+        assert_eq!(field.len(), FIELD_BUCKETS);
+        assert!((field[0] - 1.0).abs() < f32::EPSILON, "{field:?}");
+        assert!(field[FIELD_BUCKETS / 2] > 0.0);
+        assert!(
+            (field[FIELD_BUCKETS - 1] - 1.0 / 3.0).abs() < 0.001,
+            "{field:?}"
+        );
+        // Nothing analysed is nothing drawn, rather than a flat band that
+        // would claim the collection is evenly spread.
+        assert!(field_of(std::iter::empty()).is_empty());
     }
 
     #[test]
@@ -780,6 +1520,7 @@ mod tests {
             description: "request".to_owned(),
             request: "warm brass becoming urgent, then calm".to_owned(),
             items: vec![item("one"), item("two"), item("three")],
+            levels: Vec::new(),
             pool_tracks: 3,
             analyzed_tracks: 3,
             tempo_span: None,

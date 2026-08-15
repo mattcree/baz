@@ -127,13 +127,31 @@ pub(crate) fn view<'a>(
                 .color(room.paper_faint),
         );
     }
-    status = status.push(signal_path(player)).push(volume(player, ink));
+    status = status.push(signal_path(player));
+    // **The cluster, in scope order, and the reserved slot leads it.**
+    //
+    // `signal_path` is [`theme::SIGNAL_W`] 96 wide in every state — a note
+    // about the chain must not shove the volume sideways when it arrives
+    // mid-run — and it stood *between* `Shuffle` and the mute button, so on
+    // every ordinary direct path there was a 96 px hole through the middle of
+    // the controls: the owner's *"there seems to be a gap between controls and
+    // the mute button"*. At the leading edge the same reservation abuts the
+    // identity zone's `Length::Fill`, which is empty space anyway, so the slot
+    // is invisible while it is empty and still moves nothing when it fills.
+    //
+    // `Repeat` and `Shuffle` are **one cluster** on
+    // [`theme::CONTROL_CLUSTER_GAP`]: two toggles over how the run is
+    // traversed, which is one subject. Everything else is a cluster of its own
+    // at [`theme::GAP_LG`].
+    let modes = row![repeat_toggle(player, ink), shuffle_toggle(player, ink),]
+        .spacing(theme::CONTROL_CLUSTER_GAP)
+        .align_y(iced::Alignment::Center);
     let controls = row![
+        status,
         time_readout(player),
         transport_row(player, ink),
-        repeat_one_toggle(player, ink),
-        shuffle_toggle(player, ink),
-        status,
+        modes,
+        volume(player, ink),
     ]
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
@@ -523,9 +541,13 @@ fn now_playing_line(player: &PlayerState, measure: f32) -> Element<'_, Message> 
             theme::MEDIUM,
             room.paper,
         ),
-        container(match now.track_artist.as_ref().or(now.artist.as_ref()) {
+        // **The record's own words when the file has none** — `artist_line`
+        // falls through to who the album is filed under, so a compilation
+        // whose track carries no artist tag reads `Various Artists` here
+        // exactly as it does on its page and its tile.
+        container(match now.artist_line() {
             Some(artist) => line(
-                artist.as_str(),
+                artist,
                 theme::SIZE_META,
                 theme::LEADING_META,
                 theme::LINE_META,
@@ -677,7 +699,7 @@ fn transport_glyphs(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
             ink,
         ),
     ]
-    .spacing(theme::GAP_SM)
+    .spacing(theme::CONTROL_CLUSTER_GAP)
     .into()
 }
 
@@ -864,12 +886,30 @@ fn shuffle_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
         .into()
 }
 
-fn repeat_one_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
+/// **Repeat, in its three states** — off, the list, this track — on one
+/// control that cycles.
+///
+/// baz shipped with two of the three until 2026-08-15: a track could repeat
+/// and a run could not, which left it the one player without the state most
+/// listeners mean by the word. One control rather than two, because *"does
+/// this go round?"* is one question with three answers, and two independent
+/// toggles could be set to contradict each other.
+///
+/// The two lit states carry **different marks** — the same loop, with and
+/// without a `1` — so the state is legible without reading the tooltip and
+/// without depending on the accent alone.
+fn repeat_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
+    use baz_core::protocol::Repeat;
     let room = theme::active();
-    let on = player.repeat_one();
+    let repeat = player.repeat();
+    let on = repeat != Repeat::Off;
+    let glyph = match repeat {
+        Repeat::One => icon::Glyph::RepeatOne,
+        Repeat::Off | Repeat::All => icon::Glyph::Repeat,
+    };
     let mark = container(
         iced_image(icon::inked(
-            icon::Glyph::RepeatOne,
+            glyph,
             if on { room.lamp } else { room.glyph() },
         ))
         .width(Length::Fixed(theme::ICON_PX))
@@ -894,13 +934,13 @@ fn repeat_one_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press(Message::ToggleRepeatOne);
+        .on_press(Message::CycleRepeat);
     let named = tooltip(
         control,
-        text(if on {
-            "Repeat current track is on — turn it off to continue at natural end"
-        } else {
-            "Repeat current track is off — turn it on to restart at natural end"
+        text(match repeat {
+            Repeat::Off => "Repeat is off — press to repeat the list",
+            Repeat::All => "Repeating the list — press to repeat this track",
+            Repeat::One => "Repeating this track — press to turn repeat off",
         })
         .size(theme::SIZE_CAPTION)
         .line_height(theme::LEADING_CAPTION),
@@ -994,7 +1034,7 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
                 .align_y(alignment::Vertical::Top),
         ],
     ]
-    .spacing(theme::GAP_SM)
+    .spacing(theme::CONTROL_CLUSTER_GAP)
     .align_y(iced::Alignment::Center)
     .width(Length::Fixed(theme::VOLUME_BLOCK_W))
     .height(Length::Fixed(theme::VOLUME_ROW_H))
@@ -1140,6 +1180,64 @@ mod tests {
         const { assert!(theme::NOW_PLAYING_H < theme::BAR_CONTENT_H) }
         const { assert!(theme::VOLUME_ROW_H < theme::BAR_CONTENT_H) }
         const { assert!(theme::TRANSPORT_HIT < theme::BAR_CONTENT_H) }
+    }
+
+    /// **The reserved slot leads the cluster, and the cluster is clusters.**
+    ///
+    /// The owner: *"can you make sure the player controls on the bottom are
+    /// right justified. there seems to be a gap between controls and the mute
+    /// button."* The justification was already right — the cluster is
+    /// right-aligned against a `Length::Fill` identity zone — and the gap was
+    /// [`theme::SIGNAL_W`] 96 of reserved-but-empty slot standing *between*
+    /// `Shuffle` and the mute button, which is where it must not stand.
+    ///
+    /// Two things are asserted, because either alone would let it back: the
+    /// order (the slot first, so an empty reservation abuts the fill and a
+    /// full one still moves nothing), and the seams (8 inside a cluster, 16
+    /// between, which is the app bar's rule and now one token).
+    #[test]
+    fn the_trailing_cluster_leads_with_its_reserved_slot() {
+        let source = include_str!("bottom_bar.rs").replace("\r\n", "\n");
+        let code = source.split("#[cfg(test)]").next().expect("a head");
+        let controls = code
+            .split_once("let controls = row![")
+            .expect("the trailing cluster")
+            .1;
+        let controls = &controls[..controls.find("\n    ]").expect("the row ends")];
+        let order: Vec<&str> = controls
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.ends_with(','))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "status,",
+                "time_readout(player),",
+                "transport_row(player, ink),",
+                "modes,",
+                "volume(player, ink),",
+            ],
+            "the signal path's reserved slot is back inside the run of live \
+             controls, or the cluster's order has changed without this test"
+        );
+        // The `Repeat`/`Shuffle` pair is one cluster, so the two toggles are
+        // one seam apart and everything else in the row is a zone apart.
+        let modes = code
+            .split_once("let modes = row![")
+            .expect("the traversal cluster")
+            .1;
+        let modes = &modes[..modes.find(";\n").expect("a binding ends")];
+        assert!(
+            modes.contains("repeat_toggle")
+                && modes.contains("shuffle_toggle")
+                && modes.contains("theme::CONTROL_CLUSTER_GAP"),
+            "the traversal toggles are no longer one cluster"
+        );
+        // And the sum the title lane is fitted against still holds: reordering
+        // moved no pixel, because the seam the signal path gave back is the
+        // seam pairing the toggles saved.
+        const { assert!(theme::BAR_TRAILING_W == 636.0) }
     }
 
     /// **The band is derived from what it must hold, plus a stated lead** —

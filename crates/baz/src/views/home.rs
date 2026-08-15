@@ -90,10 +90,7 @@
 //! in the mockup the owner approved that is not a rearrangement of something
 //! already shipped, and it is what [`needle`] is.
 
-use iced::widget::{
-    Space, button, column, container, image as iced_image, pick_list, row, scrollable, text,
-    text_input,
-};
+use iced::widget::{Space, button, column, container, image as iced_image, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -202,330 +199,22 @@ pub(crate) fn view<'a>(
         .into()
 }
 
-/// The Home entry for opt-in local sonic analysis and its ordinary playlist.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the Home request composer keeps every visible request/result state together"
-)]
-pub(crate) fn vibe_creator<'a>(
-    shelf: &'a Shelf,
-    _player: &'a PlayerState,
-    available: bool,
-    width: f32,
-    save_enabled: bool,
-) -> Element<'a, Message> {
-    let room = theme::active();
-    let state = &shelf.vibe;
-    let lead = column![
-        section_rule("Make a mix"),
-        text("Build a journey through qualities Baz can hear in your own music.")
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .color(room.paper),
-        text("On this device · your audio never leaves Baz")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
-    ]
-    .spacing(theme::GAP_SM);
-    if !available {
-        return lead
-            .push(
-                text("Playlist storage is unavailable on this system.")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim),
-            )
-            .into();
-    }
-    let mut composer = lead;
-    if !cfg!(feature = "vibe-analysis") {
-        return composer
-            .push(
-                text(
-                    "This is the light build. Install the full build to add local sonic analysis.",
-                )
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim),
-            )
-            .spacing(theme::GAP_SM)
-            .into();
-    }
-
-    let prompt = text_input("Try “dreamy shoegaze for a rainy evening”", &state.prompt)
-        .on_input(Message::VibePrompt)
-        .on_submit(Message::VibeCreate)
-        .width(Length::Fill)
-        .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .style(move |_theme, status| theme::input(room, status));
-    let length = pick_list(
-        crate::vibe::MixLength::ALL,
-        Some(state.length),
-        Message::VibeLength,
-    )
-    .width(Length::Fixed(170.0))
-    .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-    .text_size(theme::SIZE_BODY)
-    .text_line_height(theme::LEADING_BODY)
-    .style(move |_theme, status| theme::output_picker(room, status))
-    .menu_style(move |_theme| theme::output_menu(room));
-    let busy = state.preparing || state.analyzing;
-    let can_create = !state.preparing
-        && !state.prompt.trim().is_empty()
-        && (!state.analyzing || state.has_features());
-    composer = composer
-        .push(prompt)
-        .push(
-            row![
-                word_button(
-                    "Late-night focus",
-                    Message::PlaylistCreationExample("Late-night focus"),
-                ),
-                word_button(
-                    "Warm Sunday morning",
-                    Message::PlaylistCreationExample("Warm Sunday morning"),
-                ),
-                word_button(
-                    "Restless then calm",
-                    Message::PlaylistCreationExample("Restless then calm"),
-                ),
-            ]
-            .spacing(theme::GAP_SM),
-        )
-        .push(
-            row![
-                column![
-                    text("LENGTH")
-                        .size(theme::SIZE_CAPTION)
-                        .line_height(theme::LEADING_CAPTION)
-                        .font(theme::MEDIUM)
-                        .color(room.paper_faint),
-                    length
-                ]
-                .spacing(theme::GAP_XS),
-                Space::new().width(Length::Fill),
-                word_button_maybe("Create mix", can_create.then_some(Message::VibeCreate))
-            ]
-            .spacing(theme::GAP_MD)
-            .align_y(iced::Alignment::End),
-        );
-
-    if state.open && !state.has_features() && !state.preparing && !state.analyzing {
-        composer = composer
-            .push(
-                text(format!(
-                    "To make this mix, Baz will read {} selected-edition tracks once, keep a disposable local index, and never upload audio. You can keep listening or cancel.",
-                    crate::vibe::library_paths(&shelf.albums, &shelf.edition_choice).len()
-                ))
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim),
-            )
-            .push(
-                row![
-                    word_button("Analyse locally & create", Message::VibeAnalyze),
-                    word_button("Not now", Message::VibeCancel)
-                ]
-                .spacing(theme::GAP_SM),
-            );
-    }
-    if state.preparing {
-        composer = composer.push(
-            text("Checking the local analysis index…")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim),
-        );
-    }
-    if state.analyzing {
-        let current = state
-            .current
-            .as_deref()
-            .map_or("next track", crate::vibe::seed_name);
-        composer = composer
-            .push(
-                text(format!(
-                    "Analysing {} of {} · {} · {} skipped",
-                    state.done.saturating_add(state.failed).saturating_add(1),
-                    state.total,
-                    current,
-                    state.failed
-                ))
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim),
-            )
-            .push(if state.has_features() {
-                text(format!(
-                    "A mix can use the {} tracks analysed so far; the scan will continue in the background.",
-                    state.done.saturating_sub(state.failed)
-                ))
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-            } else {
-                text("Create mix will become available after the first track is analysed.")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim)
-            })
-            .push(word_button("Cancel analysis", Message::VibeAnalysisCancel));
-    }
-    if let Some(error) = state.failure_note() {
-        composer = composer.push(
-            text(error)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.lamp)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::Word),
-        );
-    }
-    if let Some(preview) = &state.preview {
-        let result = format!(
-            "“{}” · {} · {} tracks",
-            preview.request,
-            preview.duration_note(),
-            preview.items.len()
-        );
-        composer = composer
-            .push(
-                text(result)
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .font(theme::MEDIUM)
-                    .color(room.paper),
-            )
-            .push(
-                text(preview.pool_note())
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim),
-            );
-        if state.request_changed() {
-            composer = composer.push(
-                text("Request changed · Create mix to update this preview")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim),
-            );
-        }
-        for (position, item) in preview.items.iter().enumerate() {
-            let marker: Element<'_, Message> = text(format!("{:02}", position + 1))
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_faint)
-                .into();
-            let under = item
-                .artist
-                .as_deref()
-                .or(item.album_artist.as_deref())
-                .map(|artist| (artist.into(), room.paper_dim, None));
-            let context = item
-                .album
-                .as_deref()
-                .map(|album| (album.into(), None, width >= theme::PLAYLIST_BREAKPOINT));
-            let track = crate::views::page::track_row(crate::views::page::TrackRow {
-                marker,
-                artwork: None,
-                title: item.title.as_str().into(),
-                ink: room.paper,
-                under,
-                context,
-                duration: item
-                    .duration
-                    .map(crate::vm::format_duration)
-                    .unwrap_or_default()
-                    .into(),
-                playing: false,
-                selected: false,
-                press: None,
-            });
-            composer = composer.push(
-                row![
-                    track,
-                    crate::views::page::favourite_slot(
-                        &item.path,
-                        crate::app::is_favourite(shelf, &item.path),
-                    ),
-                    crate::views::page::icon_slot(
-                        crate::icon::Glyph::ArrowUp,
-                        "Move up",
-                        position > 0,
-                        true,
-                        Message::VibePreviewShift(position, -1),
-                    ),
-                    crate::views::page::icon_slot(
-                        crate::icon::Glyph::ArrowDown,
-                        "Move down",
-                        position + 1 < preview.items.len(),
-                        true,
-                        Message::VibePreviewShift(position, 1),
-                    ),
-                    crate::views::page::icon_slot(
-                        crate::icon::Glyph::Close,
-                        "Remove from mix",
-                        true,
-                        true,
-                        Message::VibePreviewRemove(position),
-                    ),
-                ]
-                .spacing(theme::GAP_XS)
-                .align_y(iced::Alignment::Center),
-            );
-        }
-        let can_act = !preview.items.is_empty();
-        composer = composer.push(
-            row![
-                word_button_maybe("Play", can_act.then_some(Message::VibePlay)),
-                word_button_maybe(
-                    "Save playlist",
-                    (can_act && save_enabled).then_some(Message::VibeSubmit),
-                ),
-                word_button_maybe(
-                    "Another version",
-                    (!state.request_changed()).then_some(Message::VibeAnother),
-                ),
-            ]
-            .spacing(theme::GAP_SM),
-        );
-    } else if state.has_features() && !busy && state.open {
-        composer = composer.push(
-            text("No tracks could satisfy this request without breaking the diversity rules. Try a shorter mix or a broader description.")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim),
-        );
-    }
-    if state.has_features() && !busy {
-        composer = composer.push(word_button("Refresh local analysis", Message::VibeAnalyze));
-    }
-    composer.spacing(theme::GAP_SM).width(Length::Fill).into()
-}
-
 /// Home keeps discovery, while the composer itself belongs to New playlist.
 fn vibe_shortcut<'a>(available: bool) -> Element<'a, Message> {
     let room = theme::active();
     column![
-        section_rule("Make a playlist"),
-        text("Describe a journey and Baz will shape it from music on this device.")
+        section_rule("New playlist"),
+        text("Describe a journey and Baz will compose it from music on this device.")
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .color(room.paper),
         word_button_maybe(
-            "Make a vibe playlist",
+            "New vibe playlist",
             available.then_some(Message::NewPlaylistOpenVibe),
         )
     ]
     .spacing(theme::GAP_SM)
     .into()
-}
-
-fn word_button<'a>(label: &str, message: Message) -> iced::widget::Button<'a, Message> {
-    word_button_maybe(label, Some(message))
 }
 
 fn word_button_maybe<'a>(
@@ -1173,38 +862,77 @@ mod tests {
         PlayerState::new(Availability::Ready)
     }
 
+    /// **Home keeps the door and nothing else** — and this asserts the
+    /// *absence*, which is the only form of it that survives the next edit.
+    ///
+    /// The composer lived here until 2026-08-15 with exactly one caller, and
+    /// that caller was the New playlist place; the 2026-08-14 review found it
+    /// still speaking Home's vocabulary (`Make a mix`) inside a place headed
+    /// `New playlist`. It moved. An unasserted absence is an invitation: the
+    /// next edit that feels Home wants a prompt field would put one back
+    /// unchallenged, and there would be two composers again.
     #[test]
     fn new_playlist_owns_the_composer_and_home_keeps_only_its_shortcut() {
-        let source = include_str!("home.rs");
-        let body = source
-            .split("fn vibe_creator")
-            .nth(1)
-            .expect("composer")
-            .split("fn word_button")
+        // The head only: this test's own words are in the same file, which is
+        // how the first version of it failed against itself.
+        let source = include_str!("home.rs")
+            .split("#[cfg(test)]")
             .next()
-            .expect("composer body");
-        for required in [
+            .expect("a head");
+        for gone in [
+            "fn vibe_creator",
             "Make a mix",
             "Try “dreamy shoegaze for a rainy evening”",
             "VibePrompt",
             "Create mix",
             "Analyse locally & create",
-            "Save playlist",
-            "Another version",
+            "VibeSubmit",
         ] {
-            assert!(body.contains(required), "composer lost {required:?}");
+            assert!(
+                !source.contains(gone),
+                "Home is drawing the composer again: {gone:?}"
+            );
         }
-        assert!(!body.contains("Make a sonic playlist"));
-        assert!(!body.contains("Use sounding track as anchor"));
+        let composer = include_str!("new_playlist.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a head");
+        for required in [
+            "Try “dreamy shoegaze for a rainy evening”",
+            "VibePrompt",
+            "Compose",
+            "Save playlist",
+            "Compose again",
+        ] {
+            assert!(
+                composer.contains(required),
+                "the composer lost {required:?} in the move"
+            );
+        }
+        // The vocabulary is one word per act, so the words it replaced may not
+        // come back beside their replacements. Comments are stripped first:
+        // the module's own history names the words it retired, and a rule that
+        // could not be *written down* would be a rule nobody could explain.
+        let drawn: String = composer
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for gone in ["Make a mix", "Create mix", "Another version"] {
+            assert!(
+                !drawn.contains(gone),
+                "two names for one act are back: {gone:?}"
+            );
+        }
         let home = source
             .split("fn vibe_shortcut")
             .nth(1)
             .expect("Home shortcut")
-            .split("fn word_button")
+            .split("\n}\n")
             .next()
             .expect("shortcut body");
-        assert!(home.contains("Make a vibe playlist"));
-        assert!(!home.contains("VibePrompt"));
+        assert!(home.contains("New vibe playlist"));
+        assert!(home.contains("NewPlaylistOpenVibe"));
     }
 
     /// **The band stands on the interrupted run until something sounds**, and

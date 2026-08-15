@@ -59,7 +59,6 @@ use crate::app::{Message, Shelf};
 use crate::lane::{Destination, Subject, Touched};
 use crate::place::Place;
 use crate::playlists::Playlists;
-use crate::views::playlist_sleeve;
 use crate::{icon, theme};
 
 /// The lane, at the width its state says.
@@ -489,7 +488,13 @@ fn lane_row<'a>(
         // list cannot look like two different objects in two surfaces.
         Subject::Playlist(id) => {
             let art = playlists.row(id).map_or(&[][..], |entry| &entry.art);
-            playlist_sleeve(shelf, art, &entry.name, edge)
+            crate::views::playlist_sleeve_marked(
+                shelf,
+                art,
+                &entry.name,
+                edge,
+                crate::views::default_playlist_mark(id),
+            )
         }
     };
     let press = match entry.subject {

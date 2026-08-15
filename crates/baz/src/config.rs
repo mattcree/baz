@@ -118,6 +118,7 @@ const SIDEBAR_OPEN: &str = "sidebar_open";
 const SHUFFLE: &str = "shuffle";
 /// The key the player's Repeat current track property is written under.
 const REPEAT_ONE: &str = "repeat_one";
+const REPEAT: &str = "repeat";
 
 /// The key the volume fader's control position is written under.
 const VOLUME: &str = "volume";
@@ -143,10 +144,6 @@ pub const DEFAULT_VIBE_WORKERS: usize = 8;
 pub const MAX_VIBE_WORKERS: usize = 16;
 
 /// Application configuration. See the [module docs](self) for scope.
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent persisted player, view and accessibility decisions"
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     /// The music folders baz scans and shelves, **in the listener's order**
@@ -247,9 +244,15 @@ pub struct Config {
     /// launches with shuffle on should be two different shuffles; remembering
     /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
-    /// Whether a track restarts when it reaches its natural end. Explicit
-    /// transport navigation remains navigation; only completion is repeated.
-    pub repeat_one: bool,
+    /// What a naturally completed run does: end, start again, or repeat the
+    /// one track. Explicit transport navigation remains navigation; only
+    /// completion is repeated.
+    ///
+    /// It replaced a `repeat_one` boolean on 2026-08-15, when baz finally
+    /// grew *repeat the list*. A config written by an older baz is still
+    /// read: `repeat_one = true` becomes [`Repeat::One`], which is what that
+    /// file meant.
+    pub repeat: baz_core::protocol::Repeat,
     /// The album object drawn on Now Playing: flat cover, jewel case or none.
     ///
     /// View state, persisted beside density rather than exposed as a Settings
@@ -284,7 +287,7 @@ impl Default for Config {
             volume: Volume::UNITY,
             output_device: None,
             shuffle: false,
-            repeat_one: false,
+            repeat: baz_core::protocol::Repeat::Off,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -377,9 +380,9 @@ impl Config {
         );
         let _ = writeln!(
             out,
-            "# whether natural track ends repeat the current queue entry\n\
-             {REPEAT_ONE} = {}",
-            self.repeat_one,
+            "# what a finished run does: \"off\", \"all\" or \"one\"\n\
+             {REPEAT} = {}",
+            toml_string(repeat_code(self.repeat)),
         );
         let _ = writeln!(
             out,
@@ -485,10 +488,25 @@ impl Config {
             .get(SHUFFLE)
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
-        let repeat_one = table
-            .get(REPEAT_ONE)
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(false);
+        // The current key first; then the boolean an older baz wrote, which
+        // meant exactly `one`.
+        let repeat = table
+            .get(REPEAT)
+            .and_then(toml::Value::as_str)
+            .and_then(repeat_from_code)
+            .or_else(|| {
+                table
+                    .get(REPEAT_ONE)
+                    .and_then(toml::Value::as_bool)
+                    .map(|one| {
+                        if one {
+                            baz_core::protocol::Repeat::One
+                        } else {
+                            baz_core::protocol::Repeat::Off
+                        }
+                    })
+            })
+            .unwrap_or_default();
         let visualization_foreground = table
             .get(VISUALIZATION_FOREGROUND)
             .and_then(toml::Value::as_str)
@@ -528,7 +546,7 @@ impl Config {
             volume,
             output_device,
             shuffle,
-            repeat_one,
+            repeat,
             visualization_foreground,
             now_playing_facts,
             vibe_workers,
@@ -631,6 +649,27 @@ fn mode_key(mode: ReplayGainMode) -> &'static str {
         // mode this build cannot name. Off is the default, and it is the one
         // answer that is safe to write for a mode nobody here understands.
         _ => "off",
+    }
+}
+
+/// What a repeat state is called in the config file — the same three words
+/// the protocol serialises, so a listener editing the file by hand and a
+/// developer reading the wire see one vocabulary.
+const fn repeat_code(repeat: baz_core::protocol::Repeat) -> &'static str {
+    match repeat {
+        baz_core::protocol::Repeat::Off => "off",
+        baz_core::protocol::Repeat::All => "all",
+        baz_core::protocol::Repeat::One => "one",
+    }
+}
+
+/// …and back, refusing anything else rather than guessing.
+fn repeat_from_code(code: &str) -> Option<baz_core::protocol::Repeat> {
+    match code {
+        "off" => Some(baz_core::protocol::Repeat::Off),
+        "all" => Some(baz_core::protocol::Repeat::All),
+        "one" => Some(baz_core::protocol::Repeat::One),
+        _ => None,
     }
 }
 
@@ -857,7 +896,7 @@ mod tests {
                 volume: Volume::new(618),
                 output_device: None,
                 shuffle: false,
-                repeat_one: false,
+                repeat: baz_core::protocol::Repeat::Off,
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
                 now_playing_facts: true,
                 vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1208,7 +1247,7 @@ mod tests {
             volume: Volume::new(500),
             output_device: None,
             shuffle: false,
-            repeat_one: false,
+            repeat: baz_core::protocol::Repeat::Off,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1235,7 +1274,7 @@ mod tests {
             volume: Volume::new(750),
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
-            repeat_one: true,
+            repeat: baz_core::protocol::Repeat::One,
             visualization_foreground: crate::visualizer::Foreground::None,
             now_playing_facts: false,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1395,7 +1434,7 @@ mod tests {
             volume: Volume::new(250),
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
-            repeat_one: false,
+            repeat: baz_core::protocol::Repeat::Off,
             visualization_foreground: crate::visualizer::Foreground::Cover,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,

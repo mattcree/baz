@@ -220,9 +220,12 @@ pub(crate) struct Page<'a> {
 /// two words at opposite ends of the screen. The columns stack before their
 /// row anatomy can consume the title's flexible width.
 ///
-/// In the two-column form, the identity and aside stay at the top while the
-/// track table alone scrolls. The `TRACKS` rule is therefore the table's
-/// sticky head. The stacked form remains one document and one scroll.
+/// In the two-column form, the identity block stays at the top while the track
+/// table turns beneath it. The `TRACKS` rule is therefore the table's sticky
+/// head. **Each column scrolls itself**: the aside is a scroller too, because
+/// its blocks can outrun a short window and an unreachable `DETAILS` block is
+/// the one thing a column of facts may not be. The stacked form remains one
+/// document and one scroll.
 ///
 /// This arithmetic was written twice and is now written once, which is the
 /// half of *"they are different for no good reason"* that no frame would ever
@@ -239,7 +242,7 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
     // ([`super::place_pad`]).
     let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
     let measure = if page.side_by_side {
-        (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
+        (content - theme::ALBUM_ASIDE_LANE - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
     } else {
         content.min(theme::LIST_MEASURE)
     };
@@ -261,19 +264,45 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
     // **The aside**, fixed at [`theme::ALBUM_ASIDE_W`] — the sleeve's own edge
     // — so its blocks share one lane and the page has two x-edges on this side
     // rather than three (law L5).
-    let mut aside = column![sleeve].spacing(theme::GAP_MD);
+    //
+    // It is built in **two halves**, and only the desktop form spends the
+    // distinction: the **cover**, which does not scroll, and everything under
+    // it, which does. The owner, seeing the first version of the aside's
+    // scroller run a bar down the artwork: *"scroll bar being on the whole
+    // section for album image and details in the album view looks bad. the
+    // image should not scroll."* He is right, and it is the same rule the
+    // column beside it already keeps — the subject stands while the detail
+    // turns.
+    //
+    // **The cover alone, and not the commitment with it**, which was the first
+    // reading and was wrong by arithmetic: the cover, `Play album` and the
+    // acts come to 424 px, and at a 620 px window the composed row has 361 —
+    // so a fixed head of all three put `Play album` past the body's edge with
+    // nothing able to scroll it, which is the defect item 46 exists to close,
+    // reintroduced one block higher. The cover is 320 and fits wherever the
+    // page has a two-column form to draw at all.
+    //
+    // **Each half states its own width.** Their blocks are a mixture of fixed
+    // (the sleeve) and `Length::Fill` (the commitment, the acts), and a
+    // `Shrink` column resolves a `Fill` child against whatever the parent
+    // offers — so inside a scroller the commitment stretched past the sleeve to
+    // the viewport's edge and lost its right border to the clip.
+    let subject = container(sleeve).width(Length::Fixed(theme::ALBUM_ASIDE_W));
+    let mut tail = column![]
+        .spacing(theme::GAP_MD)
+        .width(Length::Fixed(theme::ALBUM_ASIDE_W));
     if let Some(commitment) = commitment {
-        aside = aside.push(commitment);
+        tail = tail.push(commitment);
     }
     if !acts.is_empty() {
-        aside = aside.push(
+        tail = tail.push(
             Row::with_children(acts)
                 .spacing(theme::GAP_SM)
                 .align_y(iced::Alignment::Center),
         );
     }
     for block in aside_tail {
-        aside = aside.push(block);
+        tail = tail.push(block);
     }
 
     let body: Element<'a, Message> = if rows.is_empty() {
@@ -314,8 +343,65 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         let main = column![identity_block(identity), table]
             .spacing(theme::GAP_XL)
             .height(Length::Fill);
+        // **The aside's tail scrolls; its subject does not**, and until
+        // 2026-08-15 neither did: the whole column was a plain container in a
+        // `Fill`-height row, so a record whose aside ran past the body — the
+        // 320 px sleeve, the commitment, the acts, an edition selector and
+        // `DETAILS`, against a short window — put its condition report
+        // somewhere no gesture could reach. The body clip cut it and nothing
+        // scrolled it (*"the details on the album view is not scrollable"*).
+        // The first fix scrolled the column whole and ran a bar down the
+        // artwork, which is the owner's *"the image should not scroll"*.
+        //
+        // **A scroller of its own, not one document.** Folding the tail into
+        // the table's scroll would cost the two things this form exists for —
+        // the record standing still while its tracks turn, and `TRACKS` as the
+        // table's sticky head — and the stacked form under [`is_two_column`]
+        // already *is* the one-document reading for the window where it fits.
+        //
+        // **It stands in [`theme::ALBUM_ASIDE_LANE`], not in the aside's own
+        // width.** iced clips a scrollable's content to its bounds *less* the
+        // bar's lane rather than painting the bar over it, so a scroller at
+        // 320 cut nine pixels off the right edge of the sleeve and of
+        // `Play album` in the first render of this change. The lane is
+        // declared and the measure beside it yields — the sleeve is where law
+        // L5's single x-edge comes from, and it may not move.
+        //
+        // **The subject can still outrun a very short window**, and that is
+        // unchanged rather than introduced: at [`theme::WINDOW_FLOOR_H`] the
+        // body is 254 px and the sleeve alone is 320, exactly as it was before
+        // either fix. What is new is that everything *below* the subject is
+        // reachable at every height.
+        let tail_scroll = scrollable(
+            container(tail)
+                .width(Length::Fixed(
+                    theme::ALBUM_ASIDE_W + theme::ALBUM_ASIDE_INSET,
+                ))
+                .padding(iced::Padding {
+                    bottom: theme::HANG,
+                    right: theme::ALBUM_ASIDE_INSET,
+                    ..iced::Padding::default()
+                }),
+        )
+        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+        .width(Length::Fixed(theme::ALBUM_ASIDE_LANE))
+        .height(Length::Fill);
+        // The column is wrapped the way the main column beside it is: a
+        // `Fill`-height container. A bare `Column::height(Fill)` as a row's
+        // cross-axis child took its content's height instead, which left the
+        // tail's scroller as tall as its own content — so it had nothing to
+        // scroll and the body clip hid the overflow, which is the defect
+        // wearing a different hat.
+        let aside = container(
+            column![subject, tail_scroll]
+                .spacing(theme::GAP_MD)
+                .width(Length::Fixed(theme::ALBUM_ASIDE_LANE)),
+        )
+        .width(Length::Fixed(theme::ALBUM_ASIDE_LANE))
+        .height(Length::Fill);
         let composed = row![
-            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            aside,
             container(main)
                 .width(Length::Fixed(measure))
                 .height(Length::Fill),
@@ -334,6 +420,11 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         .into();
     }
 
+    // The stacked form is one document and one scroll, so the two halves are
+    // simply the one column they always were.
+    let aside = column![subject, tail]
+        .spacing(theme::GAP_MD)
+        .width(Length::Fixed(theme::ALBUM_ASIDE_W));
     let main = column![
         identity_block(identity),
         column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
@@ -464,12 +555,24 @@ pub(crate) fn commitment(
     live: bool,
     message: Message,
 ) -> Element<'static, Message> {
+    commitment_marked(icon::Glyph::Play, label, live, message)
+}
+
+/// The same control with a mark of its own, for a page whose one commitment
+/// is not *play*: the New playlist place composes a list rather than starting
+/// one, and a play triangle on that button would promise the wrong act.
+pub(crate) fn commitment_marked(
+    glyph: icon::Glyph,
+    label: &'static str,
+    live: bool,
+    message: Message,
+) -> Element<'static, Message> {
     let room = theme::active();
     button(
         // **The box centres the ink, in both axes** (law L3).
         container(
             row![
-                iced_image(icon::handle(icon::Glyph::Play))
+                iced_image(icon::handle(glyph))
                     .width(Length::Fixed(theme::ICON_PX))
                     .height(Length::Fixed(theme::ICON_PX))
                     .opacity(theme::glyph_opacity(live, false)),
@@ -967,10 +1070,13 @@ mod tests {
     #[test]
     fn the_page_fills_the_window_until_its_list_reaches_its_measure() {
         let list = |w: f32| {
-            (w - 2.0 * theme::HANG - theme::SCROLLBAR_LANE - theme::ALBUM_ASIDE_W - theme::GAP_XL)
+            (w - 2.0 * theme::HANG
+                - theme::SCROLLBAR_LANE
+                - theme::ALBUM_ASIDE_LANE
+                - theme::GAP_XL)
                 .clamp(0.0, theme::LIST_MEASURE)
         };
-        let page = |w: f32| theme::ALBUM_ASIDE_W + theme::GAP_XL + list(w);
+        let page = |w: f32| theme::ALBUM_ASIDE_LANE + theme::GAP_XL + list(w);
 
         // At the shipped window the page hangs from both gutters exactly, the
         // scrollbar's declared lane included.
@@ -1178,6 +1284,97 @@ mod tests {
         assert!(
             shared.contains("empty: EMPTY"),
             "the shared playlist page hands no empty state to the subject page"
+        );
+    }
+
+    /// **The tail scrolls, the subject does not, and neither column is dead.**
+    ///
+    /// The aside was a plain container in a `Fill`-height row until
+    /// 2026-08-15, so everything below the fold in it — the edition selector,
+    /// `DETAILS` — was unreachable at short window heights: the body clip cut
+    /// it and no gesture scrolled it (the owner's *"the details on the album
+    /// view is not scrollable"*). The first fix scrolled the column whole,
+    /// which ran a scrollbar down the artwork: *"the image should not
+    /// scroll."* Both halves of that are asserted here, because neither fault
+    /// was visible in a screenshot of a tall window.
+    #[test]
+    fn the_asides_tail_scrolls_and_its_subject_does_not() {
+        let source = this_module();
+        let two_column = source
+            .split_once("if side_by_side {")
+            .expect("the desktop form")
+            .1;
+        let two_column = &two_column[..two_column
+            .find("\n    let main = column![")
+            .expect("the stacked form follows it")];
+        assert_eq!(
+            two_column.matches("scrollable(").count(),
+            2,
+            "the desktop form no longer scrolls exactly its two columns"
+        );
+        assert!(
+            two_column.contains("let tail_scroll = scrollable(")
+                && two_column.contains(".width(Length::Fixed(theme::ALBUM_ASIDE_LANE))")
+                && two_column.contains("theme::ALBUM_ASIDE_W + theme::ALBUM_ASIDE_INSET"),
+            "the aside's scroller no longer stands in its own declared lane \
+             with the tail at its own width inside it"
+        );
+        // **And the sleeve is outside it.** The scroller takes the tail and
+        // nothing above it; a scroller that contained `subject` would draw its
+        // bar down the artwork, which is what the owner rejected.
+        let scroller = two_column
+            .split_once("let tail_scroll = scrollable(")
+            .expect("the tail's scroller")
+            .1;
+        let scroller = &scroller[..scroller.find(";\n").expect("a binding ends")];
+        assert!(
+            scroller.contains("container(tail)") && !scroller.contains("subject"),
+            "the artwork is inside the aside's scroller again"
+        );
+        assert!(
+            two_column.contains("column![subject, tail_scroll]"),
+            "the cover no longer stands above the aside's scroller"
+        );
+        // **The lane is the aside, its inset and the bar** — the three terms
+        // that keep the sleeve at exactly 320 with nothing of a control's
+        // border lost to the clip.
+        const {
+            assert!(
+                theme::ALBUM_ASIDE_LANE
+                    == theme::ALBUM_ASIDE_W + theme::ALBUM_ASIDE_INSET + theme::SCROLLBAR_LANE
+            );
+        }
+
+        // **Why the fixed half is the cover *alone*.** The cover, `Play album`
+        // and the acts come to 424; the composed row gets the window less both
+        // bars, the strip and the place's two pads. At a 620 px window that is
+        // 361, so a fixed head of all three would put `Play album` past the
+        // body's edge with nothing able to scroll it — item 46's own defect,
+        // one block higher. The cover alone is 320 and clears it.
+        let composed_at = |window: f32| {
+            window
+                - theme::APP_BAR_H
+                - theme::BAR_CONTENT_H
+                - 1.0
+                - theme::TOP_BAR_H
+                - 2.0 * theme::HANG
+        };
+        let head_with_controls = theme::ALBUM_ASIDE_W
+            + theme::GAP_MD
+            + theme::TRANSPORT_HIT
+            + theme::GAP_MD
+            + theme::TRANSPORT_HIT;
+        assert!(
+            head_with_controls > composed_at(620.0),
+            "the cover, the commitment and the acts now fit a 620 px window \
+             ({head_with_controls} in {}), so the commitment could join the \
+             fixed half — restate this rather than deleting it",
+            composed_at(620.0)
+        );
+        assert!(
+            theme::ALBUM_ASIDE_W < composed_at(620.0),
+            "the cover alone no longer fits a 620 px window, so the desktop \
+             form has a height at which it cannot draw its own subject"
         );
     }
 }

@@ -434,13 +434,33 @@ pub enum Command {
         /// The order to walk in.
         traversal: Traversal,
     },
-    /// Set whether a naturally completed track restarts instead of advancing.
+    /// Set what a naturally completed run does when it runs out.
     /// Explicit [`Command::Next`], [`Command::Previous`], seeks past the end,
     /// and [`Command::JumpTo`] remain navigation and are never intercepted.
-    SetRepeatOne {
-        /// Whether natural completion repeats the current queue entry.
-        enabled: bool,
+    SetRepeat {
+        /// What natural completion does.
+        repeat: Repeat,
     },
+}
+
+/// **What happens when the music runs out** — the three states every player
+/// has, in the order the one control cycles through them.
+///
+/// baz shipped only [`Self::One`] and [`Self::Off`] until 2026-08-15, which
+/// made it the one player without *repeat the list* — the state most
+/// listeners mean by the word.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Repeat {
+    /// The run ends ([`Event::QueueEnded`]).
+    #[default]
+    Off,
+    /// The run starts again from the top of its traversal. A shuffled pass
+    /// re-walks the same drawn order, because that order *is* the run — a
+    /// fresh draw would be a different list, and nobody asked for one.
+    All,
+    /// The completed track plays again.
+    One,
 }
 
 /// A notification from the engine to its front end.
@@ -720,10 +740,10 @@ pub enum Event {
         /// The order now in effect.
         traversal: Traversal,
     },
-    /// The standing Repeat current track property changed.
-    RepeatOneChanged {
-        /// Whether natural completion now repeats the current queue entry.
-        enabled: bool,
+    /// The standing Repeat property changed.
+    RepeatChanged {
+        /// What natural completion now does.
+        repeat: Repeat,
     },
     /// A ReplayGain analysis pass has begun, and this is how much work it
     /// found (ADR-0015).
@@ -1278,8 +1298,12 @@ mod tests {
                     seed: 0x5EED_0F00_D1CE_1234,
                 },
             },
-            Command::SetRepeatOne { enabled: true },
-            Command::SetRepeatOne { enabled: false },
+            Command::SetRepeat {
+                repeat: Repeat::All,
+            },
+            Command::SetRepeat {
+                repeat: Repeat::Off,
+            },
             Command::SetReplayGain {
                 mode: ReplayGainMode::Off,
                 preamp_centidb: 0,
@@ -1374,8 +1398,12 @@ mod tests {
             Event::TraversalChanged {
                 traversal: Traversal::Shuffled { seed: 42 },
             },
-            Event::RepeatOneChanged { enabled: true },
-            Event::RepeatOneChanged { enabled: false },
+            Event::RepeatChanged {
+                repeat: Repeat::All,
+            },
+            Event::RepeatChanged {
+                repeat: Repeat::One,
+            },
             Event::QueueChanged {
                 len: 12,
                 position: Some(3),

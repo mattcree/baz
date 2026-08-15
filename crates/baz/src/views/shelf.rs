@@ -291,40 +291,11 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 /// `run` is `None` when nothing is pinned, and the layer is still built: see
 /// the note at the call site for why it may not come and go.
 fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Element<'_, Message> {
-    let room = theme::active();
-    let body: Element<'_, Message> = match run {
-        Some(run) => header_band(shelf, hang, run, block),
-        None => Space::new()
-            .width(Length::Fixed(block))
-            .height(Length::Fixed(0.0))
-            .into(),
-    };
-    container(body)
-        .width(Length::Fill)
-        // Only the band, never the wall: a layer as tall as the viewport would
-        // be a transparent sheet over every cover, and iced hands the topmost
-        // layer of a `stack` the pointer first.
-        .height(Length::Fixed(if run.is_some() {
-            hang.header_h()
-        } else {
-            0.0
-        }))
-        // The wall's scrollable centers the in-flow grid after reserving the
-        // right-hand rail + scrollbar lane. This layer spans the outer wall
-        // so its opaque field can cover sleeves, but centering its block in
-        // that *outer* width moved the sticky word right by half the 112 px
-        // reservation. Spend the identical reservation as right padding:
-        // full-width paint outside, the scrollable's content measure inside.
-        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
-        .align_x(alignment::Horizontal::Center)
-        .style(move |_theme| {
-            if run.is_some() {
-                theme::shelf_header_band(room)
-            } else {
-                iced::widget::container::Style::default()
-            }
-        })
-        .into()
+    pinned_band(
+        run.map(|run| header_band(shelf, hang, run, block)),
+        hang,
+        block,
+    )
 }
 
 /// A group header's line of type: caps, tracked, at the secondary ink.
@@ -367,17 +338,47 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 /// only one of them is a door, which is the difference between a header that
 /// names a subject and one that names a break.
 fn header_line(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, Message> {
-    let room = theme::active();
     let header = shelf.groups.get(run.group).map(|group| &group.header);
     let label = header.map_or_else(String::new, vm::GroupHeaderVm::label);
+    // The one door: a shelf keyed by artist names a person the product has a
+    // place for. Every other header — a letter, a decade, a bucket — names a
+    // break rather than a subject, and a break is not a place.
+    let door = match header {
+        Some(vm::GroupHeaderVm::Artist(artist)) => Some(Message::OpenArtist(vm::artist_id(artist))),
+        _ => None,
+    };
+    group_band(&label, door, hang, block)
+}
+
+/// **A group heading's band, drawn once for both collections.**
+///
+/// The Library's shelves and the saved-playlist wall's runs are the same
+/// object — a heading over a run of tiles, in the flow and pinned — and the
+/// owner's *"use the exact same pattern as the library please"* is a statement
+/// about this function rather than about two functions that agree. What a
+/// collection keeps is what its headings *say* and which of them is a door;
+/// the type, the band height, the block and the clip are here.
+///
+/// `door` is `Some` only where the heading names a place (ADR-0035: the
+/// ARTIST key's headers). **The type does not change when it is a door**:
+/// same face, size, tracking, ink, line box and height, gaining only
+/// [`theme::word_button`]'s ground under the pointer, on the word's own box
+/// rather than the band's width.
+pub(crate) fn group_band<'a>(
+    label: &str,
+    door: Option<Message>,
+    hang: Grid,
+    block: f32,
+) -> Element<'a, Message> {
+    let room = theme::active();
     let word = text(theme::tracked(&label.to_uppercase()))
         .size(theme::SIZE_EMPHASIS)
         .line_height(theme::LEADING_EMPHASIS)
         .font(theme::MEDIUM)
         .color(room.paper_dim)
         .wrapping(text::Wrapping::None);
-    let line: Element<'_, Message> = match header {
-        Some(vm::GroupHeaderVm::Artist(artist)) => button(
+    let line: Element<'a, Message> = match door {
+        Some(door) => button(
             container(word)
                 .height(Length::Fill)
                 .align_y(alignment::Vertical::Center),
@@ -385,9 +386,9 @@ fn header_line(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
         .height(Length::Fixed(hang.header_h()))
         .padding(0)
         .style(move |_theme, status| theme::word_button(room, room.wall, status))
-        .on_press(Message::OpenArtist(vm::artist_id(artist)))
+        .on_press(door)
         .into(),
-        _ => container(word)
+        None => container(word)
             .height(Length::Fixed(hang.header_h()))
             .align_y(alignment::Vertical::Center)
             .into(),
@@ -396,6 +397,49 @@ fn header_line(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
         .width(Length::Fixed(block))
         .height(Length::Fixed(hang.header_h()))
         .clip(true)
+        .into()
+}
+
+/// **The pinned layer, drawn once for both collections** — the band a
+/// collection paints at the top of the viewport while its run is the one on
+/// screen, and the empty layer it paints when nothing is pinned.
+///
+/// `band` is `None` when nothing is pinned, and the layer is still built:
+/// see [`pinned_header`]'s note for why it may not come and go from the tree.
+pub(crate) fn pinned_band<'a>(
+    band: Option<Element<'a, Message>>,
+    hang: Grid,
+    block: f32,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let pinned = band.is_some();
+    let body: Element<'a, Message> = band.unwrap_or_else(|| {
+        Space::new()
+            .width(Length::Fixed(block))
+            .height(Length::Fixed(0.0))
+            .into()
+    });
+    container(body)
+        .width(Length::Fill)
+        // Only the band, never the wall: a layer as tall as the viewport would
+        // be a transparent sheet over every cover, and iced hands the topmost
+        // layer of a `stack` the pointer first.
+        .height(Length::Fixed(if pinned { hang.header_h() } else { 0.0 }))
+        // The wall's scrollable centers the in-flow grid after reserving the
+        // right-hand rail + scrollbar lane. This layer spans the outer wall
+        // so its opaque field can cover sleeves, but centering its block in
+        // that *outer* width moved the sticky word right by half the 112 px
+        // reservation. Spend the identical reservation as right padding:
+        // full-width paint outside, the scrollable's content measure inside.
+        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
+        .align_x(alignment::Horizontal::Center)
+        .style(move |_theme| {
+            if pinned {
+                theme::shelf_header_band(room)
+            } else {
+                iced::widget::container::Style::default()
+            }
+        })
         .into()
 }
 
@@ -1245,8 +1289,8 @@ mod tests {
         .expect("this module's own source")
         .replace("\r\n", "\n");
         let pinned = source
-            .split_once("fn pinned_header(")
-            .expect("the pinned header exists")
+            .split_once("pub(crate) fn pinned_band(")
+            .expect("the shared pinned band exists")
             .1;
         let pinned = &pinned[..pinned.find("\n}\n").expect("a function ends")];
         assert!(
@@ -1254,6 +1298,22 @@ mod tests {
                 && pinned.contains(".width(Length::Fill)")
                 && pinned.contains(".align_x(alignment::Horizontal::Center)"),
             "the full-width sticky field no longer centers in the scrollable's content measure"
+        );
+        // **And there is one band, not two.** The saved-playlist wall groups
+        // with this module's runs (the owner's *"use the exact same pattern as
+        // the library please"*), so it must reach the pinned layer through the
+        // same function — a second copy would be a second alignment to keep in
+        // step, which is precisely the drift this test exists to catch.
+        let playlists = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/playlists.rs"),
+        )
+        .expect("the saved-playlist collection's source")
+        .replace("\r\n", "\n");
+        assert!(
+            playlists.contains("shelf::pinned_band(")
+                && playlists.contains("shelf::group_band(")
+                && !playlists.contains("theme::shelf_header_band("),
+            "the playlist wall grew its own heading band"
         );
     }
 

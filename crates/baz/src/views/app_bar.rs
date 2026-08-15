@@ -46,9 +46,9 @@
 //! every width and in every place:
 //!
 //! ```text
-//!   ▧  ‹ › [ Search library ]  ·········  ▤ ▤ ▤ ▤    ⚙    ─  □  ✕
-//!   1   2          3                4          5       6       7
-//!  mark history   search           handle      view    app    window
+//!   ▧ ‹›  [ Search library ]  ··········  ▤▤▤▤   🔔⚙   ─□✕
+//!   1  2           3                4        5      6     7
+//!  mark hist     search            handle   view   app   window
 //! ```
 //!
 //! 1. **The application's mark.** What this window *is* — the one thing a title
@@ -65,7 +65,10 @@
 //! 5. **The view** — controls that change *how the place you are in is shown*.
 //!    The display options today.
 //! 6. **The application** — doors to what the application holds rather than
-//!    what a place does. The gear today.
+//!    what a place does: the health bell and the gear, one cluster on
+//!    [`theme::CONTROL_CLUSTER_GAP`]. They stood a `GAP_LG` apart — the seam
+//!    *between* zones, spent inside one — until the owner read the bar:
+//!    *"the top bar has weird spacing as well for icons/controls."*
 //! 7. **The window** — controls that act on the window as an object of the
 //!    desktop. Minimise, maximise, close, in that order, always.
 //!
@@ -197,13 +200,21 @@ pub(crate) fn view(
     let name = mark();
     let history = history(can_back, can_forward, ink);
     let search = crate::views::search::well(shelf);
-    let furniture = row![
-        marks(density, visualization),
-        crate::views::status::bell(health),
-        gear(ink),
-    ]
-    .spacing(theme::GAP_LG)
-    .align_y(iced::Alignment::Center);
+    // **Two zones, two seams.** The display options are the *view's*
+    // (ADR-0040 §2 zone 3) and the bell and the gear are the *application's*
+    // (zone 4), so the pair is one cluster on
+    // [`theme::CONTROL_CLUSTER_GAP`] and the seam to the marks is the
+    // between-zones [`theme::GAP_LG`]. Until 2026-08-15 all three sat at 16 —
+    // the between-clusters number spent inside a cluster, which is why the
+    // bell and the gear read as two marks adrift beside three tight window
+    // buttons: the owner's *"the top bar has weird spacing as well for
+    // icons/controls"*.
+    let application = row![crate::views::status::bell(health), gear(ink)]
+        .spacing(theme::CONTROL_CLUSTER_GAP)
+        .align_y(iced::Alignment::Center);
+    let furniture = row![marks(density, visualization), application]
+        .spacing(theme::GAP_LG)
+        .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
     // note on `owns_chrome` above.
     //
@@ -301,7 +312,7 @@ fn history(can_back: bool, can_forward: bool, ink: Ink) -> Element<'static, Mess
             ink,
         ),
     ]
-    .spacing(theme::GAP_XS)
+    .spacing(theme::CONTROL_CLUSTER_GAP)
     .align_y(iced::Alignment::Center)
     .into()
 }
@@ -484,7 +495,7 @@ fn window_controls(maximized: bool, ink: Ink) -> Element<'static, Message> {
         window_button(WindowControl::Maximise, maximized, ink),
         window_button(WindowControl::Close, maximized, ink),
     ]
-    .spacing(theme::GAP_XS)
+    .spacing(theme::CONTROL_CLUSTER_GAP)
     .align_y(iced::Alignment::Center);
     container(line)
         .width(Length::Fixed(theme::APP_BAR_BUTTONS_W))
@@ -882,19 +893,50 @@ mod tests {
             "a second arrangement has come back: one layout everywhere is the \
              whole of what the owner asked for by *consistent*"
         );
-        // Zone 4 before zone 5 inside the right cluster — the view, then the
+        // Zone 5 before zone 6 inside the right cluster — the view, then the
         // application. Scope widens rightward, and that is the rule a future
         // tenant is placed by.
+        let application = code
+            .split_once("let application = row![")
+            .expect("the application cluster")
+            .1;
+        let application = &application[..application.find(";\n").expect("a binding ends")];
+        assert!(
+            application.contains("crate::views::status::bell(health)")
+                && application.contains("gear(ink)")
+                && application.contains("theme::CONTROL_CLUSTER_GAP"),
+            "the application's two doors are no longer one cluster on the \
+             cluster seam"
+        );
         let furniture = code
             .split_once("let furniture = row![")
             .expect("the view/application cluster")
             .1;
+        let furniture = &furniture[..furniture.find(";\n").expect("a binding ends")];
         assert!(
             furniture.contains("marks(density, visualization)")
-                && furniture.contains("crate::views::status::bell(health)")
-                && furniture.contains("gear(ink)"),
-            "the display options, application health, and Settings no longer \
-             stand in the scope-widening order the bar promises"
+                && furniture.contains("application")
+                && furniture.contains("theme::GAP_LG"),
+            "the display options and the application's doors no longer stand \
+             in the scope-widening order the bar promises, one zone seam apart"
+        );
+
+        // **Two seams in this bar and no third.** The owner's *"the top bar
+        // has weird spacing as well for icons/controls"* was three rhythms for
+        // one kind of object: `GAP_XS` inside the history pair and the window
+        // buttons, `GAP_LG` between the bell and the gear. Every seam between
+        // controls is now the cluster's 8 or the zone's 16 — a detent run
+        // (`density_marks`, `visualizer::marks`) touches, because it is one
+        // control with several states rather than a cluster of controls.
+        assert!(
+            !code.contains("spacing(theme::GAP_XS)"),
+            "a third control rhythm is back in the app bar"
+        );
+        assert_eq!(
+            code.matches("spacing(theme::CONTROL_CLUSTER_GAP)").count(),
+            3,
+            "the bar's three clusters — history, the application's doors, the \
+             window buttons — no longer all stand on the cluster seam"
         );
     }
 }

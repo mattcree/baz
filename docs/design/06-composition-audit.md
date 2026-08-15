@@ -737,6 +737,47 @@ Said plainly, because the list above is long and the frame is not a rout.
 
 ---
 
+## 11. The 2026-08-15 consistency pass
+
+The owner, closing a run of nine short asks: *"Can we do a pass for consistency
+of design across the app."* This section is that pass, and it is written here
+rather than in a new document because this is the document that already asks
+where things sit relative to each other.
+
+**It is an inventory with a verdict per line, not a list of differences.** An
+audit that only says *these two disagree* hands the decision back, and half of
+what follows was decided by building it.
+
+### 11.1 What the pass found, and what it did about it
+
+| divergence | verdict | where it landed |
+|---|---|---|
+| Place strips: `top_bar` (Library) names no place; `place_header_with` (Settings, New playlist) names one; `place_header_led` (Artist, the two subject pages, Playlists) leads with a subject | **A collection's strip carries its arrangement, not its name.** The lit lane destination and the breadcrumb already name every place twice. | Playlists dropped the word (item 43). Settings and New playlist keep theirs: they carry no arrangement, so an unnamed strip there would be an empty band. |
+| The strip's `note` slot: documented for *"a statement about the place"*, used for tallies on Playlists (`13 playlists`) and Artist (`6 records · 84 tracks`) | **A tally is not a statement about a place.** | Playlists' went (item 43). **Artist's stands**, and the line is now stated rather than assumed: a record count is a fact about *that artist*, which is the page's subject, where a count of the tiles in front of you is a fact about your own scroll position. |
+| Row controls drawn three ways: `page::icon_slot` (album, playlist, queue, the Vibe preview), `word_button` (New playlist's `Up`/`Down`/`Remove`), bare text | **One anatomy for one act.** | `views::new_playlist::draft_row` — both creation routes now draw the shared track row with the favourite and icon slots (item 50). |
+| Reserved empty slots that read as holes: `SIGNAL_W` 96 between `Shuffle` and the mute; `APP_BAR_MARKS_W` 160 between the well and the bell | **Reserve, but at a cluster's edge rather than inside it.** A slot that abuts a `Length::Fill` is invisible while empty; one between two live controls is a hole. | The bottom bar's moved to the cluster's leading edge (item 47). The app bar's already abuts the drag gap and was left alone — with the reason written down, which it had not been. |
+| Control seams: 0 (detent runs), `GAP_XS` 4 (history, window buttons), `GAP_SM` 8 (transport, volume), `GAP_LG` 16 (bell↔gear, and between clusters) | **Two numbers and one exception**: 8 inside a cluster, 16 between clusters, and a detent run touches because it is one control with several states. | `theme::CONTROL_CLUSTER_GAP`, applied to both bars (item 47). |
+| Two collections, two layouts: the Library grouped with `Shelves`, sticky headings and a rail; Playlists a flat grid with a rail that indexed groups it did not draw | **One collection scaffold means one layout engine.** | `views::shelf::group_band` / `pinned_band` extracted and shared; `playlists::Wall` feeds the same `Shelves` (item 44). |
+| The accent (`room.lamp`) on a Vibe analysis failure | **The accent means playback truth.** A failed analysis is not playback truth; it was riding into that file on `views::home`'s permit for the `CONTINUE` needle. | The room's `alert` ink (item 50). `theme::the_lamp_is_named_only_where_playback_truth_is_drawn` now holds without that permit being stretched. |
+| Vocabulary: `Make a mix` / `Create mix` / `Another version` / `Make a vibe playlist` for one act | **One word per act.** | The place makes a *playlist*; the Vibe route *composes* (item 50), asserted by a test that strips comments so the retired words can still be written down. |
+
+### 11.2 What it deliberately did not close
+
+- **The bottom bar names no album.** Three lanes, all reserved, and the third
+  is the continuation. Adding a fourth is a composition change on the one
+  surface that may not move; the owner's ask (item 49) is answered on its
+  other reading — the artist line, which was empty for records with no *named*
+  album artist — and the album itself waits for him to ask for it directly.
+- **`APP_BAR_MARKS_W` still reserves 160 px in places with no display
+  options.** See the table: collapsing it would slide the bar's right cluster
+  as you navigate.
+- **`place_header_with` vs `place_header_led`.** Two functions, one geometry;
+  the second takes an arbitrary lead. They could be one function with an
+  `Option`, and that is a refactor with no visible consequence — which is why
+  it is recorded here and not done.
+
+---
+
 ## Appendix — reproducing this
 
 ```sh

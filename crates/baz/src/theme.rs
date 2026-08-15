@@ -1785,6 +1785,131 @@ pub fn tracked(text: &str) -> String {
 /// Corner radius for controls (buttons, inputs, wells, steppers, the popover).
 /// **4**, down from 6.
 pub const RADIUS_CTRL: f32 = 4.0;
+
+// ---------------------------------------------------------------------------
+// The contour — the shape a generated playlist is asked to follow
+// ---------------------------------------------------------------------------
+
+/// The contour's own height (logical px) — **140**.
+///
+/// Tall enough that a line's *shape* is legible rather than a wobble — the
+/// four levels between the collection's calm end and its loud one are 35 px
+/// apart, which is a hand's resolution rather than a mouse's — and short
+/// enough that the control it belongs to, `Compose`, is still on screen at
+/// the ordinary window height. It was 176 for one build and pushed the one
+/// press of the whole flow below the fold, which is the fault the flow was
+/// rebuilt to end.
+pub const CONTOUR_H: f32 = 140.0;
+/// The top of the contour's up axis, in the collection-relative units
+/// `baz_vibe` scores against: **2**, the loudest end of the analysed library.
+/// The bottom is its negative.
+pub const CONTOUR_TOP: f32 = 2.0;
+/// Edge of a draggable point on the line — [`GAP_MD`] 12, which is smaller
+/// than the product's control floor **and is not a control box**: the grab
+/// radius below is what the hand aims at, and it is well over the floor.
+pub const CONTOUR_POINT: f32 = GAP_MD;
+/// How near a point the pointer must come to take hold of it — **20**, a
+/// radius, so the target is a 40 px circle: [`TRANSPORT_HIT`], stated as the
+/// distance it really is rather than as a box that would overlap its
+/// neighbours.
+pub const CONTOUR_GRAB: f32 = TRANSPORT_HIT / 2.0;
+/// The line's own weight, at the top of its band — 2, the needle's.
+pub const CONTOUR_LINE: f32 = NEEDLE_H;
+/// The width of one drawn column of the band. Four is the lattice's own step
+/// and is below the eye's ability to see a stair in a 176 px picture; it also
+/// bounds the drawing at ~150 quads for a full-width control.
+pub const CONTOUR_STEP: f32 = GAP_XS;
+/// Edge of one composed track's dot on the contour — [`GAP_SM`] 8.
+pub const CONTOUR_RESULT: f32 = GAP_SM;
+/// …and [`GAP_MD`] 12 for the one whose row the pointer is on.
+pub const CONTOUR_RESULT_LIT: f32 = GAP_MD;
+/// The thread between consecutive tracks: the shape the playlist *has*, as
+/// distinct from the one it was asked for. One pixel — it is a reading, not a
+/// second request.
+pub const CONTOUR_THREAD: f32 = 1.0;
+/// **The width the New playlist place gives its one commitment.** The record
+/// page's commitment is the aside's own [`ALBUM_ASIDE_W`]; this page has no
+/// aside, so the control states a width rather than filling a row and
+/// becoming a banner.
+pub const COMMITMENT_W: f32 = 200.0;
+/// The lane beside the contour that names its up axis — wide enough for
+/// `louder` and `calmer` at the caption size, and spent on both sides of the
+/// box so the line's own width is unchanged by having labels at all.
+pub const CONTOUR_AXIS_W: f32 = 48.0;
+/// A preset's thumbnail: the same widget, small, with its handles off, so the
+/// shape is its own label.
+pub const CONTOUR_THUMB_H: f32 = 44.0;
+/// …and the width its press target takes.
+pub const CONTOUR_THUMB_W: f32 = 104.0;
+
+/// The recess a contour is drawn in — the same hole in the surface a ghost
+/// sleeve and a text well stand in, so a control that draws its own picture
+/// is still one of this room's wells.
+#[must_use]
+pub fn contour_ground(p: &Palette) -> Color {
+    p.recess
+}
+
+/// **The library's own distribution**, band by band. It is deliberately the
+/// quietest ink on the control — quieter than the axis — because it is
+/// context rather than a request: the eye should find the line first and the
+/// mass behind it second.
+#[must_use]
+pub fn contour_library(p: &Palette, density: f32) -> Color {
+    alpha(p.paper_muted, 0.06 + 0.34 * density.clamp(0.0, 1.0))
+}
+
+/// The middle of the collection, drawn once so the box has a scale in it.
+#[must_use]
+pub fn contour_axis(p: &Palette) -> Color {
+    p.hairline(p.recess)
+}
+
+/// The filled band under the line: the shape as a mass, at the weight the
+/// spectrum's own bars carry.
+#[must_use]
+pub fn contour_band(p: &Palette) -> Color {
+    alpha(p.paper_faint, 0.30)
+}
+
+/// The line itself.
+#[must_use]
+pub fn contour_line(p: &Palette) -> Color {
+    p.paper_dim
+}
+
+/// A point on the line, brighter under the hand.
+#[must_use]
+pub fn contour_point(p: &Palette, lit: bool) -> Color {
+    if lit { p.paper } else { p.paper_dim }
+}
+
+/// **The distance between what a position asked for and what it got**, drawn
+/// as a tick from the dot to the line. Quiet paper rather than the accent:
+/// the reading is a *length*, and it must not depend on telling two hues
+/// apart.
+#[must_use]
+pub fn contour_miss(p: &Palette) -> Color {
+    alpha(p.paper_muted, 0.55)
+}
+
+/// The thread between the composed tracks — the same accent as the dots it
+/// joins, quieter, because it is drawn *between* facts rather than on one.
+#[must_use]
+pub fn contour_thread(p: &Palette) -> Color {
+    alpha(p.lamp, 0.35)
+}
+
+/// **One composed track, where it actually landed.** This is the one place on
+/// the control that carries the accent, and it is not the accent's usual
+/// meaning: it is the *result* of a request rather than playback truth. It is
+/// admitted for the same reason the application's mark is (ADR-0040 §2) — a
+/// stated exception with a boundary — because the whole argument for drawing
+/// the result over the request is that the two must not read as one thing.
+#[must_use]
+pub fn contour_result(p: &Palette) -> Color {
+    alpha(p.lamp, 0.85)
+}
 /// Corner radius of a segment inside the segmented control, a checkbox, a
 /// queue or track row — one step tighter than the well enclosing it, so the
 /// raised segment nests rather than straining against the edge. **3**, down
@@ -1995,6 +2120,16 @@ pub const fn insert_line_ink(p: &Palette) -> Color {
 /// square, so they rasterize at any size and the bump changes strokes 2.2 →
 /// 2.8–3.0 px, which is the whole of the chunky reading.
 pub const ICON_PX: f32 = 20.0;
+/// **Edge of the `+` on a ghost tile** — the saved-playlist wall's create
+/// affordance (`crate::views::playlists`).
+///
+/// It is [`ICON_PX`] × the sheet's supersample, which is the sprite's own
+/// raster edge (`crate::icon::RASTER_PX`, pinned there by a test): a mark in a
+/// 200–320 px sleeve wants to be bigger than a control glyph, and this is the
+/// largest size the committed raster draws **1:1** rather than as an upscale.
+/// A ghost tile's whole job is to look like the thing it will become, and a
+/// soft `+` in the middle of a wall of sharp covers would not.
+pub const GHOST_MARK_PX: f32 = ICON_PX * 2.0;
 /// Edge of a transport button's square hit area. Comfortably above the
 /// glyph so the pointer aims at a target rather than at a shape, and fixed
 /// in both axes so play and pause occupy identically many pixels.
@@ -2003,6 +2138,29 @@ pub const ICON_PX: f32 = 20.0;
 /// lattice — and the product's one control height (law L7) that every other
 /// hit box derives from.
 pub const TRANSPORT_HIT: f32 = 40.0;
+/// **The seam inside a cluster of controls** — [`GAP_SM`] 8, everywhere in
+/// both bars.
+///
+/// The product has exactly two seams between controls and this is the tighter
+/// one: **8 inside a cluster, [`GAP_LG`] 16 between clusters.** A cluster is a
+/// run of controls that act on one subject — the transport's three glyphs, the
+/// mute and its fader, `Repeat` and `Shuffle`, the two history arrows, the
+/// bell and the gear, the three window buttons — and the rule is what makes a
+/// bar read as groups rather than as a queue of boxes at arbitrary distances.
+///
+/// It is declared because the app bar had **three** rhythms for one kind of
+/// object and the owner could see it: *"the top bar has weird spacing as well
+/// for icons/controls."* The history pair and the window buttons stood at
+/// `GAP_XS` 4, the bell and the gear at `GAP_LG` 16 — the *between*-cluster
+/// number, spent inside one cluster — while the bottom bar had been on 8 and
+/// 16 all along. This token is that bar's number, given a name and applied to
+/// the other one.
+///
+/// **A detent run is not a cluster and its boxes touch**: the density steps
+/// and the visualizer's marks are one control with several states
+/// (`views::density_marks`, `visualizer::marks`), so a gap inside them would
+/// claim they were several controls.
+pub const CONTROL_CLUSTER_GAP: f32 = GAP_SM;
 /// Opacity of a glyph on a live control **at rest**.
 ///
 /// **0.57, where it was 1.00**, and the number is measured rather than chosen
@@ -2262,18 +2420,18 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_H
     + LABEL_H
     + crate::shelf::Density::Dense.hang();
 
-/// **The shortest window baz will let you make**, horizontally — **860**.
+/// **The shortest window baz will let you make**, horizontally — **864**.
 ///
 /// Two strips own floors and the window has to clear both:
 ///
 /// - the place strip needs [`TOP_BAR_FLOOR`] 600 with the lane's collapsed
 ///   rail 64 beside it, 664 in all; and
 /// - the **app bar spans the window** rather than a strip, so its floor is
-///   the window's own — [`APP_BAR_LINE`] 850 plus one [`GAP_SM`] of air,
+///   the window's own — [`APP_BAR_LINE`] 854 plus one [`GAP_SM`] of air,
 ///   which is the wider need.
 ///
 /// The expression takes the wider of those two, rounds it up onto the
-/// 4 px lattice, and names the result: 858 → **860**. `app.rs`'s `min_size`
+/// 4 px lattice, and names the result: 862 → **864**. `app.rs`'s `min_size`
 /// reads this, and the app bar's budget test asserts both claims against it
 /// rather than trusting this prose.
 ///
@@ -2512,23 +2670,30 @@ pub const APP_MARK_PX: f32 = SIDEBAR_GLYPH_PX;
 pub const APP_BAR_NAME_W: f32 = APP_MARK_PX;
 
 /// The app bar's **place history** (logical px) — two [`TRANSPORT_HIT`] boxes
-/// on a [`GAP_XS`] rhythm, **84**.
+/// on the [`CONTROL_CLUSTER_GAP`] rhythm, **88**.
 ///
 /// Declared for [`APP_BAR_BUTTONS_W`]'s reason, and declared *now* because it
 /// was not: the Back/Forward pair shipped into this bar on 2026-08-13 and
 /// never entered [`APP_BAR_LINE`]. See that constant for what the omission
 /// cost.
-pub const APP_BAR_HISTORY_W: f32 = 2.0 * TRANSPORT_HIT + GAP_XS;
+pub const APP_BAR_HISTORY_W: f32 = 2.0 * TRANSPORT_HIT + CONTROL_CLUSTER_GAP;
 
 /// The app bar's **trailing furniture** (logical px) — the display options'
-/// reserved slot, the health bell and the gear, on the row's own [`GAP_LG`]
-/// rhythm: 160 + 16 + 40 + 16 + 40 = **272**.
+/// reserved slot, then the bell and the gear as one cluster:
+/// 160 + 16 + (40 + 8 + 40) = **264**.
+///
+/// **The two seams are different on purpose** and they used not to be. The
+/// display options are the *view's* (ADR-0040 §2 zone 3) and the bell and gear
+/// are the *application's* (zone 4), so the seam between the zones is
+/// [`GAP_LG`] and the one inside zone 4 is [`CONTROL_CLUSTER_GAP`]. Spending
+/// the between-clusters number inside a cluster is what made the bell and the
+/// gear read as two unrelated marks adrift beside three tight window buttons.
 ///
 /// One constant because [`crate::views::app_bar`] builds them as one nested
 /// row, and a budget that enumerated two of the three was exactly the failure
 /// [`APP_BAR_LINE`] records.
 pub const APP_BAR_FURNITURE_W: f32 =
-    APP_BAR_MARKS_W + GAP_LG + TRANSPORT_HIT + GAP_LG + TRANSPORT_HIT;
+    APP_BAR_MARKS_W + GAP_LG + TRANSPORT_HIT + CONTROL_CLUSTER_GAP + TRANSPORT_HIT;
 
 /// **The app bar's one line at its widest** (logical px) — the budget L9
 /// demands this bar state, summed with the fill at nothing: the leading
@@ -2590,14 +2755,15 @@ pub const APP_BAR_LINE: f32 = APP_BAR_EDGE
     + APP_BAR_HANG_R;
 
 /// The app bar's reserved slot for the **window controls** (logical px) —
-/// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **128**.
+/// three [`TRANSPORT_HIT`] boxes on the [`CONTROL_CLUSTER_GAP`] rhythm,
+/// **136**.
 ///
 /// The three are drawn unconditionally and on the right, at every width and
 /// on every platform (ADR-0040 §4, the owner's decision). The width is still
 /// *declared* rather than left to the row, for [`APP_BAR_MARKS_W`]'s reason:
 /// L9 wants every tenant of a strip to state what it takes, and the budget the
 /// law adds up has to be the geometry actually drawn.
-pub const APP_BAR_BUTTONS_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * GAP_XS;
+pub const APP_BAR_BUTTONS_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * CONTROL_CLUSTER_GAP;
 
 /// The Library arrangement strip's resolved height. Search now lives in the
 /// app bar, so the strip has one line at every supported width; the arguments
@@ -2655,8 +2821,30 @@ pub const SIGNAL_W: f32 = 96.0;
 /// **The bottom bar's trailing cluster, summed** (logical px) — **636**.
 ///
 /// The whole of `bottom_bar::view`'s `controls` row on its [`GAP_LG`] rhythm:
-/// the `elapsed / total` readout, the transport, `Repeat`, `Shuffle`, and the
-/// status group (signal path, then the volume block on a [`GAP_SM`] seam).
+/// the signal path's reserved slot, the `elapsed / total` readout, the
+/// transport, the `Repeat`/`Shuffle` pair as one cluster, and the volume
+/// block.
+///
+/// # The order changed and the sum did not
+///
+/// The signal slot used to stand **between** `Shuffle` and the mute button,
+/// and it is [`SIGNAL_W`] 96 wide whether or not the chain has anything to
+/// report — which on an ordinary direct path is a 96 px hole through the
+/// middle of the cluster. The owner: *"there seems to be a gap between
+/// controls and the mute button."*
+///
+/// **The reservation is right and the position was wrong.** A note that
+/// appeared mid-run and pushed the volume sideways would be movement on the
+/// one surface ADR-0020 forbids it on, so the slot must hold its width. What
+/// it must not do is hold it *inside* the run of live controls: at the
+/// cluster's leading edge it abuts the identity zone's `Length::Fill`, which
+/// is empty space already, so an empty slot is invisible and a filled one
+/// still moves nothing.
+///
+/// The arithmetic is unchanged to the pixel — the seam the signal path gave
+/// back to the volume ([`GAP_SM`]) is exactly what pairing `Repeat` with
+/// `Shuffle` on [`CONTROL_CLUSTER_GAP`] saves — so [`bar_title_lane_w`] and
+/// every figure derived from it stand as they were.
 ///
 /// Declared for the same reason the app bar's tenants are: something has to
 /// know how much of the bar is *not* the sounding track's name. Here that
@@ -2669,17 +2857,16 @@ pub const SIGNAL_W: f32 = 96.0;
 /// zone's clip takes the difference, exactly as it did before — so the fitted
 /// ellipsis is a floor on the failure, not a promise that clipping can never
 /// happen.
-pub const BAR_TRAILING_W: f32 = 2.0 * STAMP_W
+pub const BAR_TRAILING_W: f32 = SIGNAL_W
+    + GAP_LG
+    + 2.0 * STAMP_W
     + GAP_XS
     + GAP_LG
     + TRANSPORT_W
     + GAP_LG
-    + TRANSPORT_HIT
+    + 2.0 * TRANSPORT_HIT
+    + CONTROL_CLUSTER_GAP
     + GAP_LG
-    + TRANSPORT_HIT
-    + GAP_LG
-    + SIGNAL_W
-    + GAP_SM
     + VOLUME_BLOCK_W;
 
 /// **The measure left to the sounding track's name** at a window width — what
@@ -4083,6 +4270,33 @@ pub const ALBUM_SLEEVE: f32 = ART_MAX;
 /// It is the sleeve's own edge, so the column introduces no x-position the
 /// artwork does not already establish (law L5).
 pub const ALBUM_ASIDE_W: f32 = ALBUM_SLEEVE;
+
+/// **The lane the record page's left column stands in** — the aside, plus the
+/// bar its own scroller draws.
+///
+/// The aside became a scroller on 2026-08-15 (the owner's *"the details on the
+/// album view is not scrollable"*), and iced clips a scrollable's content to
+/// its bounds **less** the bar's lane rather than painting the bar over the
+/// content. Without the extra lane the first render cut nine pixels off the
+/// right edge of the sleeve and of `Play album` — the column would have paid
+/// for its own scrollbar out of the artwork.
+///
+/// So the lane is declared and the *measure beside it* yields instead, which
+/// costs nothing at any width where the list has reached [`LIST_MEASURE`] and
+/// costs the narrowest two-column window 10 px of track title. The sleeve is
+/// the one thing on this page that may not move: it is where law L5's single
+/// x-edge comes from.
+pub const ALBUM_ASIDE_LANE: f32 = ALBUM_ASIDE_W + ALBUM_ASIDE_INSET + SCROLLBAR_LANE;
+
+/// The air between the aside's blocks and the clip its own scroller draws at.
+///
+/// **Two, and it is a rendering fact rather than a taste.** A scrollable clips
+/// at its viewport's edge, and a control's outermost border pixel lands *on*
+/// that edge: with the blocks flush against it, `Play album` — the record
+/// page's one commitment — drew three sides of its rounded border and lost the
+/// fourth. The sleeve keeps its exact [`ALBUM_ASIDE_W`], which law L5 requires;
+/// the inset is spent inside the lane around it.
+pub const ALBUM_ASIDE_INSET: f32 = 2.0;
 
 /// Window width below which the record's page stacks into one column
 /// (logical px) — **760**.
@@ -8251,7 +8465,7 @@ mod tests {
         /// The same, for the display options' slot — past the gear, the bell
         /// and both of their seams.
         const MARKS_FROM_RIGHT: f32 =
-            GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG + TRANSPORT_HIT + GAP_LG;
+            GEAR_FROM_RIGHT + TRANSPORT_HIT + CONTROL_CLUSTER_GAP + TRANSPORT_HIT + GAP_LG;
 
         // **The walk.** `app_bar::view`'s one `row!` is
         // `[name, history, search, gap, furniture]`, plus `buttons` where baz
@@ -8293,19 +8507,27 @@ mod tests {
              trailing edge exactly as they were before 2026-08-14"
         );
         assert!(
-            bar.contains(
-                "row![\n        marks(density, visualization),\n        \
-                 crate::views::status::bell(health),\n        gear(ink),\n    ]"
-            ),
+            bar.contains("let application = row![crate::views::status::bell(health), gear(ink)]")
+                && bar.contains("let furniture = row![marks(density, visualization), application]"),
             "the trailing furniture's tenants changed; `APP_BAR_FURNITURE_W` is \
              what the budget spends on them"
         );
+        // …and on which seams. The furniture is two zones, so it holds one
+        // `GAP_LG` and one `CONTROL_CLUSTER_GAP`, and the budget above is that
+        // sum. A row that spent the same number twice would be 8 px wider or
+        // narrower than the line says, which is the class of error
+        // `APP_BAR_LINE`'s own history records.
+        assert!(
+            bar.contains(".spacing(theme::CONTROL_CLUSTER_GAP)\n        .align_y")
+                && bar.contains(".spacing(theme::GAP_LG)\n        .align_y"),
+            "the furniture's two seams are no longer the cluster's and the zone's"
+        );
 
         const { assert!(APP_BAR_MARKS_W == 160.0) }
-        const { assert!(APP_BAR_BUTTONS_W == 128.0) }
-        const { assert!(APP_BAR_HISTORY_W == 84.0) }
-        const { assert!(APP_BAR_FURNITURE_W == 272.0) }
-        const { assert!(APP_BAR_LINE == 850.0) }
+        const { assert!(APP_BAR_BUTTONS_W == 136.0) }
+        const { assert!(APP_BAR_HISTORY_W == 88.0) }
+        const { assert!(APP_BAR_FURNITURE_W == 264.0) }
+        const { assert!(APP_BAR_LINE == 854.0) }
         assert!(
             (walked - APP_BAR_LINE).abs() < f32::EPSILON,
             "the drawn line walks to {walked}, the declared budget is {APP_BAR_LINE}"
@@ -8329,7 +8551,7 @@ mod tests {
         // is no frame in which they appear and nothing can be seen to move.
         // Holding their 160 px open would be 160 px of dead gutter in every
         // build that ships.
-        const { assert!(GEAR_FROM_RIGHT == 150.0) }
+        const { assert!(GEAR_FROM_RIGHT == 158.0) }
         // 262, not 206: the bell stands between the marks and the gear, and
         // the figure that omitted it was the same omission `APP_BAR_LINE`
         // records — read off the budget rather than off the row.
@@ -8456,15 +8678,31 @@ mod tests {
     /// - **a glyph beside a word is not icon-only** — the word is the name
     ///   (`views::page`'s `commitment`, which is `Play album` on a record and
     ///   `Play` on a made list and was two functions until *one page, two
-    ///   subjects*; the strip's `play_all`; the panel's `ghost_row`, whose plus
-    ///   stands in the sleeve slot beside the words `New playlist`; and the
-    ///   Home place's `resume_line`, whose triangle leads the word `Resume`);
+    ///   subjects*, and `commitment_marked`, which is the same control with a
+    ///   mark of its own for a page whose commitment is not *play*; the
+    ///   strip's `play_all`; the panel's `ghost_row` and the
+    ///   saved-playlist wall's `ghost_tile`, whose plus stands in the sleeve
+    ///   slot over the words `New Playlist`; and the Home place's
+    ///   `resume_line`, whose triangle leads the word `Resume`);
+    /// - **a sleeve is not a control** — `playlist_sleeve_marked` draws the
+    ///   built-in list's heart *as the picture of the list*, in the slot a
+    ///   collage of records would otherwise fill, and the row or tile around
+    ///   it is the control and carries the list's name;
     /// - **the well's magnifier is not a control** — the well is the
     ///   control; the glyph is its label (doc 10 §4.1), and the well itself
     ///   is reachable by every printable key.
     #[test]
     fn every_icon_only_control_carries_a_tooltip() {
-        const EXEMPT: [&str; 5] = ["commitment", "play_all", "well", "ghost_row", "resume_line"];
+        const EXEMPT: [&str; 8] = [
+            "commitment",
+            "commitment_marked",
+            "play_all",
+            "well",
+            "ghost_row",
+            "ghost_tile",
+            "playlist_sleeve_marked",
+            "resume_line",
+        ];
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut bare: Vec<String> = Vec::new();
         let mut checked = 0_u32;

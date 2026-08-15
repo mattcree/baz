@@ -492,11 +492,7 @@ fn rear_insert(shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_c
     crate::jewel_case::Insert {
         album_id: now.album_id.unwrap_or_default(),
         title: now.album.clone().unwrap_or_else(|| now.title.clone()),
-        artist: now
-            .artist
-            .clone()
-            .or_else(|| now.track_artist.clone())
-            .unwrap_or_default(),
+        artist: now.artist_line().unwrap_or_default().to_owned(),
         tracks,
     }
 }
@@ -864,11 +860,7 @@ fn placard<'a>(
         // The artist in letterspaced caps, over the work's title — the wall
         // label's own order, at the far field's scale.
         text(theme::tracked(
-            &now.artist
-                .clone()
-                .or_else(|| now.track_artist.clone())
-                .unwrap_or_default()
-                .to_uppercase()
+            &now.artist_line().unwrap_or_default().to_uppercase()
         ))
         .size(theme::SIZE_HEADING)
         .line_height(theme::LEADING_HEADING)

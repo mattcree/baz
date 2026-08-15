@@ -3,26 +3,46 @@
 //! This is the root page for playlist browsing. It does not replace the
 //! summoned picker panel: the panel answers “where should this track go?”,
 //! while this place answers “which playlist do I want to open?”.
+//!
+//! # It is the Library's wall, with playlists on it
+//!
+//! The owner, twice: *"the Playlists page does not have the rail on the right
+//! and seems to be different from the Library? it should not be significantly
+//! different"*, and then *"a-z playlists should group alphabetically — use the
+//! exact same pattern as the library please."* So the layout engine is
+//! [`crate::shelf::Shelves`] — the record wall's own — the heading band and its
+//! pinned copy are [`crate::views::shelf::group_band`] and
+//! [`crate::views::shelf::pinned_band`], and the rail is the shared [`Spine`].
+//! What this module owns is what a cell and a heading *mean* here, which is the
+//! only thing that differs: a made thing rather than a found one.
+//!
+//! # The strip says less than it did
+//!
+//! It led with the word `Playlists` and closed with a tally (`13 playlists`)
+//! until the owner removed both — *"the playlists page does not need the word
+//! 'playlists' at the top"*, *"no need for the playlist count and another
+//! noise"*. The Library's strip ([`crate::views::top_bar`]) never carried
+//! either, and this place is meant to be that place with different tiles on it.
+//! What remains is the arrangement keys and, while a deletion is pending, the
+//! name of the list awaiting the confirmation — a statement about the *place*,
+//! which is what [`crate::views::place_header_led`]'s note slot is for.
 
-use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
+use iced::widget::{
+    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, stack, text,
+};
 use iced::{Element, Length, alignment};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use baz_core::history::Recency;
-use baz_core::index::{AlbumArtist, GroupKey, Initial};
 
 use crate::app::{Message, Shelf};
+use crate::icon;
 use crate::player::PlayerState;
-use crate::playlists::{PanelRow, PlaylistOrder, Playlists};
+use crate::playlists::{Cell, PanelRow, PlaylistOrder, Playlists, Wall};
 use crate::selection::Content;
-use crate::shelf::Grid;
+use crate::shelf::{Grid, Shelves};
 use crate::theme;
-use crate::views::{
-    arrangement_key, place_header_led, place_name, place_pad, playlist_sleeve, section_rule,
-};
-use crate::vm::GroupHeaderVm;
+use crate::views::{arrangement_key, place_header_led};
 
-/// Draw every saved playlist in the shelf's shared work grid.
+/// Draw every saved playlist in the shelf's shared work grid, grouped under the
+/// Library's own heading bands.
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
@@ -31,18 +51,16 @@ pub(crate) fn view<'a>(
     scroll_offset: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let count = playlists.rows.len() + 1;
-    let note = if let Some(id) = playlists.confirming_overview_delete {
-        playlists.rows.iter().find(|row| row.id == id).map_or_else(
-            || format!("{count} playlists"),
-            |row| format!("Delete “{}”?", row.name),
-        )
-    } else {
-        match count {
-            1 => "1 playlist".to_owned(),
-            count => format!("{count} playlists"),
-        }
-    };
+    // **The note is the pending deletion and nothing else.** A tally stood
+    // here; the Library shows none, and a count of the tiles you are looking at
+    // is not a statement about the place.
+    let note = playlists.confirming_overview_delete.and_then(|id| {
+        playlists
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+            .map(|row| format!("Delete “{}”?", row.name))
+    });
     let mut order = row![].spacing(theme::GAP_MD);
     for choice in PlaylistOrder::ALL {
         order = order.push(arrangement_key(
@@ -51,71 +69,94 @@ pub(crate) fn view<'a>(
             Message::PlaylistOrderSelected(choice),
         ));
     }
-    let create = button(
-        text("New playlist")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM),
-    )
-    .on_press(Message::NewPlaylistOpen)
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status));
-    let lead = row![place_name("Playlists"), order, create]
-        .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::Center);
-    let header = place_header_led(lead.into(), Some(note));
-    let ordered = playlists.ordered_rows();
-    let total_rows = hang.rows(ordered.len());
-    let (first, end) = hang.visible_rows(scroll_offset, shelf.grid_size.height, total_rows);
-    let mut tiles = column![Space::new().height(Length::Fixed(hang.spacer_height(first)))];
-    for row_index in first..end {
-        let item_first = row_index * hang.columns;
-        let item_end = (item_first + hang.columns).min(ordered.len());
-        let mut current = row![].spacing(hang.gutter);
-        for playlist in &ordered[item_first..item_end] {
-            current = current.push(tile(
+    let header = place_header_led(order.into(), note);
+
+    let wall = playlists.wall();
+    let shelves = Shelves::new(hang, &wall.counts);
+    let runs = shelves.runs();
+    let (first_run, end_run) = shelves.visible_runs(scroll_offset, shelf.grid_size.height);
+    // One column in content coordinates, exactly as the record wall builds it:
+    // everything off screen is a single spacer, so a collection of five
+    // playlists and one of five hundred cost the same per frame.
+    let mut grid = column![].width(Length::Fixed(hang.block_width()));
+    let mut drawn = 0.0_f32;
+    let spacer = |grid: iced::widget::Column<'a, Message>, to: f32, drawn: &mut f32| {
+        let gap = (to - *drawn).max(0.0);
+        *drawn = to;
+        grid.push(Space::new().height(Length::Fixed(gap)))
+    };
+    for run in &runs[first_run..end_run] {
+        grid = spacer(grid, run.top, &mut drawn);
+        grid = grid.push(band(&wall, run.group, hang));
+        drawn = run.rows_top(hang);
+        let (first_row, end_row) = hang.visible_rows(
+            scroll_offset - run.rows_top(hang),
+            shelf.grid_size.height,
+            run.rows,
+        );
+        grid = spacer(
+            grid,
+            run.rows_top(hang) + hang.spacer_height(first_row),
+            &mut drawn,
+        );
+        for row_index in first_row..end_row {
+            grid = grid.push(cells_row(
                 shelf,
-                playlist,
+                playlists,
+                player,
+                &wall,
                 hang,
-                playlists.hovered == Some(playlist.id),
-                playlists.confirming_overview_delete == Some(playlist.id),
-                player.engine_ready(),
+                run.first + row_index * hang.columns,
+                (run.len)
+                    .saturating_sub(row_index * hang.columns)
+                    .min(hang.columns),
             ));
         }
-        tiles = tiles.push(
-            container(current)
-                .height(Length::Fixed(hang.row_h))
-                .align_y(alignment::Vertical::Top),
-        );
+        drawn += hang.spacer_height(end_row - first_row);
     }
-    tiles = tiles.push(Space::new().height(Length::Fixed(hang.spacer_height(total_rows - end))));
+    grid = spacer(grid, shelves.height(), &mut drawn);
 
-    let body = column![section_rule("All playlists"), tiles]
-        .spacing(theme::GAP_MD)
-        .width(Length::Fixed(hang.block_width()));
-    let wall: Element<'a, Message> = column![
-        header,
-        scrollable(
-            container(body)
-                .width(Length::Fill)
-                .padding(place_pad())
-                .align_x(alignment::Horizontal::Center)
-        )
-        .id(scroll_id())
-        .on_scroll(Message::PlaylistsScrolled)
-        // The body spans the window edge while reserving the rail's lane, just
-        // like Library: the bar remains at the outer edge and tiles can never
-        // slide beneath the index.
-        .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .width(Length::Fill)
-        .height(Length::Fill)
+    // **No place padding here, and that is load-bearing.** The block is
+    // centred in the scrollable's *content* measure — the outer width less
+    // `theme::WALL_RESERVE`, which `theme::shelf_scrollbar` reserves — because
+    // the pinned band centres in exactly that measure
+    // (`views::shelf::pinned_band`). A `place_pad` on top of it would centre
+    // the in-flow rows in a narrower box than the pinned heading and the two
+    // would disagree, which is the 56 px jump `impl/sticky-header-alignment/`
+    // records. The wall's own top air is `Shelves`' first `grid.hang`.
+    let body = scrollable(
+        container(grid)
+            .width(Length::Fill)
+            .align_x(alignment::Horizontal::Center),
+    )
+    .id(scroll_id())
+    .on_scroll(Message::PlaylistsScrolled)
+    // The body spans the window edge while reserving the rail's lane, just
+    // like Library: the bar remains at the outer edge and tiles can never
+    // slide beneath the index.
+    .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
+    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+    .width(Length::Fill)
+    .height(Length::Fill);
+    // **The pinned layer is always in the tree** — see `views::shelf::view` for
+    // why a `stack` that came and went would rebuild the scrollable's state and
+    // make the wall unscrollable. The lead run is never pinned: it has no
+    // heading, and an opaque band with nothing in it is a blank strip over the
+    // covers passing under it.
+    let pinned = shelves
+        .sticky(scroll_offset)
+        .filter(|&run| wall.pinned(runs.get(run).map_or(usize::MAX, |run| run.group)))
+        .and_then(|run| runs.get(run))
+        .map(|run| band(&wall, run.group, hang));
+    let body: Element<'a, Message> = stack![
+        body,
+        crate::views::shelf::pinned_band(pinned, hang, hang.block_width())
     ]
     .into();
-    let (entries, current) = rail(&ordered, playlists, hang, scroll_offset);
+
+    let (entries, current) = rail(&wall, &shelves, scroll_offset);
     crate::views::shelf::collection_scaffold(
-        wall,
+        column![header, body].into(),
         crate::views::shelf::index_rail_from(entries, current, Message::PlaylistRailJumped),
     )
 }
@@ -127,80 +168,167 @@ pub(crate) fn scroll_id() -> iced::widget::Id {
     iced::widget::Id::new("baz-playlists")
 }
 
-/// Project the active playlist ordering into the common index-rail vocabulary.
-/// Alphabetical order gets initials; chronological orders get the same elapsed
-/// buckets the Library uses. Labels therefore always describe the row they
-/// jump to — an A–Z rail is never painted over a date-sorted collection.
-fn rail(
-    ordered: &[&PanelRow],
-    playlists: &Playlists,
+/// One run's heading, in the flow of the wall.
+///
+/// The lead run has none and draws an empty band of the same height, so the
+/// create tile and `Favourites` stand on the wall's own rhythm rather than
+/// starting a pixel higher than every lettered run below them.
+fn band<'a>(wall: &Wall<'_>, group: usize, hang: Grid) -> Element<'a, Message> {
+    let label = wall
+        .headers
+        .get(group)
+        .and_then(Option::as_ref)
+        .map(crate::vm::GroupHeaderVm::label)
+        .unwrap_or_default();
+    // **No door, at any key.** The Library's ARTIST headings open a person's
+    // page (ADR-0035); a letter, a date bucket and the lead run name a break
+    // rather than a subject, and this collection has no key that names one.
+    crate::views::shelf::group_band(&label, None, hang, hang.block_width())
+}
+
+/// One row of cells, at the block's width so a partial last row stays
+/// left-aligned with the full rows above it.
+fn cells_row<'a>(
+    shelf: &'a Shelf,
+    playlists: &'a Playlists,
+    player: &PlayerState,
+    wall: &Wall<'a>,
     hang: Grid,
-    scroll_offset: f32,
-) -> (Vec<crate::rail::RailEntry>, Option<usize>) {
-    let mut headers = Vec::new();
-    let mut firsts = Vec::new();
-    for (index, playlist) in ordered.iter().enumerate() {
-        let header = match playlists.order {
-            PlaylistOrder::Alphabetical => {
-                GroupHeaderVm::Initial(Initial::of(AlbumArtist::Named(&playlist.name)))
+    first: usize,
+    len: usize,
+) -> Element<'a, Message> {
+    let mut cells = row![].spacing(hang.gutter);
+    for offset in 0..len {
+        match wall.cells.get(first + offset) {
+            Some(Cell::New) => cells = cells.push(ghost_tile(hang)),
+            Some(Cell::List(playlist)) => {
+                cells = cells.push(tile(
+                    shelf,
+                    playlist,
+                    hang,
+                    playlists.hovered == Some(playlist.id),
+                    playlists.confirming_overview_delete == Some(playlist.id),
+                    player.engine_ready(),
+                ));
             }
-            PlaylistOrder::Created => {
-                GroupHeaderVm::Recency(recency(playlist.created_unix_s, true))
-            }
-            PlaylistOrder::Played => {
-                GroupHeaderVm::Recency(recency(playlists.played_at(playlist.id), false))
-            }
-        };
-        if headers.last() != Some(&header) {
-            headers.push(header);
-            firsts.push(index);
+            None => break,
         }
     }
-    let key = match playlists.order {
-        PlaylistOrder::Alphabetical => GroupKey::Alphabet,
-        PlaylistOrder::Created => GroupKey::Added,
-        PlaylistOrder::Played => GroupKey::Played,
-    };
-    let mut entries = crate::rail::entries(key, &headers);
+    container(cells)
+        .width(Length::Fixed(hang.block_width()))
+        .height(Length::Fixed(hang.row_h))
+        .align_y(alignment::Vertical::Top)
+        .into()
+}
+
+/// Project the active ordering into the shared index-rail vocabulary, and say
+/// which entry the wall is standing on.
+///
+/// Alphabetical order gets initials; chronological orders get the same elapsed
+/// buckets the Library uses. Labels therefore always describe the run they jump
+/// to — an A–Z rail is never painted over a date-sorted collection. The lead
+/// run is not indexed: it has no heading for an entry to name, and it is
+/// already at the top of the wall, which is where `Home` goes.
+fn rail(
+    wall: &Wall<'_>,
+    shelves: &Shelves,
+    scroll_offset: f32,
+) -> (Vec<crate::rail::RailEntry>, Option<usize>) {
+    let headers = wall.rail_headers();
+    let mut entries = crate::rail::entries(wall.key, &headers);
     for entry in &mut entries {
-        entry.shelf = entry.shelf.and_then(|group| firsts.get(group).copied());
+        entry.shelf = entry.shelf.map(Wall::run_of);
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "a non-negative viewport row index is bounded by the in-memory collection"
-    )]
-    let first_visible = (scroll_offset / hang.row_h).floor().max(0.0) as usize * hang.columns;
-    let current = entries
-        .iter()
-        .rposition(|entry| entry.shelf.is_some_and(|first| first <= first_visible));
+    // Where the wall is: the run at the top of the viewport, mapped onto the
+    // rail's own list — the last present entry at or before it, which is the
+    // exact entry where every run has one and the letter of the run you are in
+    // where several share it. (`None < Some(_)`, so the comparison needs the
+    // presence guard.)
+    let here = shelves
+        .run_at(scroll_offset)
+        .and_then(|run| shelves.runs().get(run))
+        .map(|run| run.group);
+    let current = here.and_then(|group| {
+        entries
+            .iter()
+            .rposition(|entry| entry.present() && entry.shelf <= Some(group))
+    });
     (entries, current)
 }
 
-/// Map a filesystem or session timestamp to the Library's honest age buckets.
-/// `Unrecorded` describes an unavailable creation stamp; `Never` describes a
-/// playlist that has not been played in this run. They are deliberately not
-/// collapsed into the same quiet label.
-fn recency(timestamp: Option<u64>, created: bool) -> Recency {
-    let Some(timestamp) = timestamp else {
-        return if created {
-            Recency::Unrecorded
-        } else {
-            Recency::Never
-        };
-    };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now.saturating_sub(timestamp) / 86_400;
-    match days {
-        0 => Recency::Today,
-        1..=6 => Recency::ThisWeek,
-        7..=30 => Recency::ThisMonth,
-        31..=364 => Recency::MonthsAgo(u32::try_from((days / 30).max(1)).unwrap_or(u32::MAX)),
-        _ => Recency::YearsAgo(u32::try_from((days / 365).max(1)).unwrap_or(u32::MAX)),
-    }
+/// **The create affordance, as a tile.**
+///
+/// The owner: *"the new playlist should be like a ghost playlist with a + in
+/// the middle called 'New Playlist' on the playlist page, not a button."* It
+/// was a word button in the strip, standing in the row that says how the
+/// collection is *arranged* — a control about making a thing, filed with the
+/// controls about looking at things.
+///
+/// **Identical geometry to a real tile** — the same edge, the same mat, the
+/// same caption block and the same state rule lane — so nothing moves when the
+/// ghost becomes a list. That is the panel's ghost row (`views::playlist_panel`)
+/// at wall scale, and it carries the same two rules: the sleeve is
+/// [`theme::ghost_sleeve`] with the drawn [`icon::Glyph::Plus`] and never
+/// anything resembling artwork, because a placeholder that looked like a
+/// collage would be the interface inventing a playlist; and it answers the
+/// pointer like its neighbours, because a pressable thing that does not is
+/// unresponsive.
+///
+/// The mark is drawn at [`theme::GHOST_MARK_PX`], which is the sprite's own
+/// raster edge — so it is pixel-exact rather than an upscale of a 20 px glyph.
+fn ghost_tile<'a>(hang: Grid) -> Element<'a, Message> {
+    let room = theme::active();
+    let edge = hang.art;
+    let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
+    let field = container(
+        iced_image(icon::handle(icon::Glyph::Plus))
+            .width(Length::Fixed(theme::GHOST_MARK_PX))
+            .height(Length::Fixed(theme::GHOST_MARK_PX))
+            .opacity(theme::GLYPH_OPACITY),
+    )
+    .width(Length::Fixed(work))
+    .height(Length::Fixed(work))
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center)
+    .style(move |_theme| theme::ghost_sleeve(room));
+    let sleeve = container(field)
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(edge))
+        .padding(theme::SLEEVE_MAT)
+        .style(move |_theme| theme::sleeve_mat(room));
+    let body = column![
+        sleeve,
+        column![caption_lane(
+            edge,
+            text("New Playlist")
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .color(room.paper_dim)
+                .wrapping(text::Wrapping::None)
+                .into()
+        )]
+        .height(Length::Fixed(theme::CAPTION_H)),
+        crate::views::shelf::state_rule(0.0, false, edge)
+    ]
+    .spacing(theme::GAP_XS)
+    .width(Length::Fixed(edge));
+    button(body)
+        .padding(0)
+        .style(move |_theme, status| theme::tile(room, status, false))
+        .on_press(Message::NewPlaylistOpen)
+        .into()
+}
+
+/// One caption lane: a single line, top-aligned, clipped at the tile's edge —
+/// the record wall's own, so a long name behaves here exactly as it does there.
+fn caption_lane(edge: f32, content: Element<'_, Message>) -> Element<'_, Message> {
+    container(content)
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(theme::CAPTION_LINE_H))
+        .align_y(alignment::Vertical::Top)
+        .clip(true)
+        .into()
 }
 
 fn tile<'a>(
@@ -215,7 +343,13 @@ fn tile<'a>(
     let selected = shelf.selection.is(Content::Playlist(playlist.id));
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
-    let art = playlist_sleeve(shelf, &playlist.art, &playlist.name, work);
+    let art = crate::views::playlist_sleeve_marked(
+        shelf,
+        &playlist.art,
+        &playlist.name,
+        work,
+        crate::views::default_playlist_mark(playlist.id),
+    );
     let art: Element<'_, Message> = if hovered || selected || confirming_delete {
         let mut options = Vec::new();
         if confirming_delete {
@@ -264,33 +398,24 @@ fn tile<'a>(
     .height(Length::Fixed(edge))
     .padding(theme::SLEEVE_MAT)
     .style(move |_theme| theme::sleeve_mat(room));
-    let caption = |content: Element<'a, Message>| {
-        container(content)
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_y(alignment::Vertical::Top)
-            .clip(true)
-    };
+    // **The name, and nothing under it.** The second lane carried
+    // `Playlist · 12 · 41:03` — the kind, spelled out under every tile on a
+    // wall of nothing but playlists, and a count the owner asked to be rid of.
+    // The lane itself stays, empty, because [`theme::CAPTION_H`] is the grid's
+    // and a tile one line shorter than the Library's would break the pitch this
+    // place shares with it. `PanelRow::counts` is untouched: the returns lane
+    // and the picker panel draw it beside albums, where the kind is the point.
     let body = column![
         sleeve,
-        column![
-            caption(
-                text(playlist.name.clone())
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .font(theme::MEDIUM)
-                    .wrapping(text::Wrapping::None)
-                    .into()
-            ),
-            caption(
-                text(playlist.counts())
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
-                    .into()
-            )
-        ]
+        column![caption_lane(
+            edge,
+            text(playlist.name.clone())
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None)
+                .into()
+        )]
         .height(Length::Fixed(theme::CAPTION_H)),
         crate::views::shelf::state_rule(if hovered { 1.0 } else { 0.0 }, selected, edge)
     ]
@@ -305,24 +430,4 @@ fn tile<'a>(
     .on_enter(Message::PlaylistTileEntered(playlist.id))
     .on_exit(Message::PlaylistTileLeft(playlist.id))
     .into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unavailable_timestamps_keep_created_and_played_honest() {
-        assert_eq!(recency(None, true), Recency::Unrecorded);
-        assert_eq!(recency(None, false), Recency::Never);
-    }
-
-    #[test]
-    fn a_current_timestamp_is_a_current_bucket() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        assert_eq!(recency(Some(now), true), Recency::Today);
-    }
 }

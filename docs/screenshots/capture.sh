@@ -248,8 +248,12 @@ park()  { xdotool mousemove 140 620; sleep 0.8; }
 # layout — the app bar's 41 px moved all of them once already.
 #
 #   app bar          y 0…41
-#   lane rows        Home 85 · Library 125 · Playlists 165 · Now playing 205
-#                    · the first playlist/recent list row 350
+#   lane rows        Home 81 · Library 133 · Playlists 185 · Now playing 237
+#                    — SIDEBAR_DEST_H 48 on a SIDEBAR_ROW_GAP 4 seam, from the
+#                    app bar's 49. These were 85/125/165/205 until 2026-08-15,
+#                    which is the pitch the lane had *before* its rows became
+#                    their own sleeves; the stale numbers photographed Home
+#                    twice and called one of them `playlist`.
 #   wall shelf 1     tiles y 156…355, `Seagrass` x 313…513, `Werkbund` x 548…748
 #   wall shelf 2     tiles y 479…678, `Violet Ledger` x 313…513,
 #                    `Meadowgrass` x 783…983
@@ -290,26 +294,34 @@ click 596 $PLAY_1
 #     `RECENT`, and the bottom bar a live readout rather than `Nothing playing`.
 # Deliberate playback now lands on Now Playing only after TrackStarted; return
 # through the resident Library row before photographing the wall.
-click 105 125
+click 105 133
 park
 shot library
 
 # 2 · Now playing, by the lane's own row — the record and the rest of the run,
 #     side by side, which is the whole of that place.
-click 105 205
+click 105 237
 park
 shot now-playing
 
 # 3 · Home: `All songs` with its collage sleeve, what arrived recently, and the
 #     size of the collection. The one place that is about the library rather
 #     than about a record.
-click 105 85
+click 105 81
 park
 shot home
 
-# 4 · the playlist, opened from the lane row it earned by existing: a list that
-#     is thirty-five songs off four records and one `.m3u8` file on disk.
-click 140 350
+# 4 · the playlists place: the list built above beside the built-in
+#     `Favourites` and the ghost tile a new one starts from, grouped A–Z the
+#     way the library groups records.
+#
+# It was the playlist's *page*, reached by clicking whichever row the lane
+# happened to have at y 350 — a coordinate that depended on what had been
+# touched in what order, and that photographed Home when the lane's pitch
+# changed. The place is reached from the lane's own destination now, which is
+# a fixed row, and it is the better picture besides: one frame with the
+# collection, the built-in and the way in.
+click 105 185
 park
 shot playlist
 

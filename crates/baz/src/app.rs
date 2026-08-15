@@ -562,6 +562,28 @@ pub(crate) enum Message {
     VibePrompt(String),
     /// Set the requested listening duration.
     VibeLength(crate::vibe::MixLength),
+    /// **The contour's own gestures** — the shape a generated list is asked
+    /// to follow (`crate::contour`). The drag carries the raw geometry the
+    /// pointer described and `crate::vibe` decides what a line may be; the
+    /// release exists so a recomposition costs one gesture rather than one
+    /// pixel.
+    ContourDragged(usize, usize, f32, f32),
+    ContourReleased,
+    /// **The pointer entered or left one row of the composed preview**, so
+    /// the contour can light that track's own place on the line. The owner:
+    /// *"when we hover the playlist items it is showing where on the curve
+    /// it's meant to be… so a person can see it really worked."*
+    VibePreviewHovered(Option<usize>),
+    /// Load one of the drawn shapes over the current line.
+    ContourShape(usize),
+    /// Give one line another turn, or take its last one back.
+    ContourPointAdded(usize),
+    ContourPointRemoved(usize),
+    /// **Draw a second or third musical dimension, or stop drawing one.** The
+    /// owner: *"can we have more than one of these for different musical
+    /// dimensions — this obviously kinda rolls up several aspects of a song
+    /// into one value."*
+    ContourDimension(crate::vibe::Dimension),
     /// Explicitly explore another deterministic version of this request.
     VibeAnother,
     /// Edit the in-memory preview without touching music or playlist files.
@@ -571,8 +593,6 @@ pub(crate) enum Message {
     VibePlay,
     /// Write the previewed, ordinary playlist file and open it without playing.
     VibeSubmit,
-    /// Cancel first-use consent/analysis while retaining the request controls.
-    VibeCancel,
     /// Open the canonical playlist-creation place at its chooser.
     NewPlaylistOpen,
     /// Open the creation place with Vibe already chosen (Home shortcut).
@@ -581,9 +601,6 @@ pub(crate) enum Message {
     PlaylistCreationBack,
     PlaylistCreationName(String),
     PlaylistCreationExample(&'static str),
-    PlaylistCreationToggleShape,
-    PlaylistCreationEnergy(crate::playlists::EnergyShape),
-    PlaylistCreationWaypoint(usize, String),
     PlaylistCreationRemove(usize),
     PlaylistCreationShift(usize, i32),
     PlaylistCreationSave,
@@ -767,9 +784,10 @@ pub(crate) enum Message {
     /// shelf it points at and nothing about where the shelf is.
     RailJumped(usize),
     /// An entry in the saved-playlist collection's index rail was clicked.
-    /// Carries the first tile in the active ordering, not a pixel; the shared
-    /// collection scaffold owns the rail, while each collection owns its
-    /// content geometry.
+    /// Carries the **run** it names, not a pixel — the same currency
+    /// [`Self::RailJumped`] carries for the record wall, since both walls are
+    /// laid out by [`crate::shelf::Shelves`]. The shared collection scaffold
+    /// owns the rail, while each collection owns its content geometry.
     PlaylistRailJumped(usize),
     /// An explicit record-opening route: the veil/menu's labelled `Open`, a
     /// record link or source navigation. Ordinary tile presses instead send
@@ -859,7 +877,7 @@ pub(crate) enum Message {
     /// (`baz_core::traversal`). See [`App::toggle_shuffle`].
     ToggleShuffle,
     /// Turn Repeat current track on or off.
-    ToggleRepeatOne,
+    CycleRepeat,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
     /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
@@ -1803,11 +1821,13 @@ impl App {
             });
         }
         player.seed_traversal(standing);
-        let repeat_one = stored.as_ref().is_some_and(|config| config.repeat_one);
-        if repeat_one {
-            playback.send(Command::SetRepeatOne { enabled: true });
+        let repeat = stored
+            .as_ref()
+            .map_or(baz_core::protocol::Repeat::Off, |config| config.repeat);
+        if repeat != baz_core::protocol::Repeat::Off {
+            playback.send(Command::SetRepeat { repeat });
         }
-        player.seed_repeat_one(repeat_one);
+        player.seed_repeat(repeat);
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -2273,20 +2293,6 @@ impl App {
                 self.playlists.suggest_creation_name(example);
                 Task::none()
             }
-            Message::PlaylistCreationToggleShape => {
-                self.playlists.creation.shape_open = !self.playlists.creation.shape_open;
-                Task::none()
-            }
-            Message::PlaylistCreationEnergy(shape) => {
-                self.playlists.creation.energy = shape;
-                Task::none()
-            }
-            Message::PlaylistCreationWaypoint(index, text) => {
-                if let Some(waypoint) = self.playlists.creation.waypoints.get_mut(index) {
-                    *waypoint = text.chars().take(120).collect();
-                }
-                Task::none()
-            }
             Message::PlaylistCreationRemove(index) => {
                 if index < self.playlists.creation.items.len() {
                     self.playlists.creation.items.remove(index);
@@ -2458,8 +2464,8 @@ impl App {
                 self.toggle_shuffle();
                 Task::none()
             }
-            Message::ToggleRepeatOne => {
-                self.toggle_repeat_one();
+            Message::CycleRepeat => {
+                self.cycle_repeat();
                 Task::none()
             }
             Message::PlayEverything => {
@@ -3563,13 +3569,19 @@ impl App {
                 }
             }
             Message::PlaylistOrderSelected(order) => self.playlists.order = *order,
-            Message::PlaylistRailJumped(first) => {
+            Message::PlaylistRailJumped(run) => {
                 let hang = match &self.screen {
                     Screen::Shelf(state) => state.grid(),
                     Screen::Setup(_) | Screen::Blocked(_) => return Some(Task::none()),
                 };
-                let row = first / hang.columns;
-                let target = hang.spacer_height(row);
+                // The wall is grouped, so a rail entry names a **run** and the
+                // jump lands on that run's heading — the Library's own
+                // `jump_to_shelf`, over the same `Shelves` the view lays out.
+                let wall = self.playlists.wall();
+                let shelves = shelf::Shelves::new(hang, &wall.counts);
+                let Some(target) = shelves.runs().get(*run).map(|run| run.top) else {
+                    return Some(Task::none());
+                };
                 self.playlists_scroll = target;
                 return Some(Task::batch([
                     iced::widget::operation::scroll_to(
@@ -3820,7 +3832,6 @@ impl App {
     fn update_vibe(&mut self, message: &Message) -> Option<Task<Message>> {
         match message {
             Message::VibeCreate => {
-                let journey = self.playlists.creation.journey_instruction();
                 let Screen::Shelf(state) = &mut self.screen else {
                     return Some(Task::none());
                 };
@@ -3830,7 +3841,6 @@ impl App {
                 if state.vibe.prompt.trim().is_empty() || state.vibe.preparing {
                     return Some(Task::none());
                 }
-                state.vibe.set_journey(journey);
                 state.vibe.begin_request();
                 if state.vibe.has_features() {
                     state.vibe.create(
@@ -3840,7 +3850,20 @@ impl App {
                     );
                     return Some(Task::none());
                 }
-                let Some(index) = config::vibe_db_file().filter(|path| path.exists()) else {
+                // **A cold index is the ordinary first run, not a reason to
+                // do nothing.** This arm required the store to *already
+                // exist* — `.filter(|path| path.exists())` — which was
+                // survivable while a separate `Analyse locally & create`
+                // button created it, and became a press that silently did
+                // nothing the moment the consent gate folded into this one
+                // (item 50). `prepare` creates the store; the only real
+                // failure is a system with no data directory at all, which
+                // is what `VibeAnalyze` says out loud and this now says too.
+                let Some(index) = config::vibe_db_file() else {
+                    state.vibe.error = Some(
+                        "This system offers no data folder for the local analysis index."
+                            .to_owned(),
+                    );
                     return Some(Task::none());
                 };
                 let paths = crate::vibe::library_paths(&state.albums, &state.edition_choice);
@@ -3906,7 +3929,7 @@ impl App {
                 }
                 Some(self.next_vibe_job())
             }
-            Message::VibeAnalysisCancel | Message::VibeCancel => {
+            Message::VibeAnalysisCancel => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.cancel_analysis();
                 }
@@ -3922,6 +3945,49 @@ impl App {
             Message::VibeLength(length) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_length(*length);
+                }
+                Some(Task::none())
+            }
+            Message::ContourDragged(lane, index, at, level) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.drag_contour(*lane, *index, *at, *level);
+                }
+                Some(Task::none())
+            }
+            // The gesture's end changes nothing on its own: the line is
+            // already where it was dragged to, and the list is composed when
+            // the listener asks for it. It exists so the widget has one
+            // message to publish on release rather than a silent edge.
+            Message::ContourReleased => Some(Task::none()),
+            Message::VibePreviewHovered(row) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.hover_row(*row);
+                }
+                Some(Task::none())
+            }
+            Message::ContourShape(index) => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && let Some(shape) = crate::vibe::Shape::ALL.get(*index)
+                {
+                    state.vibe.set_shape(*shape);
+                }
+                Some(Task::none())
+            }
+            Message::ContourPointAdded(lane) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.add_contour_point(*lane);
+                }
+                Some(Task::none())
+            }
+            Message::ContourPointRemoved(lane) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.remove_contour_point(*lane);
+                }
+                Some(Task::none())
+            }
+            Message::ContourDimension(dimension) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.toggle_dimension(*dimension);
                 }
                 Some(Task::none())
             }
@@ -4016,24 +4082,47 @@ impl App {
     /// An open playlist needs its header and visible track rows; the unsaved
     /// state needs the same; the collection root needs its tiles. Other places
     /// leave playlist collages to the lane's viewport-aware background request.
-    fn request_playlist_art(&mut self) -> Task<Message> {
-        let mut wanted: Vec<u64> = Vec::new();
-        match self.place {
-            Place::Playlists => {
-                let hang = match &self.screen {
-                    Screen::Shelf(state) => state.grid(),
-                    Screen::Setup(_) | Screen::Blocked(_) => return Task::none(),
-                };
-                let ordered = self.playlists.ordered_rows();
-                let total_rows = hang.rows(ordered.len());
-                let (first, end) =
-                    hang.visible_rows(self.playlists_scroll, self.body_height(), total_rows);
-                let first_item = first.saturating_mul(hang.columns).min(ordered.len());
-                let end_item = end.saturating_mul(hang.columns).min(ordered.len());
-                for row in &ordered[first_item..end_item] {
+    /// **Which collages the saved-playlist wall can see**, read off the same
+    /// projection the view draws (`playlists::Wall`) and laid out by the same
+    /// [`shelf::Shelves`].
+    ///
+    /// It has to be the same one. The wall groups now, so a heading band
+    /// stands between every run and the visible tiles are no longer
+    /// `scroll / row_h`: asking the flat grid decodes the collages of tiles a
+    /// screen away while the ones on screen stay gradients — the exact failure
+    /// item 37 fixed on the record wall, arriving by a different route.
+    fn visible_playlist_collages(&self) -> Vec<u64> {
+        let Screen::Shelf(state) = &self.screen else {
+            return Vec::new();
+        };
+        let hang = state.grid();
+        let wall = self.playlists.wall();
+        let shelves = shelf::Shelves::new(hang, &wall.counts);
+        let (first_run, end_run) = shelves.visible_runs(self.playlists_scroll, self.body_height());
+        let mut wanted = Vec::new();
+        for run in &shelves.runs()[first_run..end_run] {
+            let (first_row, end_row) = hang.visible_rows(
+                self.playlists_scroll - run.rows_top(hang),
+                self.body_height(),
+                run.rows,
+            );
+            let first_cell = run.first + first_row.saturating_mul(hang.columns);
+            let end_cell = (run.first + end_row.saturating_mul(hang.columns))
+                .min(run.first + run.len)
+                .min(wall.cells.len());
+            for cell in &wall.cells[first_cell.min(end_cell)..end_cell] {
+                if let crate::playlists::Cell::List(row) = cell {
                     wanted.extend(&row.art);
                 }
             }
+        }
+        wanted
+    }
+
+    fn request_playlist_art(&mut self) -> Task<Message> {
+        let mut wanted: Vec<u64> = Vec::new();
+        match self.place {
+            Place::Playlists => wanted.extend(self.visible_playlist_collages()),
             Place::Playlist(_) => {
                 if let Some(open) = &self.playlists.open {
                     wanted.extend(&open.art);
@@ -6000,16 +6089,28 @@ impl App {
         self.publish_mpris(false);
     }
 
-    fn toggle_repeat_one(&mut self) {
-        let enabled = !self.player.repeat_one();
-        if !self.playback.send(Command::SetRepeatOne { enabled }) {
+    /// **Cycle the one Repeat control** through the three states every player
+    /// has, in the order they are universally cycled: off → the list → this
+    /// track → off.
+    ///
+    /// One control rather than two, because a listener asks *"does this go
+    /// round?"* once and the answer has three values, not two independent
+    /// booleans that can contradict each other.
+    fn cycle_repeat(&mut self) {
+        use baz_core::protocol::Repeat;
+        let repeat = match self.player.repeat() {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        };
+        if !self.playback.send(Command::SetRepeat { repeat }) {
             self.player.engine_closed();
             return;
         }
         // Mirror immediately, as shuffle does, so the resident control answers
         // the accepted press without waiting a frame for its confirmation.
-        self.player.seed_repeat_one(enabled);
-        persist(|config| config.repeat_one = enabled);
+        self.player.seed_repeat(repeat);
+        persist(|config| config.repeat = repeat);
         self.publish_mpris(false);
     }
 
@@ -11975,6 +12076,48 @@ mod tests {
         assert!(
             filter.contains("vm::song_hits"),
             "the songs section and the wall answer one query"
+        );
+    }
+
+    /// **The one press works on a cold index**, which is the only index a
+    /// first run has.
+    ///
+    /// `Message::VibeCreate` required the analysis store to *already exist*
+    /// before it would read the library — survivable while a second button
+    /// (`Analyse locally & create`) created it, and a press that silently did
+    /// nothing the moment item 50 folded the consent gate into this one. It
+    /// was caught by rendering the flow rather than by any test, which is why
+    /// the regression is pinned here at the source: the arm may branch on a
+    /// *missing data directory*, and never on a missing file that its own
+    /// `prepare` creates.
+    #[test]
+    fn a_cold_index_still_composes_on_the_one_press() {
+        let source = include_str!("app.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a head");
+        let arm = source
+            .split_once("Message::VibeCreate => {")
+            .expect("the compose arm")
+            .1;
+        let arm = &arm[..arm.find("Message::VibeAnalyze").expect("the next arm")];
+        // Comments stripped: the note beside the fix names the call it
+        // removed, and a rule that could not be written down would be a rule
+        // nobody could explain.
+        let drawn: String = arm
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !drawn.contains("path.exists()"),
+            "a first Compose is doing nothing again: the store does not exist \
+             until `prepare` makes it"
+        );
+        assert!(
+            drawn.contains("state.vibe.start_preparing()")
+                && drawn.contains("crate::vibe::prepare"),
+            "the compose arm no longer reads the library on a cold index"
         );
     }
 
