@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "blue-hour",
+  "name": "Blue Hour",
+  "colors": {
+    "recess": "#06070A", "wall": "#040C20", "plinth": "#0A1429", "plinth_lit": "#121D32",
+    "ink": "#DFE5EC", "ink_dim": "#A3A9B0", "ink_faint": "#81878D", "ink_muted": "#656B71",
+    "playback": "#E3A14E", "playback_bright": "#F1B362", "playback_deep": "#C7883D", "playback_ink": "#1B140B",
+    "alert": "#ED8579", "warning": "#D2B35E", "success": "#8EB483", "shadow": "#00000073"
+  },
+  "focus_opacity": 0.45
+}

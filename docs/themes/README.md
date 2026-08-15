@@ -22,7 +22,10 @@ the exact error and uses Closing Time. A room that cannot be resolved when you
 press it leaves the one you are in standing, and says so.
 
 Documents use `schema_version: 1`; see [`theme.schema.json`](theme.schema.json)
-and [`examples/`](examples). Every surface step must differ by at least 0.030
+and [`examples/`](examples), which holds one document per built-in — including
+`blue-hour.json` and `sea-glass.json`, the two newest, which are also the
+shortest way to see what "an existing room in a different light" means as
+data. Every surface step must differ by at least 0.030
 Oklab L, room surfaces must avoid L 0.45–0.58, readable inks must clear WCAG
 4.5:1, locatable marks 3:1, and focus opacity is bounded to 0.35–0.85.
 

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "sea-glass",
+  "name": "Sea Glass",
+  "colors": {
+    "recess": "#B9D3CB", "wall": "#9EB8B0", "plinth": "#8EA79F", "plinth_lit": "#7D958E",
+    "ink": "#0A0B0D", "ink_dim": "#131518", "ink_faint": "#1E2024", "ink_muted": "#33353A",
+    "playback": "#661107", "playback_bright": "#7F1E0E", "playback_deep": "#4C0702", "playback_ink": "#F9F4EA",
+    "alert": "#530407", "warning": "#4D2D05", "success": "#205A26", "shadow": "#00000061"
+  },
+  "focus_opacity": 0.62
+}

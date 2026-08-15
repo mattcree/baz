@@ -476,6 +476,14 @@ mod tests {
                 "reading-room",
                 include_str!("../../../docs/themes/examples/reading-room.json"),
             ),
+            (
+                "blue-hour",
+                include_str!("../../../docs/themes/examples/blue-hour.json"),
+            ),
+            (
+                "sea-glass",
+                include_str!("../../../docs/themes/examples/sea-glass.json"),
+            ),
         ] {
             let (document, _) = parse(json).unwrap_or_else(|error| panic!("{id}: {error}"));
             assert_eq!(document.id, id);

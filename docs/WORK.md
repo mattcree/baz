@@ -239,8 +239,10 @@ Phase A is complete only when all twelve items are implemented and verified;
     Stone, Plaster and Reading Room are selectable and persisted. Local v1 JSON
     supports paste/file import, immediate Settings preview and export, with a
     bundled schema/examples/prompt, strict contrast/elevation validation and
-    safe Closing Time fallback. Whole-app changes apply after restart because
-    the glyph atlas is process-cached; themes contain no executable content.
+    safe Closing Time fallback. Whole-app changes applied after restart because
+    the glyph atlas was process-cached — **item 54 closed that on 2026-08-15**,
+    and added Blue Hour and Sea Glass beside the four. Themes contain no
+    executable content.
 18. **Done 2026-08-14 — Continue the remaining briefs below and `BACKLOG.md`
     functional-first.** Conservative missing-album pruning, overview playlist
     deletion, actionable/deduplicated resampling warnings and an audited,
