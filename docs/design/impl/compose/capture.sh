@@ -137,7 +137,7 @@ shot "08-diff-after-narrowing"
 
 # …and *another version*, which is the visible press that carries the
 # variation the engine used to take invisibly on every compose.
-click 340 700
+click 340 787
 sleep 5
 move 1400 940
 shot "09-another-version"

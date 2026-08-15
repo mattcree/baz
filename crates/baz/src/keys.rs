@@ -72,8 +72,17 @@
 //! So exactly one press per query goes through this module, and the *field*
 //! remains what holds the caret, the selection, the paste and the focus ring.
 //! ADR-0017 refused the critique's removal of the well for that reason and for
-//! §4's: `text_input` is the only focusable widget in baz and the only thing
+//! §4's: `text_input` was the only focusable widget in baz and the only thing
 //! an accessibility tree would have to attach to.
+//!
+//! **There are two now.** The composing page's drawn line
+//! ([`crate::contour`]) takes focus from a press inside it, gives it up to a
+//! press outside, and while it holds it the arrows nudge the focused point
+//! rather than seeking or changing the volume. Nothing here had to learn about
+//! it: the widget captures the event, and [`Focus`] is read off iced's own
+//! capture report rather than inferred, so *somebody else already decided*
+//! covers a curve exactly as it covers a text field. That is the whole reason
+//! this module reads the report instead of tracking focus itself.
 //!
 //! **The query is drawn in the well**, at `SIZE_BODY`, and not as the
 //! critique's ~48 px display type bottom-left: `02` §3.2 reserves poster sizes

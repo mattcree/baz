@@ -1669,6 +1669,37 @@ or not."*
     Eleven call sites, one style function, and it hands the accent back its one
     job. The other six passes of note 20 stay parked until this one is proven.
 
+    **Item 72 added three more call sites and deliberately did not invent a
+    style for them**: the starting points, the vocabulary and the shape presets
+    are all quiet acts in the current treatment — bare words, hover as the
+    affordance — and giving them a fourth anatomy while this item is open would
+    be the *two names for one act* problem again. Their lit state is carried in
+    the face and the value, which is a real distinction and not a colour one,
+    and it will survive whatever ground this item gives them.
+
+78. **Not started — a keyboard route to the things a pointer can reach.**
+    *(From item 72, and from the quorum's R4.)*
+
+    The composing page's drawn line now takes keys: a press inside it takes
+    focus, Tab walks its points, the arrows nudge the focused one, Shift takes
+    each press four times as far, and a ring marks the point they are moving.
+    That is the *tuning* half of R4 and it works.
+
+    **The reachability half does not**, and it is a product-wide fact rather
+    than this page's: `text_input` and now `crate::contour` are the only
+    widgets in baz a key press can be routed to, and neither can be reached
+    without a pointer, because there is no focus traversal at all. So a
+    keyboard-only listener cannot get to the line, the chips, the presets or
+    the commitment — on this page or on any other.
+
+    This is the item that would fix it everywhere: a focus order per place, a
+    visible ring on whatever holds it, and `Tab`/`Shift+Tab` walking it.
+    `crate::keys` already reads iced's own capture report rather than tracking
+    focus itself, which is exactly the seam that makes this possible without
+    rewriting the binding table — the curve proved it. Sized as a real piece of
+    work, not a pass: every place has to state its order, and an order nobody
+    stated would be the DOM order, which is a shape nobody designed.
+
 ## Doing
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries

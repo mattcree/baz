@@ -474,6 +474,29 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **Nothing in baz can be reached by keyboard except the search well.**
+  *(WORK.md item 78, opened 2026-08-15.)* There is no focus traversal at all:
+  `text_input` and — since the composing page — `crate::contour` are the only
+  widgets a key press can be routed to, and both take focus from a pointer.
+  So every button, chip, tile and row in the product is pointer-only. The
+  binding table is not the obstacle; `crate::keys` already reads iced's own
+  capture report rather than tracking focus itself, which is the seam a real
+  focus order would use. What is missing is the order, per place, and the ring
+  that shows it. This is recorded here rather than inside item 72 because it
+  was true of every place before that page existed.
+
+- **How well the local model actually retrieves has never been blind-tested.**
+  *(Note 16's acceptance item 10; plan 22 §0.1.)* The harness
+  (`tools/vibe-eval/`), a consented 72-track corpus, four systems including a
+  deterministic diversity-matched random control, and 36 anonymous candidate
+  lists are all in the tree; the ratings are unfilled and no agent can fill
+  them. Everything measured about this feature so far is *comparative* —
+  which policy concentrates the right songs better than another, which words
+  move a pool more than others — and none of it answers whether the model's
+  idea of *warm analogue soul* is anybody's. Note 16 set its own consequence:
+  if the semantic system does not beat the random control, the next work is
+  engine quality rather than interface.
+
 - **A skipped file has no name anywhere a listener can see it.** **Closed
   2026-08-13.** Each `ScanEntry::Failed` path and reason now enters the bounded
   health history behind the app-bar bell; the terminal line remains diagnostic

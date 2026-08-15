@@ -2022,6 +2022,20 @@ pub fn contour_point(p: &Palette, lit: bool) -> Color {
     if lit { p.paper } else { p.paper_dim }
 }
 
+/// **How far the focus ring stands outside the handle it marks**: 6, so the
+/// ring reads as a halo at any point size rather than as a fatter dot.
+pub const CONTOUR_RING: f32 = GAP_SM - 2.0;
+
+/// The ring on the point the arrow keys are moving.
+///
+/// Deliberately not the accent: the accent on this control means *a song the
+/// request chose*, and focus is not that. Quiet paper at low alpha, so it
+/// reads as a halo behind a handle rather than as a second kind of dot.
+#[must_use]
+pub fn contour_focus(p: &Palette) -> Color {
+    alpha(p.paper, 0.35)
+}
+
 /// **The distance between what a position asked for and what it got**, drawn
 /// as a tick from the dot to the line. Quiet paper rather than the accent:
 /// the reading is a *length*, and it must not depend on telling two hues

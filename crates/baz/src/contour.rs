@@ -61,6 +61,7 @@
 use iced::advanced::widget::Tree;
 use iced::advanced::widget::{Widget, tree};
 use iced::advanced::{Clipboard, Layout, Shell, layout, renderer};
+use iced::keyboard::{self, key};
 use iced::{Color, Element, Event, Length, Point, Rectangle, Size, Theme, mouse};
 
 use crate::theme;
@@ -91,7 +92,25 @@ pub(crate) struct Contour<'a, Message> {
 struct ContourState {
     held: Option<usize>,
     hovered: Option<usize>,
+    /// **Which point the keys move**, and the one that wears the ring.
+    ///
+    /// The quorum, on the drawn line: *it is pointer-only and needs keys*.
+    /// A press inside the control takes focus, a press outside gives it up,
+    /// and while it is held the arrows belong to this widget rather than to
+    /// the transport — which is true by construction, because capturing the
+    /// event is what tells `crate::keys` that somebody else has already made
+    /// the decision.
+    focused: Option<usize>,
 }
+
+/// **How far one arrow press moves a point.**
+///
+/// A tenth of a level and two per cent of the list: fine enough that the keys
+/// are a *tuning* route rather than a coarse alternative, and Shift takes the
+/// same press four times as far for crossing the control.
+const NUDGE_LEVEL: f32 = 0.1;
+const NUDGE_AT: f32 = 0.02;
+const NUDGE_LARGE: f32 = 4.0;
 
 impl<'a, Message> Contour<'a, Message> {
     /// A contour drawn at `height`, inert until [`Self::on_drag`] wires it up.
@@ -260,6 +279,10 @@ where
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let Some(position) = cursor.position_over(bounds) else {
+                    // A press somewhere else is what gives the keys back to
+                    // the rest of the application. There is nowhere to publish
+                    // this to and nothing to capture — the ring simply goes.
+                    state.focused = None;
                     return;
                 };
                 // **A press anywhere in the box takes the nearest point, and
@@ -269,7 +292,12 @@ where
                 // job is that the shape is what you drew.
                 if let Some(index) = self.point_at(bounds, position) {
                     state.held = Some(index);
+                    state.focused = Some(index);
                     shell.capture_event();
+                } else {
+                    // Inside the control but not on a handle: the keys are
+                    // still this widget's, on whichever point they last had.
+                    state.focused = state.focused.or(Some(0));
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -299,6 +327,58 @@ where
                     }
                     shell.capture_event();
                 }
+            }
+            // **The keys, while this control holds them.**
+            //
+            // Tab walks the points, the arrows move the focused one, and
+            // Shift takes each press four times as far. Every one of them
+            // captures, which is how `crate::keys` knows not to seek or
+            // change the volume: it reads iced's own capture report rather
+            // than guessing at what is focused.
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                let Some(index) = state.focused else {
+                    return;
+                };
+                let Some(point) = self.points.get(index) else {
+                    state.focused = None;
+                    return;
+                };
+                let last = self.points.len().saturating_sub(1);
+                let step = if modifiers.shift() { NUDGE_LARGE } else { 1.0 };
+                let (at, level) = match key.as_ref() {
+                    iced::keyboard::Key::Named(key::Named::Tab) => {
+                        state.focused = Some(if modifiers.shift() {
+                            index.checked_sub(1).unwrap_or(last)
+                        } else if index >= last {
+                            0
+                        } else {
+                            index + 1
+                        });
+                        shell.capture_event();
+                        return;
+                    }
+                    iced::keyboard::Key::Named(key::Named::ArrowUp) => {
+                        (point.at, step.mul_add(NUDGE_LEVEL, point.level))
+                    }
+                    iced::keyboard::Key::Named(key::Named::ArrowDown) => {
+                        (point.at, step.mul_add(-NUDGE_LEVEL, point.level))
+                    }
+                    iced::keyboard::Key::Named(key::Named::ArrowRight) => {
+                        (step.mul_add(NUDGE_AT, point.at), point.level)
+                    }
+                    iced::keyboard::Key::Named(key::Named::ArrowLeft) => {
+                        (step.mul_add(-NUDGE_AT, point.at), point.level)
+                    }
+                    _ => return,
+                };
+                // The raw ask, exactly as a drag reports one: what a line may
+                // actually be is `crate::vibe`'s to decide, and the ends stay
+                // at the ends there rather than here.
+                shell.publish(on_drag(index, at, level));
+                if let Some(release) = &self.on_release {
+                    shell.publish(release.clone());
+                }
+                shell.capture_event();
             }
             _ => {}
         }
@@ -540,10 +620,29 @@ where
             for (index, point) in self.points.iter().enumerate() {
                 let held = state.held == Some(index);
                 let size = theme::CONTOUR_POINT;
+                let (x, y) = (Self::x_of(field, point.at), Self::y_of(field, point.level));
+                // **The ring on the point the keys are moving**, drawn under
+                // the handle so the handle stays the thing the hand reaches
+                // for. It is a *ring* rather than a tint because focus has to
+                // be readable without separating two inks — the standing rule
+                // — and because a filled dot already means *hovered or held*.
+                if state.focused == Some(index) {
+                    let ring = size + theme::CONTOUR_RING;
+                    quad(
+                        Rectangle {
+                            x: x - ring / 2.0,
+                            y: y - ring / 2.0,
+                            width: ring,
+                            height: ring,
+                        },
+                        theme::contour_focus(room),
+                        ring / 2.0,
+                    );
+                }
                 quad(
                     Rectangle {
-                        x: Self::x_of(field, point.at) - size / 2.0,
-                        y: Self::y_of(field, point.level) - size / 2.0,
+                        x: x - size / 2.0,
+                        y: y - size / 2.0,
                         width: size,
                         height: size,
                     },

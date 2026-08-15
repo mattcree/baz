@@ -94,9 +94,14 @@ sample 10 idle
 click 32 81
 click 327 515
 sleep 1
-# The request field, then Compose — the form's own `on_submit`, so the press
+# The request field, then Compose — the field's own `on_submit`, so the press
 # does not depend on where the button falls.
-click 640 468
+#
+# The coordinate moved once, in 2026-08's rebuild: the page became two panes
+# with the field at the head of the ask band. At 1 280 px the body is 1 048 —
+# under `COMPOSE_BREAKPOINT` — so this run measures the stacked form, which is
+# the same engine and the same compose.
+click 500 194
 xdotool type --clearmodifiers --delay 40 "a slow build into something loud"
 xdotool key --clearmodifiers Return
 sample 90 composing
