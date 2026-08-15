@@ -34,6 +34,10 @@ describe.
 
 ### Added
 
+- **Six moods to start from.** The Vibe route asks before you type: `Late-night
+  drive`, `Sunday morning`, `Focus`, `Workout`, `Wind down`, `Party`. Each
+  fills in the words, the shape and the length, and every one of them stays
+  yours to change.
 - **A sleep timer.** Settings → Playback: 15 minutes to two hours, with the
   time remaining shown while it runs. It *pauses* — the run, the position and
   the queue stay exactly where they are, so the next press carries on — and it

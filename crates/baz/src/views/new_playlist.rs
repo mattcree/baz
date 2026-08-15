@@ -192,6 +192,17 @@ fn vibe_form<'a>(
         beside_facts: None,
     }));
 
+    // 0. **A mood to start from**, asked before anything is typed. A recipe
+    //    fills the words, the shape and the length and changes nothing else,
+    //    so the form it leaves behind is the one a listener would have filled
+    //    in themselves — and every field stays theirs to change.
+    form = form
+        .push(views::section_rule("Start from"))
+        .push(hint(
+            "A common mood, filled in for you. Everything it sets can be changed.",
+        ))
+        .push(recipes_row(state));
+
     // 1. **The words** — what goes in.
     form = form
         .push(views::section_rule("The words"))
@@ -548,6 +559,32 @@ fn stepper(
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room))
     .into()
+}
+
+/// **The moods on offer**, as a row of pressable words. The one the request
+/// currently matches is lit, and it stops being lit the moment a word or a
+/// point is changed — because from then on the request is the listener's
+/// rather than the recipe's.
+fn recipes_row(state: &crate::vibe::State) -> Element<'_, Message> {
+    let room = theme::active();
+    let current = state.recipe();
+    let mut offered = row![].spacing(theme::GAP_SM);
+    for (index, recipe) in crate::vibe::Recipe::ALL.iter().enumerate() {
+        let lit = current == Some(index);
+        offered = offered.push(
+            button(
+                text(recipe.label)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::MEDIUM)
+                    .color(if lit { room.paper } else { room.paper_dim }),
+            )
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+            .style(move |_theme, status| theme::tile(room, status, lit))
+            .on_press(Message::VibeRecipe(index)),
+        );
+    }
+    offered.into()
 }
 
 /// **The shapes, as pictures** — each preset drawn by the same widget that

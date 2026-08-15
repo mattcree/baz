@@ -328,6 +328,78 @@ impl Shape {
     }
 }
 
+/// **A recipe: a mood you can start from.**
+///
+/// The owner: *"we should have like 5-6 standard recipes — as part of the
+/// wizard we should be asking users if they want to make a preset one. as
+/// long as the presets are some really common moods and themes."*
+///
+/// A recipe is **words + a shape + a length**, which is the whole of a
+/// request, so pressing one fills the form and changes nothing else: every
+/// field stays editable, and a listener can take the words and redraw the
+/// line, or keep the line and retype the words. It is a starting point and
+/// never a mode.
+///
+/// The six are the moods people actually ask for rather than the ones that
+/// demonstrate the machinery. Each one's words are ordinary language — they
+/// go to the same text tower a typed request does — and each one's shape is
+/// one of the drawn presets, so a recipe explains itself in the picture as
+/// well as in its name.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Recipe {
+    pub(crate) label: &'static str,
+    pub(crate) prompt: &'static str,
+    shape: usize,
+    pub(crate) length: MixLength,
+}
+
+impl Recipe {
+    /// Every recipe the wizard offers, in the order it offers them.
+    pub(crate) const ALL: [Self; 6] = [
+        Self {
+            label: "Late-night drive",
+            prompt: "warm hypnotic music for driving at night",
+            shape: 1,
+            length: MixLength::Hour,
+        },
+        Self {
+            label: "Sunday morning",
+            prompt: "gentle unhurried music for a slow morning",
+            shape: 2,
+            length: MixLength::Hour,
+        },
+        Self {
+            label: "Focus",
+            prompt: "calm instrumental music without vocals for concentrating",
+            shape: 1,
+            length: MixLength::NinetyMinutes,
+        },
+        Self {
+            label: "Workout",
+            prompt: "fast loud driving music with a hard pulse",
+            shape: 2,
+            length: MixLength::HalfHour,
+        },
+        Self {
+            label: "Wind down",
+            prompt: "quiet soft slow music for the end of the day",
+            shape: 4,
+            length: MixLength::HalfHour,
+        },
+        Self {
+            label: "Party",
+            prompt: "upbeat energetic danceable music",
+            shape: 3,
+            length: MixLength::TwoHours,
+        },
+    ];
+
+    /// The drawn shape this recipe starts from.
+    pub(crate) fn shape(self) -> Shape {
+        Shape::ALL[self.shape]
+    }
+}
+
 /// How many bands the library's own distribution is drawn in behind the line.
 ///
 /// Only the full build has a library to describe — a light one has no
@@ -564,6 +636,29 @@ impl State {
     /// The pointer entered or left one row of the preview.
     pub(crate) fn hover_row(&mut self, row: Option<usize>) {
         self.hovered_row = row;
+    }
+
+    /// **Start from a recipe**: its words, its shape and its length, all of
+    /// which remain editable. Nothing else is touched — a listener who has
+    /// already drawn extra lines keeps them, shaped by the recipe.
+    pub(crate) fn start_from(&mut self, recipe: Recipe) {
+        self.set_prompt(recipe.prompt);
+        self.set_shape(recipe.shape());
+        self.set_length(recipe.length);
+    }
+
+    /// Which recipe the request currently matches, if any — so the row can
+    /// light the one you started from and stop lighting it the moment you
+    /// change the words.
+    pub(crate) fn recipe(&self) -> Option<usize> {
+        Recipe::ALL.iter().position(|recipe| {
+            self.prompt == recipe.prompt
+                && self.length == recipe.length
+                && self
+                    .contour
+                    .lane(0)
+                    .is_some_and(|lane| lane.points == recipe.shape().points())
+        })
     }
 
     /// **Load a named shape onto every line.** A shape is a shape: asking for
@@ -1379,6 +1474,50 @@ mod tests {
                     _ => panic!("{} is a line on one side only at {at}", shape.label),
                 }
             }
+        }
+    }
+
+    /// **A recipe fills the form and leaves it editable**, which is the whole
+    /// of what makes it a starting point rather than a mode.
+    #[test]
+    fn a_recipe_fills_the_request_and_stops_claiming_it_the_moment_it_changes() {
+        let mut state = State::default();
+        assert_eq!(
+            state.recipe(),
+            None,
+            "nothing is a recipe until one is pressed"
+        );
+        for (index, recipe) in Recipe::ALL.iter().enumerate() {
+            state.start_from(*recipe);
+            assert_eq!(state.prompt, recipe.prompt);
+            assert_eq!(state.length, recipe.length);
+            assert_eq!(points(&state), recipe.shape().points());
+            assert_eq!(
+                state.recipe(),
+                Some(index),
+                "{} does not recognise itself",
+                recipe.label
+            );
+        }
+        // Change any one of the three and it is the listener's request.
+        state.start_from(Recipe::ALL[0]);
+        state.set_prompt("something else entirely");
+        assert_eq!(state.recipe(), None);
+        state.start_from(Recipe::ALL[0]);
+        state.drag_contour(0, 0, 0.0, 1.9);
+        assert_eq!(state.recipe(), None);
+        state.start_from(Recipe::ALL[0]);
+        state.set_length(MixLength::TwoHours);
+        assert_eq!(state.recipe(), None);
+
+        // Every recipe says something to the model and draws a real line.
+        for recipe in Recipe::ALL {
+            assert!(
+                recipe.prompt.split_whitespace().count() >= 4,
+                "{} asks the model for too little",
+                recipe.label
+            );
+            assert!(!recipe.shape().points().is_empty(), "{}", recipe.label);
         }
     }
 

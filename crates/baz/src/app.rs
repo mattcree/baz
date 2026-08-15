@@ -622,6 +622,10 @@ pub(crate) enum Message {
     /// *"when we hover the playlist items it is showing where on the curve
     /// it's meant to be… so a person can see it really worked."*
     VibePreviewHovered(Option<usize>),
+    /// **Start from one of the offered moods** — its words, its shape and its
+    /// length, all of which stay editable. The owner: *"as part of the wizard
+    /// we should be asking users if they want to make a preset one."*
+    VibeRecipe(usize),
     /// Load one of the drawn shapes over the current line.
     ContourShape(usize),
     /// Give one line another turn, or take its last one back.
@@ -4023,6 +4027,18 @@ impl App {
             Message::VibePreviewHovered(row) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.hover_row(*row);
+                }
+                Some(Task::none())
+            }
+            Message::VibeRecipe(index) => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && let Some(recipe) = crate::vibe::Recipe::ALL.get(*index)
+                {
+                    state.vibe.start_from(*recipe);
+                    // The suggested name follows the words, exactly as typing
+                    // them would — a recipe is the form filled in, not a
+                    // second way of asking.
+                    self.playlists.suggest_creation_name(recipe.prompt);
                 }
                 Some(Task::none())
             }
