@@ -5,7 +5,9 @@
 //! rejected so a typo is diagnosed instead of silently becoming a different
 //! room. Valid documents live in the application's config `themes` directory.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use iced::Color;
 use serde::{Deserialize, Serialize};
@@ -67,6 +69,10 @@ fn custom_id(selection: &str) -> Option<&str> {
     selection.strip_prefix("custom:")
 }
 
+/// Custom rooms already read from disk this run, by id — see the comment on
+/// the leak inside [`resolve`].
+static RESOLVED: Mutex<BTreeMap<String, &'static Palette>> = Mutex::new(BTreeMap::new());
+
 pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
     match selection {
         "closing-time" => Ok(&theme::CLOSING_TIME),
@@ -77,6 +83,13 @@ pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
         "sea-glass" => Ok(&theme::SEA_GLASS),
         other => {
             let id = custom_id(other).ok_or_else(|| format!("unknown selected theme {other:?}"))?;
+            if let Some(known) = RESOLVED
+                .lock()
+                .ok()
+                .and_then(|resolved| resolved.get(id).copied())
+            {
+                return Ok(known);
+            }
             let dir = themes_dir().ok_or_else(|| "no config directory is available".to_owned())?;
             let path = dir.join(format!("{id}.json"));
             let text = std::fs::read_to_string(&path).map_err(|error| {
@@ -90,7 +103,18 @@ pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
                 ));
             }
             palette.name = Box::leak(doc.name.into_boxed_str());
-            Ok(Box::leak(Box::new(palette)))
+            // **Leaked once per id, not once per press.** A room has to be
+            // `&'static` to be the room the whole application stands in, and
+            // this one is read from a file — so it is leaked. Since item 54 a
+            // listener can press a room as often as they like, and re-leaking
+            // on every press would make choosing a theme a way to spend
+            // memory. Re-reading a file the listener has *edited* is what
+            // `Import` is for, and that arrives as a fresh document.
+            let leaked: &'static Palette = Box::leak(Box::new(palette));
+            if let Ok(mut resolved) = RESOLVED.lock() {
+                resolved.insert(id.to_owned(), leaked);
+            }
+            Ok(leaked)
         }
     }
 }
@@ -141,6 +165,13 @@ pub fn preview(selection: &str) -> Result<Preview, String> {
 
 pub fn import(text: &str) -> Result<(String, PathBuf), String> {
     let (doc, _) = parse(text)?;
+    // **The cache must forget this id**, or importing an edited room under the
+    // name it already had would stand in the version read before the edit —
+    // which is exactly the thing a listener is doing when they edit and
+    // re-import. See the leak comment in `resolve`.
+    if let Ok(mut resolved) = RESOLVED.lock() {
+        resolved.remove(&doc.id);
+    }
     let dir = themes_dir().ok_or_else(|| "no config directory is available".to_owned())?;
     std::fs::create_dir_all(&dir)
         .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
