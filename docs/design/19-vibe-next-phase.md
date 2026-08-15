@@ -1,5 +1,11 @@
 # 19 — Vibe, next phase
 
+> **This is the review, not the design.** It records what the owner said, what
+> was wrong, the layouts he was offered, and what each round of it changed —
+> in the order it happened. **The design that came out of it is
+> [`21-vibe-the-design.md`](21-vibe-the-design.md)**, written as one thing;
+> where the two disagree, 21 is what we mean. Read this one for *why*.
+
 The owner, 2026-08-15, reviewing the contour page that shipped in 0.2.0. This
 document is the record of what he said, what is actually wrong, and the three
 layouts he was asked to choose between. **Nothing here is built.** It exists to

@@ -1463,7 +1463,14 @@ delivered to the owner as a page. **72 and 73 are blocked on his word**, which
 is the point of the note: *"create some designs which we can actually approve
 or not."*
 
-72. **Designed, awaiting approval — the Vibe page becomes a place.** *"the ui
+72. **Designed, awaiting approval — composing a playlist, rebuilt.** The
+    specification is **`docs/design/21-vibe-the-design.md`**, which is the
+    current thinking written as one document rather than as the chain of
+    reviews that produced it; `19` is that chain, and the notes below are how
+    each piece got there. Three decisions remain open (doc 21 §11), one of them
+    consent rather than design.
+
+    *Formerly: the Vibe page becomes a place.* *"the ui
     layout for the vibe playlist isn't great… we have to scroll to see the
     playlist. it should work on both wide and narrow layouts."*
 
