@@ -1496,6 +1496,24 @@ or not."*
     a score. Two corrections: a request the library cannot fill has to say so,
     and the narrow layout needs its Compose pinned.
 
+    **The whole feature is now drawn state by state** — doc 19 §7, note 21:
+    nine states, of which the shipping build designs one, and five have no
+    design at all. **And the model defect the owner found on those drawings**
+    (doc 19 §8, note 21a): *"I don't really get the 'mood' and 'words' and how
+    they interact… this will probably confuse people."* A mood is not a second
+    input — it is a shortcut that writes into the only input there is — but the
+    page draws two bands of equal weight, so it reads as two things that
+    combine, and after a press a lit chip and a filled field state the request
+    twice with nothing saying which one the engine reads. The page now asks
+    **two questions in the listener's words**: *what do you want to hear?* (the
+    field at the head of the band, with the starting points and the vocabulary
+    beneath it as ways of filling it, and one sentence under it — *this is
+    exactly what Baz searches for*) and *how should it move?* (the curve). A
+    starting point sets the curve and the length **only while the listener has
+    not set them themselves**. This also retires the word `Vibe` from the
+    surface without a separate decision: the place is *New playlist › From a
+    mood*.
+
 73. **Blocked on a decision — one section-header treatment.** *"the home page
     section headers and this pages section does not match the library and
     playlist. i prefer the library and homepage."*
