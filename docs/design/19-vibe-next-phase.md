@@ -219,7 +219,54 @@ sections; whether *"something I haven't played in a while"* becomes a control,
 since baz keeps a play ledger and could answer it; and whether this eventually
 reaches the wall as *more like this*.
 
-## 7. Not on the table
+## 7. The feature, designed end to end
+
+The owner, after the quorum: *"lets focus on this feature."* Design note 21 is
+that — every state drawn, not only the one that exists. It was delivered as a
+page; the states and the resolved decisions are recorded here so the repository
+carries them.
+
+**Nine states, of which the shipping build designs one.** Never listened →
+listening → ready → asked → composing → a list → edited → saved, plus two
+asides: *the shape cannot be filled* and *tuning each dimension*. The five with
+no design at all today are the two first-run states, composing, edited and
+saved — and the first two are where a new listener spends their entire first
+session.
+
+What note 21 resolves, beyond §6's list:
+
+- **The ask pane stays live while baz listens.** Everything except the compose
+  is free — pressing a mood, typing, dragging the shape — because a page you
+  cannot touch for two hours reads as broken. The commitment states what it
+  needs (`Compose · needs listening first`) and then what it can do
+  (`Compose from 1 240 so far`), which is true at every point on the bar.
+- **The shape control's anatomy**, drawn at size: one blended line; the axis
+  labelled *loud, fast, busy* → *quiet, slow, sparse* so there is no legend;
+  **the library's own distribution drawn behind it**, so a line through a thin
+  part is visible before the press; a sentence stating the shape that updates
+  as it is dragged; presets as chips *underneath* rather than thumbnails above,
+  which makes them the press-instead-of-drag route; a ring on the focused point
+  with arrow keys and doubled grab regions.
+- **The degenerate case is warned twice** — before the press against the
+  distribution, and on the result in plain numbers — with *lower the line*
+  offered as a control. Nothing is padded to reach the asked-for length.
+- **Saving happens in place**: the ask pane becomes the naming pane for one
+  press, the name is proposed from the mood, and what lands is the same
+  `.m3u8` as every other list.
+- **Narrow keeps the order, the words and the visible commitment**; only the
+  arrangement changes, and under 700 px of height the curve collapses to its
+  sentence and its presets — which is its accessible form anyway.
+
+**Four decisions remain**, and only one of them is not taste: may baz listen to
+a library before being asked (consent); does a mood compose immediately once
+there is something to compose from; do the per-dimension curves ship on day
+one; and is the surface still called *Vibe* or *New playlist › From a mood*.
+
+The build order, if it is a yes: the two panes and the measure; the shape
+control; the words vocabulary; the result; the first run; then the fork's
+removal, last, so it lands on a page that is already right.
+
+## 8. Not on the table
 
 - **The engine.** The contour still steers position against a
   collection-relative rank axis, and retrieval still runs per position. That

@@ -1536,6 +1536,20 @@ or not."*
     every mood. Ines proposed it, Marcus reframed it as a filter, Toby said he
     would press it every time. Needs the owner's word before it is designed.
 
+77. **Not started — one control style for quiet acts.** *"the general idea
+    isn't wrong around some of the controls. I think we could tackle that
+    separately."*
+
+    Pass 2 of design note 20, lifted out of the Vibe work so it can move on its
+    own. Quiet acts are bare words across the whole product — `Rename`,
+    `Delete`, `Change image…`, `Remove image`, `Save playlist`, `Import
+    pasted`, `Load template`, the mood chips, the shape presets — with no
+    border, no ground, and hover as their only affordance. Three tiers:
+    **commitment** keeps the accent outline it has; **quiet act** becomes a
+    hairline chip with a glyph; **destructive** sits apart in the alert ink.
+    Eleven call sites, one style function, and it hands the accent back its one
+    job. The other six passes of note 20 stay parked until this one is proven.
+
 ## Doing
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries
