@@ -112,16 +112,39 @@ pub(crate) fn view<'a>(
     let live = player.engine_ready();
     let playable = !open.queue.is_empty();
     let layout = playlist_page::layout(window.width);
+    let authored = open.image.is_some();
     let acts = if open.confirming_delete {
         vec![
             page::act("Cancel", true, Message::PlaylistDeleteCancel),
             page::act("Move to Trash", true, Message::PlaylistDelete),
         ]
     } else {
-        vec![
+        // **The picture's two verbs sit with Rename and Delete**, because
+        // they are the same kind of act: quiet, about the artefact rather
+        // than about the music, and reversible. `Remove image` is absent
+        // rather than disabled where there is no picture — a list that never
+        // had one has nothing to take away.
+        let mut acts = vec![
             page::act("Rename", true, Message::PlaylistRenameStart),
             page::act("Delete", true, Message::PlaylistDeleteStart),
-        ]
+            page::act(
+                if authored {
+                    "Change image…"
+                } else {
+                    "Set image…"
+                },
+                true,
+                Message::PlaylistImageChoose(open.id),
+            ),
+        ];
+        if authored {
+            acts.push(page::act(
+                "Remove image",
+                true,
+                Message::PlaylistImageRemove(open.id),
+            ));
+        }
+        acts
     };
     playlist_page::view(
         shelf,
@@ -129,6 +152,7 @@ pub(crate) fn view<'a>(
             lead: breadcrumb(open.name()),
             name: open.name().to_owned(),
             art: open.art.clone(),
+            image: shelf.playlist_image(open.id).cloned(),
             commitment: Some(page::commitment(
                 "Play",
                 live && playable,

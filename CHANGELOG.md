@@ -24,6 +24,17 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Added
+
+- **A playlist can wear a picture you choose.** Its page offers `Set image…`,
+  and the picture then stands in front of the collage baz makes from the
+  records in the list — on the tile, in the sidebar and on the page.
+  `Remove image` gives the collage back. The picture is **copied next to the
+  playlist file**, as `<name>.png` beside `<name>.m3u8`, so it travels with a
+  copy of your playlists folder, survives a reinstall, and is yours to replace
+  or delete without baz. It follows the list through a rename and goes to the
+  trash with it.
+
 ## [0.2.0] - 2026-08-15
 
 The first release after the public beta. Everything here is the answer to a

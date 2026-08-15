@@ -295,11 +295,25 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         tail = tail.push(commitment);
     }
     if !acts.is_empty() {
-        tail = tail.push(
-            Row::with_children(acts)
-                .spacing(theme::GAP_SM)
-                .align_y(iced::Alignment::Center),
-        );
+        // **Two to a line.** The aside is [`theme::ALBUM_ASIDE_W`] wide and
+        // does not grow, so a third act runs out of it: the playlist page
+        // gained `Change image…` and `Remove image` (item 52) and the fourth
+        // word was drawn half off the edge. Pairs rather than a measured wrap
+        // because a `Row` cannot ask how wide its children want to be, and
+        // because it leaves every page that has one or two acts — which is
+        // every other page in the product — pixel-identical.
+        let mut acts = acts.into_iter();
+        loop {
+            let line: Vec<Element<'a, Message>> = acts.by_ref().take(2).collect();
+            if line.is_empty() {
+                break;
+            }
+            tail = tail.push(
+                Row::with_children(line)
+                    .spacing(theme::GAP_SM)
+                    .align_y(iced::Alignment::Center),
+            );
+        }
     }
     for block in aside_tail {
         tail = tail.push(block);

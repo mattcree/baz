@@ -92,6 +92,26 @@ pub const EXTENSION: &str = "m3u8";
 /// folder are listed and read, but baz never creates one.
 pub const LEGACY_EXTENSION: &str = "m3u";
 
+/// The image extensions an **authored playlist sleeve** may wear, in the order
+/// a sibling is looked for.
+///
+/// A playlist's sleeve is otherwise a collage of quotations from the records it
+/// holds (ADR-0024 §A1) — generated, and therefore never able to disagree with
+/// the tiles it quotes. A listener may put one picture in front of that, and
+/// the owner asked for it: *"lets allow setting an image/removing the image for
+/// a playlist."*
+///
+/// **The bytes live beside the list**, as `<name>.<ext>` next to `<name>.m3u8`,
+/// and this is the decision the backlog left open. The alternative was a row in
+/// baz's own database, which would make a listener's own picture invisible to
+/// every other program, absent from their backups of the playlists folder, and
+/// lost on a reinstall — for a product whose first promise is *your files are
+/// the truth*, a sibling file is the only answer that keeps it. The cost is
+/// stated rather than discovered: the picture appears in the listener's folder,
+/// where they can replace or delete it themselves, and where a rename has to
+/// carry it (see [`Folder::rename`]).
+pub const IMAGE_EXTENSIONS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
+
 /// One line of a playlist, as a value.
 ///
 /// A playlist file is a sequence of these, in file order. Entries are the
@@ -713,6 +733,19 @@ impl Folder {
             path: source.path.clone(),
             source: error,
         })?;
+        // **The sleeve travels with the list**, because it is identified by
+        // the list's name and by nothing else: leaving it behind would orphan
+        // a file in the listener's folder and blank a tile that had a picture
+        // a moment ago. A failure here is deliberately not fatal — the rename
+        // the listener asked for has already happened, and answering with an
+        // error would report a failure that did not occur.
+        if let Some(image) = self.image_of(from) {
+            let extension = image
+                .extension()
+                .map(|extension| extension.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let _ = std::fs::rename(&image, self.dir.join(format!("{to}.{extension}")));
+        }
         Ok(PlaylistFile {
             name: to.to_string(),
             path: target,
@@ -765,7 +798,101 @@ impl Folder {
         trash::delete(&found.path).map_err(|error| PlaylistError::Io {
             path: found.path,
             source: std::io::Error::other(error),
-        })
+        })?;
+        // The authored sleeve goes to the same trash, for the same reason it
+        // travels through a rename: it is the list's picture and the list is
+        // gone. Both are restorable from the desktop's own `Restore`, and a
+        // sleeve left behind would be a file nothing in baz can reach.
+        let _ = self.remove_image(name);
+        Ok(())
+    }
+
+    /// The authored sleeve sitting beside the playlist named `name`, if the
+    /// listener has set one — `<name>.jpg` before `.jpeg` before `.png` before
+    /// `.webp`, by [`IMAGE_EXTENSIONS`].
+    ///
+    /// One `is_file` per extension rather than a directory walk: this is asked
+    /// once per playlist on every refresh, and four stats of a path baz
+    /// computes is cheaper and more predictable than reading the folder again.
+    #[must_use]
+    pub fn image_of(&self, name: &str) -> Option<PathBuf> {
+        IMAGE_EXTENSIONS
+            .iter()
+            .map(|extension| self.dir.join(format!("{name}.{extension}")))
+            .find(|path| path.is_file())
+    }
+
+    /// Put `source` beside the playlist named `name` as its sleeve, and answer
+    /// with where it landed.
+    ///
+    /// **The bytes are copied, not referenced.** A path into the listener's
+    /// pictures folder would break the day they tidy it, and the sleeve would
+    /// be missing from a copy of the playlists folder — which is the one
+    /// portable artefact baz promises. The copy keeps the source's own
+    /// extension, so nothing is re-encoded and no image *encoder* is needed
+    /// here at all.
+    ///
+    /// Any sleeve already there is trashed first, whatever its extension, so a
+    /// `.png` replacing a `.jpg` cannot leave two files for one list — and it
+    /// goes to the trash rather than under an unlink, because it is a
+    /// listener's own picture and the folder is theirs (doc 11 §5 P2).
+    ///
+    /// # Errors
+    ///
+    /// [`PlaylistError::NotFound`] if `name` is not in the folder;
+    /// [`PlaylistError::InvalidName`] if `source` has no extension this can
+    /// store, which is the honest refusal for a file baz could not draw;
+    /// [`PlaylistError::Io`] if the copy or the replacement fails.
+    pub fn set_image(&self, name: &str, source: &Path) -> Result<PathBuf, PlaylistError> {
+        self.locate(name)?;
+        let extension = source
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+            .filter(|extension| IMAGE_EXTENSIONS.contains(&extension.as_str()))
+            .ok_or_else(|| PlaylistError::InvalidName {
+                name: source.to_string_lossy().into_owned(),
+                why: "a playlist image must be a .jpg, .jpeg, .png or .webp file",
+            })?;
+        let target = self.dir.join(format!("{name}.{extension}"));
+        // Replacing a sleeve with *itself* would otherwise trash the file and
+        // then copy from a path that is no longer there.
+        if source != target {
+            self.remove_image(name)?;
+            std::fs::copy(source, &target).map_err(|error| PlaylistError::Io {
+                path: source.to_path_buf(),
+                source: error,
+            })?;
+        }
+        Ok(target)
+    }
+
+    /// Take the authored sleeve away from the playlist named `name`, to the
+    /// platform trash. The collage comes back, because the collage is what a
+    /// playlist's sleeve is when nobody has said otherwise.
+    ///
+    /// Answers `Ok(false)` when there was nothing to take: removing an absent
+    /// sleeve is not a failure, and the interface offers the act only where
+    /// there is one.
+    ///
+    /// # Errors
+    ///
+    /// [`PlaylistError::Io`] if the platform refuses the move to the trash.
+    /// Nothing is unlinked behind the listener's back — a refusal leaves the
+    /// picture exactly where it was, [`Self::delete_to_trash`]'s own rule.
+    pub fn remove_image(&self, name: &str) -> Result<bool, PlaylistError> {
+        let mut removed = false;
+        for extension in IMAGE_EXTENSIONS {
+            let path = self.dir.join(format!("{name}.{extension}"));
+            if !path.is_file() {
+                continue;
+            }
+            trash::delete(&path).map_err(|error| PlaylistError::Io {
+                path: path.clone(),
+                source: std::io::Error::other(error),
+            })?;
+            removed = true;
+        }
+        Ok(removed)
     }
 
     /// The file currently answering to `name`, `.m3u8` before `.m3u`.
@@ -841,6 +968,44 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let folder = Folder::open(dir.path().join("playlists")).expect("open");
         (dir, folder)
+    }
+
+    /// The set-then-read round trip for an authored sleeve, and the two
+    /// things about it that are easy to get wrong: **one file per list**
+    /// however many times the picture changes, and a rename that carries it.
+    ///
+    /// `remove_image` is not asserted here because it spends the platform
+    /// trash, which a test cannot have; `set_image` replacing a `.jpg` with a
+    /// `.png` exercises the same removal path through its own call.
+    #[test]
+    fn a_playlist_wears_one_authored_sleeve_and_keeps_it_through_a_rename() {
+        let (_dir, folder) = folder();
+        folder.create("Road Trip").expect("create");
+        assert_eq!(folder.image_of("Road Trip"), None, "nothing authored yet");
+
+        let source = folder.dir().join("chosen.png");
+        std::fs::write(&source, b"not really a png, and never decoded here").expect("write");
+        let landed = folder.set_image("Road Trip", &source).expect("set");
+        assert_eq!(landed, folder.dir().join("Road Trip.png"));
+        assert_eq!(folder.image_of("Road Trip"), Some(landed));
+
+        // The list keeps its picture when it is renamed, under the new name.
+        folder
+            .rename("Road Trip", "Long Way Round")
+            .expect("rename");
+        assert_eq!(folder.image_of("Road Trip"), None);
+        assert_eq!(
+            folder.image_of("Long Way Round"),
+            Some(folder.dir().join("Long Way Round.png")),
+        );
+
+        // A file baz could not draw is refused rather than copied.
+        let text = folder.dir().join("notes.txt");
+        std::fs::write(&text, b"words").expect("write");
+        assert!(matches!(
+            folder.set_image("Long Way Round", &text),
+            Err(PlaylistError::InvalidName { .. })
+        ));
     }
 
     /// An absolute fixture path *by the platform's own rule*. `/music/a.flac`

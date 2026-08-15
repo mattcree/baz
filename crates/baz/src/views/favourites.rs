@@ -126,6 +126,9 @@ pub(crate) fn view<'a>(
             lead: breadcrumb(),
             name: "Favourites".to_owned(),
             art,
+            // The built-in has no file of its own, so there is nowhere for a
+            // picture to sit beside it: it wears its heart, or its collage.
+            image: None,
             commitment: Some(page::commitment(
                 "Play",
                 player.engine_ready() && !list.items.is_empty(),

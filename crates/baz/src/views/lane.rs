@@ -488,13 +488,7 @@ fn lane_row<'a>(
         // list cannot look like two different objects in two surfaces.
         Subject::Playlist(id) => {
             let art = playlists.row(id).map_or(&[][..], |entry| &entry.art);
-            crate::views::playlist_sleeve_marked(
-                shelf,
-                art,
-                &entry.name,
-                edge,
-                crate::views::default_playlist_mark(id),
-            )
+            crate::views::playlist_sleeve_of(shelf, id, art, &entry.name, edge)
         }
     };
     let press = match entry.subject {

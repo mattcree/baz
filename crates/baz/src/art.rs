@@ -426,6 +426,20 @@ pub fn load_thumb(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
     decode(first_track, THUMB_PX)
 }
 
+/// Decode a **listener-chosen picture** — a playlist's authored sleeve — into
+/// an RGBA image no larger than `edge` per side.
+///
+/// [`load_thumb`]'s function with the resolution order taken out: there is no
+/// album, no tags and no folder to search, because the listener said which
+/// file this is. Downscale-only, like every other tier here, so a small
+/// picture is drawn at its own size rather than blown up to fill a tile.
+///
+/// Blocking; call off the UI thread.
+#[must_use]
+pub fn load_picture(path: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
+    decode_source(ArtSource::File(path.to_path_buf()), edge).map(into_parts)
+}
+
 /// Load a thumbnail at the edge the active shelf density actually draws.
 ///
 /// Unlike [`load_thumb`], this path keeps a prepared PNG in the local XDG

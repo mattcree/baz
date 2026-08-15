@@ -15,7 +15,7 @@ use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
 use crate::theme;
-use crate::views::{page, playlist_sleeve};
+use crate::views::page;
 
 /// The one empty statement under a playlist page's `TRACKS` rule.
 pub(crate) const EMPTY: &str = "Nothing here yet.";
@@ -77,6 +77,10 @@ pub(crate) struct PlaylistPage<'a> {
     pub(crate) name: String,
     /// Up to four record identities quoted by the collage.
     pub(crate) art: Vec<u64>,
+    /// The **authored** sleeve, where the listener set one — drawn instead of
+    /// the collage. `None` on the transient run and on the built-in, neither
+    /// of which is a file a picture can sit beside.
+    pub(crate) image: Option<iced_image::Handle>,
     /// The durable Play commitment. `None` for the already-current run; the
     /// compositor reserves the same control-height slot in that state.
     pub(crate) commitment: Option<Element<'a, Message>>,
@@ -102,6 +106,7 @@ pub(crate) fn view<'a>(
         name,
         art,
         commitment,
+        image,
         acts,
         identity,
         rows,
@@ -110,7 +115,13 @@ pub(crate) fn view<'a>(
     page::view(
         page::Page {
             lead,
-            sleeve: playlist_sleeve(shelf, &art, &name, theme::ALBUM_SLEEVE),
+            sleeve: super::playlist_sleeve_authored(
+                shelf,
+                image.as_ref(),
+                &art,
+                &name,
+                theme::ALBUM_SLEEVE,
+            ),
             // A run has no command that creates the playback truth it already
             // carries. Keep the slot rather than collapsing the aside.
             commitment: Some(commitment.unwrap_or_else(|| {

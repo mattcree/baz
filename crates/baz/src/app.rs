@@ -635,6 +635,19 @@ pub(crate) enum Message {
     /// row 4's enter *before* row 3's exit, so an exit that cleared the state
     /// unconditionally would unlight the row the pointer is actually on.
     DraftRowLeft(usize),
+    /// **Choose a picture for the playlist `id`** — the platform's own file
+    /// dialog, off the event loop. The owner: *"lets allow setting an
+    /// image/removing the image for a playlist."*
+    PlaylistImageChoose(u64),
+    /// The chooser closed: a file, or `None` for a dismissal, which changes
+    /// nothing.
+    PlaylistImagePicked(u64, Option<PathBuf>),
+    /// **Take the authored picture off the playlist `id`** — to the trash, and
+    /// the collage comes back.
+    PlaylistImageRemove(u64),
+    /// One authored sleeve finished decoding: the handle, or `None` where the
+    /// file could not be read as an image and the list keeps its collage.
+    PlaylistImageLoaded(u64, Option<iced_image::Handle>),
     /// **The pointer entered one row of Favourites**, for the same reason as
     /// [`Self::DraftRowEntered`].
     FavouriteRowEntered(usize),
@@ -4046,6 +4059,52 @@ impl App {
             // the listener asks for it. It exists so the widget has one
             // message to publish on release rather than a silent edge.
             Message::ContourReleased => Some(Task::none()),
+            Message::PlaylistImageChoose(id) => Some(pick_playlist_image(*id)),
+            Message::PlaylistImagePicked(id, choice) => {
+                let (id, choice) = (*id, choice.clone());
+                let Some(path) = choice else {
+                    // A dismissal changes nothing, and says nothing: the
+                    // listener closed a dialog they opened.
+                    return Some(Task::none());
+                };
+                let library = match &self.screen {
+                    Screen::Shelf(state) => Some(&state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
+                };
+                match self.playlists.set_image(id, &path, library) {
+                    Ok(_) => {
+                        if let Screen::Shelf(state) = &mut self.screen {
+                            // The path can be the same and the bytes
+                            // different, so the cached decode is dropped
+                            // rather than compared.
+                            state.forget_playlist_image(id);
+                        }
+                        Some(self.request_playlist_art())
+                    }
+                    Err(reason) => {
+                        crate::baz_log!("[playlists] {reason}");
+                        Some(Task::none())
+                    }
+                }
+            }
+            Message::PlaylistImageRemove(id) => {
+                let id = *id;
+                let library = match &self.screen {
+                    Screen::Shelf(state) => Some(&state.library),
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
+                };
+                self.playlists.remove_image(id, library);
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.forget_playlist_image(id);
+                }
+                Some(self.request_playlist_art())
+            }
+            Message::PlaylistImageLoaded(id, handle) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.finish_playlist_image(*id, handle.clone());
+                }
+                Some(Task::none())
+            }
             Message::FavouriteRowEntered(row) => {
                 self.hovered_favourite_row = Some(*row);
                 Some(Task::none())
@@ -4326,8 +4385,23 @@ impl App {
         }
         wanted.sort_unstable();
         wanted.dedup();
+        // **The authored sleeves ride with the collages**, because they are
+        // the same question asked of the same folder: which lists exist, and
+        // what does each one draw. The set is every list that has a picture
+        // rather than the visible slice — one small decode per list the
+        // listener chose a file for, and passing the whole set is also what
+        // drops the cache entry for a list that is gone.
+        let pictures: Vec<(u64, PathBuf)> = self
+            .playlists
+            .rows
+            .iter()
+            .filter_map(|row| row.image.clone().map(|path| (row.id, path)))
+            .collect();
         match &mut self.screen {
-            Screen::Shelf(state) => state.request_thumbs(&wanted),
+            Screen::Shelf(state) => Task::batch([
+                state.request_thumbs(&wanted),
+                state.request_playlist_images(&pictures),
+            ]),
             Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
         }
     }
@@ -7919,6 +7993,25 @@ pub(crate) struct Shelf {
     /// stop asking. Cleared once when the scan finishes, since late tracks
     /// or cover files may have arrived for early albums.
     no_art: HashSet<u64>,
+    /// **Authored playlist sleeves**, decoded: playlist id → the picture the
+    /// listener put beside that list's `.m3u8`.
+    ///
+    /// Held here rather than in [`crate::playlists::Playlists`] because this
+    /// is where every surface that draws a sleeve already looks — the wall's
+    /// tiles, the lane's rows and the page all reach a `Shelf` — and one
+    /// answer cannot drift from another. One decode at
+    /// [`art::THUMB_PX`] serves all three: it is exactly
+    /// [`theme::ART_MAX`], the largest a playlist sleeve is ever drawn.
+    ///
+    /// Bounded by the number of lists that *have* a picture, which is a number
+    /// the listener chose one file at a time; entries for lists that are gone
+    /// are dropped whenever the folder is re-read.
+    playlist_images: HashMap<u64, iced_image::Handle>,
+    /// Playlist ids whose sleeve decode is in flight, so a re-render does not
+    /// start it again. A picture that fails to decode stays out of
+    /// [`Self::playlist_images`] and the list draws its collage, which is the
+    /// same honest reading a record's tile gives art it cannot decode.
+    playlist_image_jobs: HashSet<u64>,
     scan_rx: Option<Receiver<ScanUpdate>>,
     /// The music folders baz is holding, in the listener's order (ADR-0022).
     ///
@@ -8177,6 +8270,8 @@ impl Shelf {
             last_requested: None,
             thumb_jobs: ThumbJobs::default(),
             no_art: HashSet::new(),
+            playlist_images: HashMap::new(),
+            playlist_image_jobs: HashSet::new(),
             scan_rx: Some(scan_rx),
             roots,
             unavailable: HashSet::new(),
@@ -9867,6 +9962,63 @@ impl Shelf {
         self.thumbs.peek(id)
     }
 
+    /// The decoded authored sleeve for the playlist `id`, if it has one and it
+    /// has arrived. `None` means *draw the collage* — either because the
+    /// listener never set a picture, or because its decode is still in flight,
+    /// and a tile that flickers from collage to picture once is better than a
+    /// blank one that waits.
+    pub(crate) fn playlist_image(&self, id: u64) -> Option<&iced_image::Handle> {
+        self.playlist_images.get(&id)
+    }
+
+    /// Start the decodes for the authored sleeves in `wanted` that are neither
+    /// cached nor in flight, and forget any that no longer belong to a list.
+    ///
+    /// `wanted` is the whole set the folder currently holds, not a delta, so
+    /// this is also where a removed picture leaves the cache.
+    fn request_playlist_images(&mut self, wanted: &[(u64, PathBuf)]) -> Task<Message> {
+        let live: HashSet<u64> = wanted.iter().map(|(id, _)| *id).collect();
+        self.playlist_images.retain(|id, _| live.contains(id));
+        let mut tasks = Vec::new();
+        for (id, path) in wanted {
+            let (id, path) = (*id, path.clone());
+            if self.playlist_images.contains_key(&id) || !self.playlist_image_jobs.insert(id) {
+                continue;
+            }
+            tasks.push(Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        art::load_picture(&path, art::THUMB_PX).map(decoded)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                },
+                move |decoded| {
+                    Message::PlaylistImageLoaded(id, decoded.map(|(_, _, handle)| handle))
+                },
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// One authored sleeve came back — or did not, in which case the list
+    /// keeps its collage and nothing is retried until the folder is re-read.
+    fn finish_playlist_image(&mut self, id: u64, handle: Option<iced_image::Handle>) {
+        self.playlist_image_jobs.remove(&id);
+        if let Some(handle) = handle {
+            self.playlist_images.insert(id, handle);
+        }
+    }
+
+    /// Drop what is cached and in flight for `id`, so the next request decodes
+    /// the file that is there **now**. Spent when a listener sets or removes a
+    /// picture: the path can be the same and the bytes different.
+    fn forget_playlist_image(&mut self, id: u64) {
+        self.playlist_images.remove(&id);
+        self.playlist_image_jobs.remove(&id);
+    }
+
     fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
         self.thumbs.focus_chrome(ids.iter().copied());
         self.request_target_thumbs()
@@ -10249,6 +10401,36 @@ fn pick_folder() -> Task<Message> {
             }
         },
         Message::MusicFolderPicked,
+    )
+}
+
+/// **Choose a playlist's sleeve** — the second thing in the product that opens
+/// the platform's file dialog, and it follows [`pick_folder`]'s rule exactly:
+/// the call blocks until the listener decides, so it runs on the blocking pool
+/// and the event loop never waits on a human.
+///
+/// The filter names the extensions the storage layer will actually store
+/// (`baz_core::playlist::IMAGE_EXTENSIONS`); a listener who defeats the filter
+/// gets the same refusal from `Folder::set_image`, which is where the rule
+/// lives.
+fn pick_playlist_image(id: u64) -> Task<Message> {
+    Task::perform(
+        async move {
+            match tokio::task::spawn_blocking(|| {
+                rfd::FileDialog::new()
+                    .add_filter("Picture", &baz_core::playlist::IMAGE_EXTENSIONS)
+                    .pick_file()
+            })
+            .await
+            {
+                Ok(choice) => choice,
+                Err(error) => {
+                    crate::baz_log!("[playlists] image picker failed: {error}");
+                    None
+                }
+            }
+        },
+        move |choice| Message::PlaylistImagePicked(id, choice),
     )
 }
 

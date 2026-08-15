@@ -325,6 +325,71 @@ pub(crate) fn playlist_sleeve(
     playlist_sleeve_marked(shelf, art, name, edge, None)
 }
 
+/// **A playlist's sleeve when the listener has chosen one** — the authored
+/// picture, drawn full-bleed at `edge`, or the collage where there is none.
+///
+/// The owner: *"lets allow setting an image/removing the image for a
+/// playlist."* One picture stands in front of the generated collage; taking it
+/// away gives the collage back, because the collage is what a playlist's
+/// sleeve *is* when nobody has said otherwise (ADR-0024 §A1 stands — it says
+/// what baz draws unasked, not that a listener may not choose).
+///
+/// `image` is the decoded handle from [`Shelf::playlist_image`], and `None`
+/// covers three different things on purpose: no picture was set, the decode is
+/// still in flight, or the file could not be read. All three draw the collage,
+/// which is a true sleeve for the list in every one of them.
+pub(crate) fn playlist_sleeve_authored(
+    shelf: &Shelf,
+    image: Option<&iced_image::Handle>,
+    art: &[u64],
+    name: &str,
+    edge: f32,
+) -> Element<'static, Message> {
+    match image {
+        Some(handle) => authored_sleeve(handle, edge),
+        None => playlist_sleeve(shelf, art, name, edge),
+    }
+}
+
+/// [`playlist_sleeve_authored`] for the surfaces that know the list by its
+/// **id** — the wall's tiles, the panel's rows and the returns lane — which is
+/// also where a built-in's mark belongs. One function so a list cannot look
+/// like two different objects in two surfaces, which is ADR-0024 §A1's own
+/// argument for the collage in the first place.
+pub(crate) fn playlist_sleeve_of(
+    shelf: &Shelf,
+    id: u64,
+    art: &[u64],
+    name: &str,
+    edge: f32,
+) -> Element<'static, Message> {
+    match shelf.playlist_image(id) {
+        Some(handle) => authored_sleeve(handle, edge),
+        None => playlist_sleeve_marked(shelf, art, name, edge, default_playlist_mark(id)),
+    }
+}
+
+/// The listener's own picture, square and full-bleed at `edge`.
+///
+/// **Cover, not fit**: a sleeve is a square hole in every surface baz draws it
+/// in, and a picture that letterboxed inside it would put the room's ground in
+/// the middle of a shelf of covers. The picture is cropped to the square from
+/// its centre and never enlarged past its own pixels — `art::load_picture` is
+/// downscale-only, so a small picture is drawn small inside its own tile
+/// rather than blown up.
+fn authored_sleeve(handle: &iced_image::Handle, edge: f32) -> Element<'static, Message> {
+    container(
+        iced_image(handle.clone())
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .content_fit(iced::ContentFit::Cover),
+    )
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(edge))
+    .clip(true)
+    .into()
+}
+
 /// **The default mark a built-in list wears** where it has no records to
 /// quote — today only `Favourites`, and its mark is the heart every row in
 /// the product hearts a song with.

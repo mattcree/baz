@@ -509,12 +509,12 @@ fn playlist_row<'a>(
     let room = theme::active();
     // The sleeve, at the row's own scale (ADR-0024 §A2): what turns a list
     // of names into a shelf of objects.
-    let sleeve = crate::views::playlist_sleeve_marked(
+    let sleeve = crate::views::playlist_sleeve_of(
         shelf,
+        entry.id,
         &entry.art,
         &entry.name,
         theme::PANEL_SLEEVE,
-        crate::views::default_playlist_mark(entry.id),
     );
     let mut name_line = row![
         text(entry.name.clone())

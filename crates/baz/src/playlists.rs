@@ -96,6 +96,9 @@ fn empty_favourites_row() -> PanelRow {
         created_unix_s: None,
         touched_unix_s: None,
         art: Vec::new(),
+        // The built-in has no file, so there is nothing to put a picture
+        // beside; it wears its heart instead (`views::default_playlist_mark`).
+        image: None,
     }
 }
 
@@ -166,6 +169,12 @@ pub(crate) struct PanelRow {
     /// collage, fewer meaning "draw the first full-bleed", none meaning the
     /// rest tile.
     pub(crate) art: Vec<u64>,
+    /// The **authored** sleeve, where the listener has set one: the sibling
+    /// picture beside the `.m3u8` (`baz_core::playlist::IMAGE_EXTENSIONS`).
+    /// A list that has one draws it instead of its collage at every size, and
+    /// removing it gives the collage back — the collage is what a playlist's
+    /// sleeve *is* when nobody has said otherwise.
+    pub(crate) image: Option<PathBuf>,
 }
 
 /// How the full Playlists place arranges its tiles.
@@ -431,6 +440,11 @@ pub(crate) struct OpenPlaylist {
     /// path names no record — so a list of nothing but missing entries states
     /// `Playlist` and no count, which is all it can prove.
     pub(crate) records: usize,
+    /// The **authored** sleeve beside this list's file, if the listener set
+    /// one. Held on the open page as well as on the row because the page's
+    /// acts read it — `Set image…` or `Change image…`, and `Remove image`
+    /// only where there is one to remove.
+    pub(crate) image: Option<PathBuf>,
     /// The rename field, while renaming.
     pub(crate) renaming: Option<NameEntry>,
     /// Whether Delete has been pressed once and is waiting for the explicit
@@ -895,6 +909,11 @@ impl Playlists {
                         .fingerprint()
                         .and_then(|stamp| u64::try_from(stamp.mtime_ns / 1_000_000_000).ok()),
                     art,
+                    // Four `is_file` calls per list, on paths baz computes —
+                    // the folder was already read for the list itself, and
+                    // this is the same order of work as the `created` stat
+                    // above.
+                    image: folder.image_of(name),
                 }
             })
             .collect();
@@ -1391,6 +1410,7 @@ impl Playlists {
                     self.clear_undo();
                 }
                 self.open = Some(resolve(id, playlist, library));
+                self.sync_open_image();
                 true
             }
             Err(error) => {
@@ -1408,7 +1428,10 @@ impl Playlists {
         };
         let (id, path) = (open.id, open.playlist.path().to_path_buf());
         match Playlist::read(&path) {
-            Ok(playlist) => self.open = Some(resolve(id, playlist, library)),
+            Ok(playlist) => {
+                self.open = Some(resolve(id, playlist, library));
+                self.sync_open_image();
+            }
             Err(error) => {
                 // Deleted under the page. The shell draws the wall when the
                 // place stops resolving; nothing to hold here — the edit
@@ -1618,7 +1641,10 @@ impl Playlists {
                 self.clear_undo();
                 let id = playlist_id(&file.name);
                 match file.read() {
-                    Ok(playlist) => self.open = Some(resolve(id, playlist, library)),
+                    Ok(playlist) => {
+                        self.open = Some(resolve(id, playlist, library));
+                        self.sync_open_image();
+                    }
                     Err(_) => self.open = None,
                 }
                 self.refresh(Some(library));
@@ -1627,6 +1653,92 @@ impl Playlists {
             Err(error) => {
                 renaming.error = Some(error.to_string());
                 None
+            }
+        }
+    }
+
+    /// Re-read which picture the open page's list wears. Called wherever the
+    /// page is installed or the folder's pictures change; two borrows rather
+    /// than one because the answer comes from the folder and the question from
+    /// the page.
+    fn sync_open_image(&mut self) {
+        let name = self.open.as_ref().map(|open| open.name().to_owned());
+        let image = match (&self.folder, name) {
+            (Some(folder), Some(name)) => folder.image_of(&name),
+            _ => None,
+        };
+        if let Some(open) = &mut self.open {
+            open.image = image;
+        }
+    }
+
+    /// **Put a picture on a list**: copy `source` beside the `.m3u8` as its
+    /// sleeve. The owner: *"lets allow setting an image/removing the image for
+    /// a playlist."*
+    ///
+    /// Answers the path it landed at, or the reason it did not, in the words
+    /// the surface shows. The refresh that follows is what makes the tile,
+    /// the lane row and the page agree — every one of them reads the rows.
+    pub(crate) fn set_image(
+        &mut self,
+        id: u64,
+        source: &Path,
+        library: Option<&Library>,
+    ) -> Result<PathBuf, String> {
+        let name = self
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+            .map(|row| row.name.clone())
+            .ok_or_else(|| "That playlist is no longer here.".to_owned())?;
+        let folder = self
+            .folder
+            .as_ref()
+            .ok_or_else(|| "Baz has no playlists folder to write to.".to_owned())?;
+        match folder.set_image(&name, source) {
+            Ok(path) => {
+                crate::baz_log!("[playlists] {name:?} wears {}", path.display());
+                self.refresh(library);
+                self.sync_open_image();
+                Ok(path)
+            }
+            Err(error) => {
+                crate::baz_log!("[playlists] could not set an image on {name:?}: {error}");
+                Err(error.to_string())
+            }
+        }
+    }
+
+    /// **Take the picture off again**, to the trash. The collage comes back,
+    /// because the collage is what a playlist's sleeve is by default.
+    ///
+    /// `false` means there was nothing to take or the trash refused; both are
+    /// logged, and neither is a state the interface has to say anything about
+    /// beyond the sleeve it draws next.
+    pub(crate) fn remove_image(&mut self, id: u64, library: Option<&Library>) -> bool {
+        let Some(name) = self
+            .rows
+            .iter()
+            .find(|row| row.id == id)
+            .map(|row| row.name.clone())
+        else {
+            return false;
+        };
+        let Some(folder) = &self.folder else {
+            return false;
+        };
+        match folder.remove_image(&name) {
+            Ok(removed) => {
+                if removed {
+                    crate::baz_log!("[playlists] {name:?} is back to its collage");
+                    self.refresh(library);
+                    self.sync_open_image();
+                }
+                removed
+            }
+            Err(error) => {
+                crate::baz_log!("[playlists] could not remove {name:?}'s image: {error}");
+                false
             }
         }
     }
@@ -1927,6 +2039,10 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         missing,
         art,
         records: records.len(),
+        // Filled in by `Playlists::sync_open_image` the moment this is
+        // installed: `resolve` reads the library, and where the picture lives
+        // is the folder's business.
+        image: None,
         renaming: None,
         confirming_delete: false,
     }
@@ -1970,6 +2086,7 @@ mod tests {
             created_unix_s: None,
             touched_unix_s: None,
             art: Vec::new(),
+            image: None,
         };
         assert_eq!(timed.counts(), "Playlist · 14 · 42:10");
 
@@ -2040,6 +2157,7 @@ mod tests {
             created_unix_s,
             touched_unix_s: None,
             art: Vec::new(),
+            image: None,
         };
         playlists.rows = vec![
             row("beta", Some(20)),
@@ -2101,6 +2219,7 @@ mod tests {
             created_unix_s: None,
             touched_unix_s: None,
             art: Vec::new(),
+            image: None,
         };
         playlists.rows = vec![row("Aubade"), row("apples"), row("Bricolage"), row("Zed")];
         playlists.order = PlaylistOrder::Alphabetical;
@@ -2236,6 +2355,53 @@ mod tests {
         }
         playlist.save().expect("save");
         playlist_id(name)
+    }
+
+    /// **A chosen picture reaches every surface that draws the list**, which
+    /// is the only thing about item 52 that could quietly not work: the row
+    /// feeds the wall's tiles, the panel and the lane, and the open page reads
+    /// its own copy for the acts (`Set image…` becomes `Change image…`, and
+    /// `Remove image` appears at all).
+    ///
+    /// The *removal* is not asserted here because it spends the platform
+    /// trash, which a test process has no claim on; `Folder::remove_image` is
+    /// the one line it is, and replacing a picture goes through it in
+    /// `baz_core`'s own test.
+    #[test]
+    fn a_chosen_picture_reaches_the_row_and_the_open_page() {
+        let (dir, folder) = folder();
+        let library = library();
+        write_list(&folder, "Road Trip", &["/m/eno/ascent.flac"]);
+        let mut playlists = Playlists::over(folder);
+        playlists.refresh(Some(&library));
+        let id = playlist_id("Road Trip");
+        assert!(
+            playlists.rows.iter().all(|row| row.image.is_none()),
+            "a list draws its collage until somebody says otherwise"
+        );
+
+        let chosen = dir.path().join("sleeve.png");
+        std::fs::write(&chosen, b"bytes, never decoded in this test").expect("write");
+        let landed = playlists
+            .set_image(id, &chosen, Some(&library))
+            .expect("set the image");
+        assert!(landed.ends_with("Road Trip.png"));
+        assert_eq!(
+            playlists
+                .rows
+                .iter()
+                .find(|row| row.id == id)
+                .and_then(|row| row.image.clone()),
+            Some(landed.clone()),
+            "the row the tiles, the panel and the lane all read"
+        );
+
+        assert!(playlists.open_page(id, &library), "the page opens");
+        assert_eq!(
+            playlists.open.as_ref().and_then(|open| open.image.clone()),
+            Some(landed),
+            "and the page, whose acts depend on it"
+        );
     }
 
     #[test]

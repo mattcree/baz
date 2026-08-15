@@ -138,6 +138,9 @@ pub(crate) fn view<'a>(
             lead: place_name(&name),
             name: name.clone(),
             art,
+            // The transient run is not a file yet, so it has no sleeve to
+            // author. Saving it as a playlist is the door to one.
+            image: None,
             commitment: None,
             acts: vec![save_control(saving.is_none(), player.run_origin())],
             identity: page::Identity {

@@ -1026,7 +1026,7 @@ Three asks arrived during the pass and are **recorded rather than started**;
 each is a decision with a real fork in it rather than an edit. Their rows are
 in `BACKLOG.md`.
 
-52. **Not started — set and remove a playlist's image.** *"lets allow setting
+52. **Done 2026-08-15 — set and remove a playlist's image.** *"lets allow setting
     an image/removing the image for a playlist."*
 
     A playlist's sleeve is a **generated collage** of the records it holds
@@ -1036,9 +1036,29 @@ in `BACKLOG.md`.
     listener's own folder, survives a reinstall, and is a file baz writes into
     a directory it otherwise only reads playlists from), or a row in baz's
     database (invisible to everything else, lost with the cache). The format
-    itself has no cover field to use. Settle that first; the view work is
-    small either way, and the picker is the platform dialog Settings already
-    opens for music folders.
+    itself has no cover field to use.
+
+    **The sibling file won, and it was not close.** A picture in baz's database
+    would be invisible to every other program, absent from a copy of the
+    playlists folder, and lost on a reinstall — for a product whose first
+    promise is *your files are the truth*, that is not a real option. The bytes
+    are **copied** rather than referenced (a path into somebody's pictures
+    folder breaks the day they tidy it) and keep the source's extension, so
+    nothing is re-encoded and no image encoder enters the tree. The picture
+    follows a rename and goes to the trash with a delete; removal restores the
+    collage, which is what a playlist's sleeve *is* when nobody has said
+    otherwise, and it goes to the trash too.
+
+    One decode at `art::THUMB_PX` — exactly `theme::ART_MAX`, the largest a
+    sleeve is drawn — serves the wall's tile, the lane's row and the page,
+    through the one function all three call. Cover-cropped to the square hole
+    every sleeve occupies, never enlarged past its own pixels.
+
+    **What it cost elsewhere**: the page gained two acts, and four do not fit
+    an aside that does not grow — the fourth word drew half off the edge, which
+    the capture caught. `page::view` now lays acts two to a line, which leaves
+    every page with one or two of them pixel-identical.
+    `docs/design/impl/playlist-image/`
 
     Also decide what removal restores — the collage, or a blank tile — and
     whether an authored image replaces the collage everywhere or only on the
@@ -1379,9 +1399,9 @@ because a player without it is missing a floor rather than a feature.
 
 ## Doing
 
-- Nothing active — items 1–51, 53, 55, 56, 61, 63 and 71 are complete, and the parity run
+- Nothing active — items 1–53, 55, 56, 61, 63 and 71 are complete, and the parity run
   shipped two of its own findings (repeat-the-list and the sleep timer).
-  **Items 52, 54, 57–60, 62 and 64–70 are recorded and not started**: each is a
+  **Items 54, 57–60, 62 and 64–70 are recorded and not started**: each is a
   decision with a real fork in it (where a playlist's authored image lives; how
   a row's card widens without nesting its controls; what live theme switching
   does to the process-cached sprite sheets; whether a rule-based list is a

@@ -343,13 +343,8 @@ fn tile<'a>(
     let selected = shelf.selection.is(Content::Playlist(playlist.id));
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
-    let art = crate::views::playlist_sleeve_marked(
-        shelf,
-        &playlist.art,
-        &playlist.name,
-        work,
-        crate::views::default_playlist_mark(playlist.id),
-    );
+    let art =
+        crate::views::playlist_sleeve_of(shelf, playlist.id, &playlist.art, &playlist.name, work);
     let art: Element<'_, Message> = if hovered || selected || confirming_delete {
         let mut options = Vec::new();
         if confirming_delete {
