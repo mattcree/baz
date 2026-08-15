@@ -1456,17 +1456,21 @@ because a player without it is missing a floor rather than a feature.
 
 ## Doing
 
-- Nothing active — items 1–56, 61, 63 and 71 are complete, and the parity run
-  shipped two of its own findings (repeat-the-list and the sleep timer).
-  **Items 57–60, 62 and 64–70 are recorded and not started**: each is a
-  decision with a real fork in it (where a playlist's authored image lives; how
-  a row's card widens without nesting its controls; what live theme switching
-  does to the process-cached sprite sheets; whether a rule-based list is a
-  saved query or a materialised `.m3u8`), and none is blocked on anything but
-  that decision. The owner has asked to *"pick up the big stuff tomorrow"*, and
-  §4 of `docs/design/18-feature-parity.md` states the order: multi-select
-  (item 62) first, because it is the floor tag editing and bulk actions stand
-  on. Phase G shipped on 2026-08-15 and was **rendered** rather
+- Nothing active. **Items 1–56, 61, 63 and 71 are complete**, `v0.2.0` is
+  tagged and its draft release is built and verified, and item 60 is measured
+  with its cheapest repair shipped.
+
+  **What is left is the big stuff, and the owner has asked to pick it up
+  tomorrow**: 57 (smart shuffle, investigation first), 58 (an equaliser and
+  then presets over it — two features, in the one place this project has been
+  most careful), 59 (how the engine is prompted, which needs a scored run
+  against the baseline corpus), 60's remaining half (one shared model session
+  behind a mutex, which trades wall-clock and needs a *time* measurement), 62
+  (multi-select), and 64–70 (the parity queue: lyrics, ratings, rule-based
+  playlists, tag editing, a folder view, crossfade, and the half of drag-drop
+  that is missing). §4 of `docs/design/18-feature-parity.md` states the order:
+  **multi-select first**, because it is the floor tag editing and bulk actions
+  stand on. Phase G shipped on 2026-08-15 and was **rendered** rather
   than argued: `docs/design/impl/second-review-pass/` holds eight frames from
   the real binary at 1280 × 860 and 1280 × 620, both runs carrying the
   `[mpris] no session bus` isolation receipt. Two of the fixes were wrong in
