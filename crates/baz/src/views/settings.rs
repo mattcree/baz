@@ -210,6 +210,7 @@ pub(crate) fn view<'a>(
     theme_view: ThemeView<'a>,
     diagnostic_lines: Vec<String>,
     resources: Option<crate::resource::Reading>,
+    sleep: Option<std::time::Duration>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
@@ -223,7 +224,11 @@ pub(crate) fn view<'a>(
         APPEARANCE_SECTION => vec![appearance_section(&theme_view)],
         VIBE_SECTION => vec![vibe_section(vibe_workers)],
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
-        _ => vec![output_section(output, player), replay_gain_section(player)],
+        _ => vec![
+            output_section(output, player),
+            replay_gain_section(player),
+            sleep_section(sleep),
+        ],
     };
     let content = container(
         scrollable(
@@ -471,6 +476,55 @@ fn word_action(label: &'static str, message: Message) -> Element<'static, Messag
 /// Controls the amount of parallel local CLAP inference used by the first
 /// library scan. More sessions trade additional CPU and RAM for a shorter
 /// wait; the setting is persisted and applies to the next scan.
+/// **The sleep timer**: how long until Baz stops on its own.
+///
+/// A parity gap, and the plainest kind — every phone player has one, and it
+/// is the one thing a listener asks for at midnight and cannot improvise
+/// (`docs/design/18-feature-parity.md` §2.3).
+///
+/// It **pauses**, and does not stop, close or quit: pausing is the one ending
+/// that keeps the run, the position and the queue exactly where they were, so
+/// the morning's first press carries on rather than starting over. Nothing is
+/// faded — a fade would be baz changing the volume the listener set.
+fn sleep_section(remaining: Option<std::time::Duration>) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut choices = row![].spacing(theme::GAP_SM);
+    for minutes in crate::app::SLEEP_CHOICES {
+        choices = choices.push(word_control(
+            minutes.label,
+            true,
+            Message::SleepTimerSet(minutes.minutes),
+        ));
+    }
+    column![
+        section_heading(
+            "Sleep timer",
+            "Pause the music after a while. The run, the position and the queue stay where they are.",
+        ),
+        choices,
+        text(remaining.map_or_else(
+            || "Off — nothing is scheduled.".to_owned(),
+            |left| {
+                let seconds = left.as_secs();
+                format!(
+                    "Pausing in {}:{:02}.",
+                    seconds / 60,
+                    seconds % 60
+                )
+            }
+        ))
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .color(if remaining.is_some() {
+            room.paper
+        } else {
+            room.paper_faint
+        }),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
 fn vibe_section(workers: usize) -> Element<'static, Message> {
     let room = theme::active();
     column![

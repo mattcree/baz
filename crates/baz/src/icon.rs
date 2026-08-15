@@ -1194,7 +1194,7 @@ const VISUAL_FACTS: &[Outline] = &[
 ///
 /// The owner, having already had these fixed once: *"the back button icon is
 /// wrong and so is the forward"*. He is right, and the outlines were unchanged
-/// since — what changed is that they were **drawn 25 % larger**, [`ICON_PX`]
+/// since — what changed is that they were **drawn 25 % larger**, [`theme::ICON_PX`]
 /// 16 → 20 in the 2026-08-14 control pass, and the shape's faults stopped
 /// being mush.
 ///
@@ -1268,7 +1268,7 @@ const HISTORY_BACK: &[Outline] = &[
 /// [`HISTORY_FORWARD`]'s sprite; fixing that ordering drew these outlines for
 /// the first time and they are **a circle**. The old form was 0.56 wide and
 /// 0.60 tall with near-vertical sides — square enough that its rounded top
-/// closed it into a blob at [`ICON_PX`] 20 — and its "short base" was flush
+/// closed it into a blob at [`theme::ICON_PX`] 20 — and its "short base" was flush
 /// with the body rather than a rim, so there was no mouth to read.
 ///
 /// # A silhouette, and why that is not a departure
@@ -1292,7 +1292,7 @@ const HISTORY_BACK: &[Outline] = &[
 /// The first drawing of this profile was 0.68 at the mouth, and the owner read
 /// the bar: *"the bell icon is a little bit narrow/skinny."* That is
 /// measurable rather than a matter of taste — every neighbour in the same
-/// [`ICON_PX`] 20 box is wider ([`GEAR`] 0.84, [`HOME`] and [`NOW_PLAYING`]
+/// [`theme::ICON_PX`] 20 box is wider ([`GEAR`] 0.84, [`HOME`] and [`NOW_PLAYING`]
 /// 0.88), so the bell laid about 13.6 px of ink where the gear one seam away
 /// laid 16.8, and it was the narrowest mark in the app bar's right cluster.
 ///

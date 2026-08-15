@@ -65,7 +65,7 @@
 //!   stage, which makes whether it clips depend on the volume. Rejected: it
 //!   makes the distortion's *existence* depend on unrelated settings.
 //! - **A limiter.** Transparent on peaks, and stateful. The engine's decode
-//!   path is a pure function of position: [`AudioSource::seek`] must produce
+//!   path is a pure function of position: [`crate::playback::AudioSource::seek`] must produce
 //!   the same samples for the same frame however you arrived at it, and the
 //!   integration tests compare a seeked decode against a reference decode of
 //!   the whole file. A limiter's gain depends on what it heard a moment ago,

@@ -65,12 +65,14 @@ Noticed within the hour by anyone building a playlist by hand. Sized medium:
 the selection type, the shift/ctrl grammar, and the acts that then apply to a
 set rather than to an item.
 
-### 2.3 A sleep timer — **item 63**
+### 2.3 A sleep timer — **shipped 2026-08-15**
 
 Small, universal, and absent. Every phone player and most desktop ones have
-it; it is the one feature a listener asks for at midnight and cannot improvise.
-Sized small: a bounded countdown that pauses at zero, with a visible remaining
-time and a cancel.
+it; it is the one feature a listener asks for at midnight and cannot
+improvise. Settings → Playback now offers 15 minutes to two hours with the
+remaining time under it, and it **pauses**: the run, the position and the
+queue stay where they are, so the next press carries on. It records a line in
+the event history when it fires.
 
 ### 2.4 Lyrics — **item 64**
 
@@ -118,10 +120,16 @@ gapless, where crossfade is actively wrong; but for shuffled listening it is
 what people expect. Sized medium, and its interaction with gapless has to be
 stated rather than discovered.
 
-### 2.10 Drag and drop from the file manager — **item 70**
+### 2.10 Drag and drop from the file manager — **item 70, and it is half done**
 
 Dropping a folder onto the window is how a lot of people first try a player.
-baz has internal drag (`crate::drag`) but accepts nothing from outside.
+baz **already accepts a drop on its first-run setup screen** — the path lands
+in the folder field and is checked — so the window-level plumbing exists
+(`Message::FileDropped`). What it does not do is accept a drop *anywhere
+else*: dropping an album on the wall, or a file on a playlist, does nothing.
+
+That makes this smaller than it looked, and it also makes the missing half the
+one people would actually use.
 
 ## 3. Deliberate refusals, and why
 
@@ -145,8 +153,8 @@ without new information.
 
 ## 4. What this run changes about the order of work
 
-The two items that should be done before anything else in §2 are **multi-select
-(2.2)** and **the sleep timer (2.3)**: one is a workflow floor that every other
-list feature stands on, and the other is an evening's work for a feature people
-genuinely miss. Rule-based playlists (2.6) is the biggest prize and the one
-worth doing properly rather than quickly.
+**Multi-select (2.2)** is now the first thing to do: it is the workflow floor
+every other list feature stands on, and tag editing (2.7) cannot sensibly
+happen before it. The sleep timer (2.3) shipped inside this run, as repeat
+(2.1) did. Rule-based playlists (2.6) is the biggest prize and the one worth
+doing properly rather than quickly.

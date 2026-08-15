@@ -1240,9 +1240,20 @@ because a player without it is missing a floor rather than a feature.
     deliberately one content item (ADR-0017's select-then-activate), which is
     right for activation and wrong for building a list by hand. Medium.
 
-63. **Not started — a sleep timer.** A bounded countdown that pauses at zero,
-    with the remaining time visible and a cancel. Small, universal, and the
-    one feature a listener asks for at midnight and cannot improvise.
+63. **Done 2026-08-15 — a sleep timer.** Settings → Playback, six choices and
+    an off, with the time remaining under them while it runs.
+
+    **It pauses**, and does not stop, close or fade: pausing is the one ending
+    that keeps the run, the position and the queue where they are, so the next
+    press carries on rather than starting over — and a fade would be baz
+    moving a volume the listener set. When it fires it records a line in the
+    canonical event history, because music stopping on its own is exactly the
+    kind of thing a listener should be able to look up.
+
+    Its clock exists only while it is armed, which is the rule every other
+    per-second wake-up in the shell follows. It is deliberately **not
+    persisted**: a timer that survived a restart would pause somebody who
+    never set one.
 
 64. **Not started — lyrics.** Embedded `USLT` and sidecar `.lrc`, both
     offline, which is what makes this the one metadata feature that fits baz's
@@ -1273,9 +1284,12 @@ because a player without it is missing a floor rather than a feature.
     actively wrong, so the interaction has to be *stated* — probably: never
     within an album's own sequence, optional between unrelated tracks.
 
-70. **Not started — drag and drop from the file manager.** Dropping a folder
-    onto the window is how many people first try a player; baz has internal
-    drag and accepts nothing from outside.
+70. **Not started — drag and drop from the file manager, and it is half
+    done.** baz already accepts a drop on the first-run setup screen
+    (`Message::FileDropped`, straight into the folder field), so the
+    window-level plumbing exists. What is missing is a drop *anywhere else* —
+    an album onto the wall, files onto a playlist — which is the half people
+    would use.
 
 71. **Not started — the store screenshots' playlist sequence.** The harness
     builds a playlist by hand in the running app (a dozen presses through the

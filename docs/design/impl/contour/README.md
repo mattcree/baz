@@ -122,17 +122,35 @@ out loud. `a_cold_index_still_composes_on_the_one_press` pins it.
 that carried a shape into a text prompt, and their three messages. A shape
 travels as a shape now.
 
+## The fixture had to be rebuilt before any of this could be shown
+
+The first end-to-end capture ran against
+`docs/design/composition/tools/mkfixture.sh`, which builds a wall of **digital
+silence** — one of the two independent guarantees that a headless run is
+inaudible, and exactly right for photographing layout. It is useless here: bliss
+extracts identical features from every silent file, so every track ranks at the
+same place on a collection-relative axis and the dots draw a **flat row
+whatever the line asks for**. The picture was honest and demonstrated nothing,
+which is a fair description of how this looked to the owner on his own library
+before the rank axis landed.
+
+`mkfixture-varied.sh` builds 24 tracks whose loudness and pulse rate genuinely
+vary — a click train at a stated tempo under a quiet tone, at a stated
+amplitude, peaking at −30 dBFS. That is enough for the three features
+`Dimension::Energy` is made of to spread, so a drawn line has something to
+follow and a reader can see whether it did.
+
 ## Frames
 
-Captured against a **real** analysis of the 206-track fixture library — every
-claim this control makes needs an analysed collection to be true rather than
-seeded. `capture.sh`; the run prints its `[mpris] no session bus` receipt.
+Captured against a **real** analysis — every claim this control makes needs an
+analysed collection to be true rather than seeded. `capture.sh`; the run prints
+its `[mpris] no session bus` receipt.
 
 | frame | what it shows |
 |---|---|
-| `01-vibe-form-cold` | the form before anything is analysed: the shapes, the line, no field behind it |
+| `01-vibe-form-cold` | the place before anything is analysed: identity, sections, the shapes, the line |
 | `02-request-typed` | words and shape together — the two halves of one request |
 | `03-analysing` | the one press reading the library |
-| `04-composed` | the field behind the line, and the composed list as dots on a thread |
-| `05-row-hovered` | a row's track lit on the line, with its sentence |
-| `06-another-row-hovered` | the same, further along the list |
+| `04-composed` | the library's own distribution behind the line, and the composed list as dots on a thread, with a tick from each to what was asked |
+| `05-list` | the rows the dots stand for |
+| `06-row-hovered` | a hovered row's track, lit on the line, and the sentence: *6 of 12 · Part 2 · asked for the middle, landed the loud end* |

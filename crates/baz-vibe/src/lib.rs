@@ -915,7 +915,7 @@ impl Axes {
 }
 
 /// Where a raw feature value sits on the −2…+2 scale a [`Contour`] is drawn
-/// on — the inverse of the mapping [`axis_distance_target`] compares against,
+/// on — the inverse of the mapping `Axis::distance` compares against,
 /// so a level drawn and a level scored are the same number.
 /// **One axis of the collection, as places rather than as a span.**
 ///

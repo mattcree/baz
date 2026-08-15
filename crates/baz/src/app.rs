@@ -349,6 +349,49 @@ impl CoverAction {
     }
 }
 
+/// **A sleep timer in flight**: when it fires, and what it was set for.
+#[derive(Debug, Clone, Copy)]
+struct Sleep {
+    minutes: u32,
+    fires_at: Instant,
+}
+
+/// The durations the Settings row offers, and the words for them. Five
+/// choices and an off, which is what every player in the field offers and
+/// what a listener can pick from without reading.
+pub(crate) struct SleepChoice {
+    pub(crate) label: &'static str,
+    pub(crate) minutes: Option<u32>,
+}
+
+/// What the sleep timer offers.
+pub(crate) const SLEEP_CHOICES: [SleepChoice; 6] = [
+    SleepChoice {
+        label: "Off",
+        minutes: None,
+    },
+    SleepChoice {
+        label: "15 min",
+        minutes: Some(15),
+    },
+    SleepChoice {
+        label: "30 min",
+        minutes: Some(30),
+    },
+    SleepChoice {
+        label: "45 min",
+        minutes: Some(45),
+    },
+    SleepChoice {
+        label: "1 hour",
+        minutes: Some(60),
+    },
+    SleepChoice {
+        label: "2 hours",
+        minutes: Some(120),
+    },
+];
+
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     /// Setup screen: the folder text input changed.
@@ -569,6 +612,11 @@ pub(crate) enum Message {
     /// pixel.
     ContourDragged(usize, usize, f32, f32),
     ContourReleased,
+    /// **Set or clear the sleep timer**, in whole minutes. `None` is *off*.
+    SleepTimerSet(Option<u32>),
+    /// One second of the sleep timer's own clock, which exists only while it
+    /// is armed.
+    SleepTimerTick,
     /// **The pointer entered or left one row of the composed preview**, so
     /// the contour can light that track's own place on the line. The owner:
     /// *"when we hover the playlist items it is showing where on the curve
@@ -1479,6 +1527,10 @@ struct App {
     resource_meter: crate::resource::Meter,
     /// What that observer last said, or `None` before the first tick.
     resource_reading: Option<crate::resource::Reading>,
+    /// **When the sleep timer will pause the music**, and how long it was set
+    /// for. Session state and deliberately not persisted: a timer that
+    /// survived a restart would pause a listener who never set one.
+    sleep: Option<Sleep>,
     /// When the meter was last sampled, so the rate divides by a real
     /// interval rather than by the timer's nominal one — a tick the event
     /// loop delivered late would otherwise read as a spike.
@@ -1863,6 +1915,7 @@ impl App {
             settings_section: 0,
             resource_meter: crate::resource::Meter::default(),
             resource_reading: None,
+            sleep: None,
             resource_sampled: None,
             theme_json: String::new(),
             theme_notice: None,
@@ -2462,6 +2515,14 @@ impl App {
             }
             Message::ToggleShuffle => {
                 self.toggle_shuffle();
+                Task::none()
+            }
+            Message::SleepTimerSet(minutes) => {
+                self.set_sleep_timer(minutes);
+                Task::none()
+            }
+            Message::SleepTimerTick => {
+                self.tick_sleep_timer();
                 Task::none()
             }
             Message::CycleRepeat => {
@@ -6096,6 +6157,57 @@ impl App {
     /// One control rather than two, because a listener asks *"does this go
     /// round?"* once and the answer has three values, not two independent
     /// booleans that can contradict each other.
+    /// How long the sleep timer has left, or `None` when it is off.
+    fn sleep_remaining(&self) -> Option<Duration> {
+        self.sleep
+            .map(|sleep| sleep.fires_at.saturating_duration_since(Instant::now()))
+    }
+
+    /// Arm the sleep timer, or turn it off. Setting it again while it is
+    /// running restarts it, which is what pressing a duration means.
+    fn set_sleep_timer(&mut self, minutes: Option<u32>) {
+        self.sleep = minutes.map(|minutes| Sleep {
+            minutes,
+            fires_at: Instant::now() + Duration::from_secs(u64::from(minutes) * 60),
+        });
+        match minutes {
+            Some(minutes) => crate::baz_log!("[sleep] pausing in {minutes} minutes"),
+            None => crate::baz_log!("[sleep] off"),
+        }
+    }
+
+    /// One tick of the sleep timer's own clock.
+    ///
+    /// **It pauses**, and does not stop, close or quit: pausing keeps the run,
+    /// the position and the queue exactly where they are, so the next press
+    /// carries on. It is recorded in the event history because music stopping
+    /// on its own is exactly the kind of thing a listener should be able to
+    /// look up rather than wonder about.
+    fn tick_sleep_timer(&mut self) {
+        let Some(sleep) = self.sleep else {
+            return;
+        };
+        if Instant::now() < sleep.fires_at {
+            return;
+        }
+        self.sleep = None;
+        if self.player.now_playing().is_some() && !self.playback.send(Command::Pause) {
+            self.player.engine_closed();
+            return;
+        }
+        if let Screen::Shelf(state) = &mut self.screen {
+            state.health.record(
+                crate::health::Level::Ready,
+                "Sleep timer",
+                format!(
+                    "Playback paused after {} minutes. Press play to carry on where you were.",
+                    sleep.minutes
+                ),
+            );
+        }
+        crate::baz_log!("[sleep] paused playback");
+    }
+
     fn cycle_repeat(&mut self) {
         use baz_core::protocol::Repeat;
         let repeat = match self.player.repeat() {
@@ -6747,6 +6859,7 @@ impl App {
                         Vec::new()
                     },
                     self.resource_reading,
+                    self.sleep_remaining(),
                 )
             }
         };
@@ -7042,6 +7155,13 @@ impl App {
                 iced::time::every(Duration::from_secs(1))
                     .map(|_| Message::ResourceTick(Instant::now())),
             );
+        }
+        // **The sleep timer's clock runs only while it is armed**, which is
+        // the same rule the resource meter's and the visualizer's follow: a
+        // second-by-second wake-up that exists when nothing is scheduled is a
+        // cost with no reader.
+        if self.sleep.is_some() {
+            subs.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::SleepTimerTick));
         }
         if let Screen::Shelf(state) = &self.screen {
             if state.scanning {
@@ -12076,6 +12196,56 @@ mod tests {
         assert!(
             filter.contains("vm::song_hits"),
             "the songs section and the wall answer one query"
+        );
+    }
+
+    /// **The sleep timer pauses, and pauses only once.**
+    ///
+    /// Pausing is the one ending that keeps the run, the position and the
+    /// queue where they are, so the next press carries on rather than
+    /// starting over — and the timer clears itself, because a timer that
+    /// fired every second after its deadline would pause a listener who had
+    /// just pressed play.
+    #[test]
+    fn the_sleep_timer_pauses_once_and_clears_itself() {
+        let source = include_str!("app.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a head");
+        let body = source
+            .split_once("fn tick_sleep_timer(&mut self)")
+            .expect("the tick")
+            .1;
+        let body = &body[..body.find("\n    }\n").expect("a function ends")];
+        assert!(
+            body.contains("self.sleep = None;") && body.contains("Command::Pause"),
+            "the sleep timer no longer pauses, or no longer disarms itself"
+        );
+        for forbidden in ["Command::Stop", "Message::Quit", "SetVolume"] {
+            assert!(
+                !body.contains(forbidden),
+                "the sleep timer does more than pause: {forbidden}"
+            );
+        }
+        // Its clock exists only while it is armed — the rule every other
+        // per-second wake-up in this file follows.
+        let subs = source
+            .split_once("fn add_place_clocks")
+            .expect("the clocks")
+            .1;
+        assert!(
+            subs.contains("if self.sleep.is_some() {"),
+            "the sleep timer's clock is no longer conditional on its being set"
+        );
+        // Six choices and an off, which is what a listener can pick from
+        // without reading.
+        assert_eq!(SLEEP_CHOICES.len(), 6);
+        assert!(SLEEP_CHOICES[0].minutes.is_none());
+        assert!(
+            SLEEP_CHOICES
+                .iter()
+                .skip(1)
+                .all(|choice| choice.minutes.is_some_and(|minutes| minutes > 0)),
         );
     }
 

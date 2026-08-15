@@ -34,6 +34,10 @@ describe.
 
 ### Added
 
+- **A sleep timer.** Settings → Playback: 15 minutes to two hours, with the
+  time remaining shown while it runs. It *pauses* — the run, the position and
+  the queue stay exactly where they are, so the next press carries on — and it
+  says so in the event history when it fires.
 - **Repeat the list.** Baz had *repeat this track* and nothing else, which
   left it the one player without the state most people mean by the word. One
   control cycles **off → the list → this track**; the two lit states carry

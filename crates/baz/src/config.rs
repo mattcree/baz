@@ -250,7 +250,7 @@ pub struct Config {
     ///
     /// It replaced a `repeat_one` boolean on 2026-08-15, when baz finally
     /// grew *repeat the list*. A config written by an older baz is still
-    /// read: `repeat_one = true` becomes [`Repeat::One`], which is what that
+    /// read: `repeat_one = true` becomes [`baz_core::protocol::Repeat::One`], which is what that
     /// file meant.
     pub repeat: baz_core::protocol::Repeat,
     /// The album object drawn on Now Playing: flat cover, jewel case or none.

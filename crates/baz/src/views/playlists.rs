@@ -12,7 +12,7 @@
 //! exact same pattern as the library please."* So the layout engine is
 //! [`crate::shelf::Shelves`] — the record wall's own — the heading band and its
 //! pinned copy are [`crate::views::shelf::group_band`] and
-//! [`crate::views::shelf::pinned_band`], and the rail is the shared [`Spine`].
+//! [`crate::views::shelf::pinned_band`], and the rail is the shared `Spine`.
 //! What this module owns is what a cell and a heading *mean* here, which is the
 //! only thing that differs: a made thing rather than a found one.
 //!
