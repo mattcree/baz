@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use crate::theme::{self, Palette, Room};
 
 pub const DEFAULT_SELECTION: &str = "closing-time";
-pub const BUILTINS: [(&str, &str); 4] = [
+pub const BUILTINS: [(&str, &str); 6] = [
     ("closing-time", "Closing Time"),
+    ("blue-hour", "Blue Hour"),
     ("stone", "Stone"),
+    ("sea-glass", "Sea Glass"),
     ("plaster", "Plaster"),
     ("reading-room", "Reading Room"),
 ];
@@ -71,6 +73,8 @@ pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
         "stone" => Ok(&theme::STONE),
         "plaster" => Ok(&theme::PLASTER),
         "reading-room" => Ok(&theme::READING_ROOM),
+        "blue-hour" => Ok(&theme::BLUE_HOUR),
+        "sea-glass" => Ok(&theme::SEA_GLASS),
         other => {
             let id = custom_id(other).ok_or_else(|| format!("unknown selected theme {other:?}"))?;
             let dir = themes_dir().ok_or_else(|| "no config directory is available".to_owned())?;
@@ -97,6 +101,8 @@ pub fn preview(selection: &str) -> Result<Preview, String> {
         "stone" => theme::STONE,
         "plaster" => theme::PLASTER,
         "reading-room" => theme::READING_ROOM,
+        "blue-hour" => theme::BLUE_HOUR,
+        "sea-glass" => theme::SEA_GLASS,
         other => {
             let id = custom_id(other).ok_or_else(|| format!("unknown selected theme {other:?}"))?;
             let dir = themes_dir().ok_or_else(|| "no config directory is available".to_owned())?;

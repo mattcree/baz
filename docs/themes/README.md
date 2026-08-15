@@ -5,13 +5,21 @@ surfaces, four ink levels, playback mark, status marks, shadow and focus-ring
 opacity. They cannot contain code, URLs, paths, fonts, layout or behaviour.
 Unknown fields are rejected.
 
-Open **Settings → Appearance** to select one of the four built-ins, paste or
-import a JSON document, load an editable template, or export the selected
-theme. A successful import is normalized into Baz's config `themes` directory
-and selected for the next launch. The preview updates immediately; the whole
-application changes after restart because its glyph texture atlas is built
-once per process. A missing or invalid selected custom theme never prevents
-startup: Baz reports the exact error and uses Closing Time.
+Open **Settings → Appearance** to select one of the six built-ins — Closing
+Time, Blue Hour, Stone, Sea Glass, Plaster, Reading Room — paste or import a
+JSON document, load an editable template, or export the selected theme. A
+successful import is normalized into Baz's config `themes` directory.
+
+**A room you pick stands the moment you press it**, and so does one you
+import: the whole application changes on the next frame, not on the next
+launch. It used to be the other way round because the glyph sprite sheets were
+rasterized once per process in the room's ink; they are now kept per room, and
+anything else that bakes a colour — the jewel case's generated textures — is
+keyed on which room is standing.
+
+A missing or invalid selected custom theme never prevents startup: Baz reports
+the exact error and uses Closing Time. A room that cannot be resolved when you
+press it leaves the one you are in standing, and says so.
 
 Documents use `schema_version: 1`; see [`theme.schema.json`](theme.schema.json)
 and [`examples/`](examples). Every surface step must differ by at least 0.030

@@ -1773,10 +1773,20 @@ impl App {
             Ok((selection, path)) => {
                 let saved = selection.clone();
                 persist(move |config| config.theme = saved);
-                self.theme_notice = Some(format!(
-                    "Imported {} and selected it for the next launch.",
-                    path.display()
-                ));
+                // An imported room stands immediately, like a picked one
+                // (item 54): a listener editing a room and pasting it wants to
+                // *see* it, and asking them to restart to find out is what
+                // made the schema hard to work against.
+                self.theme_notice = Some(match crate::theme_file::resolve(&selection) {
+                    Ok(room) => {
+                        crate::theme::stand_in(room);
+                        format!("Imported {} and standing in it now.", path.display())
+                    }
+                    Err(reason) => format!(
+                        "Imported {} and selected it, but could not stand in it: {reason}.",
+                        path.display()
+                    ),
+                });
             }
             Err(error) => self.theme_notice = Some(error),
         }
@@ -2407,11 +2417,29 @@ impl App {
             Message::PlaylistCreationSave => self.save_playlist_creation(),
             Message::ThemeSelected(selection) => {
                 persist(move |config| selection.clone_into(&mut config.theme));
-                self.theme_notice = Some(format!(
-                    "{} will be used the next time baz starts.",
-                    crate::theme_file::preview(selection)
-                        .map_or_else(|_| selection.to_owned(), |preview| preview.name)
-                ));
+                // **The room changes now**, which is item 54 and the owner's
+                // own words: *"ideally can we apply them upon selection."*
+                // Everything that reads `theme::active()` per frame follows on
+                // the next one; the two things that *bake* a colour — the
+                // glyph sheets and the jewel case's textures — are keyed on
+                // `theme::generation()` and so miss rather than serve a
+                // picture painted in the room before.
+                //
+                // A room that cannot be resolved leaves the one standing and
+                // says so, rather than dropping the listener into Closing Time
+                // for a typo in a file they are editing.
+                match crate::theme_file::resolve(selection) {
+                    Ok(room) => {
+                        crate::theme::stand_in(room);
+                        self.theme_notice = Some(format!("{} is standing now.", room.name));
+                    }
+                    Err(reason) => {
+                        self.theme_notice = Some(format!(
+                            "Could not stand in that room: {reason}. \
+                             The one you are in is unchanged."
+                        ));
+                    }
+                }
                 Task::none()
             }
             Message::ThemeJsonChanged(text) => {

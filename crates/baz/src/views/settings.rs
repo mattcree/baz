@@ -338,7 +338,7 @@ fn debug_section(
     section.push(log).into()
 }
 
-/// Four coordinated built-ins plus the bounded local JSON extension surface.
+/// Six coordinated built-ins plus the bounded local JSON extension surface.
 #[expect(
     clippy::too_many_lines,
     reason = "one small form is clearest as one composition beside its validation workflow"
@@ -423,7 +423,7 @@ fn appearance_section<'a>(view: &ThemeView<'a>) -> Element<'a, Message> {
     let mut section = column![
         section_heading(
             "Visual room",
-            "Four safe built-ins, or a validated local JSON room. Whole-app changes apply on restart.",
+            "Six coordinated rooms, or a validated local JSON one. A room you pick stands the moment you press it.",
         ),
         choices,
         preview,

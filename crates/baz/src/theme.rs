@@ -107,7 +107,9 @@
 //! colours. `every_ink_and_every_surface_clears_its_floor` sweeps both, over
 //! every room.
 
-use std::sync::OnceLock;
+use std::cell::Cell;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use iced::font::{self, Weight};
 use iced::widget::rule::FillMode;
@@ -138,17 +140,23 @@ pub enum Room {
     Plaster,
     /// Its mirror: warm paper ground, cool ink, oxblood lamp.
     ReadingRoom,
+    /// Closing Time's dark room in indigo, under the same amber lamp.
+    BlueHour,
+    /// Plaster's light room in green-cyan, under the same oxblood lamp.
+    SeaGlass,
     /// A validated data-only palette loaded from the listener's theme folder.
     Custom,
 }
 
 impl Room {
     /// Every room, in the order the tests sweep them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 6] = [
         Self::ClosingTime,
         Self::Stone,
         Self::Plaster,
         Self::ReadingRoom,
+        Self::BlueHour,
+        Self::SeaGlass,
     ];
 
     /// The room's resolved palette.
@@ -159,6 +167,8 @@ impl Room {
             Self::Stone => &STONE,
             Self::Plaster => &PLASTER,
             Self::ReadingRoom => &READING_ROOM,
+            Self::BlueHour => &BLUE_HOUR,
+            Self::SeaGlass => &SEA_GLASS,
         }
     }
 }
@@ -761,6 +771,90 @@ pub const READING_ROOM: Palette = Palette {
     ring_alpha: 0.55,
 };
 
+/// **Blue Hour** — Closing Time's dark room, in indigo.
+///
+/// The owner, 2026-08-15: *"lets create more interesting themes for the app
+/// too."* The four rooms that shipped are deliberately quiet, and quiet is not
+/// the same as colourless — but all four of them are, near enough, grey.
+///
+/// This is the smallest honest way to be *interesting*: **the same room, in a
+/// different light.** Every surface sits at Closing Time's exact oklch L, hue
+/// set to 264° with a real chroma (0.045), so the elevation law is satisfied
+/// by construction — the treads are unchanged, because lightness is what a
+/// tread is made of — and the ink keeps its own lightnesses with a cool cast
+/// (250°, chroma 0.012) so every WCAG ratio lands where Closing Time's does.
+///
+/// **The lamp does not move.** Amber over indigo is the blue hour itself, and
+/// the accent is playback truth in every room: a listener who learns what the
+/// amber dot means in one room should not have to learn it again in another.
+pub const BLUE_HOUR: Palette = Palette {
+    room: Room::BlueHour,
+    name: "Blue Hour",
+    // #050709 / #040B1F / #0A1329 / #121C32 — night at four levels.
+    //
+    // **`recess` is the quiet one on purpose.** It is not only a plane: it is
+    // the ink the wall's hover veil is made of, and `veil_alpha` solves one
+    // alpha per stop by averaging the three channels — honest only while the
+    // three answers agree, which a strongly chromatic colour makes them not.
+    // At the wall's own chroma this room drew 3/255 off its intent and the
+    // veil's option labels fell to 4.37 : 1, both of which the theme tests
+    // caught before a frame was rendered. So the plane below the wall keeps
+    // the wall's hue at a **fifth** of its chroma — solved down until the
+    // residual came back inside 1/255 — which is a room whose floor is darker
+    // and quieter than its walls, the thing the name describes.
+    recess: Color::from_rgb(0.022, 0.027, 0.038),
+    wall: Color::from_rgb(0.016, 0.046, 0.125),
+    plinth: Color::from_rgb(0.040, 0.078, 0.161),
+    plinth_lit: Color::from_rgb(0.071, 0.112, 0.197),
+    // #DEE5EC / #A2A9AF / #80868D / #656B71 — Closing Time's paper, cooled.
+    paper: Color::from_rgb(0.873, 0.899, 0.927),
+    paper_dim: Color::from_rgb(0.639, 0.663, 0.689),
+    paper_faint: Color::from_rgb(0.505, 0.528, 0.554),
+    paper_muted: Color::from_rgb(0.397, 0.420, 0.444),
+    // The amber, unchanged: see above.
+    lamp: Color::from_rgb(0.890, 0.631, 0.306),
+    lamp_bright: Color::from_rgb(0.945, 0.702, 0.384),
+    lamp_deep: Color::from_rgb(0.780, 0.533, 0.239),
+    lamp_ink: Color::from_rgb(0.106, 0.078, 0.043),
+    alert: Color::from_rgb(0.929, 0.522, 0.475),
+    warning: Color::from_rgb(0.824, 0.702, 0.369),
+    success: Color::from_rgb(0.557, 0.706, 0.514),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    ring_alpha: 0.45,
+};
+
+/// **Sea Glass** — Plaster's light room, in green-cyan.
+///
+/// Plaster's exact oklch L at hue 175° and chroma 0.030, with Plaster's own
+/// cool ink and oxblood lamp: the same elevation, the same legibility, and a
+/// room that is a colour rather than a grey. The lamp stays oxblood for the
+/// reason Reading Room's does — amber on a light ground is a stain — and it is
+/// the one thing a listener reads as *playing* in any room.
+pub const SEA_GLASS: Palette = Palette {
+    room: Room::SeaGlass,
+    name: "Sea Glass",
+    // #B9D3CB / #9EB7AF / #8DA69F / #7C958E — sea glass at four levels,
+    // descending as they rise, which is what a light room does.
+    recess: Color::from_rgb(0.727, 0.829, 0.798),
+    wall: Color::from_rgb(0.620, 0.720, 0.689),
+    plinth: Color::from_rgb(0.556, 0.654, 0.624),
+    plinth_lit: Color::from_rgb(0.490, 0.586, 0.557),
+    // Plaster's ink, unchanged: a light room's legibility is its ink's.
+    paper: Color::from_rgb(0.039, 0.043, 0.051),
+    paper_dim: Color::from_rgb(0.075, 0.082, 0.094),
+    paper_faint: Color::from_rgb(0.118, 0.125, 0.141),
+    paper_muted: Color::from_rgb(0.200, 0.208, 0.227),
+    lamp: Color::from_rgb(0.400, 0.067, 0.027),
+    lamp_bright: Color::from_rgb(0.498, 0.118, 0.055),
+    lamp_deep: Color::from_rgb(0.298, 0.027, 0.008),
+    lamp_ink: Color::from_rgb(0.976, 0.957, 0.918),
+    alert: Color::from_rgb(0.325, 0.016, 0.027),
+    warning: Color::from_rgb(0.302, 0.176, 0.020),
+    success: Color::from_rgb(0.125, 0.353, 0.149),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.38),
+    ring_alpha: 0.62,
+};
+
 /// What the desktop says it prefers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
@@ -809,8 +903,53 @@ pub fn follow(appearance: Appearance) -> &'static Palette {
     }
 }
 
-/// The room this process resolved at startup.
-static ACTIVE: OnceLock<&'static Palette> = OnceLock::new();
+/// The room standing now, and a counter that changes when it does.
+///
+/// **This used to be a `OnceLock`**, and the room was a startup fact: the
+/// picker in Settings said *"applies on restart"* because it had to. The
+/// owner, 2026-08-15: *"ideally can we apply them upon selection."*
+///
+/// The lock is only ever taken by [`install`] and [`stand_in`] — a listener
+/// pressing a room in a list — and by the first [`active`] read on each thread
+/// after one of those. Every other read is a relaxed atomic load and a
+/// thread-local hit, because `active()` is called by every style closure of
+/// every widget in every frame and a lock per call would be a lock per pixel's
+/// worth of decision.
+static ACTIVE: RwLock<Option<&'static Palette>> = RwLock::new(None);
+
+/// Bumped whenever the room changes. Starts at 1 so that a thread's cache,
+/// which starts at 0, is stale until it has read the room once.
+static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// This thread's copy of the standing room, and the generation it was
+    /// read at.
+    static STANDING: Cell<(u64, &'static Palette)> = const { Cell::new((0, &CLOSING_TIME)) };
+}
+
+/// **Which room is standing, as a number.** Anything that bakes a colour into
+/// a cached artefact keys that cache on this, so a room change misses it
+/// rather than serving a picture drawn in the room before —
+/// [`crate::icon`]'s sprite sheets and the jewel case's generated textures are
+/// the two that do.
+#[must_use]
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
+
+/// **Stand in a different room, now.** The next frame is drawn in it.
+///
+/// Everything that reads [`active`] per frame — which is every style function
+/// baz has — follows immediately. Everything that *baked* a colour follows
+/// because its cache key carries [`generation`]. Nothing is re-created eagerly
+/// here: the sheets and textures are rebuilt when they are next asked for,
+/// which is during the same frame the listener sees.
+pub fn stand_in(room: &'static Palette) {
+    if let Ok(mut standing) = ACTIVE.write() {
+        *standing = Some(room);
+    }
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+}
 
 /// Resolve the room and stand in it, once, at startup.
 ///
@@ -833,7 +972,7 @@ pub fn install(selected: &str) -> &'static Palette {
             &CLOSING_TIME
         }),
     };
-    let _ = ACTIVE.set(room);
+    stand_in(room);
     active()
 }
 
@@ -844,7 +983,20 @@ pub fn install(selected: &str) -> &'static Palette {
 /// cares about a room names it, and one that does not gets the room baz is.
 #[must_use]
 pub fn active() -> &'static Palette {
-    ACTIVE.get().copied().unwrap_or(&CLOSING_TIME)
+    let generation = GENERATION.load(Ordering::Relaxed);
+    STANDING.with(|standing| {
+        let (seen, room) = standing.get();
+        if seen == generation {
+            return room;
+        }
+        let room = ACTIVE
+            .read()
+            .ok()
+            .and_then(|active| *active)
+            .unwrap_or(&CLOSING_TIME);
+        standing.set((generation, room));
+        room
+    })
 }
 
 // ---------------------------------------------------------------------------

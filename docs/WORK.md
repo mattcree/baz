@@ -1105,7 +1105,7 @@ in `BACKLOG.md`.
     Open: whether the trailing slots need their own hover treatment adjusted
     once they light *inside* a lit card.
 
-54. **Not started — more rooms, and apply them on selection.** *"lets create
+54. **Done 2026-08-15 — more rooms, and apply them on selection.** *"lets create
     more interesting themes for the app too, and ideally can we apply them
     upon selection."*
 
@@ -1123,6 +1123,33 @@ in `BACKLOG.md`.
     anything else that baked a colour (the jewel case's textures, the
     visualizer) has to be invalidated with them. That is the decision to take
     before any of it is worth starting.
+
+    **The decision, taken**: the sheets are kept **per room**, keyed on a
+    generation counter, rather than becoming one swappable handle. `ACTIVE` is
+    an `RwLock` behind a relaxed atomic and a thread-local cache, because
+    `active()` is called by every style closure of every widget in every frame
+    and a lock per call would be a lock per pixel's worth of decision. Nothing
+    needs hand invalidation: the sheets and the jewel case's generated textures
+    key on `theme::generation()`, so a room change is a cache *miss*, and
+    everything else in the product reads `active()` per frame and follows.
+    An imported room stands immediately as well — a listener editing a JSON
+    room had to restart to see what they had written, which is what made the
+    schema hard to work against.
+
+    **"More" is two**, each an existing room in a different light: **Blue
+    Hour** (Closing Time at hue 264°, chroma 0.045) and **Sea Glass** (Plaster
+    at hue 175°, chroma 0.030). Holding each parent's exact oklch L means the
+    elevation law is satisfied by construction — a tread is made of lightness —
+    and every WCAG ratio lands where its parent's does. The lamp does not move
+    in either: the accent is playback truth in every room.
+
+    **The laws caught the first version**, which is what they are for. Blue
+    Hour with the wall's chroma on every plane failed the veil residual
+    (3/255) and dropped a veil option's label to 4.37 : 1, both because
+    `recess` is *the ink the hover veil is made of* and `veil_alpha` solves one
+    alpha per stop by averaging three channels — honest only while the three
+    agree. That plane now carries a fifth of the wall's chroma.
+    `docs/design/impl/live-rooms/`
 
 55. **Done 2026-08-15 — the contour.** *"lets try something else with the vibe
     thing… work through a way to create an interesting contoured playlist"*,
@@ -1399,9 +1426,9 @@ because a player without it is missing a floor rather than a feature.
 
 ## Doing
 
-- Nothing active — items 1–53, 55, 56, 61, 63 and 71 are complete, and the parity run
+- Nothing active — items 1–56, 61, 63 and 71 are complete, and the parity run
   shipped two of its own findings (repeat-the-list and the sleep timer).
-  **Items 54, 57–60, 62 and 64–70 are recorded and not started**: each is a
+  **Items 57–60, 62 and 64–70 are recorded and not started**: each is a
   decision with a real fork in it (where a playlist's authored image lives; how
   a row's card widens without nesting its controls; what live theme switching
   does to the process-cached sprite sheets; whether a rule-based list is a

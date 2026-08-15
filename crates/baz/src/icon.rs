@@ -59,7 +59,8 @@
 //! [`Glyph::Speaker`] and [`Glyph::SpeakerMuted`] without the bottom bar
 //! reflowing: muting is a change of ink, never of geometry.
 
-use std::sync::LazyLock;
+use std::cell::RefCell;
+use std::sync::{Arc, LazyLock, RwLock};
 
 use iced::Color;
 use iced::widget::image;
@@ -1530,15 +1531,70 @@ impl From<PlayPause> for Glyph {
 /// a fresh id per call, and a fresh id per frame would churn the renderer's
 /// texture atlas. These ids live as long as the process.
 ///
-/// **The room is baked in.** The sheet is rasterized on first use, which is
-/// during the first frame and therefore after `theme::install` has resolved
-/// the room; a room that could change while the process ran would have to
-/// invalidate this, and that is part of what step 20 buys when it makes the
-/// second room selectable.
-static SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
-    let ink = rgb(theme::active().glyph());
+/// **The room is baked in, so the sheet is keyed by the room.** It used to be
+/// a `LazyLock` rasterized once per process, which is what made the room a
+/// startup fact and the picker say *"applies on restart"*. The owner,
+/// 2026-08-15: *"ideally can we apply them upon selection."*
+///
+/// So each room gets its own sheet, minted the first time that room is
+/// standing and kept — a listener trying four rooms ends with four sheets of
+/// 18 sprites at 32 × 32 × 4 bytes, which is 73 KiB a room, and keeping them
+/// means going back to a room they have already seen costs nothing and, more
+/// importantly, does not mint **new texture ids** for the renderer's atlas to
+/// churn on.
+static SHEETS: RwLock<Vec<(u64, Sheets)>> = RwLock::new(Vec::new());
+
+/// One room's sprites: the glyph-ink sheet and the accent sheet.
+type Sheet = [image::Handle; Glyph::COUNT];
+
+/// A room's pair of sheets, shared by every surface drawing in that room.
+type Sheets = (Arc<Sheet>, Arc<Sheet>);
+
+thread_local! {
+    /// The standing room's two sheets, so the common path — every glyph of
+    /// every frame — is a relaxed atomic load and a thread-local hit rather
+    /// than a lock.
+    static STANDING: RefCell<Option<(u64, Sheets)>> = const { RefCell::new(None) };
+}
+
+/// The two sheets for the room standing now, rasterizing them if this is the
+/// first time it has stood.
+fn sheets() -> Sheets {
+    let generation = theme::generation();
+    if let Some((seen, sheets)) = STANDING.with(|standing| standing.borrow().clone())
+        && seen == generation
+    {
+        return sheets;
+    }
+    let found = SHEETS
+        .read()
+        .ok()
+        .and_then(|sheets| {
+            sheets
+                .iter()
+                .find(|(seen, _)| *seen == generation)
+                .map(|(_, sheets)| sheets.clone())
+        })
+        .unwrap_or_else(|| {
+            let room = theme::active();
+            let sheets: Sheets = (
+                Arc::new(rasterize_sheet(rgb(room.glyph()))),
+                Arc::new(rasterize_sheet(rgb(room.lamp))),
+            );
+            if let Ok(mut all) = SHEETS.write() {
+                all.push((generation, sheets.clone()));
+            }
+            sheets
+        });
+    STANDING.with(|standing| {
+        *standing.borrow_mut() = Some((generation, found.clone()));
+    });
+    found
+}
+
+fn rasterize_sheet(ink: [u8; 3]) -> Sheet {
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
-});
+}
 
 /// **The two orders are one order**, checked when the crate compiles.
 ///
@@ -1582,27 +1638,20 @@ const _: () = {
 /// The sprite for `glyph`. Cheap: an `Arc` bump over the shared sheet.
 #[must_use]
 pub fn handle(glyph: Glyph) -> image::Handle {
-    SHEET[glyph.index()].clone()
+    sheets().0[glyph.index()].clone()
 }
-
-/// The same sheet, inked in the room's **accent**.
-///
-/// Two consumers, and the accent discipline is what bounds it to two: the
-/// wall's hover `Play`, which is the record page's `Play album` moved onto the
-/// sleeve and carries that control's licence (`theme::veil_option_ink`); and
-/// the bar's shuffle toggle **while it is on**, which creates playback truth
-/// about what sounds *next* in the way `Play album` creates it about what
-/// sounds now (`crate::views::bottom_bar`'s `shuffle_toggle`).
-/// Built lazily beside [`SHEET`] and by the same rules — the room is baked in,
-/// the ids live as long as the process, and the cost of the second sheet is
-/// 18 sprites of 32 × 32 × 4 bytes.
-static ACCENT_SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
-    let ink = rgb(theme::active().lamp);
-    Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
-});
 
 /// The sprite for `glyph` in `ink`, which must be one of the two inks a sheet
 /// exists for: the room's glyph ink, or its accent.
+///
+/// **The accent sheet has two consumers**, and the accent discipline is what
+/// bounds it to two: the wall's hover `Play`, which is the record page's `Play
+/// album` moved onto the sleeve and carries that control's licence
+/// ([`theme::veil_option_ink`]); and the bar's shuffle toggle **while it is
+/// on**, which creates playback truth about what sounds *next* in the way
+/// `Play album` creates it about what sounds now
+/// (`crate::views::bottom_bar`'s `shuffle_toggle`). It is built beside the
+/// glyph-ink sheet and by the same rules — see [`SHEETS`].
 ///
 /// The caller states the ink and this resolves the sheet, so the *decision*
 /// about which glyph wears the accent lives in one place
@@ -1611,10 +1660,11 @@ static ACCENT_SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| 
 /// silently minting one here is how an accent discipline stops being one.
 #[must_use]
 pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
+    let (plain, accent) = sheets();
     if ink == theme::active().lamp {
-        ACCENT_SHEET[glyph.index()].clone()
+        accent[glyph.index()].clone()
     } else {
-        SHEET[glyph.index()].clone()
+        plain[glyph.index()].clone()
     }
 }
 
@@ -1625,7 +1675,7 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
 ///
 /// Everything above this line is a *glyph*: an outline in a unit square,
 /// rasterized to coverage and **inked by the room** at draw time
-/// ([`SHEET`], [`ACCENT_SHEET`]). A glyph has no colour of its own; the room
+/// ([`SHEETS`]). A glyph has no colour of its own; the room
 /// gives it one, which is how baz keeps two inks and one accent.
 ///
 /// baz's application icon is a different kind of asset and `packaging/README.md`
@@ -1685,7 +1735,7 @@ static APP_MARK: LazyLock<image::Handle> = LazyLock::new(|| {
 });
 
 /// The application's mark, for the app bar's zone 1. Cheap: an `Arc` bump over
-/// the one decoded copy, whose id lives as long as the process for [`SHEET`]'s
+/// the one decoded copy, whose id lives as long as the process for [`SHEETS`]'s
 /// reason.
 #[must_use]
 pub fn app_mark() -> image::Handle {

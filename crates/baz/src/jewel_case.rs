@@ -677,9 +677,19 @@ fn generated_spine(insert: &Insert) -> Handle {
     })
 }
 
+/// The cache key for one generated texture.
+///
+/// **The standing room is part of every key.** These textures bake colours —
+/// the front's gradient, the rear's blur and its drawn track list, the spine's
+/// type — and a room that can change while the process runs (item 54) would
+/// otherwise be served a case painted in the room before it. Keying on
+/// `theme::generation()` makes a room change a cache *miss* rather than
+/// something that has to be invalidated by hand, and the LRU retires the old
+/// entries in its own time.
 fn texture_key(label: &str, value: &impl Hash) -> u64 {
     let mut hash = DefaultHasher::new();
     label.hash(&mut hash);
+    crate::theme::generation().hash(&mut hash);
     value.hash(&mut hash);
     hash.finish()
 }

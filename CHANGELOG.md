@@ -26,6 +26,13 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
+- **Two more rooms, and a room now changes the moment you pick it.** `Blue
+  Hour` is the dark room in indigo, `Sea Glass` the light one in green-cyan —
+  six in all, listed dark-then-light. Choosing one used to mean restarting baz,
+  because its icons were drawn in the room's ink once per run; they are now
+  kept per room, so the whole application changes on the next frame. A theme
+  you paste or import stands immediately too, which is what makes writing one
+  bearable.
 - **A playlist can wear a picture you choose.** Its page offers `Set image…`,
   and the picture then stands in front of the collage baz makes from the
   records in the list — on the tile, in the sidebar and on the page.
