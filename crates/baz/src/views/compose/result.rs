@@ -111,6 +111,7 @@ fn listening(vibe: &crate::vibe::State) -> Element<'_, Message> {
 fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Element<'a, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
+    let advanced = vibe.depth == crate::vibe::Depth::Advanced;
     let draft = &playlists.creation;
     let Some(preview) = &vibe.preview else {
         return column![
@@ -135,14 +136,19 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
             ))
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(room.paper_dim),
+            .color(room.paper_faint),
         ]
         .align_y(iced::Alignment::Center)
     ]
-    .spacing(theme::GAP_SM);
+    // The heading and its count are one group — the count is *about* the
+    // list rather than a second heading beside it — so it steps down a size
+    // and an ink, and the rows below stand clear of both.
+    .spacing(theme::GAP_MD);
 
-    // **The diff first**, because it teaches the most.
-    if let Some(diff) = &preview.diff {
+    // **The diff first**, because it teaches the most. It is the query
+    // builder explaining what it just did, so it belongs to the depth that
+    // admits to being one.
+    if let Some(diff) = preview.diff.as_ref().filter(|_| advanced) {
         block = block.push(
             container(
                 column![
@@ -195,7 +201,11 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
                 preview.items.len(),
                 layout.measure,
                 vibe.hovered_row == Some(position) || selected,
-                preview.matches.get(position).map(|found| found.ticks),
+                preview
+                    .matches
+                    .get(position)
+                    .filter(|_| advanced)
+                    .map(|found| found.ticks),
                 &super::super::new_playlist::DraftEdits {
                     shift: &|row, delta| Message::VibePreviewShift(row, delta),
                     remove: &Message::VibePreviewRemove,
@@ -207,7 +217,10 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
         );
         // **The why-line**, under the row it explains, as a rank and never a
         // score: *your words let it in; your line put it fourth.*
-        if selected && let Some(why) = vibe.why(position) {
+        if selected
+            && advanced
+            && let Some(why) = vibe.why(position)
+        {
             block = block.push(
                 container(
                     text(why)

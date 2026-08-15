@@ -131,12 +131,38 @@ pub(crate) fn view<'a>(
     }
 
     let ask = ask::view(shelf, stage, layout);
-    let answer = column![
-        shape::view(vibe, layout),
-        result::view(shelf, playlists, stage, layout),
-    ]
-    .spacing(theme::GAP_LG)
-    .width(Length::Fill);
+    let mut answer = column![].spacing(theme::GAP_LG).width(Length::Fill);
+    // **What all these controls are actually building**, in one line, at the
+    // head of the answer.
+    //
+    // The owner: *"the fact that there are a ton of options which are just
+    // query builders… seems like we should make that more clear."* They are,
+    // and no single place said so — the words were in one band, the shape in
+    // another, the length on the commitment. This is the query they add up
+    // to, assembled from the controls rather than stored, so it cannot drift
+    // from them. It stands in **both** depths, because it is the thing simple
+    // mode is hiding the machinery *of*.
+    answer = answer.push(
+        container(
+            column![
+                views::caption_word("BAZ WILL LOOK FOR"),
+                iced::widget::text(vibe.query())
+                    .size(theme::SIZE_EMPHASIS)
+                    .line_height(theme::LEADING_EMPHASIS)
+                    .color(room.paper)
+                    .width(Length::Fill)
+                    .wrapping(iced::widget::text::Wrapping::Word),
+            ]
+            .spacing(theme::GAP_XS),
+        )
+        .padding(theme::pad(theme::GAP_MD, theme::GAP_MD))
+        .width(Length::Fill)
+        .style(move |_theme| theme::segmented(room)),
+    );
+    if vibe.depth == crate::vibe::Depth::Advanced {
+        answer = answer.push(shape::view(vibe, layout));
+    }
+    let answer = answer.push(result::view(shelf, playlists, stage, layout));
 
     let body: Element<'a, Message> = if layout.side_by_side {
         row![
@@ -177,6 +203,31 @@ pub(crate) fn heading(words: &str) -> Element<'static, Message> {
         .into()
 }
 
+/// **The two depths, as a real pair of tabs** — one lit, one not, side by
+/// side in a well, so it reads as *there are two of these and you are on
+/// this one* rather than as two words that happen to be near each other.
+pub(crate) fn depth_tabs(current: crate::vibe::Depth) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut tabs = row![].spacing(theme::GAP_XS);
+    for depth in crate::vibe::Depth::ALL {
+        let lit = depth == current;
+        tabs = tabs.push(
+            iced::widget::button(
+                iced::widget::text(depth.label())
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(if lit { theme::MEDIUM } else { theme::SANS }),
+            )
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_MD))
+            .style(move |_theme, status| theme::pill(room, room.wall, status, lit))
+            .on_press(Message::VibeDepth(depth)),
+        );
+    }
+    column![tabs, views::hint(current.detail())]
+        .spacing(theme::GAP_XS)
+        .into()
+}
+
 /// A pressable word in the chip anatomy the whole page uses: the starting
 /// points, the vocabulary and the shape presets are the same kind of thing —
 /// *press this instead of doing it by hand* — so they are the same control.
@@ -186,21 +237,13 @@ pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'_, Mess
         iced::widget::text(label)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            // **Weight and value, never hue.** A chip that is lit is the one
-            // the request currently matches, and the difference has to be
-            // readable by somebody who cannot separate two inks: it is set in
-            // the medium face at full paper against the regular face dimmed,
-            // which is a step in two non-colour dimensions at once.
-            //
-            // `theme::tile` used to draw this and cannot: it ignores its own
-            // `selected` argument and returns the same transparent style
-            // either way, so the state was carried entirely by the text
-            // colour and the call read as though it were not.
-            .font(if lit { theme::MEDIUM } else { theme::SANS })
-            .color(if lit { room.paper } else { room.paper_dim }),
+            // The face carries the state too, so the reading survives being
+            // printed, dimmed, or seen by somebody who cannot separate the
+            // two inks — which is the standing rule in this product.
+            .font(if lit { theme::MEDIUM } else { theme::SANS }),
     )
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_MD))
+    .style(move |_theme, status| theme::pill(room, room.wall, status, lit))
     .on_press(message)
     .into()
 }

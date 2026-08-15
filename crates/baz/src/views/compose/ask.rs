@@ -1,58 +1,82 @@
 //! **What do you want to hear?** — one band, one request, and the readouts
 //! that say what it means.
 //!
-//! Design 21 §4. The **field is at the head of it**, with one sentence
-//! underneath — *this is exactly what Baz searches for* — because that
-//! sentence is what says there is no hidden state, nothing accumulating out of
-//! sight, and that what you can read is what will happen. The engine now earns
-//! that claim rather than merely making it: compose is deterministic, and the
-//! freshness store that used to bias every list invisibly is gone.
+//! # Hierarchy, after the owner looked at it
 //!
-//! Beneath the field, two ways of writing it. **Starting points** replace the
-//! line, visibly, and are editable at once. **The vocabulary** appends with a
-//! comma. Neither is a second input; there is one line, so there is no way to
-//! have two of anything, and a starting point stops being lit the moment the
-//! words change — not a mode switching off, a label ceasing to be true.
+//! *"I mean just look at this. there is just no information hierarchy."* He
+//! was right, and the defect was specific: eleven blocks at one size, one
+//! weight and **one spacing**, so nothing grouped and nothing led. The
+//! remedies are *Refactoring UI*'s (Wathan and Schoger), applied rather than
+//! alluded to:
+//!
+//! 1. **Space between groups must beat space within them.** Everything here
+//!    was [`theme::GAP_SM`] apart, so `MADE OF` sat as far from its own chips
+//!    as from the block above it. Within a group is [`TIGHT`] and between
+//!    groups is [`APART`] — a six-fold step, which is what lets proximity do
+//!    the grouping without a single rule or box.
+//! 2. **Hierarchy by de-emphasis.** There is one primary control on this pane
+//!    — the field — and it is the only thing at body size. Everything else
+//!    steps *down* rather than the field stepping up.
+//! 3. **Labels are usually optional.** Four all-caps labels — `A PLACE TO
+//!    START`, `MADE OF`, `FEELS LIKE`, `HOW LONG` — competed with the content
+//!    they named and with each other. Two survive: the length's is carried by
+//!    the commitment, which already says *about an hour*, and the vocabulary's
+//!    two rows are one group under one label.
+//! 4. **Secondary information is one line, not four.** The count and its three
+//!    closest titles were four body lines of equal weight. They are a count
+//!    and a caption now, because they are something you glance at.
+//!
+//! # The model
+//!
+//! Design 21 §4. The **field is at the head**, with one sentence underneath —
+//! *this is exactly what Baz searches for* — because that sentence is what
+//! says there is no hidden state and that what you can read is what will
+//! happen. Beneath it, two ways of writing it: **starting points** replace the
+//! line, **the vocabulary** appends with a comma. Neither is a second input;
+//! there is one line, so there is no way to have two of anything, and a
+//! starting point stops being lit the moment the words change — not a mode
+//! switching off, a label ceasing to be true.
 
 use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
-use crate::views::compose::{Layout, Stage, chip, heading, wrap_chips};
+use crate::views::compose::{Layout, Stage, chip, depth_tabs, heading, wrap_chips};
 use crate::{theme, views};
+
+/// Space **within** a group.
+const TIGHT: f32 = theme::GAP_XS;
+/// Space **between** groups — six times [`TIGHT`], which is the grouping.
+const APART: f32 = theme::GAP_XL;
 
 pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
-    let mut band = column![
+    let advanced = vibe.depth == crate::vibe::Depth::Advanced;
+
+    // 1. The one primary control, and the sentence saying what it is.
+    let mut asked = column![
         heading("What do you want to hear?"),
-        text_input("warm analogue soul, unhurried", &vibe.prompt)
+        text_input("warm hypnotic music for driving at night", &vibe.prompt)
             .on_input(Message::VibePrompt)
             .on_submit(Message::VibeCreate)
             .width(Length::Fill)
-            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .style(move |_theme, status| theme::input(room, status)),
-        views::hint("This is exactly what Baz searches for."),
+        quiet("This is exactly what Baz searches for."),
     ]
-    .spacing(theme::GAP_SM);
+    .spacing(TIGHT);
+    if advanced {
+        asked = asked.push(matches_note(vibe));
+    }
 
-    // **The live readouts.** A count says how many; the three titles say how
-    // well, which is the question a listener actually has. Together they are
-    // the difference between a text box and a control somebody can learn.
-    band = band.push(matches_note(vibe));
-
-    // **Starting points.** Six named moods; pressing one replaces the line
-    // with its words. A starting point also sets the shape and the length —
-    // but only while the listener has not set them themselves. Drag a point
-    // once and they are yours; from then on a mood changes the words and
-    // nothing else, which is the sort of effect that is invisible when it is
-    // right.
+    // 2. The two ways of writing it.
     let current = vibe.recipe();
-    band = band
-        .push(views::caption_word("A PLACE TO START"))
-        .push(wrap_chips(
+    let mut ways = column![
+        views::caption_word("START FROM"),
+        wrap_chips(
             crate::vibe::Recipe::ALL
                 .iter()
                 .enumerate()
@@ -64,18 +88,19 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
                     )
                 })
                 .collect(),
-            2,
-        ));
-
-    // **The vocabulary.** Twelve words in two rows, each chosen by measurement
-    // — `docs/design/impl/vibe-eligibility/`, finding 6 — because there is no
-    // language model here and the text tower answers descriptive phrases about
-    // sound. Telling somebody to describe the sound and not the story without
-    // giving them the words is a scold.
-    for name in crate::vibe::Chip::ROWS {
-        band = band
-            .push(views::caption_word(&name.to_uppercase()))
-            .push(wrap_chips(
+            3,
+        ),
+    ]
+    .spacing(TIGHT);
+    // The vocabulary is the query builder's own, so it belongs to the depth
+    // that admits to being one — and it is **one** group under one label,
+    // rather than two labels competing over six words each.
+    if advanced {
+        ways = ways
+            .push(Space::new().height(theme::GAP_MD))
+            .push(views::caption_word("OR ADD A WORD"));
+        for name in crate::vibe::Chip::ROWS {
+            ways = ways.push(wrap_chips(
                 crate::vibe::Chip::ALL
                     .iter()
                     .enumerate()
@@ -84,151 +109,141 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
                     .collect(),
                 3,
             ));
+        }
     }
 
-    band = band
-        .push(Space::new().height(theme::GAP_SM))
-        .push(commitment(shelf, stage, layout));
-    container(band).width(Length::Fill).into()
+    container(
+        column![
+            depth_tabs(vibe.depth),
+            asked,
+            ways,
+            commitment(shelf, stage, layout),
+        ]
+        .spacing(APART),
+    )
+    .width(Length::Fill)
+    .into()
+}
+
+/// The quietest voice on the pane: a caption, for something you glance at
+/// rather than read.
+fn quiet(line: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    text(line.to_owned())
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION)
+        .color(room.paper_faint)
+        .width(Length::Fill)
+        .wrapping(text::Wrapping::Word)
+        .into()
 }
 
 /// **The live match count, and the three nearest** — design 21 §6's first
 /// readout with this plan's addition beside it.
 ///
 /// The count is the eligible set the words draw, by the same rule a compose
-/// will apply, so *"matches 340 songs"* is a promise rather than a
-/// description. The three titles are the cheapest possible answer to *does baz
+/// will apply, so *"211 of 5 076 songs match"* is a promise rather than a
+/// description. The three titles are the cheapest possible answer to *does Baz
 /// understand my phrase*: type *slow sparse piano*, see a death-metal track
 /// first, and you know before spending a compose.
+///
+/// It was four body lines of equal weight, which is a good part of what made
+/// this pane a wall. It is a count in the pane's own voice with its evidence
+/// in the caption voice under it: one thing to glance at, not four to read.
 fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let room = theme::active();
     if vibe.counting {
-        return views::hint("Counting…");
+        return quiet("Counting…");
     }
     let Some(live) = &vibe.live else {
-        // Nothing to count against yet, and a prompt to type is not a
-        // readout. It goes rather than standing under the sentence that has
-        // already said what the field is for.
         return Space::new().into();
     };
-    // **A count of nothing is not a count.** On a library baz has never heard
+    // **A count of nothing is not a count.** On a library Baz has never heard
     // the arithmetic is honest and the sentence is nonsense — *matches 0 songs
-    // of the 0 Baz has heard* — so the readout says what is actually true
-    // instead, which is that there is nothing to count against yet.
-    let head = if live.analysed == 0 {
-        "Baz has not heard anything yet — the count arrives as it listens.".to_owned()
-    } else if live.prompt.is_empty() {
-        format!(
-            "No words yet — all {} songs Baz has heard are eligible.",
-            live.analysed
-        )
+    // of the 0 Baz has heard* — so the readout says what is actually true.
+    if live.analysed == 0 {
+        return quiet("Baz has not heard anything yet — the count arrives as it listens.");
+    }
+    let head = if live.prompt.is_empty() {
+        format!("All {} songs Baz has heard", live.analysed)
     } else {
-        format!(
-            "Matches {} songs of the {} Baz has heard.",
-            live.eligible, live.analysed
-        )
+        format!("{} of {} songs match", live.eligible, live.analysed)
     };
     let mut note = column![
         text(head)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(room.paper)
-            .width(Length::Fill)
-            .wrapping(text::Wrapping::Word),
+            .font(theme::MEDIUM)
+            .color(room.paper_dim),
     ]
-    .spacing(theme::GAP_XS);
+    .spacing(0.0);
     if !live.closest.is_empty() {
-        note = note.push(views::hint("Closest so far:"));
-        for title in &live.closest {
-            note = note.push(
-                text(format!("· {title}"))
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_dim)
-                    .width(Length::Fill)
-                    .wrapping(text::Wrapping::None),
-            );
-        }
+        note = note.push(quiet(&format!("Closest: {}", live.closest.join(" · "))));
     }
     note.into()
 }
 
-/// **The one press, and the length it commits to** — in minutes on the
-/// commitment itself, which is the quorum's R6: *how long* is part of what you
-/// are about to spend, not a setting somewhere above it.
+/// **The one press, the length it commits to, and what pressing it again
+/// does.**
 ///
-/// Its words change with what it can actually do. On a library baz has never
-/// heard it says so and offers to listen; while it is listening it says how
-/// much it can already compose from, which is true at every point of the bar.
+/// Length in words on the commitment itself — the quorum's R6: *how long* is
+/// part of what you are about to spend, not a setting somewhere above it. The
+/// pills above it carry no label of their own for the same reason: the button
+/// beneath them already says *about an hour*.
+///
+/// Its words change with what it can actually do. On a library Baz has never
+/// heard it says so, and the offer to listen is the one accent-weight control
+/// on screen, in the other pane; while it is listening it says how much it can
+/// already compose from, which is true at every point of the bar.
 fn commitment(shelf: &Shelf, stage: Stage, _layout: Layout) -> Element<'_, Message> {
     let vibe = &shelf.vibe;
     let ready = vibe.done.saturating_sub(vibe.failed);
-    let (label, message) = match stage {
-        // **At most one commitment on screen.** On a library baz has never
-        // heard, the act on offer is *Listen to my music* — it is in the
-        // result pane with its cost stated — so this one says what it needs
-        // and waits rather than competing with it for the accent.
-        Stage::Cold => ("Compose · needs listening first".to_owned(), None),
-        Stage::Listening if vibe.has_features() => (
-            format!("Compose from {ready} so far"),
-            Some(Message::VibeCreate),
-        ),
-        Stage::Listening => ("Compose · listening…".to_owned(), None),
+    let (label, live) = match stage {
+        // At most one commitment on screen: on a cold library the act on offer
+        // is *Listen to my music*, in the result pane with its cost stated.
+        Stage::Cold => ("Compose · needs listening first".to_owned(), false),
+        Stage::Listening if vibe.has_features() => (format!("Compose from {ready} so far"), true),
+        Stage::Listening => ("Compose · listening…".to_owned(), false),
         Stage::Ready => (
             format!("Compose · about {}", crate::vibe::spoken(vibe.length)),
-            Some(Message::VibeCreate),
+            true,
         ),
     };
-    let lengths = wrap_chips(
-        crate::vibe::MixLength::ALL
-            .iter()
-            .map(|length| {
-                chip(
-                    crate::vibe::spoken(*length),
-                    vibe.length == *length,
-                    Message::VibeLength(*length),
-                )
-            })
-            .collect(),
-        4,
-    );
-    let mut block = column![views::caption_word("HOW LONG"), lengths].spacing(theme::GAP_XS);
-    block = block
-        .push(Space::new().height(theme::GAP_XS))
-        .push(views::page::commitment_marked(
+    column![
+        wrap_chips(
+            crate::vibe::MixLength::ALL
+                .iter()
+                .map(|length| {
+                    chip(
+                        crate::vibe::spoken(*length),
+                        vibe.length == *length,
+                        Message::VibeLength(*length),
+                    )
+                })
+                .collect(),
+            4,
+        ),
+        Space::new().height(theme::GAP_SM),
+        views::page::commitment_marked(
             crate::icon::Glyph::Queue,
             label.into(),
-            message.is_some(),
+            live,
             Message::VibeCreate,
-        ));
-    if let Some(preview) = &vibe.preview {
-        // *Compose again* states what it will replace, and only once there is
-        // something to lose. **Another version** stands beside it as a
-        // distinct, visible press — the one that carries the variation the
-        // engine used to take invisibly on every compose.
-        block = block
-            .push(views::hint(&format!(
-                "Composing again replaces the {} songs on the right.",
-                preview.items.len()
-            )))
-            .push(
-                row![
-                    views::word_button_maybe("Another version", Some(Message::VibeAnother)),
-                    Space::new().width(Length::Fill),
-                ]
-                .spacing(theme::GAP_SM),
-            );
-    }
-    // **The other way to make a playlist**, as a quiet act rather than as a
-    // fork asked before anything is shown. One press either way, and nobody
-    // has to classify themselves to see the page.
-    block
-        .push(Space::new().height(theme::GAP_SM))
-        .push(views::word_button_maybe(
+        ),
+        // What pressing it again will do, said rather than discovered.
+        quiet(if vibe.preview.is_some() {
+            "Press again for a different list from the same request."
+        } else {
+            "Every press composes a different list from the same request."
+        }),
+        Space::new().height(theme::GAP_SM),
+        row![views::word_button_maybe(
             "…or start with an empty list",
             Some(Message::PlaylistCreationMode(
                 crate::playlists::CreationMode::Manual,
             )),
-        ))
-        .into()
+        )],
+    ]
+    .spacing(TIGHT)
+    .into()
 }

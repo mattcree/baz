@@ -19,7 +19,7 @@
 //! [`theme::COMPOSE_SHORT_H`] of window height — the sentence and the presets
 //! alone, which is the control's accessible form anyway.
 
-use iced::widget::{Space, column, row, text};
+use iced::widget::{Space, column, row};
 use iced::{Element, Length};
 
 use crate::app::Message;
@@ -28,7 +28,7 @@ use crate::{theme, views};
 
 pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Message> {
     let mut block = column![heading("How should it move?")].spacing(theme::GAP_SM);
-    block = block.push(views::hint(sentence(vibe)));
+    block = block.push(views::hint(crate::vibe::shape_words(&vibe.contour)));
     if layout.draw_curve {
         if vibe.expanded {
             for (index, lane) in vibe.contour.lanes.iter().enumerate() {
@@ -157,38 +157,6 @@ fn dots(vibe: &crate::vibe::State, lane: Option<usize>) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// **The shape, said out loud**, updating as it is dragged.
-///
-/// A picture of a request should still be *sayable*: it is what a listener
-/// checks before spending a compose, it is the whole control under
-/// [`theme::COMPOSE_SHORT_H`], and it is what somebody reading the screen aloud
-/// has.
-fn sentence(vibe: &crate::vibe::State) -> &'static str {
-    let Some(opening) = vibe.contour.level_at(0, 0.0) else {
-        return "No shape — your words alone decide the order.";
-    };
-    let landing = vibe.contour.level_at(0, 1.0).unwrap_or(opening);
-    let peak = (0_u8..=10)
-        .filter_map(|step| vibe.contour.level_at(0, f32::from(step) / 10.0_f32))
-        .fold(f32::MIN, f32::max);
-    let turns = vibe
-        .contour
-        .lane(0)
-        .is_some_and(|lane| lane.points.len() > 2);
-    let rise = landing - opening;
-    if turns && peak > opening.max(landing) + 0.4 {
-        "Starts quiet, climbs to a peak partway through, and comes down."
-    } else if rise > 0.6 {
-        "Starts quiet and climbs the whole way."
-    } else if rise < -0.6 {
-        "Starts loud and winds down."
-    } else if turns {
-        "Turns on the way through and ends where it started."
-    } else {
-        "Holds one level the whole way."
-    }
-}
-
 /// **The presets, underneath rather than above** — because they are the
 /// press-instead-of-drag route to the same outcome, and under
 /// [`theme::COMPOSE_SHORT_H`] they are the only route. Chips rather than
@@ -220,30 +188,25 @@ fn presets(vibe: &crate::vibe::State) -> Element<'_, Message> {
 /// the expander says what it opens, and what it opens is already holding this
 /// line's own points.
 fn expander(vibe: &crate::vibe::State) -> Element<'_, Message> {
-    let room = theme::active();
-    let open = !vibe.contour.is_one_line();
+    let open = vibe.expanded;
     let label = if open {
         "Back to one line"
     } else {
-        "Tune each thing Baz listens for"
+        "Shape each thing Baz listens for separately"
     };
-    let mut block = column![views::word_button_maybe(
-        label,
-        Some(Message::ContourExpander),
-    )]
-    .spacing(theme::GAP_XS);
-    if open {
-        block = block.push(
-            text(
-                "Every line starts at the shape above. Each is a stated combination of \
-                 measurements — never a mood.",
-            )
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_dim)
-            .width(Length::Fill)
-            .wrapping(text::Wrapping::Word),
-        );
-    }
-    block.into()
+    // A chip rather than a bare word, and a sentence saying what is behind
+    // it. The owner had to ask for per-dimension curves *after* they shipped,
+    // which is the whole of what a control nobody can find looks like.
+    column![
+        chip(label, open, Message::ContourExpander),
+        views::hint(if open {
+            "Energy, tempo, brightness, dynamics and texture, each on its own line. \
+             Every one is a stated combination of measurements — never a mood."
+        } else {
+            "Energy, tempo, brightness, dynamics and texture can each take a different \
+             shape. They are all on this one line until you open them."
+        }),
+    ]
+    .spacing(theme::GAP_XS)
+    .into()
 }

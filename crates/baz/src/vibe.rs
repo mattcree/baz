@@ -171,11 +171,6 @@ impl Contour {
         self.lanes.get(index)
     }
 
-    /// The level one lane asks for at `fraction`.
-    pub(crate) fn level_at(&self, lane: usize, fraction: f32) -> Option<f32> {
-        level_at(&self.lanes.get(lane)?.points, fraction)
-    }
-
     /// **Move one point of one line**, within what a line may be: the ends
     /// stay at the ends — a playlist has a first track and a last — and an
     /// interior point stays between its neighbours.
@@ -295,6 +290,39 @@ impl Shape {
             .iter()
             .map(|&(at, level)| ContourPoint { at, level })
             .collect()
+    }
+}
+
+/// **How much of the query builder the page is showing.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Depth {
+    /// Words, a mood, a length, and the press.
+    #[default]
+    Simple,
+    /// …and the vocabulary, the drawn line, its per-dimension curves, and the
+    /// readouts that say what the engine did.
+    Advanced,
+}
+
+impl Depth {
+    pub(crate) const ALL: [Self; 2] = [Self::Simple, Self::Advanced];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Simple => "Simple",
+            Self::Advanced => "Advanced",
+        }
+    }
+
+    /// One line saying what this depth is for, under the control that picks
+    /// it — because a mode nobody can explain is a mode nobody switches.
+    pub(crate) const fn detail(self) -> &'static str {
+        match self {
+            Self::Simple => "Describe it, pick a length, and press.",
+            Self::Advanced => {
+                "The whole query: a vocabulary, a line to shape it, and what Baz did with it."
+            }
+        }
     }
 }
 
@@ -543,6 +571,38 @@ const fn engine_dimension(dimension: Dimension) -> baz_vibe::Dimension {
         Dimension::Brightness => baz_vibe::Dimension::Brightness,
         Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
         Dimension::Texture => baz_vibe::Dimension::Texture,
+    }
+}
+
+/// **The shape, said out loud** — a picture of a request should still be
+/// *sayable*.
+///
+/// It is what a listener checks before spending a compose, it is the whole of
+/// the control on a short window, and it is what somebody reading the screen
+/// aloud has.
+pub(crate) fn shape_words(contour: &Contour) -> &'static str {
+    let Some(points) = contour.lane(0).map(|lane| lane.points.as_slice()) else {
+        return "in no particular shape";
+    };
+    let Some(opening) = level_at(points, 0.0) else {
+        return "in no particular shape";
+    };
+    let landing = level_at(points, 1.0).unwrap_or(opening);
+    let peak = (0_u8..=10)
+        .filter_map(|step| level_at(points, f32::from(step) / 10.0))
+        .fold(f32::MIN, f32::max);
+    let turns = points.len() > 2;
+    let rise = landing - opening;
+    if turns && peak > opening.max(landing) + 0.4 {
+        "starting quiet, climbing to a peak partway through, then coming down"
+    } else if rise > 0.6 {
+        "starting quiet and climbing the whole way"
+    } else if rise < -0.6 {
+        "starting loud and winding down"
+    } else if turns {
+        "turning on the way through and ending where it started"
+    } else {
+        "holding one level the whole way"
     }
 }
 
@@ -797,6 +857,21 @@ pub(crate) struct State {
     /// When the words have been still long enough to be worth embedding.
     /// `None` means there is nothing waiting.
     count_due: Option<std::time::Instant>,
+    /// **Which of the two depths the page is showing.**
+    ///
+    /// The owner: *"we should have a simple and advanced mode I think."* The
+    /// split is not a feature gate — every control in advanced was in the
+    /// page before it existed — it is an answer to the complaint beside it,
+    /// that *"there are a ton of options which are just query builders"*.
+    ///
+    /// **Simple** is the four things a listener needs to get a playlist: what
+    /// they want to hear, a mood to start from, how long, and the press. It
+    /// states the query it has built and shows the list.
+    ///
+    /// **Advanced** adds the query builder proper — the vocabulary, the drawn
+    /// line and its per-dimension curves, and the readouts that explain what
+    /// the engine did.
+    pub(crate) depth: Depth,
     /// **Whether the per-dimension lines are open.** Kept rather than derived
     /// from whether the curves differ, because *open and identical* is a real
     /// state: it is what the expander shows the moment it is pressed, and it
@@ -869,6 +944,7 @@ impl Default for State {
             counting: false,
             varied: false,
             count_due: None,
+            depth: Depth::Simple,
             expanded: false,
             shape_touched: false,
             length_touched: false,
@@ -901,6 +977,42 @@ impl State {
         } else {
             Some(row)
         };
+    }
+
+    /// **The whole request, in one readable line** — what all these controls
+    /// are actually building.
+    ///
+    /// The owner: *"the fact that there are a ton of options which are just
+    /// query builders… seems like we should make that more clear."* They are,
+    /// and the page had no single place that said so: the words were in one
+    /// band, the shape in another, the length on the commitment, and nothing
+    /// anywhere stated the query they add up to.
+    ///
+    /// This is that statement. It is assembled from the controls rather than
+    /// stored, so it cannot drift from them, and it is the same three clauses
+    /// design 21 §3's table names: **which** songs, **where** each goes, and
+    /// **how many** there are.
+    pub(crate) fn query(&self) -> String {
+        let words = self.effective_request();
+        let which = if words.is_empty() {
+            "Any song Baz has heard".to_owned()
+        } else {
+            format!("Songs like “{words}”")
+        };
+        let where_it_goes = if self.contour.lanes.is_empty() {
+            "in no particular shape".to_owned()
+        } else if self.expanded && !self.contour.is_one_line() {
+            format!(
+                "shaped separately across {} of the things Baz listens for",
+                self.contour.lanes.len()
+            )
+        } else {
+            shape_words(&self.contour).to_owned()
+        };
+        format!(
+            "{which}, {where_it_goes}, for about {}.",
+            spoken(self.length)
+        )
     }
 
     /// **Why this song is here**, in the two halves design 21 §3 promises an
@@ -1351,14 +1463,27 @@ impl State {
         self.length = length;
     }
 
-    /// **Compose.**
+    /// **Compose: a new list every press.**
     ///
-    /// Deterministic: the same request composed twice returns the identical
-    /// list. It did not used to be — the seed advanced on every press and a
-    /// freshness penalty pushed recently offered tracks away — and that is why
-    /// the diff below can now state a cause and always be right. *"Identical,
-    /// because nothing changed"* has to be true before it is worth saying.
-    pub(crate) fn create(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+    /// The owner: *"we should instead make the button compose generate a new
+    /// playlist each time it's clicked."* So it does, and the separate
+    /// *another version* press that used to carry that is gone — one control,
+    /// one act, and the help text under it says what pressing again will do.
+    ///
+    /// **The engine underneath is still exactly deterministic**, which is what
+    /// makes this honest rather than random: `compose(request, seed)` is a
+    /// pure function and invariant I2 says so in CI. What advances is the
+    /// seed, here, in the one place a press arrives — so the diff can always
+    /// name the cause, and *a new draw of the same request* is a cause a
+    /// listener performed rather than something that happened to them.
+    pub(crate) fn compose(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+        self.variation = self.variation.wrapping_add(1);
+        self.varied = true;
+        self.create(albums, chosen);
+    }
+
+    /// One compose at the seed the request currently stands at.
+    fn create(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
         self.open = true;
         self.awaiting_create = false;
         let request = self.effective_request();
@@ -1389,18 +1514,6 @@ impl State {
         }
         self.varied = false;
         self.preview = preview;
-    }
-
-    /// **Another version**: the same request, a different draw.
-    ///
-    /// The visible press that carries the power the old auto-incrementing seed
-    /// took invisibly. It is a distinct act, and the diff names it as the
-    /// cause, so variation is something the listener asked for rather than
-    /// something that happened to them.
-    pub(crate) fn another(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
-        self.variation = self.variation.wrapping_add(1);
-        self.varied = true;
-        self.create(albums, chosen);
     }
 
     pub(crate) fn remove_preview(&mut self, row: usize) {
@@ -1497,7 +1610,7 @@ fn diff(previous: &Generated, current: &Generated, varied: bool) -> Diff {
             }
         }
     } else if varied {
-        changed("another version: the same request, a different draw")
+        changed("a new draw of the same request")
     } else if line_moved && length_moved {
         changed("you moved the line and changed the length")
     } else if line_moved {
@@ -2004,7 +2117,7 @@ mod tests {
             let scored = engine_contour(&drawn);
             for step in 0_u8..=20 {
                 let at = f32::from(step) / 20.0;
-                let ours = drawn.level_at(0, at);
+                let ours = drawn.lane(0).and_then(|lane| level_at(&lane.points, at));
                 let theirs = scored
                     .lanes
                     .first()
@@ -2235,11 +2348,11 @@ mod tests {
         let sentence = diff(&same, &moved, false).cause;
         assert!(sentence.contains("reorders the same 300"), "{sentence}");
 
-        // …and the visible press names itself rather than hiding behind the
-        // request, which is exactly what the old auto-incrementing seed did.
+        // …and a re-press names itself rather than hiding behind the request,
+        // which is exactly what the old auto-incrementing seed did not.
         let drawn = generated("warm brass", &["c", "d"], 300, 60);
         let sentence = diff(&same, &drawn, true).cause;
-        assert!(sentence.contains("another version"), "{sentence}");
+        assert!(sentence.contains("a new draw"), "{sentence}");
     }
 
     /// **A row explains itself as a rank, never a score** — the quorum's R9.

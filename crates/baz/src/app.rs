@@ -607,6 +607,9 @@ pub(crate) enum Message {
     VibeLength(crate::vibe::MixLength),
     /// Append one word of the vocabulary to the request, with a comma.
     VibeWord(usize),
+    /// Show the four controls that make a playlist, or the whole query
+    /// builder behind them.
+    VibeDepth(crate::vibe::Depth),
     /// The debounce clock: ask whether the words have been still long enough
     /// to be worth a text embedding.
     VibeCountTick,
@@ -674,8 +677,6 @@ pub(crate) enum Message {
     /// expander. Closing puts every line back on the first one's curve, which
     /// is why it says *back to one line* rather than *close*.
     ContourExpander,
-    /// Explicitly explore another deterministic version of this request.
-    VibeAnother,
     /// Edit the in-memory preview without touching music or playlist files.
     VibePreviewRemove(usize),
     VibePreviewShift(usize, i32),
@@ -3970,7 +3971,7 @@ impl App {
                 }
                 state.vibe.begin_request();
                 if state.vibe.has_features() {
-                    state.vibe.create(&state.albums, &state.edition_choice);
+                    state.vibe.compose(&state.albums, &state.edition_choice);
                     return Some(Task::none());
                 }
                 // **A cold index is the ordinary first run, not a reason to
@@ -4020,7 +4021,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_preparation(result.clone());
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.create(&state.albums, &state.edition_choice);
+                        state.vibe.compose(&state.albums, &state.edition_choice);
                     }
                 }
                 Some(self.next_vibe_job())
@@ -4039,7 +4040,7 @@ impl App {
                         );
                     }
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.create(&state.albums, &state.edition_choice);
+                        state.vibe.compose(&state.albums, &state.edition_choice);
                     }
                 }
                 Some(self.next_vibe_job())
@@ -4079,6 +4080,12 @@ impl App {
             // **The words have been still for 400 ms.** Embed once, off this
             // thread; the count and the closest three are computed against
             // vectors already in memory when it comes back.
+            Message::VibeDepth(depth) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.depth = *depth;
+                }
+                Some(Task::none())
+            }
             Message::VibeCountTick => {
                 let settled = match &mut self.screen {
                     Screen::Shelf(state) => state.vibe.settled_prompt(),
@@ -4215,7 +4222,7 @@ impl App {
                     // filled the form.
                     if state.vibe.has_features() && !state.vibe.preparing {
                         let (albums, chosen) = (&state.albums, &state.edition_choice);
-                        state.vibe.create(albums, chosen);
+                        state.vibe.compose(albums, chosen);
                     }
                 }
                 Some(Task::none())
@@ -4231,12 +4238,6 @@ impl App {
             Message::ContourExpander => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.toggle_expander();
-                }
-                Some(Task::none())
-            }
-            Message::VibeAnother => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.another(&state.albums, &state.edition_choice);
                 }
                 Some(Task::none())
             }

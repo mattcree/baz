@@ -907,7 +907,6 @@ mod tests {
             "VibePrompt",
             "Compose",
             "Save playlist",
-            "Another version",
             "What do you want to hear?",
             "How should it move?",
         ] {
@@ -927,7 +926,15 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        for gone in ["Make a mix", "Create mix", "Compose again"] {
+        // `Another version` joins the retired names: the owner asked for
+        // `Compose` to draw a new list every press, so a second control for
+        // the same act would be two names for one thing again.
+        for gone in [
+            "Make a mix",
+            "Create mix",
+            "Compose again",
+            "Another version",
+        ] {
             assert!(
                 !drawn.contains(gone),
                 "two names for one act are back: {gone:?}"

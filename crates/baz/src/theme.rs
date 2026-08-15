@@ -1938,6 +1938,11 @@ pub fn tracked(text: &str) -> String {
 /// **4**, down from 6.
 pub const RADIUS_CTRL: f32 = 4.0;
 
+/// **A pill's radius**: half the height a chip of one meta line and
+/// [`GAP_XS`] of padding stands at, so the ends are true semicircles and the
+/// shape says *press me* before the words are read.
+pub const RADIUS_PILL: f32 = 12.0;
+
 // ---------------------------------------------------------------------------
 // The contour — the shape a generated playlist is asked to follow
 // ---------------------------------------------------------------------------
@@ -3690,6 +3695,55 @@ pub fn transport(p: &Palette, on: Color, status: button::Status) -> button::Styl
 /// Chrome recedes; the word is the control. Geometry is identical in all four
 /// states.
 #[must_use]
+/// **A pill**: a chip you can obviously press, and that obviously shows
+/// whether it is on.
+///
+/// The owner, on the composing page: *"I just think we don't use very good
+/// controls visually. some things are not clearly pills, tabs, buttons etc."*
+/// He was right, and about a specific thing: the starting points, the
+/// vocabulary, the shape presets and the lengths were drawn with
+/// [`tile`], which returns a transparent style and **ignores its own
+/// `selected` argument** — so a row of pressable words looked like a
+/// sentence, and *which one am I on* was carried by text colour alone.
+///
+/// This is `WORK.md` item 77's *quiet act becomes a hairline chip*, brought
+/// forward from that parked pass because the owner asked for it twice: once
+/// as *"chips that look pressable"* in the 2026-08-15 review, and once here.
+/// It is one function so that item 77 changes pills everywhere by changing
+/// this, rather than finding eleven hand-rolled variants.
+///
+/// **Three states, each separated in more than one dimension** — the standing
+/// rule is that no reading may rest on telling two hues apart:
+///
+/// - **off**: a hairline edge, no ground, dimmed ink;
+/// - **hovered**: the edge firms and a wash arrives under it;
+/// - **on**: a filled ground *and* a firmer edge *and* full paper ink, which
+///   is a step in three at once and readable in a greyscale screenshot.
+pub fn pill(p: &Palette, on: Color, status: button::Status, lit: bool) -> button::Style {
+    let (background, border, text_color) = match (status, lit) {
+        (button::Status::Disabled, _) => (Color::TRANSPARENT, p.hairline(on), p.paper_muted),
+        (button::Status::Hovered | button::Status::Pressed, true) => {
+            (p.ink_wash_press(on), p.paper_faint, p.paper)
+        }
+        (button::Status::Hovered | button::Status::Pressed, false) => {
+            (p.ink_wash(on), p.hairline_strong(on), p.paper)
+        }
+        (button::Status::Active, true) => (p.ink_wash(on), p.paper_faint, p.paper),
+        (button::Status::Active, false) => (Color::TRANSPARENT, p.hairline(on), p.paper_dim),
+    };
+    button::Style {
+        snap: true,
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: border,
+            width: if lit { SELECTION_EDGE } else { 1.0 },
+            radius: RADIUS_PILL.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
 pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
         button::Status::Hovered => (p.ink_wash(on), p.paper),
