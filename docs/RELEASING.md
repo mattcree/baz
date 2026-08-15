@@ -207,6 +207,33 @@ of scratch space, and keep it off a tmpfs.
     `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
     `packaging/flatpak/README.md` has the commands.
 
+## v0.2.0 release record
+
+Cut on 2026-08-15 from annotated tag `v0.2.0`, resolving to commit
+`c96e05c`. The dry run was
+[31858378333](https://github.com/mattcree/baz/actions/runs/31858378333) and the
+tagged publish run was
+[31860986161](https://github.com/mattcree/baz/actions/runs/31860986161); the
+same tree had already passed the ordinary CI gate as
+[31860783174](https://github.com/mattcree/baz/actions/runs/31860783174), and the
+whole local rehearsal in this document was run before the tag.
+
+The draft's three archives were downloaded again and **verified against the
+published `SHA256SUMS`** (all three `OK`). The Linux archive holds one correctly
+named root with the binary, `README.md`, `CHANGELOG.md`, `LICENSE`, the desktop
+entry, the metainfo (carrying the `0.2.0` release element) and the complete Vibe
+model set; the Windows zip holds the same payload around `baz.exe`. The Linux
+binary reports `baz 0.2.0` when run, and the macOS executable was identified as
+a two-slice `x86_64`/`arm64` Mach-O before the draft was reviewed.
+
+**The dry run earned its place this time.** It failed first on rustdoc under
+`-D warnings` — four unresolved intra-doc links introduced with the release's
+own work, plus one that predated it — none of which the ordinary gate catches,
+because `cargo doc` runs in the release workflow and not in the PR suite.
+
+Publishing the draft is the owner's own step; it is a prerelease until he says
+otherwise, exactly as `v0.1.0` was.
+
 ## v0.1.0 release record
 
 The public beta shipped on 2026-08-14 from annotated tag `v0.1.0`, resolving
