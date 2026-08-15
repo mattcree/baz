@@ -24,6 +24,15 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Changed
+
+- **A Vibe compose uses about half the memory.** baz analysed with eight model
+  sessions at once and each one costs roughly 145 MB of the runtime's own
+  scratch space — measured, and the reason a compose could reach 1.8 GB on a
+  library of two dozen tracks. Four is the new default, which halves the peak
+  and is still comfortably concurrent; `vibe_workers` in `config.toml` buys the
+  speed back if you would rather spend the memory.
+
 ### Added
 
 - **Two more rooms, and a room now changes the moment you pick it.** `Blue

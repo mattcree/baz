@@ -1277,7 +1277,7 @@ in `BACKLOG.md`.
     Neither ships without a scored run against the corpus. A prompt change that
     cannot be measured is a superstition.
 
-60. **Not started — 1.8 GB, and where it goes.** *"figure out why we are using
+60. **Measured 2026-08-15, and half fixed — 1.8 GB, and where it goes.** *"figure out why we are using
     so much memory… I see 1.8GB."*
 
     **First diagnosis, from the source and one measurement.**
@@ -1302,6 +1302,36 @@ in `BACKLOG.md`.
     Then, cheapest first: load each tower where it is used; release sessions
     when a scan ends; cap workers against memory rather than cores; and price
     ORT's arena and memory-pattern options with a measurement.
+
+    **Confirmed, and the diagnosis above is wrong in its arithmetic.**
+    `docs/design/impl/vibe-memory/measure.sh` drives the real binary headlessly
+    through a compose and samples its own `/proc` RSS. On **24 tracks**:
+
+    | workers | idle | peak composing | two minutes later |
+    |---|---|---|---|
+    | 2 | 251 MiB | 863 MiB | 733 MiB |
+    | 4 | 252 MiB | 1 129 MiB | 670 MiB |
+    | 8 | 252 MiB | **1 762 MiB** | 747 MiB |
+
+    So the owner's 1.8 GB is **reproducible on two dozen tracks** — it is the
+    width of the scan, not the size of the library — and a worker costs about
+    **145 MiB**, not the 34 MB its weights file holds: what dominates is ONNX
+    Runtime's per-session arena, which lazy loading does not touch. About
+    420–500 MiB never returns, nearly independently of the worker count, which
+    points at the text tower's session and retained arena rather than the
+    workers'.
+
+    **Shipped from that**: `DEFAULT_VIBE_WORKERS` 8 → 4, which halves the peak
+    and keeps real concurrency; `vibe_workers` and `BAZ_VIBE_WORKERS` still buy
+    speed with memory.
+
+    **Left, with the numbers to judge them by**: one shared session behind a
+    mutex (≈400 MiB peak, but `Session::run` takes `&mut self`, so it trades
+    wall-clock and needs a *time* measurement first — the current design chose
+    the other way deliberately); releasing sessions when a scan ends, which the
+    500 MiB floor says does not happen today; and pricing ORT's arena and
+    memory-pattern options. None of those is a guess-and-ship, which is exactly
+    what the first repair was.
 
 ### Phase I — the 2026-08-15 parity run
 

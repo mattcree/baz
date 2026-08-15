@@ -4276,10 +4276,12 @@ impl App {
         }))
     }
 
-    /// Number of concurrent local Vibe analyzers. Four model sessions are a
-    /// reasonable baseline, while this temporary workload benefits from
-    /// spending more memory to finish sooner. `BAZ_VIBE_WORKERS` tunes the
-    /// trade-off for the current machine and is capped to sixteen workers.
+    /// Number of concurrent local Vibe analyzers — [`config::DEFAULT_VIBE_WORKERS`],
+    /// which is four and is a **measured** memory decision rather than a
+    /// guess: each one costs about 145 MiB of ONNX Runtime arena, so eight of
+    /// them is where the owner's 1.8 GB came from
+    /// (`docs/design/impl/vibe-memory/`). `BAZ_VIBE_WORKERS` and the config's
+    /// `vibe_workers` still buy speed with memory, up to sixteen.
     fn configured_vibe_workers() -> usize {
         let configured = config::config_file().map_or(config::DEFAULT_VIBE_WORKERS, |path| {
             config::load(&path).vibe_workers

@@ -138,8 +138,21 @@ const THEME: &str = "theme";
 
 /// The number of concurrent local Vibe model sessions.
 const VIBE_WORKERS: &str = "vibe_workers";
-/// The safe default for an aggressive but bounded local scan.
-pub const DEFAULT_VIBE_WORKERS: usize = 8;
+/// The default number of concurrent local Vibe model sessions.
+///
+/// **Four, and the number is a memory decision measured rather than guessed.**
+/// It was eight, which is where the owner's *"why are we using so much
+/// memory… I see 1.8GB"* came from: `docs/design/impl/vibe-memory/` measures
+/// the same 24-track compose at 2, 4 and 8 workers and finds a marginal cost
+/// of **~145 MiB per worker** — the audio session's ONNX Runtime arena, not
+/// the 34 MB of weights the file holds — over a fixed ~350 MiB for the text
+/// tower and a 252 MiB idle baseline. Eight workers peaked at **1.76 GiB**,
+/// four at 1.13, two at 0.86.
+///
+/// Four is the knee: it halves the peak against eight while keeping real
+/// concurrency, and `vibe_workers` in `config.toml` (or `BAZ_VIBE_WORKERS`)
+/// still buys speed with memory for anyone who wants that trade.
+pub const DEFAULT_VIBE_WORKERS: usize = 4;
 /// The hard upper bound for persisted/configured model sessions.
 pub const MAX_VIBE_WORKERS: usize = 16;
 
