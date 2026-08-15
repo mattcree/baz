@@ -73,7 +73,7 @@ Each tagged release attaches these to its GitHub release page, together with a
 | File | For | Rust target |
 |---|---|---|
 | `baz-<version>-linux-x86_64.tar.gz` | 64-bit Intel/AMD Linux | `x86_64-unknown-linux-gnu` |
-| `baz-<version>-macos-universal.tar.gz` | any Mac, Apple silicon or Intel | `aarch64-` and `x86_64-apple-darwin`, combined |
+| `baz-<version>-macos-universal.tar.gz` | any Mac, Apple silicon or Intel | `aarch64-` and `x86_64-apple-darwin`, combined into `baz.app` |
 | `baz-<version>-windows-x86_64.zip` | 64-bit Windows | `x86_64-pc-windows-msvc` |
 
 Verify what you downloaded before you run it:
@@ -112,13 +112,36 @@ without it.
 `Exec=baz` in that entry assumes the binary is on `PATH`; edit it to an
 absolute path if you put it elsewhere.
 
-**macOS and Windows**: the binaries are **not signed or notarized**. macOS will
-refuse to run an unnotarized download until you clear the quarantine attribute
-(`xattr -d com.apple.quarantine baz`), and Windows SmartScreen will warn. That
-is not a formality being skipped — code-signing certificates are a cost and an
-identity decision the project has not made. Check the SHA-256 against
-`SHA256SUMS` and decide for yourself; the sums are produced by the same public
-CI run that built the binaries, from a tag, and the workflow that did it is
+### macOS
+
+The macOS download contains **`baz.app`**, an ordinary application bundle.
+Drag it to `/Applications` — or run it from wherever you unpacked it — and it
+will carry baz's own mark in Finder, the Dock and Launchpad. The local Vibe
+models travel inside the bundle, so there is nothing to place beside it.
+
+**It is not signed or notarized**, and macOS will say so in a way that reads
+like a fault. Gatekeeper attaches a quarantine flag to anything a browser
+downloads, and for an unsigned app it refuses to open it with *"baz is damaged
+and can't be opened."* **The app is not damaged**; that is the message macOS
+uses for this case. Two ways through it:
+
+- **Right-click the app and choose Open**, then confirm. macOS remembers the
+  choice, so this is once per download.
+- Or clear the flag yourself: `xattr -dr com.apple.quarantine
+  /Applications/baz.app`.
+
+Verify the download's SHA-256 against `SHA256SUMS` first if you would rather
+not take either on trust.
+
+### Windows
+
+SmartScreen will warn, for the same reason: the `.exe` is unsigned. *More
+info* → *Run anyway*.
+
+**Neither is a formality being skipped.** Signing needs a paid Apple Developer
+account and a Windows code-signing certificate — a cost and an identity
+decision the project has not made. The sums are produced by the same public CI
+run that built the binaries, from a tag, and the workflow that did it is
 `.github/workflows/release.yml`.
 
 **Linux runtime requirements**, read off the shipped binary rather than

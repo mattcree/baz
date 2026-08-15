@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The bundle identifier is the same one string every other surface uses:
+	  the desktop entry's basename, the AppStream component id, the Flatpak
+	  id, the MPRIS DesktopEntry constant, and the icon files' basename. CI's
+	  packaging job fails the build if any of them drift apart, and this file
+	  joined that family when it was written.
+	-->
+	<key>CFBundleIdentifier</key>
+	<string>@APP_ID@</string>
+
+	<!-- What the executable inside Contents/MacOS is called. -->
+	<key>CFBundleExecutable</key>
+	<string>baz</string>
+
+	<!--
+	  CFBundleName is the menu-bar name and is capped at 15 characters by
+	  Apple; CFBundleDisplayName is what Finder shows under the icon. Both are
+	  the product's own name, lower case, because that is how baz is written
+	  everywhere else in this repository and a proper noun that changes case
+	  between platforms is two names.
+	-->
+	<key>CFBundleName</key>
+	<string>baz</string>
+	<key>CFBundleDisplayName</key>
+	<string>baz</string>
+
+	<!--
+	  The icon, without its extension — the documented form, and the one that
+	  keeps working if the file is ever re-rendered to a different container.
+	-->
+	<key>CFBundleIconFile</key>
+	<string>@APP_ID@</string>
+
+	<!--
+	  CFBundleShortVersionString is the human release number and is what the
+	  Finder's Get Info panel shows. CFBundleVersion is the build number;
+	  baz has one release per version, so they are the same string rather
+	  than a second number nobody maintains.
+	-->
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+
+	<!--
+	  **The line that makes the icon sharp.** Without it macOS runs the window
+	  server in 1x compatibility for this bundle, which is also why an app can
+	  look soft on a retina display while its icon file is perfect.
+	-->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+
+	<!--
+	  baz is a window, not a menu-bar agent: it belongs in the Dock and in
+	  Command-Tab. Stated rather than defaulted, because `LSUIElement` is the
+	  one property that would silently make the icon this bundle exists for
+	  invisible.
+	-->
+	<key>LSUIElement</key>
+	<false/>
+
+	<!--
+	  The floor the Rust toolchain's own Apple targets support. Stated so a
+	  launch on something older fails with Apple's own message rather than a
+	  dynamic-linker error.
+	-->
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+
+	<!--
+	  Read-only access to the user's music, and that is the whole of what baz
+	  asks a Mac for. macOS shows this sentence in the permission prompt the
+	  first time a scan reaches `~/Music`, and a bundle that omits it is
+	  terminated rather than prompted.
+	-->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>baz reads the music files you point it at so it can list and play them. Nothing leaves this device.</string>
+
+	<!--
+	  baz plays audio and does not record; there is no microphone or camera
+	  entry here, deliberately, because a bundle that declares a permission it
+	  never uses trains people to grant permissions without reading them.
+	-->
+</dict>
+</plist>

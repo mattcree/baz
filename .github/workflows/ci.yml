@@ -144,6 +144,21 @@ jobs:
           sudo apt-get install -y desktop-file-utils appstream python3-yaml
       - name: Desktop entry
         run: desktop-file-validate packaging/io.github.mattcree.baz.desktop
+      # **The macOS bundle, built and checked on Linux**, which is the whole
+      # reason `bundle.sh` uses no Apple-only tool: a bundle nobody can
+      # inspect until a release runs is a bundle nobody reviews. This builds
+      # one over a stand-in executable and runs the script's own structural
+      # checks — the plist parses, its keys say what they must, and the icns
+      # header describes the file it is in.
+      - name: macOS app bundle assembles and validates
+        run: |
+          set -euo pipefail
+          printf '#!/bin/sh\nexit 0\n' > /tmp/baz-stub
+          chmod +x /tmp/baz-stub
+          packaging/macos/bundle.sh /tmp/baz-stub 0.0.0-ci /tmp/bundle-check
+          test -x /tmp/bundle-check/baz.app/Contents/MacOS/baz
+          test -f /tmp/bundle-check/baz.app/Contents/Info.plist
+          test -f "/tmp/bundle-check/baz.app/Contents/Resources/io.github.mattcree.baz.icns"
       # Offline, deliberately. The screenshot URLs point at `docs/screenshots/`
       # on `main`, so on a pull request they name a branch's files at a URL
       # that only resolves once the branch has landed — a fetching validator
@@ -177,6 +192,12 @@ jobs:
           grep -qx "id: $id" "packaging/flatpak/$id.yml"
           grep -qx "pub(crate) const DESKTOP_ENTRY: &str = \"$id\";" \
             crates/baz/src/mpris/mod.rs
+          # macOS joined the family: the bundle's CFBundleIdentifier and the
+          # icon it names are the same string, and `bundle.sh` substitutes
+          # `@APP_ID@` from one literal so a drift here is a build failure
+          # rather than a Mac quietly drawing the generic mark.
+          grep -q "app_id=$id" packaging/macos/bundle.sh
+          test -f "packaging/icons/$id.icns"
           echo "application id consistent: $id"
 
   fuzz:

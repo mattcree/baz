@@ -13,6 +13,14 @@ distributed product.
 The Flatpak manifest and the AppStream metadata, plus the submission path to
 Flathub. See [`flatpak/README.md`](flatpak/README.md).
 
+## `macos/`
+
+The macOS application bundle: `Info.plist.in` and the `bundle.sh` that
+assembles `baz.app` around a built binary. macOS keeps an application's icon,
+name and permission strings in the bundle rather than in the executable, so a
+bare Mach-O has nowhere to put them. See [`macos/README.md`](macos/README.md),
+which also says why the bundle is unsigned and what signing it would take.
+
 ## `icons/`
 
 The application icon: an SVG master and the PNG ladder, in the freedesktop
@@ -38,7 +46,8 @@ on that one string and a desktop matches them against each other:
 | the window's Wayland `app_id` / X11 `WM_CLASS` | the same constant (`app::window_settings`) |
 | `<id>` in the AppStream metainfo | `packaging/flatpak/` |
 | `id:` in the Flatpak manifest | `packaging/flatpak/` |
-| the icon files' basename | `packaging/icons/hicolor/*/apps/` |
+| the icon files' basename | `packaging/icons/hicolor/*/apps/`, `packaging/icons/*.icns` |
+| `CFBundleIdentifier` and `CFBundleIconFile` | `packaging/macos/Info.plist.in`, via `bundle.sh`'s one literal |
 
 That is how GNOME's and KDE's media widgets find the player's name and icon
 from an MPRIS connection, and how a launcher knows the running window belongs

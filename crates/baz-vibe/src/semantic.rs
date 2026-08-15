@@ -206,16 +206,48 @@ impl Model {
 }
 
 fn model_directory() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok();
+    let working = std::env::current_dir().ok();
+    model_candidates(
+        std::env::var_os("BAZ_VIBE_MODEL_DIR").map(PathBuf::from),
+        executable.as_deref(),
+        working.as_deref(),
+    )
+    .into_iter()
+    .find(|path| {
+        path.join("audio_model_quantized.onnx").is_file()
+            && path.join("text_model_quantized.onnx").is_file()
+            && path.join("tokenizer.json").is_file()
+    })
+}
+
+/// **Every place the bundled towers might be**, in the order they are tried.
+///
+/// Split out from [`model_directory`] so the list is testable: it depends on
+/// `current_exe()` and `current_dir()`, which a test cannot set, and the one
+/// entry that matters most on macOS — the app bundle's `Resources` — is a
+/// path nobody developing on Linux will ever hit by accident.
+fn model_candidates(
+    override_dir: Option<PathBuf>,
+    executable: Option<&Path>,
+    working: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(path) = std::env::var_os("BAZ_VIBE_MODEL_DIR") {
-        candidates.push(PathBuf::from(path));
+    candidates.extend(override_dir);
+    if let Some(parent) = executable.and_then(Path::parent) {
+        candidates.extend(parent.ancestors().flat_map(|path| {
+            [
+                path.join("models/vibe"),
+                // **Inside a macOS app bundle**, where the executable lives at
+                // `baz.app/Contents/MacOS/baz` and its data belongs in
+                // `Contents/Resources`. That is one directory *across* from
+                // the executable rather than above it, so walking ancestors
+                // alone never reaches it.
+                path.join("Resources/models/vibe"),
+            ]
+        }));
     }
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(parent) = executable.parent()
-    {
-        candidates.extend(parent.ancestors().map(|path| path.join("models/vibe")));
-    }
-    if let Ok(working) = std::env::current_dir() {
+    if let Some(working) = working {
         candidates.extend(working.ancestors().flat_map(|path| {
             [
                 path.join("models/vibe"),
@@ -223,11 +255,7 @@ fn model_directory() -> Option<PathBuf> {
             ]
         }));
     }
-    candidates.into_iter().find(|path| {
-        path.join("audio_model_quantized.onnx").is_file()
-            && path.join("text_model_quantized.onnx").is_file()
-            && path.join("tokenizer.json").is_file()
-    })
+    candidates
 }
 
 fn sampled_starts(samples: usize) -> Vec<usize> {
@@ -358,6 +386,38 @@ fn normalized(values: &[f32]) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A macOS app bundle's models are found**, which is the one layout
+    /// nobody developing on Linux hits by accident and the one where getting
+    /// it wrong is invisible: the app launches, and Vibe reports that the
+    /// bundled model could not be found.
+    #[test]
+    fn the_towers_are_found_inside_a_macos_app_bundle() {
+        let executable = Path::new("/Applications/baz.app/Contents/MacOS/baz");
+        let candidates = model_candidates(None, Some(executable), None);
+        assert!(
+            candidates.contains(&PathBuf::from(
+                "/Applications/baz.app/Contents/Resources/models/vibe"
+            )),
+            "the bundle's Resources are not searched: {candidates:?}"
+        );
+        // The plain layouts stay ahead of it, so a development tree and a
+        // tarball behave exactly as they did.
+        let plain = candidates
+            .iter()
+            .position(|path| path.ends_with("Contents/MacOS/models/vibe"));
+        let bundled = candidates
+            .iter()
+            .position(|path| path.ends_with("Contents/Resources/models/vibe"));
+        assert!(plain < bundled, "{candidates:?}");
+        // An explicit override still wins over everything.
+        let forced = model_candidates(
+            Some(PathBuf::from("/tmp/models")),
+            Some(executable),
+            None,
+        );
+        assert_eq!(forced.first(), Some(&PathBuf::from("/tmp/models")));
+    }
 
     #[test]
     fn six_windows_cover_the_track_including_both_ends() {

@@ -1584,16 +1584,19 @@ The second half is a real, small piece of work and a real design question:
 
   Three different states, and they should not be described as one:
 
-  1. **macOS is the real gap and it is not an icon problem.** baz has no
-     `.app` bundle at all — no `Info.plist`, no `Contents/Resources`, no
-     `.icns` — so there is nothing for Finder, the Dock, Launchpad or
-     Spotlight to draw a mark *on*. A bare Mach-O binary cannot carry one.
-     The work is a bundle: `Info.plist` with `CFBundleIconFile`, an `.icns`
-     rendered from `logo-transparent-circle-red.svg` at the six sizes
-     `iconutil` wants (16/32/128/256/512 at 1× and 2×), the binary in
-     `Contents/MacOS/`, and a `.dmg` or zip that preserves the bundle.
-     `packaging/icons/render.sh` already owns the raster ladder and is where
-     the `.icns` rungs belong.
+  1. ~~**macOS is the real gap and it is not an icon problem.**~~ **Built
+     2026-08-15, unverified on a Mac.** baz had no `.app` bundle at all, so
+     there was nothing for Finder, the Dock, Launchpad or Spotlight to draw a
+     mark *on* — a bare Mach-O cannot carry one, and double-clicking it opened
+     Terminal. `packaging/macos/` now holds `Info.plist.in` and a `bundle.sh`
+     that assembles `baz.app` around the universal binary, the release
+     workflow ships the bundle instead of the loose executable, and
+     `packaging/icons/render.sh` renders and validates a committed `.icns`.
+     The models travel in `Contents/Resources`, and `baz-vibe` learned to look
+     there — that path is a unit test rather than a comment, because ancestor
+     walking never reaches a sibling directory. CI assembles a bundle on Linux
+     on every push and runs its structural checks. **What remains is looking
+     at it on a Mac**, which is the acceptance below.
   2. **Windows is written but unverified.** `crates/baz/build.rs` embeds
      `logo-transparent-circle-red.ico` through `winres`, and the release
      workflow builds Windows natively so the resource compiler runs. Nobody
@@ -1616,6 +1619,15 @@ The second half is a real, small piece of work and a real design question:
   `docs/design/impl/`. Neither can be verified from the Linux development
   machine, so both are owner-verified steps — the same boundary as the
   packaged `.exe` launch in `WORK.md` item 12.
+
+  **And one thing the bundle makes newly visible:** an unsigned app that a
+  browser downloaded is refused by Gatekeeper with *"baz is damaged and can't
+  be opened"*, which is false and is the most confusing message an independent
+  macOS application can give. `docs/INSTALL.md` documents both ways through
+  it. Removing it needs a paid Apple Developer account, a Developer ID
+  certificate in CI, and `codesign` → `notarytool` → `stapler` in the release
+  — an external boundary, and the owner's to cross.
+  `packaging/macos/README.md` says exactly where those two steps would go.
 - **`OpenUri` is not implemented**, so MPRIS's `SupportedUriSchemes` and
   `SupportedMimeTypes` are empty and the desktop entry registers no
   `MimeType=`. baz plays what it scanned; "open this file with baz" is a real

@@ -180,8 +180,18 @@ jobs:
               slices="$slices target/$target/release/baz"
             done
             # shellcheck disable=SC2086
-            lipo -create -output "$stage/baz" $slices
-            lipo -info "$stage/baz"
+            lipo -create -output "staging/baz-universal" $slices
+            lipo -info "staging/baz-universal"
+            # **A macOS application is a bundle, not a binary.** A bare Mach-O
+            # cannot carry an icon, a name or a permission string, so what
+            # shipped before this had nothing for Finder, the Dock, Launchpad
+            # or Spotlight to draw but the generic application mark.
+            #
+            # The bundle script is plain `mkdir`/`cp`/`sed` and runs on any
+            # Unix — no `iconutil`, no `plutil` — so what the runner produces
+            # is exactly what a reviewer can produce and inspect on Linux.
+            packaging/macos/bundle.sh "staging/baz-universal" "${VERSION}" "$stage"
+            rm "staging/baz-universal"
           elif [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.targets }}/release/baz.exe" "$stage/baz.exe"
           else
@@ -192,20 +202,26 @@ jobs:
           # it to, and ADR-0001 is why. The changelog and readme are there so
           # an unpacked archive can answer "what is this and what changed".
           cp LICENSE README.md CHANGELOG.md "$stage/"
-          mkdir -p "$stage/models/vibe"
-          cp models/vibe/audio_model_quantized.onnx \
-             models/vibe/text_model_quantized.onnx \
-             models/vibe/tokenizer.json \
-             models/vibe/LICENSE \
-             models/vibe/MODEL_CARD.md \
-             models/vibe/README.md \
-             "$stage/models/vibe/"
+          if [ "${{ matrix.universal || 'false' }}" != "true" ]; then
+            mkdir -p "$stage/models/vibe"
+            cp models/vibe/audio_model_quantized.onnx \
+               models/vibe/text_model_quantized.onnx \
+               models/vibe/tokenizer.json \
+               models/vibe/LICENSE \
+               models/vibe/MODEL_CARD.md \
+               models/vibe/README.md \
+               "$stage/models/vibe/"
+          fi
 
           # Desktop integration files, for anyone installing the tarball by
           # hand rather than through Flatpak (docs/INSTALL.md says where).
           # The icons travel in the hicolor layout they are installed in, so
           # the install is a copy of a tree rather than eight named files, and
           # the desktop entry's bare `Icon=io.github.mattcree.baz` resolves.
+          #
+          # macOS is the exception: the bundle above already carries its own
+          # icon and its own copy of the models, so a second loose set beside
+          # it would be the same bytes twice in one download.
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp packaging/io.github.mattcree.baz.desktop "$stage/"
             cp packaging/flatpak/io.github.mattcree.baz.metainfo.xml "$stage/"
@@ -223,7 +239,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           name="baz-${VERSION}-${{ matrix.artifact }}"
-          tar -czf "dist/${name}.tar.gz" -C staging "$name"
+          # `COPYFILE_DISABLE` stops macOS `tar` writing an AppleDouble `._`
+          # sidecar beside every file it archives. Harmless on Linux, and on
+          # macOS the difference between an app bundle and an app bundle
+          # littered with files Finder shows to anyone who extracts it
+          # somewhere other than macOS.
+          COPYFILE_DISABLE=1 tar -czf "dist/${name}.tar.gz" -C staging "$name"
 
       - name: Archive (zip)
         if: runner.os == 'Windows'
