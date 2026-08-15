@@ -190,7 +190,23 @@ jobs:
             # The bundle script is plain `mkdir`/`cp`/`sed` and runs on any
             # Unix — no `iconutil`, no `plutil` — so what the runner produces
             # is exactly what a reviewer can produce and inspect on Linux.
+            # **The shipping icon is Apple's tool's, not a hand-written
+            # container.** The first bundle shipped one written by hand and
+            # macOS drew the generic icon over it, so this refuses to build a
+            # download that quietly fell back.
+            command -v iconutil >/dev/null || {
+              echo "iconutil is missing from the macOS runner" >&2
+              exit 1
+            }
             packaging/macos/bundle.sh "staging/baz-universal" "${VERSION}" "$stage"
+            # And prove it after the fact: `iconutil` writes a `TOC ` chunk
+            # first and the fallback writer is the only other thing that
+            # produces this file, so its absence would mean the fallback ran.
+            head -c 12 "$stage/baz.app/Contents/Resources/io.github.mattcree.baz.icns" \
+              | grep -qa "TOC " || {
+                echo "the bundled icns has no table of contents" >&2
+                exit 1
+              }
             rm "staging/baz-universal"
           elif [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.targets }}/release/baz.exe" "$stage/baz.exe"

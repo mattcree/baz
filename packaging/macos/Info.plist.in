@@ -29,11 +29,13 @@
 	<string>baz</string>
 
 	<!--
-	  The icon, without its extension — the documented form, and the one that
-	  keeps working if the file is ever re-rendered to a different container.
+	  **With its extension.** The bare name is the documented form and should
+	  work, but the first bundle shipped with a bare name *and* drew the
+	  generic icon, so it stops being a variable: this is the exact filename in
+	  `Contents/Resources`.
 	-->
 	<key>CFBundleIconFile</key>
-	<string>@APP_ID@</string>
+	<string>@APP_ID@.icns</string>
 
 	<!--
 	  CFBundleShortVersionString is the human release number and is what the

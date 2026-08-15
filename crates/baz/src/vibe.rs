@@ -982,6 +982,15 @@ impl State {
         self.field.get(&dimension).map_or(&[], Vec::as_slice)
     }
 
+    /// **How many tracks Baz has actually heard.**
+    ///
+    /// Deleted once as dead code and wanted again the moment the door had to
+    /// say *heard 1 240 of your 5 076* — which is the state that decides
+    /// whether it still offers to listen.
+    pub(crate) fn analysed(&self) -> usize {
+        self.features.len()
+    }
+
     /// The pointer entered or left one row of the preview.
     pub(crate) fn hover_row(&mut self, row: Option<usize>) {
         self.hovered_row = row;

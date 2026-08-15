@@ -35,8 +35,9 @@ app_id=io.github.mattcree.baz
 
 [ -f "$binary" ] || { echo "bundle.sh: no binary at $binary" >&2; exit 1; }
 
-icon="$here/../icons/$app_id.icns"
-[ -f "$icon" ] || { echo "bundle.sh: no icon at $icon — run packaging/icons/render.sh" >&2; exit 1; }
+iconset="$here/../icons/baz.iconset"
+fallback="$here/../icons/$app_id.icns"
+[ -d "$iconset" ] || { echo "bundle.sh: no iconset at $iconset — run packaging/icons/render.sh" >&2; exit 1; }
 
 app="$out/baz.app"
 rm -rf "$app"
@@ -48,7 +49,29 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 sed -e "s/@APP_ID@/$app_id/g" -e "s/@VERSION@/$version/g" \
   "$here/Info.plist.in" > "$app/Contents/Info.plist"
 
-cp "$icon" "$app/Contents/Resources/$app_id.icns"
+# **Apple's own tool builds the container that ships.**
+#
+# The first version of this shipped a hand-written `.icns` and macOS drew the
+# generic icon over it — while an independent reader opened the file and found
+# all ten sizes, so whatever IconServices wanted was something a general
+# parser does not check. Guessing at that one release at a time, with no Mac
+# in the loop, is the wrong way to spend attention: `iconutil` is on every
+# macOS runner and is the tool the format belongs to.
+#
+# The fallback is used only where `iconutil` does not exist, which is CI's
+# Linux run checking this script's *shape*. It is never what a person
+# downloads.
+if command -v iconutil >/dev/null 2>&1; then
+  iconutil -c icns "$iconset" -o "$app/Contents/Resources/$app_id.icns"
+  echo "  icon: built by iconutil from $(basename "$iconset")"
+else
+  [ -f "$fallback" ] || {
+    echo "bundle.sh: no iconutil and no fallback at $fallback" >&2
+    exit 1
+  }
+  cp "$fallback" "$app/Contents/Resources/$app_id.icns"
+  echo "  icon: committed fallback (no iconutil on this machine)"
+fi
 cp "$binary" "$app/Contents/MacOS/baz"
 chmod +x "$app/Contents/MacOS/baz"
 
@@ -83,7 +106,7 @@ with open(f"{app}/Contents/Info.plist", "rb") as handle:
     plist = plistlib.load(handle)
 for key, want in [
     ("CFBundleIdentifier", app_id),
-    ("CFBundleIconFile", app_id),
+    ("CFBundleIconFile", f"{app_id}.icns"),
     ("CFBundleExecutable", "baz"),
     ("CFBundleShortVersionString", version),
     ("CFBundlePackageType", "APPL"),

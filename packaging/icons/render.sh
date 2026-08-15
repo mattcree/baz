@@ -51,62 +51,89 @@ done
 # --------------------------------------------------------------------------
 # The macOS icon, from the same master.
 #
-# `.icns` is committed for the same reason the PNG ladder is: the release
-# runner should not need a rasterizer, and Apple's own `iconutil` only exists
-# on macOS — generating it there would mean the artwork was rendered by a tool
-# nobody can run while reviewing the change. This writes the container
-# directly, which is a documented and very small format: an `icns` magic, a
-# big-endian total length, then typed chunks whose payloads are ordinary PNGs.
+# **Two artefacts, and the release ships the one Apple's own tool makes.**
 #
-# The ten types are the set `iconutil` emits from a complete `.iconset`, so a
-# Mac reads exactly what it would have read from Apple's own tool.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-for size in 16 32 64 128 256 512 1024; do
-  magick -background none "$master" -resize "${size}x${size}" \
-    -strip -depth 8 PNG32:"$tmp/${size}.png"
-done
+# `baz.iconset/` is the input: the ten PNGs `iconutil` expects, at Apple's
+# exact filenames. It is committed for the same reason the hicolor ladder is —
+# a release runner should not need a rasterizer — and `bundle.sh` runs
+# `iconutil -c icns` over it on macOS, so what a person downloads is a
+# container produced by Apple.
+#
+# `io.github.mattcree.baz.icns` is a fallback, written here directly, and is
+# used only where `iconutil` does not exist: CI assembles a bundle on Linux to
+# check its *shape*, and that check should not need a Mac. **A hand-written
+# icns was what shipped first and macOS drew the generic icon over it** — the
+# container parses perfectly in an independent reader, so the fault is
+# something IconServices wants that a general parser does not, and the most
+# likely candidate is the `TOC ` chunk every `iconutil` file opens with. It is
+# written now. That is a hypothesis rather than a finding, which is exactly
+# why the shipping path no longer depends on it being right.
+iconset=baz.iconset
+rm -rf "$iconset"
+mkdir -p "$iconset"
+render_rung() { # edge  name
+  magick -background none "$master" -resize "${1}x${1}" \
+    -strip -depth 8 PNG32:"$iconset/$2"
+}
+render_rung 16   icon_16x16.png
+render_rung 32   icon_16x16@2x.png
+render_rung 32   icon_32x32.png
+render_rung 64   icon_32x32@2x.png
+render_rung 128  icon_128x128.png
+render_rung 256  icon_128x128@2x.png
+render_rung 256  icon_256x256.png
+render_rung 512  icon_256x256@2x.png
+render_rung 512  icon_512x512.png
+render_rung 1024 icon_512x512@2x.png
 
-python3 - "$tmp" io.github.mattcree.baz.icns <<'EOF'
+python3 - "$iconset" io.github.mattcree.baz.icns <<'EOF'
 import struct
 import sys
 
 source, target = sys.argv[1], sys.argv[2]
 
-# type -> pixel edge. The names are Apple's; the pairs are the retina ladder,
-# so `icp4` is 16pt at 1x and `ic11` is the same 16pt at 2x.
+# type -> (iconset filename, pixel edge). The names are Apple's, and this is
+# the set `iconutil` emits from a complete `.iconset`.
 TYPES = [
-    ("icp4", 16),    # 16pt @1x
-    ("ic11", 32),    # 16pt @2x
-    ("icp5", 32),    # 32pt @1x
-    ("ic12", 64),    # 32pt @2x
-    ("ic07", 128),   # 128pt @1x
-    ("ic13", 256),   # 128pt @2x
-    ("ic08", 256),   # 256pt @1x
-    ("ic14", 512),   # 256pt @2x
-    ("ic09", 512),   # 512pt @1x
-    ("ic10", 1024),  # 512pt @2x
+    ("icp4", "icon_16x16.png", 16),
+    ("ic11", "icon_16x16@2x.png", 32),
+    ("icp5", "icon_32x32.png", 32),
+    ("ic12", "icon_32x32@2x.png", 64),
+    ("ic07", "icon_128x128.png", 128),
+    ("ic13", "icon_128x128@2x.png", 256),
+    ("ic08", "icon_256x256.png", 256),
+    ("ic14", "icon_256x256@2x.png", 512),
+    ("ic09", "icon_512x512.png", 512),
+    ("ic10", "icon_512x512@2x.png", 1024),
 ]
 
 chunks = []
-for name, edge in TYPES:
-    with open(f"{source}/{edge}.png", "rb") as handle:
+for name, filename, edge in TYPES:
+    with open(f"{source}/{filename}", "rb") as handle:
         payload = handle.read()
     if payload[:8] != b"\x89PNG\r\n\x1a\n":
-        raise SystemExit(f"{edge}.png is not a PNG")
+        raise SystemExit(f"{filename} is not a PNG")
+    width, height = struct.unpack(">II", payload[16:24])
+    if (width, height) != (edge, edge):
+        raise SystemExit(f"{filename} is {width}x{height}, expected {edge}")
     chunks.append(name.encode("ascii") + struct.pack(">I", len(payload) + 8) + payload)
 
-body = b"".join(chunks)
+# **The table of contents Apple's own tool always writes**: one entry per
+# following chunk, its type and its total length, in order. A reader can find
+# any size without walking the file — and its absence is the one concrete
+# difference between what this wrote first and what `iconutil` produces.
+toc_body = b"".join(chunk[:8] for chunk in chunks)
+toc = b"TOC " + struct.pack(">I", len(toc_body) + 8) + toc_body
+
+body = toc + b"".join(chunks)
 with open(target, "wb") as handle:
     handle.write(b"icns" + struct.pack(">I", len(body) + 8) + body)
 
 # Read it back rather than trusting the write: a malformed icns fails silently
-# on macOS by drawing the generic application mark, which is exactly the
-# defect this file exists to fix.
+# on macOS by drawing the generic application mark.
 with open(target, "rb") as handle:
     written = handle.read()
-magic, total = written[:4], struct.unpack(">I", written[4:8])[0]
-if magic != b"icns" or total != len(written):
+if written[:4] != b"icns" or struct.unpack(">I", written[4:8])[0] != len(written):
     raise SystemExit("the icns header does not describe the file it is in")
 offset, seen = 8, []
 while offset < len(written):
@@ -114,22 +141,24 @@ while offset < len(written):
     length = struct.unpack(">I", written[offset + 4 : offset + 8])[0]
     if length < 8 or offset + length > len(written):
         raise SystemExit(f"chunk {kind} runs past the end of the file")
-    # **Read the pixels the payload actually has**, not the size it was asked
-    # for. A chunk whose type says 512 and whose PNG is 128 is the failure
-    # this whole file exists to avoid, and it is invisible until a Mac draws
-    # a blurry icon — the IHDR is thirteen bytes in and says so plainly.
-    payload = written[offset + 8 : offset + length]
-    width, height = struct.unpack(">II", payload[16:24])
-    expected = dict(TYPES)[kind]
-    if (width, height) != (expected, expected):
-        raise SystemExit(f"{kind} claims {expected}px and holds {width}x{height}")
+    if kind != "TOC ":
+        # Read the pixels the payload actually has, not the size it was asked
+        # for: a chunk whose type says 512 and whose PNG is 128 opens, passes
+        # by name, and draws blurry.
+        payload = written[offset + 8 : offset + length]
+        width, height = struct.unpack(">II", payload[16:24])
+        expected = {name: edge for name, _, edge in TYPES}[kind]
+        if (width, height) != (expected, expected):
+            raise SystemExit(f"{kind} claims {expected}px and holds {width}x{height}")
     seen.append(kind)
     offset += length
-if seen != [name for name, _ in TYPES]:
+if seen != ["TOC "] + [name for name, _, _ in TYPES]:
     raise SystemExit(f"round trip lost chunks: {seen}")
-print(f"  icns: {len(written)} bytes, {len(seen)} sizes, every payload at its stated edge")
+print(f"  icns fallback: {len(written)} bytes, TOC + {len(seen) - 1} sizes")
 EOF
 
 echo "rendered:"
 ls -l hicolor/*/apps/io.github.mattcree.baz.png | awk '{print "  " $5 "\t" $9}'
 ls -l io.github.mattcree.baz.icns | awk '{print "  " $5 "\t" $9}'
+echo "iconset (what iconutil builds the shipping icns from):"
+ls -l baz.iconset | awk 'NR>1 {print "  " $5 "\t" $9}'
