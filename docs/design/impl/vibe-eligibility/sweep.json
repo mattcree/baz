@@ -1,0 +1,2764 @@
+{
+  "analysed_tracks": 5076,
+  "labelled_tracks": 4958,
+  "requests": [
+    {
+      "id": "calm-piano",
+      "query": "calm piano instrumental",
+      "judged": true,
+      "base_rate": 0.13331988,
+      "distribution": {
+        "minimum": -0.25148076,
+        "p50": 0.13092457,
+        "p90": 0.35567772,
+        "p99": 0.5423465,
+        "maximum": 0.6862924,
+        "mean": 0.1467092,
+        "deviation": 0.1504782
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 3676,
+          "share": 0.72419226,
+          "precision": 0.17957258,
+          "lift": 1.3469303
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 2905,
+          "share": 0.57230103,
+          "precision": 0.21037868,
+          "lift": 1.5779992
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 2287,
+          "share": 0.45055163,
+          "precision": 0.23155555,
+          "lift": 1.7368418
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 1702,
+          "share": 0.3353034,
+          "precision": 0.2534206,
+          "lift": 1.9008461
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1160,
+          "share": 0.2285264,
+          "precision": 0.2940663,
+          "lift": 2.2057197
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 799,
+          "share": 0.1574074,
+          "precision": 0.3261694,
+          "lift": 2.4465172
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.88,
+          "lift": 6.6006656
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.7254902,
+          "lift": 5.4417253
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.5841584,
+          "lift": 4.38163
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.47619048,
+          "lift": 3.5717888
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.37698412,
+          "lift": 2.827666
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 820,
+          "share": 0.16154452,
+          "precision": 0.3226601,
+          "lift": 2.4201949
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 437,
+          "share": 0.086091414,
+          "precision": 0.39631337,
+          "lift": 2.97265
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 181,
+          "share": 0.035658,
+          "precision": 0.51955307,
+          "lift": 3.897041
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 68,
+          "share": 0.013396375,
+          "precision": 0.6764706,
+          "lift": 5.0740414
+        },
+        {
+          "policy": "elbow",
+          "kept": 179,
+          "share": 0.03526399,
+          "precision": 0.5254237,
+          "lift": 3.9410753
+        }
+      ],
+      "tick_boundaries": [
+        0.48410383,
+        0.5287608
+      ]
+    },
+    {
+      "id": "bright-rock",
+      "query": "bright energetic guitar rock",
+      "judged": true,
+      "base_rate": 0.3350141,
+      "distribution": {
+        "minimum": -0.2740001,
+        "p50": 0.276715,
+        "p90": 0.43446192,
+        "p99": 0.5053321,
+        "maximum": 0.55933535,
+        "mean": 0.24586661,
+        "deviation": 0.16382968
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4280,
+          "share": 0.84318364,
+          "precision": 0.37649307,
+          "lift": 1.1238126
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4061,
+          "share": 0.8000394,
+          "precision": 0.38858148,
+          "lift": 1.1598959
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3792,
+          "share": 0.7470449,
+          "precision": 0.40290087,
+          "lift": 1.2026385
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3453,
+          "share": 0.68026006,
+          "precision": 0.42399293,
+          "lift": 1.2655972
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 2814,
+          "share": 0.5543735,
+          "precision": 0.46726617,
+          "lift": 1.3947656
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 2265,
+          "share": 0.4462175,
+          "precision": 0.51133835,
+          "lift": 1.5263189
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.72,
+          "lift": 2.1491632
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.7647059,
+          "lift": 2.282608
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.8019802,
+          "lift": 2.3938699
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.76679844,
+          "lift": 2.2888541
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.72386587,
+          "lift": 2.1607027
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 774,
+          "share": 0.15248227,
+          "precision": 0.67315173,
+          "lift": 2.0093236
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 93,
+          "share": 0.018321512,
+          "precision": 0.8152174,
+          "lift": 2.4333823
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 1.0,
+          "lift": 2.9849489
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 1.0,
+          "lift": 2.9849489
+        },
+        {
+          "policy": "elbow",
+          "kept": 199,
+          "share": 0.0392041,
+          "precision": 0.7676768,
+          "lift": 2.291476
+        }
+      ],
+      "tick_boundaries": [
+        0.48238716,
+        0.5005719
+      ]
+    },
+    {
+      "id": "gentle-jazz",
+      "query": "gentle acoustic jazz trio",
+      "judged": true,
+      "base_rate": 0.10306575,
+      "distribution": {
+        "minimum": -0.19489516,
+        "p50": 0.16500618,
+        "p90": 0.30702728,
+        "p99": 0.41395292,
+        "maximum": 0.46443415,
+        "mean": 0.16668783,
+        "deviation": 0.106285706
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4300,
+          "share": 0.84712374,
+          "precision": 0.11203221,
+          "lift": 1.0869975
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3665,
+          "share": 0.7220252,
+          "precision": 0.12600166,
+          "lift": 1.2225367
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 2809,
+          "share": 0.5533885,
+          "precision": 0.14455232,
+          "lift": 1.4025253
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 1895,
+          "share": 0.37332547,
+          "precision": 0.15388711,
+          "lift": 1.4930965
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1143,
+          "share": 0.2251773,
+          "precision": 0.14700705,
+          "lift": 1.4263424
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 566,
+          "share": 0.11150512,
+          "precision": 0.095914744,
+          "lift": 0.93061703
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.009803922,
+          "lift": 0.095122986
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.03557312,
+          "lift": 0.3451498
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.08118812,
+          "lift": 0.7877313
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 858,
+          "share": 0.16903073,
+          "precision": 0.13967136,
+          "lift": 1.3551675
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 374,
+          "share": 0.073680066,
+          "precision": 0.05929919,
+          "lift": 0.575353
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 124,
+          "share": 0.024428684,
+          "precision": 0.008064516,
+          "lift": 0.07824632
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 23,
+          "share": 0.004531127,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 319,
+          "share": 0.06284476,
+          "precision": 0.04731861,
+          "lift": 0.45911092
+        }
+      ],
+      "tick_boundaries": [
+        0.35530072,
+        0.3850418
+      ]
+    },
+    {
+      "id": "industrial",
+      "query": "aggressive industrial percussion",
+      "judged": true,
+      "base_rate": 0.06857604,
+      "distribution": {
+        "minimum": -0.35298634,
+        "p50": -0.10021842,
+        "p90": 0.023510754,
+        "p99": 0.1726118,
+        "maximum": 0.21608846,
+        "mean": -0.08946597,
+        "deviation": 0.09305381
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 355,
+          "share": 0.06993696,
+          "precision": 0.12857144,
+          "lift": 1.8748741
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 242,
+          "share": 0.047675334,
+          "precision": 0.1570248,
+          "lift": 2.289791
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 212,
+          "share": 0.04176517,
+          "precision": 0.16981132,
+          "lift": 2.4762487
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 0,
+          "share": 0.0,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 0,
+          "share": 0.0,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.08,
+          "lift": 1.1665882
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.23529412,
+          "lift": 3.4311419
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.24509804,
+          "lift": 3.5741062
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.1496063,
+          "lift": 2.181612
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.13173653,
+          "lift": 1.9210286
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 683,
+          "share": 0.13455477,
+          "precision": 0.12369598,
+          "lift": 1.8037784
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 355,
+          "share": 0.06993696,
+          "precision": 0.12857144,
+          "lift": 1.8748741
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 248,
+          "share": 0.04885737,
+          "precision": 0.15322581,
+          "lift": 2.234393
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 214,
+          "share": 0.04215918,
+          "precision": 0.1682243,
+          "lift": 2.4531062
+        },
+        {
+          "policy": "elbow",
+          "kept": 410,
+          "share": 0.08077226,
+          "precision": 0.12623763,
+          "lift": 1.8408417
+        }
+      ],
+      "tick_boundaries": [
+        0.07889078,
+        0.1726118
+      ]
+    },
+    {
+      "id": "dream-pop",
+      "query": "dreamy female vocals and soft synthesizers",
+      "judged": true,
+      "base_rate": 0.11052844,
+      "distribution": {
+        "minimum": -0.21725677,
+        "p50": 0.18558183,
+        "p90": 0.37642646,
+        "p99": 0.5004419,
+        "maximum": 0.6607384,
+        "mean": 0.19619206,
+        "deviation": 0.13273397
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4359,
+          "share": 0.85874707,
+          "precision": 0.114164904,
+          "lift": 1.0329007
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3799,
+          "share": 0.74842393,
+          "precision": 0.11889997,
+          "lift": 1.0757409
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3183,
+          "share": 0.6270686,
+          "precision": 0.124157846,
+          "lift": 1.1233113
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 2347,
+          "share": 0.46237195,
+          "precision": 0.14092496,
+          "lift": 1.2750108
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1729,
+          "share": 0.34062254,
+          "precision": 0.14832254,
+          "lift": 1.34194
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1159,
+          "share": 0.22832939,
+          "precision": 0.14824562,
+          "lift": 1.3412441
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.08,
+          "lift": 0.7237956
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.08,
+          "lift": 0.7237956
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.07920792,
+          "lift": 0.7166293
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.128,
+          "lift": 1.1580731
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.12350598,
+          "lift": 1.1174136
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 862,
+          "share": 0.16981876,
+          "precision": 0.1403302,
+          "lift": 1.2696297
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 393,
+          "share": 0.07742317,
+          "precision": 0.12628865,
+          "lift": 1.1425897
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 132,
+          "share": 0.026004728,
+          "precision": 0.092307694,
+          "lift": 0.8351488
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 23,
+          "share": 0.004531127,
+          "precision": 0.08695652,
+          "lift": 0.7867344
+        },
+        {
+          "policy": "elbow",
+          "kept": 185,
+          "share": 0.03644602,
+          "precision": 0.10989011,
+          "lift": 0.9942248
+        }
+      ],
+      "tick_boundaries": [
+        0.46449298,
+        0.4964502
+      ]
+    },
+    {
+      "id": "focus",
+      "query": "sparse unobtrusive music for deep focus",
+      "judged": true,
+      "base_rate": 0.13896732,
+      "distribution": {
+        "minimum": -0.23867962,
+        "p50": 0.15305437,
+        "p90": 0.28530717,
+        "p99": 0.3784068,
+        "maximum": 0.47281158,
+        "mean": 0.15763019,
+        "deviation": 0.10046236
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4389,
+          "share": 0.8646572,
+          "precision": 0.14789876,
+          "lift": 1.0642701
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3566,
+          "share": 0.7025217,
+          "precision": 0.1609589,
+          "lift": 1.15825
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 2598,
+          "share": 0.5118203,
+          "precision": 0.18359375,
+          "lift": 1.321129
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 1768,
+          "share": 0.34830576,
+          "precision": 0.20687678,
+          "lift": 1.4886721
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1077,
+          "share": 0.21217494,
+          "precision": 0.2406367,
+          "lift": 1.7316065
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 395,
+          "share": 0.07781718,
+          "precision": 0.274359,
+          "lift": 1.9742699
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.2,
+          "lift": 1.4391873
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.25490198,
+          "lift": 1.8342584
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.26,
+          "lift": 1.8709434
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.292,
+          "lift": 2.1012135
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.26294822,
+          "lift": 1.8921586
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 774,
+          "share": 0.15248227,
+          "precision": 0.2464146,
+          "lift": 1.7731838
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 334,
+          "share": 0.06579984,
+          "precision": 0.29393938,
+          "lift": 2.115169
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 90,
+          "share": 0.017730497,
+          "precision": 0.25,
+          "lift": 1.798984
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 24,
+          "share": 0.0047281324,
+          "precision": 0.20833333,
+          "lift": 1.4991534
+        },
+        {
+          "policy": "elbow",
+          "kept": 226,
+          "share": 0.044523247,
+          "precision": 0.29147983,
+          "lift": 2.0974703
+        }
+      ],
+      "tick_boundaries": [
+        0.34313905,
+        0.36362708
+      ]
+    },
+    {
+      "id": "wistful",
+      "query": "wistful but not tragic, like remembering somewhere fondly",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.32387087,
+        "p50": 0.21253319,
+        "p90": 0.39037645,
+        "p99": 0.5352328,
+        "maximum": 0.6338684,
+        "mean": 0.22237203,
+        "deviation": 0.12773655
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4684,
+          "share": 0.92277384,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4215,
+          "share": 0.83037823,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3610,
+          "share": 0.7111899,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 2939,
+          "share": 0.5789992,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 2039,
+          "share": 0.40169424,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1366,
+          "share": 0.26910955,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 813,
+          "share": 0.16016549,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 363,
+          "share": 0.071513005,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 132,
+          "share": 0.026004728,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 40,
+          "share": 0.00788022,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 215,
+          "share": 0.042356186,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.47173125,
+        0.51232207
+      ]
+    },
+    {
+      "id": "restless-night",
+      "query": "restless late-night electronic music",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.34362316,
+        "p50": 0.17489094,
+        "p90": 0.31014746,
+        "p99": 0.4116892,
+        "maximum": 0.49142903,
+        "mean": 0.16599774,
+        "deviation": 0.112764
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4245,
+          "share": 0.8362884,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3687,
+          "share": 0.72635937,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 2957,
+          "share": 0.58254534,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 1938,
+          "share": 0.3817967,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1187,
+          "share": 0.23384555,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 597,
+          "share": 0.117612295,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 816,
+          "share": 0.1607565,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 296,
+          "share": 0.058313634,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 81,
+          "share": 0.015957447,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 12,
+          "share": 0.0023640662,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 251,
+          "share": 0.049448386,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.36147875,
+        0.39089292
+      ]
+    },
+    {
+      "id": "warm-not-sweet",
+      "query": "warm intimate acoustic music",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.24330953,
+        "p50": 0.20621686,
+        "p90": 0.33024123,
+        "p99": 0.40785408,
+        "maximum": 0.49999934,
+        "mean": 0.19593549,
+        "deviation": 0.10808889
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4553,
+          "share": 0.8969661,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3997,
+          "share": 0.78743106,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3458,
+          "share": 0.6812451,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 2655,
+          "share": 0.52304965,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1700,
+          "share": 0.33490938,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 856,
+          "share": 0.16863672,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 817,
+          "share": 0.1609535,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 260,
+          "share": 0.051221434,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 44,
+          "share": 0.008668243,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 3,
+          "share": 0.00059101655,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 146,
+          "share": 0.028762806,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.38904592,
+        0.4085888
+      ]
+    },
+    {
+      "id": "dark-not-loud",
+      "query": "dark tense music",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.2629017,
+        "p50": 0.2656402,
+        "p90": 0.40650055,
+        "p99": 0.54655194,
+        "maximum": 0.66271955,
+        "mean": 0.2515485,
+        "deviation": 0.12748305
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4699,
+          "share": 0.9257289,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4382,
+          "share": 0.86327815,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 4030,
+          "share": 0.79393226,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3463,
+          "share": 0.6822301,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 2774,
+          "share": 0.5464933,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1750,
+          "share": 0.34475964,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 734,
+          "share": 0.14460205,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 306,
+          "share": 0.060283687,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 105,
+          "share": 0.02068558,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 28,
+          "share": 0.005516154,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 238,
+          "share": 0.046887312,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.48154935,
+        0.52381337
+      ]
+    },
+    {
+      "id": "slow-burn",
+      "query": "a patient nocturnal electronic journey",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.2815909,
+        "p50": 0.05179821,
+        "p90": 0.18001275,
+        "p99": 0.31836408,
+        "maximum": 0.40542686,
+        "mean": 0.059374943,
+        "deviation": 0.099068366
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 2568,
+          "share": 0.50591016,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 1548,
+          "share": 0.30496454,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 744,
+          "share": 0.1465721,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 384,
+          "share": 0.07565012,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 257,
+          "share": 0.050630417,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 220,
+          "share": 0.043341212,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 663,
+          "share": 0.13061465,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 358,
+          "share": 0.07052798,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 244,
+          "share": 0.048069347,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 216,
+          "share": 0.04255319,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 369,
+          "share": 0.07269503,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.25577506,
+        0.31836408
+      ]
+    },
+    {
+      "id": "storm-clears",
+      "query": "tension gradually clearing into warmth",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.25500777,
+        "p50": 0.19652823,
+        "p90": 0.35300225,
+        "p99": 0.48439807,
+        "maximum": 0.6071202,
+        "mean": 0.19880705,
+        "deviation": 0.121521495
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4518,
+          "share": 0.8900709,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 3980,
+          "share": 0.78408194,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3236,
+          "share": 0.6375098,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 2472,
+          "share": 0.48699763,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1700,
+          "share": 0.33490938,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1135,
+          "share": 0.22360127,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 739,
+          "share": 0.14558707,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 347,
+          "share": 0.06836092,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 135,
+          "share": 0.026595745,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 33,
+          "share": 0.006501182,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 251,
+          "share": 0.049448386,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.4284794,
+        0.46145314
+      ]
+    },
+    {
+      "id": "start:sunday-morning",
+      "query": "gentle unhurried music for a slow morning",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.2357504,
+        "p50": 0.18833774,
+        "p90": 0.32254288,
+        "p99": 0.41540563,
+        "maximum": 0.50420505,
+        "mean": 0.18905088,
+        "deviation": 0.10192295
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4672,
+          "share": 0.9204098,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4093,
+          "share": 0.80634356,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3251,
+          "share": 0.64046496,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 2315,
+          "share": 0.45606777,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 1333,
+          "share": 0.26260835,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 701,
+          "share": 0.13810086,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 795,
+          "share": 0.15661938,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 355,
+          "share": 0.06993696,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 110,
+          "share": 0.021670606,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 23,
+          "share": 0.004531127,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 252,
+          "share": 0.04964539,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.37607878,
+        0.40137583
+      ]
+    },
+    {
+      "id": "start:late-night-drive",
+      "query": "warm hypnotic music for driving at night",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.27299854,
+        "p50": 0.25965953,
+        "p90": 0.38683495,
+        "p99": 0.4767121,
+        "maximum": 0.55466896,
+        "mean": 0.24160245,
+        "deviation": 0.12275472
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4669,
+          "share": 0.91981876,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4350,
+          "share": 0.856974,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3943,
+          "share": 0.77679276,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3411,
+          "share": 0.6719858,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 2709,
+          "share": 0.53368795,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1710,
+          "share": 0.33687943,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 733,
+          "share": 0.14440504,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 231,
+          "share": 0.045508273,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 30,
+          "share": 0.0059101656,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 211,
+          "share": 0.041568164,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.442629,
+        0.46319684
+      ]
+    },
+    {
+      "id": "start:focus",
+      "query": "calm instrumental music without vocals for concentrating",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.19187282,
+        "p50": 0.23542483,
+        "p90": 0.39284906,
+        "p99": 0.49268842,
+        "maximum": 0.6195549,
+        "mean": 0.24442539,
+        "deviation": 0.112059124
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4891,
+          "share": 0.96355397,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4578,
+          "share": 0.90189123,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 4068,
+          "share": 0.8014184,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3347,
+          "share": 0.65937746,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 2315,
+          "share": 0.45606777,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 1618,
+          "share": 0.3187549,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 882,
+          "share": 0.17375886,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 364,
+          "share": 0.071710005,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 94,
+          "share": 0.018518519,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 14,
+          "share": 0.002758077,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 157,
+          "share": 0.030929865,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.46523064,
+        0.49220565
+      ]
+    },
+    {
+      "id": "start:workout",
+      "query": "fast loud driving music with a hard pulse",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.21371472,
+        "p50": 0.377635,
+        "p90": 0.5513904,
+        "p99": 0.6192234,
+        "maximum": 0.6752541,
+        "mean": 0.33113816,
+        "deviation": 0.1938564
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4511,
+          "share": 0.8886919,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4350,
+          "share": 0.856974,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3983,
+          "share": 0.784673,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3749,
+          "share": 0.7385737,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 3493,
+          "share": 0.6881403,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 3167,
+          "share": 0.62391645,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 793,
+          "share": 0.15622537,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 40,
+          "share": 0.00788022,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 246,
+          "share": 0.048463356,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.59428066,
+        0.6080894
+      ]
+    },
+    {
+      "id": "start:wind-down",
+      "query": "quiet soft slow music for the end of the day",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.355582,
+        "p50": 0.09291902,
+        "p90": 0.23021087,
+        "p99": 0.28918263,
+        "maximum": 0.42230594,
+        "mean": 0.0938515,
+        "deviation": 0.0965099
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 3455,
+          "share": 0.68065405,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 2393,
+          "share": 0.4714342,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 1465,
+          "share": 0.28861308,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 768,
+          "share": 0.15130024,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 184,
+          "share": 0.036249015,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 38,
+          "share": 0.0074862097,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 875,
+          "share": 0.17237982,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 248,
+          "share": 0.04885737,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 60,
+          "share": 0.011820331,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 14,
+          "share": 0.002758077,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 177,
+          "share": 0.034869976,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.2636754,
+        0.28698456
+      ]
+    },
+    {
+      "id": "start:party",
+      "query": "upbeat energetic danceable music",
+      "judged": false,
+      "base_rate": 0.0,
+      "distribution": {
+        "minimum": -0.18412568,
+        "p50": 0.31942558,
+        "p90": 0.43184143,
+        "p99": 0.51066726,
+        "maximum": 0.6200574,
+        "mean": 0.27298617,
+        "deviation": 0.15158127
+      },
+      "policies": [
+        {
+          "policy": "floor 0.05",
+          "kept": 4516,
+          "share": 0.8896769,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.10",
+          "kept": 4313,
+          "share": 0.8496848,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.15",
+          "kept": 3884,
+          "share": 0.76516944,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.20",
+          "kept": 3604,
+          "share": 0.7100079,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.25",
+          "kept": 3279,
+          "share": 0.6459811,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "floor 0.30",
+          "kept": 2769,
+          "share": 0.54550827,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 0.5%",
+          "kept": 25,
+          "share": 0.004925138,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 1.0%",
+          "kept": 51,
+          "share": 0.010047281,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 2.0%",
+          "kept": 102,
+          "share": 0.020094562,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 5.0%",
+          "kept": 254,
+          "share": 0.0500394,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "top 10.0%",
+          "kept": 508,
+          "share": 0.1000788,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.0sd",
+          "kept": 593,
+          "share": 0.11682427,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+1.5sd",
+          "kept": 73,
+          "share": 0.014381403,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.0sd",
+          "kept": 5,
+          "share": 0.0009850275,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "mean+2.5sd",
+          "kept": 1,
+          "share": 0.00019700552,
+          "precision": 0.0,
+          "lift": 0.0
+        },
+        {
+          "policy": "elbow",
+          "kept": 196,
+          "share": 0.03861308,
+          "precision": 0.0,
+          "lift": 0.0
+        }
+      ],
+      "tick_boundaries": [
+        0.48229575,
+        0.503723
+      ]
+    }
+  ],
+  "policy_means": [
+    {
+      "policy": "floor 0.05",
+      "mean_kept": 4074.4443,
+      "kept_variation": 0.2580511,
+      "smallest_kept": 355,
+      "largest_kept": 4891,
+      "mean_lift": 1.2549642,
+      "unfillable": 0
+    },
+    {
+      "policy": "floor 0.10",
+      "mean_kept": 3562.4443,
+      "kept_variation": 0.30885535,
+      "smallest_kept": 242,
+      "largest_kept": 4578,
+      "mean_lift": 1.4140357,
+      "unfillable": 0
+    },
+    {
+      "policy": "floor 0.15",
+      "mean_kept": 2972.7778,
+      "kept_variation": 0.37284648,
+      "smallest_kept": 212,
+      "largest_kept": 4068,
+      "mean_lift": 1.5437824,
+      "unfillable": 0
+    },
+    {
+      "policy": "floor 0.20",
+      "mean_kept": 2345.0557,
+      "kept_variation": 0.46692988,
+      "smallest_kept": 1,
+      "largest_kept": 3749,
+      "mean_lift": 1.2372037,
+      "unfillable": 1
+    },
+    {
+      "policy": "floor 0.25",
+      "mean_kept": 1716.2778,
+      "kept_variation": 0.58698094,
+      "smallest_kept": 0,
+      "largest_kept": 3493,
+      "mean_lift": 1.3500624,
+      "unfillable": 1
+    },
+    {
+      "policy": "floor 0.30",
+      "mean_kept": 1172.8334,
+      "kept_variation": 0.74966675,
+      "smallest_kept": 0,
+      "largest_kept": 3167,
+      "mean_lift": 1.3698279,
+      "unfillable": 1
+    },
+    {
+      "policy": "top 0.5%",
+      "mean_kept": 25.0,
+      "kept_variation": 0.0,
+      "smallest_kept": 25,
+      "largest_kept": 25,
+      "mean_lift": 2.0132332,
+      "unfillable": 0
+    },
+    {
+      "policy": "top 1.0%",
+      "mean_kept": 51.0,
+      "kept_variation": 0.0,
+      "smallest_kept": 51,
+      "largest_kept": 51,
+      "mean_lift": 2.2855883,
+      "unfillable": 0
+    },
+    {
+      "policy": "top 2.0%",
+      "mean_kept": 102.0,
+      "kept_variation": 0.0,
+      "smallest_kept": 102,
+      "largest_kept": 102,
+      "mean_lift": 2.1720502,
+      "unfillable": 0
+    },
+    {
+      "policy": "top 5.0%",
+      "mean_kept": 254.0,
+      "kept_variation": 0.0,
+      "smallest_kept": 254,
+      "largest_kept": 254,
+      "mean_lift": 1.9411154,
+      "unfillable": 0
+    },
+    {
+      "policy": "top 10.0%",
+      "mean_kept": 508.0,
+      "kept_variation": 0.0,
+      "smallest_kept": 508,
+      "largest_kept": 508,
+      "mean_lift": 1.7844502,
+      "unfillable": 0
+    },
+    {
+      "policy": "mean+1.0sd",
+      "mean_kept": 779.1111,
+      "kept_variation": 0.09667425,
+      "smallest_kept": 593,
+      "largest_kept": 882,
+      "mean_lift": 1.7718797,
+      "unfillable": 0
+    },
+    {
+      "policy": "mean+1.5sd",
+      "mean_kept": 290.3889,
+      "kept_variation": 0.38344398,
+      "smallest_kept": 40,
+      "largest_kept": 437,
+      "mean_lift": 1.8523365,
+      "unfillable": 0
+    },
+    {
+      "policy": "mean+2.0sd",
+      "mean_kept": 100.94444,
+      "kept_variation": 0.7079194,
+      "smallest_kept": 1,
+      "largest_kept": 248,
+      "mean_lift": 1.9714603,
+      "unfillable": 3
+    },
+    {
+      "policy": "mean+2.5sd",
+      "mean_kept": 41.055557,
+      "kept_variation": 1.5503078,
+      "smallest_kept": 1,
+      "largest_kept": 216,
+      "mean_lift": 2.1329973,
+      "unfillable": 11
+    },
+    {
+      "policy": "elbow",
+      "mean_kept": 234.83333,
+      "kept_variation": 0.28993994,
+      "smallest_kept": 146,
+      "largest_kept": 410,
+      "mean_lift": 1.9373665,
+      "unfillable": 0
+    }
+  ],
+  "chips": [
+    {
+      "row": "made of",
+      "word": "piano",
+      "discrimination": 3.3034222,
+      "pull": 0.091184705,
+      "displacement": 0.74177015,
+      "lift": 3.573706
+    },
+    {
+      "row": "made of",
+      "word": "acoustic guitar",
+      "discrimination": 2.8239872,
+      "pull": 0.14202707,
+      "displacement": 0.8274743,
+      "lift": 1.5287267
+    },
+    {
+      "row": "made of",
+      "word": "electric guitars",
+      "discrimination": 2.434397,
+      "pull": 0.061288346,
+      "displacement": 0.7364664,
+      "lift": 1.085436
+    },
+    {
+      "row": "made of",
+      "word": "synthesizers",
+      "discrimination": 2.8061519,
+      "pull": 0.09163635,
+      "displacement": 0.62532556,
+      "lift": 4.0590053
+    },
+    {
+      "row": "made of",
+      "word": "strings",
+      "discrimination": 2.906647,
+      "pull": 0.07771989,
+      "displacement": 0.7683422,
+      "lift": 3.6563997
+    },
+    {
+      "row": "made of",
+      "word": "brass",
+      "discrimination": 2.5004244,
+      "pull": 0.011045529,
+      "displacement": 0.7944499,
+      "lift": 1.6813619
+    },
+    {
+      "row": "made of",
+      "word": "female vocals",
+      "discrimination": 2.571077,
+      "pull": 0.025208909,
+      "displacement": 0.8235909,
+      "lift": null
+    },
+    {
+      "row": "made of",
+      "word": "no vocals",
+      "discrimination": 2.3673878,
+      "pull": -0.000056215376,
+      "displacement": 0.4698398,
+      "lift": 1.6986474
+    },
+    {
+      "row": "made of",
+      "word": "drum machine",
+      "discrimination": 2.5468588,
+      "pull": 0.005086395,
+      "displacement": 0.64909595,
+      "lift": 0.8662784
+    },
+    {
+      "row": "feels like",
+      "word": "warm",
+      "discrimination": 2.3292153,
+      "pull": 0.061187804,
+      "displacement": 0.5343,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "dark",
+      "discrimination": 2.5221632,
+      "pull": 0.04753399,
+      "displacement": 0.6742303,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "melancholy",
+      "discrimination": 2.8303971,
+      "pull": 0.03252294,
+      "displacement": 0.5590908,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "euphoric",
+      "discrimination": 2.7765646,
+      "pull": 0.0009950248,
+      "displacement": 0.50784606,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "tense",
+      "discrimination": 2.6363313,
+      "pull": 0.022467827,
+      "displacement": 0.57283527,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "dreamy",
+      "discrimination": 2.378617,
+      "pull": 0.025624067,
+      "displacement": 0.6294662,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "raw",
+      "discrimination": 2.5963786,
+      "pull": 0.0009950248,
+      "displacement": 0.62861127,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "hopeful",
+      "discrimination": 2.4269402,
+      "pull": 0.098573916,
+      "displacement": 0.6634352,
+      "lift": null
+    },
+    {
+      "row": "feels like",
+      "word": "nostalgic",
+      "discrimination": 3.074583,
+      "pull": 0.014822388,
+      "displacement": 0.6138164,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "slow",
+      "discrimination": 1.9884593,
+      "pull": -0.0035866932,
+      "displacement": 0.4536429,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "driving",
+      "discrimination": 2.7966504,
+      "pull": 0.0030049752,
+      "displacement": 0.6059476,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "hypnotic",
+      "discrimination": 2.8503747,
+      "pull": 0.009044666,
+      "displacement": 0.63789284,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "sparse",
+      "discrimination": 3.158388,
+      "pull": 0.005210719,
+      "displacement": 0.52074516,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "dense",
+      "discrimination": 2.5948696,
+      "pull": 0.016001087,
+      "displacement": 0.57375985,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "danceable",
+      "discrimination": 2.5975661,
+      "pull": 0.046453875,
+      "displacement": 0.62243557,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "steady",
+      "discrimination": 3.0045097,
+      "pull": 0.0,
+      "displacement": 0.46564656,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "swelling",
+      "discrimination": 2.5098252,
+      "pull": -0.001004975,
+      "displacement": 0.58181095,
+      "lift": null
+    },
+    {
+      "row": "moves like",
+      "word": "restless",
+      "discrimination": 2.500013,
+      "pull": 0.018265653,
+      "displacement": 0.49493113,
+      "lift": null
+    }
+  ]
+}

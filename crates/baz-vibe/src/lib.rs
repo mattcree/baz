@@ -312,13 +312,24 @@ impl Features {
             .sqrt()
     }
 
-    fn semantic_distance(&self, other: &[f32]) -> f32 {
-        1.0 - self
-            .semantic
+    /// **How well this track answers an embedded request** — the cosine of the
+    /// two unit vectors, −1…1, higher being closer.
+    ///
+    /// It is the one number the eligible set is drawn from, so it is public:
+    /// a surface that wants to say *matches 340 songs* while the listener is
+    /// still typing must be able to ask the same question the selector asks,
+    /// and get the same answer.
+    #[must_use]
+    pub fn similarity(&self, request: &[f32]) -> f32 {
+        self.semantic
             .iter()
-            .zip(other)
+            .zip(request)
             .map(|(left, right)| left * right)
             .sum::<f32>()
+    }
+
+    fn semantic_distance(&self, other: &[f32]) -> f32 {
+        1.0 - self.similarity(other)
     }
 
     fn semantic_pair_distance(&self, other: &Self) -> f32 {
@@ -328,6 +339,21 @@ impl Features {
     fn at(&self, index: AnalysisIndex) -> f32 {
         self.values[index as usize]
     }
+}
+
+/// **Embed an ordinary-language request** with the bundled local text tower.
+///
+/// The one embedding the whole feature is built on. It is separated from
+/// selection because a surface needs it *before* a request is committed — to
+/// count what matches while the listener is still typing — and because paying
+/// for the tower once per keystroke-settled phrase, rather than once per
+/// compose, is what makes that count affordable.
+///
+/// # Errors
+///
+/// Returns an inference error if the bundled model cannot embed the prompt.
+pub fn embed_request(prompt: &str) -> Result<Vec<f32>, Error> {
+    semantic::embed_text(prompt.trim()).map_err(Error::Semantic)
 }
 
 /// Select tracks near the requested collection-relative targets, then order
