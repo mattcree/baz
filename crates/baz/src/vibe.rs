@@ -912,18 +912,28 @@ impl State {
     /// says *louder than 78% of this request's songs* instead of *0.63*.
     pub(crate) fn why(&self, row: usize) -> Option<String> {
         let preview = self.preview.as_ref()?;
-        let level = preview.blended.get(row).copied()?;
-        // A level is a rank stretched onto −2…+2, so this is the rank back.
-        let percentile = ((level + 2.0) / 4.0 * 100.0).clamp(0.0, 100.0).round();
-        let where_it_went = format!(
-            "your line put it {} of {} — louder, faster and busier than {percentile:.0}% of \
-             this request's songs",
-            row + 1,
-            preview.items.len()
+        if row >= preview.items.len() {
+            return None;
+        }
+        let placed = format!("{} of {}", row + 1, preview.items.len());
+        // With no line drawn there is no height to report, and the honest
+        // sentence is the shorter one rather than an invented percentile.
+        let where_it_went = preview.blended.get(row).copied().map_or_else(
+            || format!("You drew no line, so the order is continuity alone; it is {placed}."),
+            |level| {
+                // A level is a rank stretched onto −2…+2, so this is the rank
+                // back.
+                let percentile = ((level + 2.0) / 4.0 * 100.0).clamp(0.0, 100.0).round();
+                format!(
+                    "Your line put it {placed} — louder, faster and busier than \
+                     {percentile:.0}% of this request's songs."
+                )
+            },
         );
         let Some(found) = preview.matches.get(row) else {
             return Some(format!(
-                "You asked for no words, so every song baz has heard was eligible. {where_it_went}."
+                "You asked for no words, so every song Baz has heard was eligible. \
+                 {where_it_went}"
             ));
         };
         let strength = match found.ticks {
@@ -932,7 +942,7 @@ impl State {
             _ => "a weak match — your line asked for something your words did not have much of",
         };
         Some(format!(
-            "Your words let it in: {strength} of the {} eligible. {where_it_went}.",
+            "Your words let it in: {strength} of the {} eligible. {where_it_went}",
             preview.eligible_tracks
         ))
     }
@@ -1095,6 +1105,8 @@ impl State {
                 self.done = self.features.len();
                 self.analyzing = !self.pending.is_empty();
                 self.error = None;
+                // Same reason: what is eligible has just been established.
+                self.words_changed();
             }
             Err(error) => {
                 self.error = Some(error);
@@ -1139,6 +1151,11 @@ impl State {
         }
         if self.pending.is_empty() && self.active_workers == 0 {
             self.analyzing = false;
+            // **The count is against a pool that just changed.** A live
+            // readout that describes the library as it was when the phrase
+            // settled is worse than no readout: it says *Baz has not heard
+            // anything yet* over a library it has now heard. Recount.
+            self.words_changed();
         }
     }
 
@@ -1462,15 +1479,23 @@ fn diff(previous: &Generated, current: &Generated, varied: bool) -> Diff {
     let line_moved = previous.contour != current.contour;
     let length_moved = previous.target_minutes != current.target_minutes;
     let cause = if words_moved {
-        let narrowed = match current.eligible_tracks.cmp(&previous.eligible_tracks) {
-            std::cmp::Ordering::Less => "narrowed",
-            std::cmp::Ordering::Greater => "widened",
-            std::cmp::Ordering::Equal => "left",
-        };
-        changed(&format!(
-            "your words {narrowed} what is eligible, from {} to {}",
-            previous.eligible_tracks, current.eligible_tracks
-        ))
+        match current.eligible_tracks.cmp(&previous.eligible_tracks) {
+            std::cmp::Ordering::Equal => changed(&format!(
+                "your words changed, and the same {} songs are still eligible",
+                current.eligible_tracks
+            )),
+            ordering => {
+                let moved = if ordering == std::cmp::Ordering::Less {
+                    "narrowed"
+                } else {
+                    "widened"
+                };
+                changed(&format!(
+                    "your words {moved} what is eligible, from {} to {}",
+                    previous.eligible_tracks, current.eligible_tracks
+                ))
+            }
+        }
     } else if varied {
         changed("another version: the same request, a different draw")
     } else if line_moved && length_moved {

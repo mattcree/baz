@@ -186,11 +186,21 @@ pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'_, Mess
         iced::widget::text(label)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM)
+            // **Weight and value, never hue.** A chip that is lit is the one
+            // the request currently matches, and the difference has to be
+            // readable by somebody who cannot separate two inks: it is set in
+            // the medium face at full paper against the regular face dimmed,
+            // which is a step in two non-colour dimensions at once.
+            //
+            // `theme::tile` used to draw this and cannot: it ignores its own
+            // `selected` argument and returns the same transparent style
+            // either way, so the state was carried entirely by the text
+            // colour and the call read as though it were not.
+            .font(if lit { theme::MEDIUM } else { theme::SANS })
             .color(if lit { room.paper } else { room.paper_dim }),
     )
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::tile(room, status, lit))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(message)
     .into()
 }

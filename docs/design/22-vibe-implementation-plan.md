@@ -10,9 +10,36 @@
 > it orders the work so that nothing legible is built on top of anything
 > unmeasured.
 >
-> **Nothing here is started.** Owner decisions are marked **waiting** inline
-> and collected in §8, following `WORK.md`'s rule that a blocked item is a
-> note, never a deletion.
+> **Carried out on 2026-08-15, except for §0.1.** Phases 0.2–4 are built and
+> in the tree; what each one found is recorded where the work is, and the
+> departures from design 21 are collected in that document's own header note.
+> Six of §8's seven decisions were taken as proposed — the seventh is 0.1's
+> verdict, which cannot be taken until 0.1 is done.
+>
+> **§0.1 is the one item no agent can do**, and it is the gate note 16 set
+> rather than a formality: the harness, the consented corpus, the four systems
+> and the materialized candidates are all ready, and the ratings need the
+> owner's ears. If the semantic system does not beat the diversity-matched
+> random control, the next work is engine quality — window policy, hybrid
+> conventional constraints — and not more interface. Nothing built below
+> changes that, because every measurement below is *comparative*: which policy
+> concentrates the right songs better than another, never whether any of them
+> is good.
+>
+> Where a phase's answer differed from what this plan expected, the plan is
+> **not** edited to match — the difference is the finding:
+>
+> - **§0.2's largest-gap candidate is a trap.** Implemented literally it pinned
+>   all eighteen swept prompts to the smallest pool allowed. The knee of the
+>   ranked curve is what was meant.
+> - **§0.3 could not fill three rows.** Design 21 §4's *moves like* row
+>   measured as displacement without pull, and the sweep refused it.
+> - **§2.1's two options were both wrong.** Neither page-open nor first-press:
+>   the text tower loads on the **first settled phrase**, so nothing is paid
+>   for until the listener has actually written something, and by the time they
+>   stop typing the count is there.
+> - **§1.5's tick boundaries cannot be absolute.** They are the eligible pool's
+>   own terciles, per request.
 
 ## 1. What the audit found
 

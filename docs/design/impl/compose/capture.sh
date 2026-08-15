@@ -45,7 +45,7 @@ sleep 1
 env -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS DISPLAY="$DISP" \
     WINIT_UNIX_BACKEND=x11 HOME="$S/home" XDG_DATA_HOME="$S/data" \
     XDG_CONFIG_HOME="$S/config" XDG_CACHE_HOME="$S/cache" \
-    XDG_RUNTIME_DIR="$S/run" BAZ_ROOM=closing-time BAZ_VIBE_WORKERS=8 \
+    XDG_RUNTIME_DIR="$S/run" BAZ_ROOM=closing-time BAZ_VIBE_WORKERS=1 \
     BAZ_VIBE_MODEL_DIR="$REPO/models/vibe" \
     "$BIN" >> "$S/app.log" 2>&1 & APID=$!
 WID=""
@@ -85,6 +85,10 @@ sleep 6
 move 1400 940
 shot "03-listening"
 
+# One worker rather than eight, so **state 2 lasts long enough to be
+# photographed** on a 24-track fixture. The states are what is being
+# exercised here; the rate is measured elsewhere, by `vibe-rate`.
+#
 # **Wait by watching the store stop growing**, rather than by guessing.
 DB="$S/data/baz/vibe.db"
 last=-1; still=0
@@ -113,8 +117,10 @@ sleep 6
 move 1400 940
 shot "06-a-list"
 
-# **6 · A row explains itself** — three cues, none of them a colour.
-click 1100 640
+# **6 · A row explains itself** — three cues, none of them a colour. The
+# coordinate is a row's own title rather than the space beside it: the first
+# attempt landed in the gutter between two rows and selected nothing.
+click 900 726
 move 1400 940
 shot "07-why-this-song"
 

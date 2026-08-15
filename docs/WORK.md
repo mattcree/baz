@@ -1612,6 +1612,13 @@ or not."*
     hairline); Library and Playlists use `shelf::group_band`. Proposed — the
     band everywhere, including Home.
 
+    **One of the four places has left the question.** The composing page no
+    longer uses `views::section_rule` at all: item 72 replaced its named
+    blocks with the two questions in the listener's own words, headed in the
+    emphasis voice. So this is now a pass over **three** places — Home,
+    Library and Playlists — and the composing page will follow whichever way
+    it goes without being one of the reasons for going that way.
+
 74. **Not started — the bell, again.** *"the bell icon is still weirdly
     skinny… backlog it."*
 
@@ -1625,15 +1632,21 @@ or not."*
     Widen the dome and let the flare follow; assert the body's **median** width
     instead — a glyph is read by its mass, not by its widest scanline.
 
-75. **Not started — the vibe route's first run.** *(From the quorum, R1 and
-    Q1.)* Analysis is minutes to hours on a real library, and the page has no
-    design for that state beyond a sentence. Wanted: an honest progress reading
-    in the result pane with a partial list forming in it, a labelled *Listen to
-    my library* that says roughly how long and can be stopped and resumed, and
-    a decision from the owner about whether baz may do any of it before being
-    asked (`docs/design/quorum/2026-08-15-vibe.jsonl`, Q1 — a consent and
-    battery question, not a design one). **Blocked on that answer**; the rest
-    is buildable the moment item 72 is approved.
+75. **Done 2026-08-15 with item 72 — the composing route's first run.** *(From
+    the quorum, R1 and Q1.)* The result pane carries the two cold states: a
+    stated cost with a labelled *Listen to my music* that can be stopped and
+    resumed, and a real reading while it runs — how many heard, how long left,
+    how many skipped — with the commitment rewriting its own words to what it
+    can do now (`Compose · needs listening first` → `Compose from 1 240 so
+    far`). The ask pane is fully live throughout, which is the whole of what
+    keeps a two-hour state from reading as broken. Every duration comes from
+    one function reading one measured rate, so no copy can drift away from it.
+
+    **The consent question was answered as proposed: no.** baz does not listen
+    to a library before it is asked to. The offer is on the page with its cost
+    beside it, which makes it a decision rather than something that happened
+    to somebody. If the owner would rather it were opt-in-at-first-launch,
+    that is a change to one press and its copy, not to any of this.
 
 76. **Not started — lean towards what you haven't played.** *(From the quorum,
     Q3.)* baz keeps a play ledger, so it can answer *"something I haven't

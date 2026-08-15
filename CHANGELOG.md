@@ -62,6 +62,18 @@ Every release is built from a tag by CI, gated on the full test suite — see
   minute or two* — from a measured rate rather than a guess, and the
   description is fully usable while baz is listening.
 
+### Known, and not known
+
+- **How *well* this retrieves has not been blind-tested.** Everything above is
+  about making the feature legible and its engine honest, and the measurements
+  behind it are comparative: which eligibility policy concentrates the right
+  songs *better than another*, which words move a pool *more than others*. None
+  of that answers whether the local model's idea of *warm analogue soul*
+  matches yours. The evaluation harness, a consented 72-track corpus and a
+  diversity-matched random control are all in the tree ready for a blind
+  listening run; until somebody sits down and does it, treat the results as
+  interesting rather than proven.
+
 - **A Vibe compose uses about half the memory.** baz analysed with eight model
   sessions at once and each one costs roughly 145 MB of the runtime's own
   scratch space — measured, and the reason a compose could reach 1.8 GB on a
