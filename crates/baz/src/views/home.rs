@@ -882,7 +882,6 @@ mod tests {
         for gone in [
             "fn vibe_creator",
             "Make a mix",
-            "Try “dreamy shoegaze for a rainy evening”",
             "VibePrompt",
             "Create mix",
             "Analyse locally & create",
@@ -893,35 +892,60 @@ mod tests {
                 "Home is drawing the composer again: {gone:?}"
             );
         }
-        let composer = include_str!("new_playlist.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a head");
+        // The composer is a place of its own now — `views::compose` — rather
+        // than a section of the New playlist form. The assertion follows it
+        // rather than being deleted, because what it guards is that there is
+        // exactly **one** of it.
+        let composer = [
+            include_str!("compose/mod.rs"),
+            include_str!("compose/ask.rs"),
+            include_str!("compose/shape.rs"),
+            include_str!("compose/result.rs"),
+        ]
+        .join("\n");
         for required in [
-            "Try “dreamy shoegaze for a rainy evening”",
             "VibePrompt",
             "Compose",
             "Save playlist",
-            "Compose again",
+            "Another version",
+            "What do you want to hear?",
+            "How should it move?",
         ] {
             assert!(
                 composer.contains(required),
                 "the composer lost {required:?} in the move"
             );
         }
-        // The vocabulary is one word per act, so the words it replaced may not
-        // come back beside their replacements. Comments are stripped first:
-        // the module's own history names the words it retired, and a rule that
+        // The vocabulary is one word per act. Comments are stripped first: the
+        // modules' own history names the words they retired, and a rule that
         // could not be *written down* would be a rule nobody could explain.
         let drawn: String = composer
             .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.starts_with("//")
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        for gone in ["Make a mix", "Create mix", "Another version"] {
+        for gone in ["Make a mix", "Create mix", "Compose again"] {
             assert!(
                 !drawn.contains(gone),
                 "two names for one act are back: {gone:?}"
+            );
+        }
+        // **Nothing on the surface says vibe, contour, dimension or recipe**
+        // (design 21 §9). The words are in the *code* — they are the type
+        // names — so this reads only the strings a listener could see.
+        for banned in [
+            "\"Vibe",
+            "\"Contour",
+            "\"Recipe",
+            "contour\"",
+            "dimension\"",
+        ] {
+            assert!(
+                !drawn.contains(banned),
+                "the machinery's own vocabulary reached the surface: {banned:?}"
             );
         }
         let home = source

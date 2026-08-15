@@ -11,8 +11,30 @@ owner's complaints, the eight defects, the three layouts, and the quorum in
 draft had missed. Every claim below that came from somewhere is attributed at
 the end.
 
-**Nothing here is built.** Three decisions remain open (§11) and one of them is
-consent rather than design.
+> **Built, and amended in four places by what building it found.**
+> `docs/design/22-vibe-implementation-plan.md` is the build plan, and the
+> amendments are its doing:
+>
+> 1. **The eligible set is real now.** §3's table said it was *"a description
+>    of the implementation rather than a metaphor for it"* and it was a
+>    metaphor: the engine scored one blended cost over every analysed track.
+>    Selection is two stages, and the five invariants that say so run in CI.
+> 2. **Another version is restored** as a distinct, visible press (the
+>    quorum's R8), because compose is deterministic now — the seed no longer
+>    advances on its own and the hidden freshness penalty is gone. §6's diff
+>    can therefore say *"identical, because nothing changed"* and be right.
+> 3. **A closest-three readout joins §6**, under the count. A count says how
+>    many and never how well, and the three nearest titles are the cheapest
+>    possible answer to *does baz understand my phrase*.
+> 4. **§4's third vocabulary row does not ship.** The sweep in
+>    `docs/design/impl/vibe-eligibility/` measured twenty-seven candidates:
+>    *moves like* displaced the pool heavily and pulled it almost nowhere, and
+>    it duplicated the question the curve asks directly beneath it. Twelve
+>    chips in two rows.
+>
+> The three decisions in §11 were taken as proposed. §10's missing
+> measurement — a per-track analysis rate — now exists, and it says §7's
+> *"roughly two hours"* was right.
 
 ---
 

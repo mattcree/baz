@@ -26,6 +26,42 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **Making a playlist from a mood is a place now, not a form.** It asks two
+  questions in the words you would use — *what do you want to hear?* and *how
+  should it move?* — with the description on the left and the list on the
+  right, so what you are tuning is on screen while you tune it. Under about
+  1 180 px the same three blocks stack, and nothing is hidden behind a tab at
+  any width. The Manual/Vibe fork is gone: the page lands on composing, and
+  *start with an empty list* is one press inside it.
+- **Your words now really do decide which songs are eligible.** They used to
+  be one ingredient of a blended score, so a song that answered them poorly
+  could still take a place by sitting at the right height on the curve, and
+  moving the curve quietly changed which songs were even considered. Selection
+  happens in two stages: the words draw a pool, and the line orders it. Moving
+  the line reorders the same songs — which is what the page has always claimed
+  and can now be believed about.
+- **Composing twice with the same request gives you the same list.** A hidden
+  freshness penalty used to push away songs baz had recently offered, and the
+  variation seed advanced on every press. Both are gone. Variation is a
+  visible act — **Another version** — and after any recompose a line says what
+  changed and why: *your words narrowed what is eligible, from 340 to 291 —
+  changed 6 of 18*.
+
+### Added
+
+- **A live count under the description**, with the three closest songs beneath
+  it, updating as you type. A count says how many; the three titles say how
+  well, which is the question you actually have before spending a compose.
+- **The songs your words let in are drawn behind the curve**, and thin out as
+  you narrow the phrase — so you can see what a change will do before pressing
+  anything.
+- **Three match ticks on every row**, and a selected row explains itself:
+  *your words let it in; your line put it fourth*. A rank, never a score, and
+  never a colour.
+- **The first run says what it will cost and offers to start** — *24 tracks, a
+  minute or two* — from a measured rate rather than a guess, and the
+  description is fully usable while baz is listening.
+
 - **A Vibe compose uses about half the memory.** baz analysed with eight model
   sessions at once and each one costs roughly 145 MB of the runtime's own
   scratch space — measured, and the reason a compose could reach 1.8 GB on a

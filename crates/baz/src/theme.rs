@@ -1979,20 +1979,6 @@ pub const CONTOUR_RESULT_LIT: f32 = GAP_MD;
 /// distinct from the one it was asked for. One pixel — it is a reading, not a
 /// second request.
 pub const CONTOUR_THREAD: f32 = 1.0;
-/// **The width the New playlist place gives its one commitment.** The record
-/// page's commitment is the aside's own [`ALBUM_ASIDE_W`]; this page has no
-/// aside, so the control states a width rather than filling a row and
-/// becoming a banner.
-pub const COMMITMENT_W: f32 = 200.0;
-/// The lane beside the contour that names its up axis — wide enough for
-/// `louder` and `calmer` at the caption size, and spent on both sides of the
-/// box so the line's own width is unchanged by having labels at all.
-pub const CONTOUR_AXIS_W: f32 = 48.0;
-/// A preset's thumbnail: the same widget, small, with its handles off, so the
-/// shape is its own label.
-pub const CONTOUR_THUMB_H: f32 = 44.0;
-/// …and the width its press target takes.
-pub const CONTOUR_THUMB_W: f32 = 104.0;
 
 /// The recess a contour is drawn in — the same hole in the surface a ghost
 /// sleeve and a text well stand in, so a control that draws its own picture
@@ -5034,6 +5020,55 @@ pub const PLAYLIST_ALBUM_W: f32 = 160.0;
 /// used to be); below it the shared page stacks and gives the table the
 /// body's full measure.
 pub const PLAYLIST_BREAKPOINT: f32 = 1032.0;
+
+/// **The ask pane's measure**, on the composing page: 400.
+///
+/// Design 21 §8 asks for the ask *"on the left at a bounded width"*. Bounded
+/// rather than proportional because everything in it is a paragraph, a field
+/// or a row of chips — text, in other words, and text has a comfortable
+/// measure that a wide window does not improve. 400 holds the longest starting
+/// point (`Late-night drive`) and a chip beside it without wrapping, and it
+/// leaves [`LIST_MEASURE`] 880 for the result at the breakpoint below.
+pub const COMPOSE_ASK_W: f32 = 400.0;
+
+/// **The narrowest a result pane may be and still be a list**: 600.
+///
+/// Not [`LIST_MEASURE`] 880, which is the *maximum* a row lane may take rather
+/// than what it needs. A row's furniture — the number, the ticks, the
+/// favourite, three edit targets and a duration — is about 280 px, so 600
+/// leaves the title and artist a comfortable 320. Below it the rows would be
+/// worse side by side than stacked, which is exactly what a breakpoint is for.
+pub const COMPOSE_RESULT_MIN: f32 = 600.0;
+
+/// **Where the composing page stops being two panes**: the ask's own measure,
+/// the gutter, the narrowest useful result and the place's two hangs.
+///
+/// Derived rather than remembered, like [`PLAYLIST_BREAKPOINT`], so that
+/// widening either pane moves the point instead of quietly crushing one of
+/// them. It lands at 1 184, which is design 21 §8's *"≥ ~1180 px"* arrived at
+/// from the parts rather than from the number.
+///
+/// **It is measured against the place's body, not the window** — the mistake
+/// the first render of this page made. The returns lane is 232 px wide, so a
+/// 1 600 px window has 1 368 px of body, and a breakpoint derived from
+/// [`LIST_MEASURE`] silently stacked a page that had ample room to split.
+pub const COMPOSE_BREAKPOINT: f32 = COMPOSE_ASK_W + GAP_XL + COMPOSE_RESULT_MIN + 2.0 * HANG;
+
+/// **Where the curve collapses to its sentence and its presets.**
+///
+/// Design 21 §8: under 700 px of window height the drawn line goes and the
+/// words for it stay, *"which is its accessible form anyway"* — the same form
+/// the keyboard and the presets already give. A control that has to be dragged
+/// in 90 px is not a control.
+pub const COMPOSE_SHORT_H: f32 = 700.0;
+
+/// The three match ticks on a result row: the drawn mark, and the lane that
+/// holds all three with their gaps.
+pub const TICK_W: f32 = 3.0;
+/// One tick's full height, at the strongest.
+pub const TICK_H: f32 = GAP_SM;
+/// The lane three ticks and their two gaps occupy.
+pub const TICK_LANE_W: f32 = 3.0 * TICK_W + 2.0 * 2.0;
 
 /// **The ghost row's sleeve slot** (the owner's `New playlist`, 2026-08-09):
 /// the surface *below* the panel with a hairline edge, holding the drawn

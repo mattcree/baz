@@ -670,14 +670,10 @@ pub(crate) enum Message {
     VibeRecipe(usize),
     /// Load one of the drawn shapes over the current line.
     ContourShape(usize),
-    /// Give one line another turn, or take its last one back.
-    ContourPointAdded(usize),
-    ContourPointRemoved(usize),
-    /// **Draw a second or third musical dimension, or stop drawing one.** The
-    /// owner: *"can we have more than one of these for different musical
-    /// dimensions — this obviously kinda rolls up several aspects of a song
-    /// into one value."*
-    ContourDimension(crate::vibe::Dimension),
+    /// **Open or close the per-dimension lines** — design 21 §5's labelled
+    /// expander. Closing puts every line back on the first one's curve, which
+    /// is why it says *back to one line* rather than *close*.
+    ContourExpander,
     /// Explicitly explore another deterministic version of this request.
     VibeAnother,
     /// Edit the in-memory preview without touching music or playlist files.
@@ -694,7 +690,6 @@ pub(crate) enum Message {
     PlaylistCreationMode(crate::playlists::CreationMode),
     PlaylistCreationBack,
     PlaylistCreationName(String),
-    PlaylistCreationExample(&'static str),
     PlaylistCreationRemove(usize),
     PlaylistCreationShift(usize, i32),
     PlaylistCreationSave,
@@ -2397,13 +2392,6 @@ impl App {
                 self.playlists.creation.name = name.chars().take(96).collect();
                 self.playlists.creation.name_is_suggested = false;
                 self.playlists.creation.error = None;
-                Task::none()
-            }
-            Message::PlaylistCreationExample(example) => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.set_prompt(example);
-                }
-                self.playlists.suggest_creation_name(example);
                 Task::none()
             }
             Message::PlaylistCreationRemove(index) => {
@@ -4231,21 +4219,9 @@ impl App {
                 }
                 Some(Task::none())
             }
-            Message::ContourPointAdded(lane) => {
+            Message::ContourExpander => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.add_contour_point(*lane);
-                }
-                Some(Task::none())
-            }
-            Message::ContourPointRemoved(lane) => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.remove_contour_point(*lane);
-                }
-                Some(Task::none())
-            }
-            Message::ContourDimension(dimension) => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.toggle_dimension(*dimension);
+                    state.vibe.toggle_expander();
                 }
                 Some(Task::none())
             }
@@ -6913,9 +6889,12 @@ impl App {
                 state.grid(),
                 self.playlists_scroll,
             ),
-            (Screen::Shelf(state), Place::NewPlaylist) => {
-                views::new_playlist::view(state, &self.playlists, &self.player, self.body_width())
-            }
+            (Screen::Shelf(state), Place::NewPlaylist) => views::new_playlist::view(
+                state,
+                &self.playlists,
+                &self.player,
+                iced::Size::new(self.body_width(), self.body_height()),
+            ),
             (Screen::Shelf(state), Place::Favourites) => views::favourites::view(
                 state,
                 &self.player,

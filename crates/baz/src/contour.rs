@@ -142,15 +142,6 @@ impl<'a, Message> Contour<'a, Message> {
         self
     }
 
-    /// Whether the draggable points are drawn. A preset's thumbnail is the
-    /// same widget with them off: the shape *is* the label, and handles on a
-    /// 44 px picture would be four dots and no shape.
-    #[must_use]
-    pub(crate) fn marks(mut self, marks: bool) -> Self {
-        self.marks = marks;
-        self
-    }
-
     /// Report a point moved to `(at, level)` — the raw geometry the pointer
     /// described, unclamped except to the box. What a listener may actually
     /// ask for is [`crate::vibe`]'s rule, not this widget's.

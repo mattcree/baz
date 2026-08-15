@@ -106,16 +106,6 @@ pub(crate) struct Lane {
     pub(crate) weight: f32,
 }
 
-impl Lane {
-    pub(crate) fn new(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
-        Self {
-            dimension,
-            points,
-            weight: 1.0,
-        }
-    }
-}
-
 /// **The shape the next generated playlist is asked to follow** — a line per
 /// dimension.
 ///
@@ -131,12 +121,6 @@ impl Contour {
     /// Smallest gap between neighbouring points, as a fraction of the list.
     /// Two points at one position would ask for two levels at once.
     const MIN_GAP: f32 = 0.06;
-    /// The most points one line may carry. Six is four turns — more shape
-    /// than a playlist of tens of tracks can express.
-    const MAX_POINTS: usize = 6;
-    /// **The most lines at once** — one per thing baz listens for, which is
-    /// what the blend already is.
-    pub(crate) const MAX_LANES: usize = Dimension::ALL.len();
 
     /// **The weights of the blended line**, in [`Dimension::ALL`] order,
     /// energy dominant, summing to one. Mirrors `baz_vibe::Contour::BLEND`;
@@ -147,13 +131,6 @@ impl Contour {
     /// satisfied by tracks that sound nothing alike — the *"dots aren't
     /// following my line"* failure, back in a different hat.
     pub(crate) const BLEND: [f32; 5] = [0.40, 0.20, 0.15, 0.15, 0.10];
-
-    /// One line over one dimension.
-    pub(crate) fn of(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
-        Self {
-            lanes: vec![Lane::new(dimension, points)],
-        }
-    }
 
     /// **The default request's line**: every dimension asked for the same
     /// shape, weighted with energy dominant.
@@ -194,10 +171,6 @@ impl Contour {
         self.lanes.get(index)
     }
 
-    pub(crate) fn has(&self, dimension: Dimension) -> bool {
-        self.lanes.iter().any(|lane| lane.dimension == dimension)
-    }
-
     /// The level one lane asks for at `fraction`.
     pub(crate) fn level_at(&self, lane: usize, fraction: f32) -> Option<f32> {
         level_at(&self.lanes.get(lane)?.points, fraction)
@@ -222,74 +195,6 @@ impl Contour {
         let high = lane.points[index + 1].at - Self::MIN_GAP;
         if low <= high {
             lane.points[index].at = at.clamp(low, high);
-        }
-    }
-
-    /// Add a turn where there is most room for one, at the level the line
-    /// already stands at there — so the shape does not jump when it gains a
-    /// handle.
-    pub(crate) fn add_point(&mut self, lane: usize) {
-        let Some(points) = self.lanes.get(lane).map(|lane| lane.points.clone()) else {
-            return;
-        };
-        if points.len() >= Self::MAX_POINTS || points.len() < 2 {
-            return;
-        }
-        let Some((index, at)) = points
-            .windows(2)
-            .enumerate()
-            .max_by(|left, right| {
-                (left.1[1].at - left.1[0].at).total_cmp(&(right.1[1].at - right.1[0].at))
-            })
-            .map(|(index, pair)| (index, f32::midpoint(pair[0].at, pair[1].at)))
-        else {
-            return;
-        };
-        let level = level_at(&points, at).unwrap_or(0.0);
-        if let Some(lane) = self.lanes.get_mut(lane) {
-            lane.points.insert(index + 1, ContourPoint { at, level });
-        }
-    }
-
-    /// Take the last turn back out. The two ends are the line and never go.
-    pub(crate) fn remove_point(&mut self, lane: usize) {
-        if let Some(lane) = self.lanes.get_mut(lane)
-            && lane.points.len() > 2
-        {
-            let index = lane.points.len() - 2;
-            lane.points.remove(index);
-        }
-    }
-
-    /// Give a dimension a line of its own, at the same shape the first lane
-    /// carries — a second line that started flat would look like a mistake,
-    /// and one that started at a random shape would be one.
-    pub(crate) fn add_lane(&mut self, dimension: Dimension) {
-        if self.has(dimension) || self.lanes.len() >= Self::MAX_LANES {
-            return;
-        }
-        let points = self
-            .lanes
-            .first()
-            .map_or_else(|| Shape::DEFAULT.points(), |lane| lane.points.clone());
-        let weight = Dimension::ALL
-            .iter()
-            .position(|held| *held == dimension)
-            .and_then(|index| Self::BLEND.get(index).copied())
-            .unwrap_or(1.0);
-        self.lanes.push(Lane {
-            dimension,
-            points,
-            weight,
-        });
-    }
-
-    /// Take a dimension's line away, leaving it unconstrained. The first lane
-    /// stays: a contour with no lines at all is `Any`, which is a *shape*
-    /// choice made in the shape row rather than by emptying the control.
-    pub(crate) fn remove_lane(&mut self, dimension: Dimension) {
-        if self.lanes.len() > 1 {
-            self.lanes.retain(|lane| lane.dimension != dimension);
         }
     }
 }
@@ -603,6 +508,86 @@ pub(crate) fn field_of(levels: impl Iterator<Item = f32>) -> Vec<f32> {
     buckets
 }
 
+/// **Where one value stands on a sorted axis**, as the −2…+2 level the engine
+/// scores against: a track's *place* in the pool, not its fraction of the
+/// distance between the two most extreme records.
+///
+/// Loudness and tempo cluster hard — a real library has a handful of outliers
+/// at each end and everything else packed in the middle — so a min–max axis
+/// maps almost every track to within a whisker of the centre, and a rising
+/// line drawn over it is answered by tracks that are all near the middle. That
+/// is exactly the *"dots aren't following my line"* failure, and the rank is
+/// what fixes it.
+#[cfg(feature = "vibe-analysis")]
+fn rank_level(sorted: &[f32], value: f32) -> f32 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let below = sorted.partition_point(|held| *held < value);
+    let through = sorted.partition_point(|held| *held <= value);
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a library's track count is far below f32's exact-integer range"
+    )]
+    let rank = ((below + through) as f32 / 2.0) / sorted.len() as f32;
+    rank.clamp(0.0, 1.0)
+        .mul_add(2.0 * LEVEL_LIMIT, -LEVEL_LIMIT)
+}
+
+/// One dimension in the engine's own vocabulary.
+#[cfg(feature = "vibe-analysis")]
+const fn engine_dimension(dimension: Dimension) -> baz_vibe::Dimension {
+    match dimension {
+        Dimension::Energy => baz_vibe::Dimension::Energy,
+        Dimension::Tempo => baz_vibe::Dimension::Tempo,
+        Dimension::Brightness => baz_vibe::Dimension::Brightness,
+        Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
+        Dimension::Texture => baz_vibe::Dimension::Texture,
+    }
+}
+
+/// **A length, in the words a listener uses** — design 21 §9: never *tracks*
+/// as a unit of length, and never a bare number of minutes on a control that
+/// is about how long you are going to be listening for.
+pub(crate) const fn spoken(length: MixLength) -> &'static str {
+    match length {
+        MixLength::HalfHour => "half an hour",
+        MixLength::Hour => "an hour",
+        MixLength::NinetyMinutes => "an hour and a half",
+        MixLength::TwoHours => "two hours",
+    }
+}
+
+/// **How long listening to this many tracks will take**, from the measured
+/// rate rather than from a guess.
+///
+/// 4 490 tracks an hour at the shipping four workers, measured on a real
+/// 5 076-track library across a network mount —
+/// `docs/design/impl/vibe-memory/`. Every duration this page states comes
+/// through here, so there is exactly one place to correct when the number is
+/// re-measured, and no copy can drift away from it.
+pub(crate) fn listening_estimate(tracks: usize) -> String {
+    /// Tracks an hour, four workers. See `docs/design/impl/vibe-memory/`.
+    const PER_HOUR: usize = 4_490;
+    if tracks == 0 {
+        return "no time at all".to_owned();
+    }
+    let minutes = (tracks * 60).div_ceil(PER_HOUR).max(1);
+    match minutes {
+        0..=3 => "a minute or two".to_owned(),
+        // Rounded to five minutes: the per-track spread is four-fold, so a
+        // figure to the minute would be a precision the measurement does not
+        // have.
+        4..=75 => format!("{} minutes", minutes.div_ceil(5) * 5),
+        // …and to the half hour above that, rounded rather than always up:
+        // 126 minutes is "2 hours", not "2 and a half".
+        _ => match ((minutes + 15) / 30, (minutes + 15) / 30 % 2) {
+            (halves, 0) => format!("{} hours", halves / 2),
+            (halves, _) => format!("{} and a half hours", halves / 2),
+        },
+    }
+}
+
 /// Listening-time targets offered beside the ordinary-language request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum MixLength {
@@ -677,9 +662,11 @@ pub(crate) struct Generated {
     /// Those lines collapsed by their weights — where each track's dot sits on
     /// the one blended line.
     pub(crate) blended: Vec<f32>,
-    /// **The eligible songs on the blended axis**, one level each: design 21
-    /// §6's cloud, which is the eligible set rather than the library and is
-    /// the clearest picture of cause and effect in the feature.
+    /// **The eligible songs on the blended axis**, bucketed: design 21 §6's
+    /// cloud, which is the eligible set rather than the library and is the
+    /// clearest picture of cause and effect in the feature. Bucketed here
+    /// rather than in the view, so the picture behind the line is a reading of
+    /// what selection did and not a second opinion about it.
     pub(crate) cloud: Vec<f32>,
     /// The same, per drawn line, for when the expander is open.
     pub(crate) lane_clouds: Vec<Vec<f32>>,
@@ -695,6 +682,10 @@ pub(crate) struct Generated {
     pub(crate) eligible_tracks: usize,
     pub(crate) tempo_span: Option<(f32, f32)>,
     pub(crate) target_minutes: u64,
+    /// **How many positions were asked for** — so a request the library
+    /// cannot fill can say so in numbers rather than quietly returning a short
+    /// list. Nothing is ever padded to reach it.
+    pub(crate) asked_positions: usize,
     /// The shape this was composed with, kept so the next compose can say
     /// whether the line moved.
     pub(crate) contour: Contour,
@@ -806,6 +797,17 @@ pub(crate) struct State {
     /// When the words have been still long enough to be worth embedding.
     /// `None` means there is nothing waiting.
     count_due: Option<std::time::Instant>,
+    /// **Whether the per-dimension lines are open.** Kept rather than derived
+    /// from whether the curves differ, because *open and identical* is a real
+    /// state: it is what the expander shows the moment it is pressed, and it
+    /// is the whole of design 21 §5's claim that the lines were already the
+    /// blend.
+    pub(crate) expanded: bool,
+    /// Whether the listener has set the shape themselves. A mood sets the
+    /// shape only until this is true.
+    shape_touched: bool,
+    /// The same, for the length.
+    length_touched: bool,
     features: HashMap<PathBuf, SonicFeatures>,
     pending: VecDeque<PathBuf>,
     run: u64,
@@ -832,6 +834,16 @@ pub(crate) struct Live {
     pub(crate) analysed: usize,
     /// The three best matches, nearest first, as *title — artist*.
     pub(crate) closest: Vec<String>,
+    /// **The eligible songs' own distribution** on the blended axis, bucketed
+    /// — design 21 §6's cloud, drawn behind the line and live.
+    ///
+    /// Live rather than left over from the last compose, because the sentence
+    /// it has to earn is *"narrow the phrase and watch the cloud thin out
+    /// under your curve"*, and a picture of the previous request cannot say
+    /// that. It is affordable because the expensive half is already done: the
+    /// count has ranked the library, and ranking a few hundred survivors on
+    /// five axes costs nothing beside it.
+    pub(crate) cloud: Vec<f32>,
 }
 
 impl Default for State {
@@ -857,6 +869,9 @@ impl Default for State {
             counting: false,
             varied: false,
             count_due: None,
+            expanded: false,
+            shape_touched: false,
+            length_touched: false,
             features: HashMap::new(),
             pending: VecDeque::new(),
             run: 0,
@@ -871,11 +886,6 @@ impl State {
     /// draws it. Empty until something has been analysed.
     pub(crate) fn field_of(&self, dimension: Dimension) -> &[f32] {
         self.field.get(&dimension).map_or(&[], Vec::as_slice)
-    }
-
-    /// How many tracks the local index holds features for.
-    pub(crate) fn analyzed(&self) -> usize {
-        self.features.len()
     }
 
     /// The pointer entered or left one row of the preview.
@@ -927,13 +937,41 @@ impl State {
         ))
     }
 
-    /// **Start from a recipe**: its words, its shape and its length, all of
-    /// which remain editable. Nothing else is touched — a listener who has
-    /// already drawn extra lines keeps them, shaped by the recipe.
+    /// **Start from a mood**: its words always, and its shape and its length
+    /// **only while the listener has not set them themselves**.
+    ///
+    /// Design 21 §4 bounds the effect that used to be silent. Drag a point
+    /// once and the shape is yours; from then on a mood changes the words and
+    /// nothing else. Invisible when it is right, and the alternative — a mood
+    /// that throws away a line somebody drew — is the kind of thing that
+    /// teaches people not to press anything.
     pub(crate) fn start_from(&mut self, recipe: Recipe) {
         self.set_prompt(recipe.prompt);
-        self.set_shape(recipe.shape());
-        self.set_length(recipe.length);
+        if !self.shape_touched {
+            let touched = self.shape_touched;
+            self.set_shape(recipe.shape());
+            self.shape_touched = touched;
+        }
+        if !self.length_touched {
+            self.length = recipe.length;
+        }
+    }
+
+    /// **Open or close the per-dimension lines.**
+    ///
+    /// Closing puts every line back on the first one's curve, which is the
+    /// only way back to one line once they have been pulled apart — and it is
+    /// lossy, which is why it says *back to one line* rather than *close*.
+    pub(crate) fn toggle_expander(&mut self) {
+        self.expanded = !self.expanded;
+        if !self.expanded {
+            let Some(points) = self.contour.lane(0).map(|lane| lane.points.clone()) else {
+                return;
+            };
+            for lane in &mut self.contour.lanes {
+                lane.points.clone_from(&points);
+            }
+        }
     }
 
     /// Which recipe the request currently matches, if any — so the row can
@@ -955,13 +993,14 @@ impl State {
     /// peak and fall, which is what the picture then shows. Lines are shaped
     /// apart by dragging them apart.
     pub(crate) fn set_shape(&mut self, shape: Shape) {
+        self.shape_touched = true;
         let points = shape.points();
         if points.is_empty() {
             self.contour.lanes.clear();
             return;
         }
         if self.contour.lanes.is_empty() {
-            self.contour = Contour::of(Dimension::Energy, points);
+            self.contour = Contour::blended(&points);
             return;
         }
         for lane in &mut self.contour.lanes {
@@ -970,44 +1009,21 @@ impl State {
     }
 
     /// Move one point of one line, by the widget's raw geometry.
+    ///
+    /// **A drag is what makes the shape the listener's.** From here on a mood
+    /// press changes the words and leaves the line alone.
     pub(crate) fn drag_contour(&mut self, lane: usize, index: usize, at: f32, level: f32) {
-        self.contour.drag(lane, index, at, level);
-    }
-
-    /// Whether a line can gain or lose a turn, so the two controls can be
-    /// inert rather than absent at the ends of their range.
-    pub(crate) fn can_add_point(&self, lane: usize) -> bool {
-        self.contour
-            .lane(lane)
-            .is_some_and(|lane| (2..Contour::MAX_POINTS).contains(&lane.points.len()))
-    }
-
-    pub(crate) fn can_remove_point(&self, lane: usize) -> bool {
-        self.contour
-            .lane(lane)
-            .is_some_and(|lane| lane.points.len() > 2)
-    }
-
-    pub(crate) fn add_contour_point(&mut self, lane: usize) {
-        self.contour.add_point(lane);
-    }
-
-    pub(crate) fn remove_contour_point(&mut self, lane: usize) {
-        self.contour.remove_point(lane);
-    }
-
-    /// Give a dimension a line of its own, or take its line away.
-    pub(crate) fn toggle_dimension(&mut self, dimension: Dimension) {
-        if self.contour.has(dimension) {
-            self.contour.remove_lane(dimension);
-        } else {
-            self.contour.add_lane(dimension);
+        self.shape_touched = true;
+        if self.expanded {
+            self.contour.drag(lane, index, at, level);
+            return;
         }
-    }
-
-    /// Whether another line can be drawn at all.
-    pub(crate) fn can_add_lane(&self) -> bool {
-        self.contour.lanes.len() < Contour::MAX_LANES
+        // While it is one line, it is five lanes holding one curve, and
+        // dragging it drags all of them — otherwise the blend would silently
+        // stop being a blend at the first gesture.
+        for held in 0..self.contour.lanes.len() {
+            self.contour.drag(held, index, at, level);
+        }
     }
 
     /// **Rebuild the library's own distribution** behind the line, from
@@ -1021,38 +1037,15 @@ impl State {
     #[cfg(feature = "vibe-analysis")]
     pub(crate) fn rebuild_field(&mut self) {
         for dimension in Dimension::ALL {
-            let engine = match dimension {
-                Dimension::Energy => baz_vibe::Dimension::Energy,
-                Dimension::Tempo => baz_vibe::Dimension::Tempo,
-                Dimension::Brightness => baz_vibe::Dimension::Brightness,
-                Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
-                Dimension::Texture => baz_vibe::Dimension::Texture,
-            };
+            let engine = engine_dimension(dimension);
             let values: Vec<f32> = self
                 .features
                 .values()
                 .map(|features| features.value(engine))
                 .collect();
-            // The same rank scale the engine scores against: a track's place
-            // in the collection, not its fraction of the distance between the
-            // two most extreme records.
             let mut sorted = values.clone();
             sorted.sort_by(f32::total_cmp);
-            #[expect(
-                clippy::cast_precision_loss,
-                reason = "a library's track count is far below f32's exact-integer range"
-            )]
-            let level = |value: f32| {
-                if sorted.is_empty() {
-                    return 0.0;
-                }
-                let below = sorted.partition_point(|held| *held < value);
-                let through = sorted.partition_point(|held| *held <= value);
-                let rank = ((below + through) as f32 / 2.0) / sorted.len() as f32;
-                rank.clamp(0.0, 1.0)
-                    .mul_add(2.0 * LEVEL_LIMIT, -LEVEL_LIMIT)
-            };
-            let field = field_of(values.iter().map(|value| level(*value)));
+            let field = field_of(values.iter().map(|value| rank_level(&sorted, *value)));
             if field.is_empty() {
                 self.field.remove(&dimension);
             } else {
@@ -1215,6 +1208,9 @@ impl State {
                 eligible: self.features.len(),
                 analysed: self.features.len(),
                 closest: Vec::new(),
+                // With no words the eligible set is the library, and the
+                // library's own shape is already kept per dimension.
+                cloud: self.field_of(Dimension::Energy).to_vec(),
             });
             return None;
         }
@@ -1268,7 +1264,44 @@ impl State {
                 .take(3)
                 .filter_map(|(_, path)| named(path))
                 .collect(),
+            cloud: self.cloud_of(scored.iter().take(eligible).map(|(_, path)| *path)),
         });
+    }
+
+    /// **The eligible set's own shape on the blended axis**, bucketed for the
+    /// picture behind the line.
+    ///
+    /// Ranked *within the eligible set* rather than within the library, which
+    /// is the same pool-relative choice the engine's axes make: the cloud and
+    /// the dots have to be measured against the same thing or the picture
+    /// lies about where a track landed.
+    #[cfg(feature = "vibe-analysis")]
+    fn cloud_of<'a>(&self, members: impl Iterator<Item = &'a Path>) -> Vec<f32> {
+        let members: Vec<&SonicFeatures> =
+            members.filter_map(|path| self.features.get(path)).collect();
+        if members.is_empty() {
+            return Vec::new();
+        }
+        let mut blended = vec![0.0_f32; members.len()];
+        let total: f32 = Contour::BLEND.iter().sum();
+        for (dimension, weight) in Dimension::ALL.into_iter().zip(Contour::BLEND) {
+            let engine = engine_dimension(dimension);
+            let values: Vec<f32> = members
+                .iter()
+                .map(|features| features.value(engine))
+                .collect();
+            let mut sorted = values.clone();
+            sorted.sort_by(f32::total_cmp);
+            for (level, value) in blended.iter_mut().zip(&values) {
+                *level += weight * rank_level(&sorted, *value);
+            }
+        }
+        field_of(blended.into_iter().map(|level| level / total))
+    }
+
+    #[cfg(not(feature = "vibe-analysis"))]
+    fn cloud_of<'a>(&self, _members: impl Iterator<Item = &'a Path>) -> Vec<f32> {
+        Vec::new()
     }
 
     /// The light build has no tower to ask.
@@ -1297,6 +1330,7 @@ impl State {
     }
 
     pub(crate) fn set_length(&mut self, length: MixLength) {
+        self.length_touched = true;
         self.length = length;
     }
 
@@ -1595,13 +1629,7 @@ fn engine_contour(contour: &Contour) -> baz_vibe::Contour {
             .iter()
             .filter(|lane| !lane.points.is_empty())
             .map(|lane| baz_vibe::Lane {
-                dimension: match lane.dimension {
-                    Dimension::Energy => baz_vibe::Dimension::Energy,
-                    Dimension::Tempo => baz_vibe::Dimension::Tempo,
-                    Dimension::Brightness => baz_vibe::Dimension::Brightness,
-                    Dimension::Dynamics => baz_vibe::Dimension::Dynamics,
-                    Dimension::Texture => baz_vibe::Dimension::Texture,
-                },
+                dimension: engine_dimension(lane.dimension),
                 points: lane
                     .points
                     .iter()
@@ -1775,14 +1803,19 @@ fn generate(
         items: selected,
         levels,
         blended,
-        cloud: selection.blended_cloud,
-        lane_clouds: selection.cloud,
+        cloud: field_of(selection.blended_cloud.into_iter()),
+        lane_clouds: selection
+            .cloud
+            .into_iter()
+            .map(|lane| field_of(lane.into_iter()))
+            .collect(),
         matches,
         pool_tracks,
         analyzed_tracks: selection.analysed_tracks,
         eligible_tracks: selection.eligible_tracks,
         tempo_span: selection.tempo_span,
         target_minutes: length.minutes(),
+        asked_positions: limit,
         contour: contour.clone(),
         diff: None,
     }))
@@ -1887,7 +1920,8 @@ mod tests {
 
         // An interior turn stays between its neighbours, with a gap either
         // side: two points at one position would ask for two levels at once.
-        state.add_contour_point(0);
+        // The turn comes from a preset now rather than from a stepper.
+        state.set_shape(Shape::ALL[3]);
         assert_eq!(points(&state).len(), 3);
         state.drag_contour(0, 1, 5.0, 0.0);
         assert!(points(&state)[1].at <= 1.0 - Contour::MIN_GAP);
@@ -1900,40 +1934,34 @@ mod tests {
         );
     }
 
-    /// **A turn arrives where there is room for it, at the level the line
-    /// already stands at** — so gaining a handle changes the shape by
-    /// nothing, and the listener can drag it deliberately rather than
-    /// recovering from a jump.
+    /// **Turns come from the presets now**, not from a stepper.
+    ///
+    /// Design 21 §5 deletes the `−`/`+` pair that minted a curve — *"nothing
+    /// else in baz creates a control with a stepper"* — so the shapes on
+    /// offer are where a multi-turn line comes from, and every one of them is
+    /// a line a playlist could actually have.
     #[test]
-    fn a_new_turn_lands_on_the_line_it_joins() {
+    fn every_offered_shape_is_a_line_a_playlist_could_have() {
         let mut state = State::default();
-        state.set_shape(Shape::DEFAULT);
-        let before: Vec<f32> = (0..=10)
-            .map(|step| {
-                state
-                    .contour
-                    .level_at(0, f32::from(u8::try_from(step).unwrap_or(0)) / 10.0)
-                    .expect("a line")
-            })
-            .collect();
-        state.add_contour_point(0);
-        for (step, level) in before.iter().enumerate() {
-            let at = f32::from(u8::try_from(step).unwrap_or(0)) / 10.0;
-            let after = state.contour.level_at(0, at).expect("still a line");
-            assert!((after - level).abs() < 0.001, "the shape moved at {at}");
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            state.set_shape(*shape);
+            let drawn = points(&state);
+            assert_eq!(drawn, shape.points(), "{} did not load", shape.label);
+            if index == 0 {
+                assert!(drawn.is_empty(), "Any is no line at all");
+                continue;
+            }
+            assert!(drawn.len() >= 2, "{} needs two ends", shape.label);
+            assert!(
+                drawn.windows(2).all(|pair| pair[1].at > pair[0].at),
+                "{} runs backwards",
+                shape.label
+            );
+            // Every line of the blend gets it, because one drawn line is five
+            // lanes holding one curve.
+            assert_eq!(state.contour.lanes.len(), Dimension::ALL.len());
+            assert!(state.contour.is_one_line());
         }
-        // The ends never go, however many times the control is pressed.
-        for _ in 0..8 {
-            state.remove_contour_point(0);
-        }
-        assert_eq!(points(&state).len(), 2);
-        assert!(!state.can_remove_point(0));
-        // …and the cap holds at the other end.
-        for _ in 0..8 {
-            state.add_contour_point(0);
-        }
-        assert_eq!(points(&state).len(), Contour::MAX_POINTS);
-        assert!(!state.can_add_point(0));
     }
 
     /// **The line the interface draws is the line the engine scores.**
@@ -1947,7 +1975,7 @@ mod tests {
     #[test]
     fn the_drawn_line_is_the_scored_line() {
         for shape in Shape::ALL {
-            let drawn = Contour::of(Dimension::Energy, shape.points());
+            let drawn = Contour::blended(&shape.points());
             let scored = engine_contour(&drawn);
             for step in 0_u8..=20 {
                 let at = f32::from(step) / 20.0;
@@ -1959,7 +1987,7 @@ mod tests {
                 match (ours, theirs) {
                     (None, None) => {}
                     (Some(ours), Some(theirs)) => assert!(
-                        (ours - theirs).abs() < 0.0001,
+                        (ours - theirs).abs() < 0.0001_f32,
                         "{} disagrees at {at}: drawn {ours}, scored {theirs}",
                         shape.label
                     ),

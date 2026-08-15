@@ -1463,8 +1463,73 @@ delivered to the owner as a page. **72 and 73 are blocked on his word**, which
 is the point of the note: *"create some designs which we can actually approve
 or not."*
 
-72. **Designed, awaiting approval — composing a playlist, rebuilt.** The
-    specification is **`docs/design/21-vibe-the-design.md`**, which is the
+72. **Built 2026-08-15 — composing a playlist, rebuilt.** The specification is
+    `docs/design/21-vibe-the-design.md` and the build plan is
+    `docs/design/22-vibe-implementation-plan.md`; what shipped, and where it
+    departs from the design, is recorded in doc 21's own header note.
+
+    **What the audit found before anything was built, and what it cost.**
+    Design 21 §3 claimed its which/where/how-many table was *"a description of
+    the implementation rather than a metaphor for it."* It was a metaphor.
+    Selection was one blended cost over every analysed track, so a poor
+    word-match could win a slot at the right height; a shaped request
+    retrieved per position, so dragging the curve re-selected rather than
+    reordered; and a +2.0 freshness penalty plus a seed that advanced on every
+    press meant an unchanged request returned a changed list. Three readouts
+    the design asks for — the count, the cloud, the why-line — all presuppose
+    an eligible set that did not exist. So the engine moved first.
+
+    **Phase 0 — measured before building.** `crates/baz-vibe/src/bin/`
+    gained two probes and both answered:
+    - `vibe-eligibility` swept the eligibility policy over a **real
+      5 076-track analysed library**. Fixed cosine floors are unusable (the
+      distribution moves wholesale with the phrase: a 0.20 floor keeps 3 749
+      tracks for one request and **one** for another); distribution-relative
+      floors are worse (short right tails empty the pool for eleven of
+      eighteen prompts); largest-gap is a trap that pins every request to its
+      smallest allowed pool. **The knee of the ranked curve** ships: at
+      matched pool size its relevance equals top-K per cent's, and it is the
+      only policy whose size responds to the words, which is what makes the
+      live count worth drawing. The same sweep fixed the tick buckets (the
+      pool's own terciles) and scored the vocabulary — and **refused one of
+      design 21's three chip rows**: *moves like* displaced the pool heavily
+      and pulled it almost nowhere. Full table in
+      `docs/design/impl/vibe-eligibility/`.
+    - `vibe-rate` measured what design 21 §10 admitted nobody had:
+      **4 490 tracks an hour at four workers** on a real library over a
+      network mount. A 9 412-track library is 2 h 06 m, so §7's *"roughly two
+      hours"* was right and is now measured. Recorded in
+      `docs/design/impl/vibe-memory/`.
+
+    **Phase 1 — the engine.** `baz_vibe::eligible()` draws the pool; the walk
+    runs inside it; relevance leaves the blended cost and becomes a within-pool
+    tiebreak. Rank axes are pool-relative. The default line is five lanes
+    holding one curve, weighted with energy dominant, which makes design 21
+    §5's consistency claim structural rather than arithmetic. Five invariants
+    run in CI: the words let it in; the same request twice is the same list;
+    moving the line leaves the pool identical; a pool no bigger than the list
+    only reorders; a result never outgrows its pool.
+
+    **Phases 2–3 — the services and the page.** `views::compose` is a place of
+    its own — ask / shape / result — with the four readouts, the nine states,
+    and the fork deleted so the strip sentence dies with its reason.
+
+    **What did not survive, deliberately.** The `−`/`+` turn stepper is gone
+    (design 21 §5), so multi-turn lines come from the presets; the `LINES` row
+    is gone, replaced by the expander, which reveals all five rather than
+    letting you add up to three. If turns by gesture are wanted back, the
+    thing to design is a gesture on the line, not a stepper beside it.
+
+    **Still open, and it is the one thing no agent can do:** plan 22 §0.1's
+    blind listening ballot. The harness, the consented 72-track corpus and the
+    materialized candidates are ready; the ratings need the owner's ears, and
+    note 16's own gate says that if the semantic system does not beat the
+    diversity-matched random control, the next work is engine quality rather
+    than more interface.
+
+    *The original entry follows, because its diagnosis is what was built
+    against.* The specification is **`docs/design/21-vibe-the-design.md`**,
+    which is the
     current thinking written as one document rather than as the chain of
     reviews that produced it; `19` is that chain, and the notes below are how
     each piece got there. Three decisions remain open (doc 21 §11), one of them

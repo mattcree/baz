@@ -80,6 +80,7 @@ pub(crate) mod app_bar;
 pub(crate) mod artist;
 pub(crate) mod blocked;
 pub(crate) mod bottom_bar;
+pub(crate) mod compose;
 pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
 pub(crate) mod favourites;
@@ -731,6 +732,89 @@ pub(crate) fn place_pad() -> iced::Padding {
         bottom: theme::HANG,
         left: theme::HANG,
     }
+}
+
+/// **One quiet line**: a statement about a flow rather than a control.
+///
+/// Shared rather than copied per view because the composing page and the
+/// manual route say the same kind of thing in the same voice, and a hint that
+/// changed weight between two halves of one place would read as two places.
+pub(crate) fn hint(line: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    text(line.to_owned())
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .color(room.paper_dim)
+        .width(Length::Fill)
+        .wrapping(text::Wrapping::Word)
+        .into()
+}
+
+/// The same, in the alert ink: something the listener needs to act on.
+pub(crate) fn alert(line: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    text(line.to_owned())
+        .size(theme::SIZE_META)
+        .line_height(theme::LEADING_META)
+        .color(room.alert)
+        .width(Length::Fill)
+        .wrapping(text::Wrapping::Word)
+        .into()
+}
+
+/// A caption naming the control beneath it, in the caption voice.
+pub(crate) fn caption_word(word: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    text(word.to_owned())
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION)
+        .font(theme::MEDIUM)
+        .color(room.paper_faint)
+        .into()
+}
+
+/// One word naming the edge of a drawn control, in the quietest voice on it:
+/// the picture is the subject and these are its edges.
+pub(crate) fn axis_word(word: &'static str) -> Element<'static, Message> {
+    let room = theme::active();
+    text(word)
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION)
+        .color(room.paper_muted)
+        .wrapping(text::Wrapping::None)
+        .into()
+}
+
+/// A quiet act: a bare word with hover as its affordance.
+pub(crate) fn word_button_maybe<'a>(label: &str, message: Option<Message>) -> Element<'a, Message> {
+    let room = theme::active();
+    iced::widget::button(
+        container(
+            text(label.to_owned())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM),
+        )
+        .height(Length::Fill)
+        .align_y(iced::alignment::Vertical::Center),
+    )
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press_maybe(message)
+    .into()
+}
+
+/// The playlist-name field, wherever a draft is named.
+pub(crate) fn name_input(value: &str) -> Element<'_, Message> {
+    let room = theme::active();
+    iced::widget::text_input("Playlist name", value)
+        .on_input(Message::PlaylistCreationName)
+        .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .style(move |_theme, status| theme::input(room, status))
+        .into()
 }
 
 /// A block's name inside a place: a hairline, then the word in the room's

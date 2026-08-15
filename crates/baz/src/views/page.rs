@@ -569,15 +569,20 @@ pub(crate) fn commitment(
     live: bool,
     message: Message,
 ) -> Element<'static, Message> {
-    commitment_marked(icon::Glyph::Play, label, live, message)
+    commitment_marked(icon::Glyph::Play, label.into(), live, message)
 }
 
 /// The same control with a mark of its own, for a page whose one commitment
 /// is not *play*: the New playlist place composes a list rather than starting
 /// one, and a play triangle on that button would promise the wrong act.
+/// `label` is owned-or-borrowed because the composing page's commitment
+/// **changes its own words to what it can do now** — `Compose · needs
+/// listening first`, then `Compose from 1 240 so far` — which is true at every
+/// point of a scan and is why that page's first two states are not a dead
+/// button and a spinner.
 pub(crate) fn commitment_marked(
     glyph: icon::Glyph,
-    label: &'static str,
+    label: std::borrow::Cow<'static, str>,
     live: bool,
     message: Message,
 ) -> Element<'static, Message> {
