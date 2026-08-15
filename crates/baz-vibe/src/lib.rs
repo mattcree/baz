@@ -896,8 +896,6 @@ struct Weights {
 }
 
 impl Weights {
-    const VARIATION: f32 = 0.05;
-
     const fn for_request(shape: bool) -> Self {
         if shape {
             // The line decides where in the pool to be; relevance breaks ties
@@ -1079,7 +1077,23 @@ fn walk(
         let require_fresh_album = scored
             .iter()
             .any(|(index, _)| !album_counts.contains_key(&candidates[*index].album));
-        let next = scored
+        let cost = |index: usize| {
+            let candidate = &candidates[index];
+            // Continuity is measured in the same space the request is made
+            // in: two tracks a text request considers alike, or two tracks
+            // whose whole feature vectors are close.
+            let continuity = previous.map_or(0.0, |previous| {
+                if request.semantic.is_some() {
+                    previous.semantic_pair_distance(&candidate.features)
+                } else {
+                    previous.distance(&candidate.features) / transition_scale
+                }
+            });
+            weights.relevance * relevance(candidate)
+                + weights.fit * fit_at(candidate, fraction)
+                + weights.continuity * continuity
+        };
+        let mut room: Vec<(usize, f32)> = scored
             .iter()
             .enumerate()
             .filter(|(_, (index, _))| {
@@ -1093,29 +1107,34 @@ fn walk(
                     && !chosen_paths.contains(&candidate.path)
                     && (!require_fresh_album || !album_counts.contains_key(&candidate.album))
             })
-            .min_by(|(_, (left_index, _)), (_, (right_index, _))| {
-                let cost = |index: usize| {
-                    let candidate = &candidates[index];
-                    // Continuity is measured in the same space the request is
-                    // made in: two tracks a text request considers alike, or
-                    // two tracks whose whole feature vectors are close.
-                    let continuity = previous.map_or(0.0, |previous| {
-                        if request.semantic.is_some() {
-                            previous.semantic_pair_distance(&candidate.features)
-                        } else {
-                            previous.distance(&candidate.features) / transition_scale
-                        }
-                    });
-                    weights.relevance * relevance(candidate)
-                        + weights.fit * fit_at(candidate, fraction)
-                        + weights.continuity * continuity
-                        + Weights::VARIATION * variation_noise(&candidate.path, variation)
-                };
-                cost(*left_index)
-                    .total_cmp(&cost(*right_index))
-                    .then_with(|| left_index.cmp(right_index))
-            })
-            .map(|(position, _)| position);
+            .map(|(position, (index, _))| (position, cost(*index)))
+            .collect();
+        room.sort_by(|left, right| {
+            left.1
+                .total_cmp(&right.1)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        // **Another version is a different draw, not a nudged one.**
+        //
+        // Variation used to be a 0.05 noise term added to a cost whose fit
+        // weight is 0.70, which is to say it almost never changed the winner:
+        // pressing *another version* on a real request returned the same list
+        // and the diff had to say so. A tiebreak cannot express *give me a
+        // different one*.
+        //
+        // So the walk keeps the best few at each position and **draws** one of
+        // them, by a hash of the seed and the position. At seed 0 the draw is
+        // always the best — the compose stays exactly deterministic, which is
+        // invariant I2 — and every other seed walks a different path through
+        // music the request equally allows.
+        let take = if variation == 0 {
+            1
+        } else {
+            ANOTHER_DRAW.min(room.len())
+        };
+        let next = room
+            .get(draw(variation, chosen.len(), take))
+            .map(|(at, _)| *at);
         let Some(next) = next else {
             break;
         };
@@ -1386,22 +1405,32 @@ impl Axis {
     }
 }
 
-fn variation_noise(path: &Path, seed: u64) -> f32 {
-    if seed == 0 {
-        return 0.0;
+/// **How many of the best candidates *another version* draws from**, per
+/// position.
+///
+/// Five is enough that a twenty-track list is drawn very differently each
+/// time, and tight enough that every draw is still one the request allowed:
+/// the fifth-best answer at a position is a song the words let in and the
+/// line is content with, not a concession.
+const ANOTHER_DRAW: usize = 5;
+
+/// Which of the best `take` to take, from the seed and the position.
+///
+/// `take == 1` is the deterministic compose and returns 0 without consulting
+/// the seed at all, which is what keeps *the same request twice is the same
+/// list* true by construction rather than by arithmetic that happens to
+/// cancel.
+fn draw(seed: u64, position: usize, take: usize) -> usize {
+    if take <= 1 {
+        return 0;
     }
-    let hash = path_bytes(path)
-        .iter()
-        .fold(seed ^ 0xcbf2_9ce4_8422_2325, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    let hash = [seed, position as u64]
+        .into_iter()
+        .flat_map(u64::to_le_bytes)
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "the low 24 bits intentionally become a stable unit interval"
-    )]
-    {
-        (hash & 0x00ff_ffff) as f32 / 0x00ff_ffff_u64 as f32
-    }
+    usize::try_from(hash % take as u64).unwrap_or(0)
 }
 
 fn mean(values: &[f32]) -> f32 {
