@@ -1479,6 +1479,23 @@ or not."*
     Photographed before anything moves:
     `docs/design/impl/vibe-next-phase/` at 1600 × 900 and 1000 × 700.
 
+    **A quorum then found nine things this proposal had missed** — doc 19 §6,
+    transcript in `docs/design/quorum/2026-08-15-vibe.jsonl`. The ones that
+    change what gets built: the **cold start is the primary state** (a mood
+    press cannot compose immediately on a library baz has never listened to,
+    and most first visits are exactly that); the blend must be a **weighted**
+    mean with energy dominant, because an unweighted mean of rank axes is
+    degenerate and reproduces the *"dots aren't following my line"* failure;
+    the words need a **vocabulary of chips**, not a rule and two examples; the
+    curve is **pointer-only** and needs keys, bigger targets and a sentence
+    that states its shape; the row-to-dot pairing must not rest on hue;
+    **length goes on the commitment in minutes**; the **Manual/Vibe fork
+    dies**, which deletes the top-right sentence by deleting its reason; the
+    result must be an **editable playlist** with a warned Recompose and a
+    variation press; and a selected row must **explain itself** as a rank, not
+    a score. Two corrections: a request the library cannot fill has to say so,
+    and the narrow layout needs its Compose pinned.
+
 73. **Blocked on a decision — one section-header treatment.** *"the home page
     section headers and this pages section does not match the library and
     playlist. i prefer the library and homepage."*
@@ -1502,10 +1519,31 @@ or not."*
     Widen the dome and let the flare follow; assert the body's **median** width
     instead — a glyph is read by its mass, not by its widest scanline.
 
+75. **Not started — the vibe route's first run.** *(From the quorum, R1 and
+    Q1.)* Analysis is minutes to hours on a real library, and the page has no
+    design for that state beyond a sentence. Wanted: an honest progress reading
+    in the result pane with a partial list forming in it, a labelled *Listen to
+    my library* that says roughly how long and can be stopped and resumed, and
+    a decision from the owner about whether baz may do any of it before being
+    asked (`docs/design/quorum/2026-08-15-vibe.jsonl`, Q1 — a consent and
+    battery question, not a design one). **Blocked on that answer**; the rest
+    is buildable the moment item 72 is approved.
+
+76. **Not started — lean towards what you haven't played.** *(From the quorum,
+    Q3.)* baz keeps a play ledger, so it can answer *"something I haven't
+    played in a while"*, which is the request people actually make of a large
+    library. Not a seventh mood: a toggle beside the words that composes with
+    every mood. Ines proposed it, Marcus reframed it as a filter, Toby said he
+    would press it every time. Needs the owner's word before it is designed.
+
 ## Doing
 
-- **Waiting on the owner for two decisions** (items 72 and 73 — doc 19 §5),
-  which is where the Vibe review stops until he answers. Items 1–56, 61, 63
+- **Waiting on the owner for five decisions** — doc 19 §5, which now carries
+  the quorum's four open questions beside my own: which layout, which section
+  header, whether baz may listen to a library before being asked, whether
+  *"something I haven't played in a while"* becomes a control, and whether this
+  ever reaches the wall as *more like this*. Items 72, 73, 75 and 76 are all
+  blocked on those answers, which is the point of asking rather than guessing. Items 1–56, 61, 63
   and 71 are complete, `v0.2.0` is tagged and its draft release is built and
   verified, and item 60 is measured with its cheapest repair shipped.
 

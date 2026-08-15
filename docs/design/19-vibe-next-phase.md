@@ -138,9 +138,88 @@ a listener who never opens the drawer never learns it is there.
 4. **Six moods or four.** *Proposed: six; they wrap honestly.*
 5. **Does Vibe keep its own place** — today it is a mode of `New playlist`
    behind a fork. *Proposed: stays a mode, and the fork loses a step because
-   the mood press composes.*
+   the mood press composes.* **Superseded by the quorum's R7**: the fork dies
+   and the two become one page, which also deletes the top-right sentence by
+   deleting its reason.
 
-## 6. Not on the table
+The quorum below added four more, and refused to answer them itself because
+none of them is a designer's to settle:
+
+6. **May baz listen to a library before it is asked to?** Analysis is hours of
+   CPU on a large collection and battery on a laptop. Quietly at first launch
+   makes the feature instant when it is found; not doing it makes the first use
+   slow. *Proposed: opt-in, on the feature's own page, with the cost stated.*
+7. **Does `something I haven't played in a while` become a control?** baz keeps
+   a play ledger, so it can answer this, and it is the request people actually
+   make of a large library. *Proposed: a toggle beside the words, not a seventh
+   mood — it composes with all of them.*
+8. **Does this reach the wall as `more like this`?** Out of scope for this
+   phase; recorded so it is not lost.
+9. **Six moods or four** — unchanged from 4 above; the room was content with
+   six.
+
+## 6. What the quorum changed
+
+The owner read §1–§5 and said it *"still feels like it hasn't addressed
+everything"*, and asked for a room: *"create a quorum of domain experts and UX
+experts and have them discuss this."* That room is
+`docs/design/quorum/2026-08-15-vibe.jsonl` — nine hats, 89 messages, and it
+found nine things this note had missed. The full resolutions are in the file;
+these are the ones that change the design above.
+
+1. **The cold start is the primary state, not a footnote.** §4 says a mood
+   press composes immediately. On a library baz has not listened to yet that
+   sentence is false — analysis is minutes to hours — and most first visits are
+   in exactly that state. The right pane becomes an honest progress reading
+   with a partial list forming in it; no copy promises a list in one press
+   until the library has been heard. *(R1)*
+2. **An unweighted blend is degenerate.** Each dimension is a rank axis, so the
+   plain mean puts loud-and-slow and quiet-and-fast in the same place: a line
+   the engine satisfies with tracks that sound nothing alike — which is the
+   *"the dots aren't following my line"* failure, again. The blend is a
+   **weighted** mean with energy dominant, labelled in listener words (*loud,
+   fast and busy* → *quiet, slow and sparse*). Seeding each dimension from the
+   blend stays exactly consistent under weights, so the owner's instruction
+   survives. *(R2)*
+3. **The words need a vocabulary, not a rule.** *"Describe the sound, not the
+   story"* tells somebody what not to do without giving them a route. Three
+   rows of four chips — what it is made of, what it feels like, how it moves —
+   that append to the field, chosen by a scored run against the baseline corpus
+   rather than by taste. *(R3)*
+4. **The curve is pointer-only.** Arrow-key nudging with visible focus, grab
+   regions at twice the drawn radius, the shape presets promoted to being the
+   accessible route to the same outcome, and a permanent sentence under the
+   curve stating the shape in words as it is dragged. *(R4)*
+5. **The row-to-dot pairing must not rest on hue** — enlarge the dot, drop a
+   tick to the axis, and put the position number in the row. *(R5)*
+6. **Length belongs on the commitment, in minutes**: `Compose · about an hour`,
+   with the count arriving in the result's own line. *(R6)*
+7. **The Manual/Vibe fork dies.** One New playlist page: *Start from a mood*
+   with the chips, *Start with an empty list* underneath. This deletes the
+   top-right sentence the owner asked to remove by deleting its reason, and
+   removes a navigation step. *(R7)*
+8. **The result is a playlist, not a receipt** — ordinary rows and controls,
+   save under a name, and a Recompose that states what it replaces when there
+   is something to replace, beside a variation press. *(R8)*
+9. **A selected row explains itself in one line**, as a rank and never a score:
+   *"position 4 of 20 — louder than 78% of your library, matched 'warm analogue
+   soul'."* That is the owner's original demand — that a person can see it
+   really worked — in a form that survives a screenshot. *(R9)*
+
+Two more that are corrections rather than additions: a request the collection
+cannot fill must **say so** instead of degrading silently *(R10)*, and the
+narrow layout must **pin Compose** and land on the list after composing,
+because §4 fixed the wide case and left the narrow one exactly as it was
+*(R11)*. The local-analysis block moves to Settings *(R12)*.
+
+The room also refused to decide four things, and they are in the file as
+`open_question` records: whether baz may listen to a library before being asked
+(consent and battery, the owner's call); whether Home keeps its small-caps
+sections; whether *"something I haven't played in a while"* becomes a control,
+since baz keeps a play ledger and could answer it; and whether this eventually
+reaches the wall as *more like this*.
+
+## 7. Not on the table
 
 - **The engine.** The contour still steers position against a
   collection-relative rank axis, and retrieval still runs per position. That
