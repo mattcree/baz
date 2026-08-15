@@ -1263,7 +1263,7 @@ in `BACKLOG.md`.
     line over bands with draggable points, which is what a graphic EQ is drawn
     as — frequency across instead of position.
 
-59. **Not started — how the engine is prompted.** *"part of how this will work
+59. **Partly answered 2026-08-15 — how the engine is prompted.** *"part of how this will work
     is in how we prompt the underlying engine here."*
 
     Measurable rather than a matter of taste: `crates/baz-vibe/src/bin/vibe-baseline.rs`
@@ -1278,6 +1278,30 @@ in `BACKLOG.md`.
 
     Neither ships without a scored run against the corpus. A prompt change that
     cannot be measured is a superstition.
+
+    **Partly answered 2026-08-15 by item 72's Phase 0.** The scored run exists
+    and the harness that does it is
+    `crates/baz-vibe/src/bin/vibe-eligibility.rs`, over a real 5 076-track
+    analysed library — `docs/design/impl/vibe-eligibility/`. What it settled:
+
+    - **The template thread has its answer, and it is not the one this entry
+      expected.** Twenty-seven candidate words were scored on how far
+      appending them moves a real request's pool *towards their own meaning*.
+      Instrumentation words do it — *acoustic guitar* 0.142, *synthesizers*
+      0.092, *piano* 0.091, the last two also concentrating genre by 3.5–4.1×.
+      Mood and movement adjectives mostly do not: they displace the pool
+      heavily (0.45–0.83 Jaccard) and pull it almost nowhere. **Appending an
+      adjective to a five-word request scrambles the embedding rather than
+      steering it**, which is a fact about the template that no amount of
+      phrasing fixes, and it is why design 21's third chip row does not ship.
+    - **The arc thread is untouched**, and remains the honest version of the
+      semantic waypoints item 55 deleted.
+
+    **What none of it answers** is whether the retrieval is any *good*. Every
+    number above is comparative. That is `docs/design/22-vibe-implementation-plan.md`
+    §0.1's blind listening ballot, it needs the owner's ears, and note 16's own
+    gate says that if the semantic system does not beat the diversity-matched
+    random control then the next work is engine quality rather than prompting.
 
 60. **Measured 2026-08-15, and half fixed — 1.8 GB, and where it goes.** *"figure out why we are using
     so much memory… I see 1.8GB."*
@@ -1602,35 +1626,45 @@ or not."*
     the entire model in one use. The list deliberately does **not** update
     while the line is dragged.
 
-73. **Blocked on a decision — one section-header treatment.** *"the home page
+73. **Done 2026-08-15 — one section-header treatment.** *"the home page
     section headers and this pages section does not match the library and
     playlist. i prefer the library and homepage."*
 
-    The sentence reads two ways and the cost of guessing is a pass over four
-    places, so doc 19 §5 asks it as decision 2. The facts: Home and the Vibe
-    page both use `views::section_rule` (11 px letter-spaced caps over a
-    hairline); Library and Playlists use `shelf::group_band`. Proposed — the
-    band everywhere, including Home.
+    Two treatments existed for one job: `views::section_rule` drew the scale's
+    smallest tracked caps over a hairline (Home, the album and artist pages,
+    the shared page's `Tracks`), and `shelf::group_band` drew 15 px tracked
+    caps with no rule (Library, Playlists). **The band won**, which is the
+    proposal doc 19 §5 recorded, and it converted all nine call sites by
+    changing one function — the hairline went with the size, because it was
+    there to separate a tiny caption from the body under it and a 15 px band
+    separates itself.
 
-    **One of the four places has left the question.** The composing page no
-    longer uses `views::section_rule` at all: item 72 replaced its named
-    blocks with the two questions in the listener's own words, headed in the
-    emphasis voice. So this is now a pass over **three** places — Home,
-    Library and Playlists — and the composing page will follow whichever way
-    it goes without being one of the reasons for going that way.
+    `shelf::group_band` stays a separate function rather than calling the
+    shared one: it carries the wall's own geometry — a fixed header height
+    from the grid, and an optional door on the word — which a heading inside a
+    document does not have and should not pay for.
 
-74. **Not started — the bell, again.** *"the bell icon is still weirdly
+    **The sentence still reads two ways** and this took the recorded reading.
+    If he meant the other one, it is the same one function to change back.
+
+74. **Done 2026-08-15 — the bell, again.** *"the bell icon is still weirdly
     skinny… backlog it."*
 
-    **Item 48 measured the wrong thing and its test passed.** It widened the
-    glyph to 0.78 of the box *at the widest point*, and the widest point is the
-    **rim** — one hairline at the foot. The mass a reader sees is the **dome**,
-    0.30 in item 40 and about **0.34** after item 48's uniform 1.147 scale,
-    against the gear's 0.84 disc in the same box.
-    `the_bell_is_as_wide_as_the_cluster_it_stands_in` takes the *maximum* run
-    width with 0.07 of slack, so a wide rim under a narrow dome satisfies it.
-    Widen the dome and let the flare follow; assert the body's **median** width
-    instead — a glyph is read by its mass, not by its widest scanline.
+    **Item 48 measured the wrong thing and its test passed**, which is the
+    whole lesson. It widened the glyph to 0.78 of the box *at the widest
+    point*, and a bell's widest point is its **rim** — one hairline at the
+    foot. `the_bell_is_as_wide_as_the_cluster_it_stands_in` took the maximum
+    run, so a wide plate under a narrow spike satisfied it while the **dome**,
+    which is the mass a reader sees, sat at 0.33 against the gear's 0.57 in the
+    same box.
+
+    The dome carries the width now — a 0.60 waist flaring to the same 0.78 rim,
+    with the crown and clapper grown to match, because a 0.10 stud on a 0.60
+    body reads as a pin. **The test measures the median run rather than the
+    widest**, and it was checked against the old outline before the new one
+    landed: it fails there at 0.326 against the 0.567 it needs, which is the
+    only evidence that a replacement test is a guard rather than a rubber
+    stamp.
 
 75. **Done 2026-08-15 with item 72 — the composing route's first run.** *(From
     the quorum, R1 and Q1.)* The result pane carries the two cold states: a
@@ -1655,27 +1689,32 @@ or not."*
     every mood. Ines proposed it, Marcus reframed it as a filter, Toby said he
     would press it every time. Needs the owner's word before it is designed.
 
-77. **Not started — one control style for quiet acts.** *"the general idea
-    isn't wrong around some of the controls. I think we could tackle that
+77. **Half done 2026-08-15 — one control style for quiet acts.** *"the general
+    idea isn't wrong around some of the controls. I think we could tackle that
     separately."*
 
-    Pass 2 of design note 20, lifted out of the Vibe work so it can move on its
-    own. Quiet acts are bare words across the whole product — `Rename`,
-    `Delete`, `Change image…`, `Remove image`, `Save playlist`, `Import
-    pasted`, `Load template`, the mood chips, the shape presets — with no
-    border, no ground, and hover as their only affordance. Three tiers:
-    **commitment** keeps the accent outline it has; **quiet act** becomes a
-    hairline chip with a glyph; **destructive** sits apart in the alert ink.
-    Eleven call sites, one style function, and it hands the accent back its one
-    job. The other six passes of note 20 stay parked until this one is proven.
+    Pass 2 of design note 20. Three tiers: **commitment** keeps the accent
+    outline it has; **quiet act** becomes a hairline chip with a glyph;
+    **destructive** sits apart in the alert ink.
 
-    **Item 72 added three more call sites and deliberately did not invent a
-    style for them**: the starting points, the vocabulary and the shape presets
-    are all quiet acts in the current treatment — bare words, hover as the
-    affordance — and giving them a fourth anatomy while this item is open would
-    be the *two names for one act* problem again. Their lit state is carried in
-    the face and the value, which is a real distinction and not a colour one,
-    and it will survive whatever ground this item gives them.
+    **The destructive tier shipped.** `views::page::destructive_act` draws
+    `Delete` and its armed `Move to Trash` in the alert ink, and they are the
+    only acts in their row that change colour at all — which makes the
+    difference a *position* in the row's rhythm as well as a hue, since a
+    reading nobody can make in greyscale is not a reading. The reversibility
+    rule stands above it unchanged: deletion moves the file to the platform
+    trash, and this marks the act rather than guarding it.
+
+    **The quiet-act chip did not, deliberately.** `theme::pill` is the
+    anatomy — it shipped with item 72 for the composing page's starting
+    points, vocabulary, presets and lengths, and it is what this tier should
+    wear. What is left is the *sweep*: `theme::word_button` has **nineteen**
+    call sites, not the eleven this entry estimated, and they are not all the
+    same kind of thing — `shelf::group_band`'s door is a heading, the status
+    panel's are on a different ground, and a blunt global change would give a
+    chip's border to several surfaces nobody would be looking at while it
+    happened. It wants a pass with eyes on each site, which is a session of
+    its own rather than the tail of another one.
 
 78. **Not started — a keyboard route to the things a pointer can reach.**
     *(From item 72, and from the quorum's R4.)*

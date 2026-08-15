@@ -40,28 +40,28 @@ pub(crate) fn view<'a>(
 /// **1 · Never listened**, which is where a new listener spends their entire
 /// first session and which the shipping build did not design.
 ///
-/// The ask pane beside this is fully drawn and fully pressable — set up the
-/// request while it works — and the cost is stated rather than hidden, because
-/// this is a consent decision and consent needs a number. The number is
-/// measured: `docs/design/impl/vibe-memory/`, 4 490 tracks an hour at four
-/// workers on a real library.
+/// The offer to listen is **not** here. It is at the door
+/// ([`super::door`]), which is the first thing anybody arriving by either
+/// route sees, and which is where the owner asked for it: *"the weird
+/// dependency on 'listening to my music' seems to be a first step before
+/// using this feature rather than buried."* Drawing it here as well would put
+/// the same commitment on screen twice in the same state — two accent-weight
+/// controls for one act, which is the thing this page keeps having to be
+/// talked out of.
+///
+/// So this states the fact and points at the step, and the ask pane beside it
+/// stays fully drawn and fully pressable: a page you cannot touch for two
+/// hours reads as broken.
 fn cold(shelf: &Shelf) -> Element<'_, Message> {
     let tracks = crate::vibe::library_paths(&shelf.albums, &shelf.edition_choice).len();
     column![
         heading("Baz has not listened to your music yet"),
         views::hint(&format!(
-            "To compose from sound rather than from tags, Baz reads each track once — {tracks} \
-             of them, {}. It keeps a disposable local index, nothing is uploaded, and you can \
-             stop and pick up where it left off at any time.",
+            "Set up your request here — it will keep. Composing needs Baz to read each of \
+             your {tracks} tracks once, {}, which it offers to do when you start a smart \
+             playlist.",
             crate::vibe::listening_estimate(tracks)
         )),
-        Space::new().height(theme::GAP_SM),
-        views::page::commitment_marked(
-            crate::icon::Glyph::Queue,
-            "Listen to my music".into(),
-            true,
-            Message::VibeAnalyze,
-        ),
     ]
     .spacing(theme::GAP_SM)
     .into()

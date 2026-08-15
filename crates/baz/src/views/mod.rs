@@ -817,8 +817,27 @@ pub(crate) fn name_input(value: &str) -> Element<'_, Message> {
         .into()
 }
 
-/// A block's name inside a place: a hairline, then the word in the room's
-/// quietest voice.
+/// **A block's name inside a place** — the wall's own group band, in every
+/// place that names a block.
+///
+/// The owner: *"the home page section headers and this pages section does not
+/// match the library and playlist. i prefer the library and homepage."* Two
+/// treatments existed for one job: this drew the scale's smallest tracked
+/// caps over a hairline, while Library and Playlists drew
+/// [`shelf::group_band`]'s 15 px tracked caps with no rule. Nine call sites
+/// wore the first and the wall wore the second, and a listener walking
+/// between them met two different ideas of what a heading is.
+///
+/// **This is the band now**, so the nine call sites converted by changing one
+/// function. [`shelf::group_band`] stays a separate function rather than
+/// calling this: it carries the wall's own geometry — a fixed header height
+/// from the grid, and an optional door on the word — which a heading inside a
+/// document does not have and should not pay for.
+///
+/// The hairline went with the size. It was there to separate a tiny caption
+/// from the body under it; a 15 px band at the emphasis size separates itself,
+/// and a rule under every heading in the product would be a line where the
+/// type already is one.
 ///
 /// The one structural rule beyond the three `.interface-design/system.md` §2
 /// names, and it earns its place the way the Settings readout's does: it
@@ -827,16 +846,12 @@ pub(crate) fn name_input(value: &str) -> Element<'_, Message> {
 /// differently would read as two surfaces.
 pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
     let room = theme::active();
-    column![
-        rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
-        text(theme::tracked(&name.to_uppercase()))
-            .size(theme::SIZE_HEADING)
-            .line_height(theme::LEADING_HEADING)
-            .font(theme::MEDIUM)
-            .color(room.paper_faint),
-    ]
-    .spacing(theme::GAP_SM)
-    .into()
+    text(theme::tracked(&name.to_uppercase()))
+        .size(theme::SIZE_EMPHASIS)
+        .line_height(theme::LEADING_EMPHASIS)
+        .font(theme::MEDIUM)
+        .color(room.paper_dim)
+        .into()
 }
 
 /// **The density detents** (ADR-0028, doc 11 §5 P8 — the owner's choice; the

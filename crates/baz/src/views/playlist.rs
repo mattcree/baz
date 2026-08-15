@@ -116,7 +116,7 @@ pub(crate) fn view<'a>(
     let acts = if open.confirming_delete {
         vec![
             page::act("Cancel", true, Message::PlaylistDeleteCancel),
-            page::act("Move to Trash", true, Message::PlaylistDelete),
+            page::destructive_act("Move to Trash", true, Message::PlaylistDelete),
         ]
     } else {
         // **The picture's two verbs sit with Rename and Delete**, because
@@ -126,7 +126,7 @@ pub(crate) fn view<'a>(
         // had one has nothing to take away.
         let mut acts = vec![
             page::act("Rename", true, Message::PlaylistRenameStart),
-            page::act("Delete", true, Message::PlaylistDeleteStart),
+            page::destructive_act("Delete", true, Message::PlaylistDeleteStart),
             page::act(
                 if authored {
                     "Change image…"
@@ -707,12 +707,16 @@ mod tests {
         )
         .expect("this module's source");
         assert!(
-            source.contains("page::act(\"Delete\", true, Message::PlaylistDeleteStart)"),
-            "the first press must only arm deletion"
+            source
+                .contains("page::destructive_act(\"Delete\", true, Message::PlaylistDeleteStart)"),
+            "the first press must only arm deletion, and it wears the alert ink \
+             it is the one act in its row that earns"
         );
         assert!(
             source.contains("page::act(\"Cancel\", true, Message::PlaylistDeleteCancel)")
-                && source.contains("page::act(\"Move to Trash\", true, Message::PlaylistDelete)"),
+                && source.contains(
+                    "page::destructive_act(\"Move to Trash\", true, Message::PlaylistDelete)"
+                ),
             "the armed state must offer both roads explicitly"
         );
     }

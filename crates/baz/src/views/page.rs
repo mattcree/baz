@@ -634,6 +634,38 @@ pub(crate) fn act(
     enabled: bool,
     message: Message,
 ) -> Element<'static, Message> {
+    tiered_act(label, enabled, message, false)
+}
+
+/// **A destructive act, standing apart in the alert ink** — design note 20's
+/// third tier (`WORK.md` item 77).
+///
+/// `Delete` sat in the same ink, at the same weight and in the same row as
+/// `Rename` and `Queue`, so the one act that cannot be taken back looked
+/// exactly like the two that can. The ink is the alert's, and it is *not* the
+/// only cue: it is the only act in its row that changes colour at all, which
+/// makes the difference a **position** in the row's rhythm as well as a hue —
+/// the standing rule, since a reading nobody can make in greyscale is not a
+/// reading.
+///
+/// The reversibility rule (doc 11 §5 P2) still stands above this: deleting a
+/// playlist moves the file to the platform trash, and the confirm dialog was
+/// retired *because* it is reversible. This marks the act; it does not guard
+/// it.
+pub(crate) fn destructive_act(
+    label: &'static str,
+    enabled: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    tiered_act(label, enabled, message, true)
+}
+
+fn tiered_act(
+    label: &'static str,
+    enabled: bool,
+    message: Message,
+    destructive: bool,
+) -> Element<'static, Message> {
     let room = theme::active();
     button(
         container(
@@ -641,10 +673,10 @@ pub(crate) fn act(
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
-                .color(if enabled {
-                    room.paper
-                } else {
-                    room.paper_muted
+                .color(match (enabled, destructive) {
+                    (false, _) => room.paper_muted,
+                    (true, true) => room.alert,
+                    (true, false) => room.paper,
                 })
                 .wrapping(text::Wrapping::None),
         )

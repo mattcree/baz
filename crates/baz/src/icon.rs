@@ -1313,38 +1313,53 @@ const HISTORY_BACK: &[Outline] = &[
 /// ink; a badge sitting on the rim is the convention every notification bell
 /// in the field uses, and it is legible because the dot is a solid disc in a
 /// tone of its own rather than more of the same ink.
+/// **The bell, widened at the dome rather than at the rim** — item 74.
+///
+/// The owner, twice: *"the bell icon is still weirdly skinny."* Item 48 tried
+/// to answer that with a uniform 1.147 scale and a test that took the glyph's
+/// **widest scanline**, which is the rim — one hairline at the foot. The rim
+/// was already 0.78 of the box, so the test passed while the *dome*, which is
+/// the mass a reader actually sees, sat at about 0.36 against the gear's 0.84
+/// disc in the same box. A wide plate under a narrow spike satisfies a
+/// maximum and reads as skinny, because a glyph is read by its mass.
+///
+/// So the dome carries the width now — a 0.60 waist flaring to the same 0.78
+/// rim — and `the_bell_is_as_wide_as_the_cluster_it_stands_in` measures the
+/// body's **median** run instead of its widest, which is the measurement that
+/// would have failed on the old outline.
 const BELL: &[Outline] = &[
     // The body: dome, flare, rim.
     &[
         (0.500, 0.180),
-        (0.586, 0.215),
-        (0.649, 0.300),
-        (0.672, 0.420),
-        (0.678, 0.560),
-        (0.729, 0.640),
+        (0.650, 0.215),
+        (0.752, 0.300),
+        (0.790, 0.420),
+        (0.800, 0.560),
+        (0.845, 0.640),
         (0.890, 0.690),
         (0.890, 0.740),
         (0.110, 0.740),
         (0.110, 0.690),
-        (0.271, 0.640),
-        (0.322, 0.560),
-        (0.328, 0.420),
-        (0.351, 0.300),
-        (0.414, 0.215),
+        (0.155, 0.640),
+        (0.200, 0.560),
+        (0.210, 0.420),
+        (0.248, 0.300),
+        (0.350, 0.215),
     ],
-    // The crown, standing proud of the dome and unioned into it.
+    // The crown, standing proud of the dome and unioned into it. It grows
+    // with the dome: a 0.10 stud on a 0.60 body reads as a pin.
     &[
-        (0.450, 0.105),
-        (0.550, 0.105),
-        (0.550, 0.190),
-        (0.450, 0.190),
+        (0.435, 0.100),
+        (0.565, 0.100),
+        (0.565, 0.190),
+        (0.435, 0.190),
     ],
-    // The clapper, across a real gap.
+    // The clapper, across a real gap. Likewise — it hangs from a wider bell.
     &[
-        (0.420, 0.800),
-        (0.580, 0.800),
-        (0.546, 0.895),
-        (0.454, 0.895),
+        (0.400, 0.800),
+        (0.600, 0.800),
+        (0.560, 0.900),
+        (0.440, 0.900),
     ],
 ];
 
@@ -2363,8 +2378,32 @@ mod tests {
     ///
     /// The ceiling is the other half: a bell wider than it is tall stops being
     /// a bell.
+    ///
+    /// **It measures the median run, not the widest** — item 74, and the whole
+    /// of why item 48's repair passed its own test while the owner went on
+    /// seeing a skinny bell. The widest scanline of a bell is its **rim**, one
+    /// hairline at the foot, and the rim was already 0.78 of the box. A test
+    /// reading the maximum was satisfied by a wide plate under a narrow spike.
+    /// A glyph is read by its **mass**, so the median of the runs a glyph
+    /// actually fills is the number that corresponds to what a reader sees.
     #[test]
     fn the_bell_is_as_wide_as_the_cluster_it_stands_in() {
+        // The median width of the solid runs a glyph fills, over every
+        // scanline that touches it at all.
+        let median = |glyph: Glyph| {
+            let mut runs: Vec<f32> = Vec::new();
+            let mut y = 0.0;
+            while y <= 1.0 {
+                if let (Some((start, _)), Some(&(last_start, last_width))) =
+                    (runs_along(glyph, y).first(), runs_along(glyph, y).last())
+                {
+                    runs.push(last_start + last_width - start);
+                }
+                y += 1.0 / 512.0;
+            }
+            runs.sort_by(f32::total_cmp);
+            runs.get(runs.len() / 2).copied().unwrap_or(0.0)
+        };
         let widest = |glyph: Glyph| {
             let mut widest = 0.0_f32;
             let mut y = 0.0;
@@ -2378,13 +2417,13 @@ mod tests {
             }
             widest
         };
-        let bell = widest(Glyph::Bell);
+        let bell = median(Glyph::Bell);
         // Its neighbours in the same box: the gear one seam away, and the two
         // round marks the lane draws at the same size.
         let neighbours = [
-            widest(Glyph::Gear),
-            widest(Glyph::Home),
-            widest(Glyph::NowPlaying),
+            median(Glyph::Gear),
+            median(Glyph::Home),
+            median(Glyph::NowPlaying),
         ];
         let narrowest = neighbours.iter().copied().fold(f32::MAX, f32::min);
         assert!(
@@ -2410,9 +2449,10 @@ mod tests {
         }
         let height = tallest - top;
         assert!(
-            bell <= height + 0.01,
-            "the bell is {bell:.3} wide against {height:.3} tall — wider than \
-             it is tall, which is a pot rather than a bell"
+            widest(Glyph::Bell) <= height + 0.01,
+            "the bell is {:.3} wide against {height:.3} tall — wider than it \
+             is tall, which is a pot rather than a bell",
+            widest(Glyph::Bell)
         );
     }
 

@@ -1570,13 +1570,52 @@ The second half is a real, small piece of work and a real design question:
 
 ## Platform integration
 
-- ~~**No application icon.**~~ — **shipped.** `packaging/icons/` holds the SVG
-  master and the hicolor PNG ladder, the desktop entry names it, and the
-  Flatpak and the Linux tarball install it. **The binary still sets no window
-  icon**: winit 0.30 supports that on Windows and X11 only — never Wayland or
-  macOS — so it buys nothing on baz's primary platform and is worth doing for
-  the Windows build alone. The reasoning and the patch are in
-  `packaging/icons/README.md`.
+- ~~**No application icon.**~~ — **shipped on Linux and in the window.**
+  `packaging/icons/` holds the SVG master and the hicolor PNG ladder, the
+  desktop entry names it, the Flatpak and the Linux tarball install it, and
+  `app.rs` decodes the 64 px PNG into `window::Settings::icon` (Windows and
+  X11; winit supports per-window icons nowhere else).
+
+- **The application's own mark is not on the macOS app, and the Windows
+  embedding has never been seen on Windows.** *(The owner, 2026-08-15: "we
+  need to use our app icon on the executable. e.g. when opening the mac app it
+  should use that icon and be seen in their apps with it, and in the tray. the
+  same for windows.")*
+
+  Three different states, and they should not be described as one:
+
+  1. **macOS is the real gap and it is not an icon problem.** baz has no
+     `.app` bundle at all — no `Info.plist`, no `Contents/Resources`, no
+     `.icns` — so there is nothing for Finder, the Dock, Launchpad or
+     Spotlight to draw a mark *on*. A bare Mach-O binary cannot carry one.
+     The work is a bundle: `Info.plist` with `CFBundleIconFile`, an `.icns`
+     rendered from `logo-transparent-circle-red.svg` at the six sizes
+     `iconutil` wants (16/32/128/256/512 at 1× and 2×), the binary in
+     `Contents/MacOS/`, and a `.dmg` or zip that preserves the bundle.
+     `packaging/icons/render.sh` already owns the raster ladder and is where
+     the `.icns` rungs belong.
+  2. **Windows is written but unverified.** `crates/baz/build.rs` embeds
+     `logo-transparent-circle-red.ico` through `winres`, and the release
+     workflow builds Windows natively so the resource compiler runs. Nobody
+     has opened the resulting `.exe` on a Windows machine and looked at
+     Explorer, the Start menu, the taskbar and Alt-Tab. Until somebody has,
+     this is a claim rather than a fact — and `winres` fails *silently enough*
+     on a cross-build that "it compiles" is not evidence.
+  3. **"In the tray" has no implementation on any platform**, so it is a
+     feature request rather than an icon defect. baz has no tray or
+     status-item integration: not on Linux (`StatusNotifierItem`), not on
+     Windows (`Shell_NotifyIcon`), not on macOS (`NSStatusItem`). What the
+     window and taskbar draw today is the window icon above. If a tray is
+     wanted it needs its own decision — what it shows, what its menu does,
+     whether closing to tray is a behaviour baz has — and it is a larger item
+     than the mark it would wear.
+
+  **Acceptance:** the mark visible on the `.app` in Finder, the Dock and
+  Launchpad on a real Mac; visible on `baz.exe` in Explorer, the Start menu
+  and the taskbar on a real Windows machine; a screenshot of each in
+  `docs/design/impl/`. Neither can be verified from the Linux development
+  machine, so both are owner-verified steps — the same boundary as the
+  packaged `.exe` launch in `WORK.md` item 12.
 - **`OpenUri` is not implemented**, so MPRIS's `SupportedUriSchemes` and
   `SupportedMimeTypes` are empty and the desktop entry registers no
   `MimeType=`. baz plays what it scanned; "open this file with baz" is a real
