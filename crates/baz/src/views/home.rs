@@ -203,14 +203,18 @@ pub(crate) fn view<'a>(
 fn vibe_shortcut<'a>(available: bool) -> Element<'a, Message> {
     let room = theme::active();
     column![
-        section_rule("New playlist"),
-        text("Describe a journey and Baz will compose it from music on this device.")
+        section_rule("Smart playlists"),
+        text("Describe the music you want and Baz composes it from what is on this device.")
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .color(room.paper),
+        // **The same door as the wall's**, rather than a second route with
+        // its own behaviour. Home's shortcut used to skip straight to the
+        // form, which is how the listening step ended up somewhere a new
+        // listener could arrive without meeting it.
         word_button_maybe(
-            "New vibe playlist",
-            available.then_some(Message::NewPlaylistOpenVibe),
+            "New smart playlist",
+            available.then_some(Message::NewSmartPlaylistOpen),
         )
     ]
     .spacing(theme::GAP_SM)
@@ -962,8 +966,8 @@ mod tests {
             .split("\n}\n")
             .next()
             .expect("shortcut body");
-        assert!(home.contains("New vibe playlist"));
-        assert!(home.contains("NewPlaylistOpenVibe"));
+        assert!(home.contains("New smart playlist"));
+        assert!(home.contains("NewSmartPlaylistOpen"));
     }
 
     /// **The band stands on the interrupted run until something sounds**, and

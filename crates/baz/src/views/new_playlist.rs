@@ -53,38 +53,35 @@ pub(crate) fn view<'a>(
     let width = size.width;
     let room = theme::active();
     let draft = &playlists.creation;
-    // **The fork is gone, and the strip sentence with it.**
+    // **Two doors, two things, named at the door.**
     //
-    // *"Manual and Vibe become the same ordinary playlist"* was a sentence
-    // explaining a fork; deleting the fork deletes its reason. The owner asked
-    // for the sentence to go, and this is the way it goes that leaves nothing
-    // behind — rather than removing the words and keeping the screen that made
-    // them necessary.
+    // The Manual/Vibe fork is gone — *"Manual and Vibe become the same
+    // ordinary playlist"* was a sentence explaining a fork, and deleting the
+    // fork deleted its reason. What replaced it was one page that landed on
+    // composing, which was right while there was one door and wrong the
+    // moment there were two: the plain `New playlist` ghost passed no mode,
+    // and this routing drew the *composing* page for it.
     //
-    // The page now **lands on composing**, which is the thing this place is
-    // for, and *start with an empty list* is a quiet act inside it. A fork
-    // asked every listener to classify themselves before seeing anything; this
-    // asks nobody anything and takes one press either way.
-    // The place names what it is making. A smart playlist is a different
+    // **The place names what it is making.** A smart playlist is a different
     // thing from a hand-made one — it is composed from how the music sounds —
     // and a header that called both *New playlist* would be the fork's
     // ambiguity back without the fork.
+    let smart = draft.mode == Some(CreationMode::Vibe);
     let header = views::place_header_with(
-        match draft.mode {
-            Some(CreationMode::Manual) => "New playlist",
-            None | Some(CreationMode::Vibe) => "New smart playlist",
+        if smart {
+            "New smart playlist"
+        } else {
+            "New playlist"
         },
         None,
     );
-    let body: Element<'a, Message> = match draft.mode {
-        Some(CreationMode::Manual) => manual_form(shelf, playlists, width),
-        // The composing route is a place of its own now, not a section of this
-        // form: two panes, its own states, its own readouts. It draws its own
-        // scroller, so it returns before this one wraps the body.
-        None | Some(CreationMode::Vibe) => {
-            return column![header, views::compose::view(shelf, playlists, size)].into();
-        }
-    };
+    if smart {
+        // The composing route is a place of its own, not a section of this
+        // form: two panes, its own door, its own states and readouts. It draws
+        // its own scroller, so it returns before this one wraps a body.
+        return column![header, views::compose::view(shelf, playlists, size)].into();
+    }
+    let body: Element<'a, Message> = manual_form(shelf, playlists, width);
     column![
         header,
         scrollable(container(body).padding(views::place_pad()))
@@ -100,8 +97,6 @@ pub(crate) fn view<'a>(
 fn manual_form<'a>(shelf: &'a Shelf, playlists: &'a Playlists, width: f32) -> Element<'a, Message> {
     let draft = &playlists.creation;
     let mut form = column![
-        back_button(),
-        views::caption_word("MANUAL"),
         named("PLAYLIST NAME", views::name_input(&draft.name)),
         views::hint(
             "Use the app-bar search and choose Add to playlist. Nothing is written until Save."
@@ -286,10 +281,6 @@ fn named<'a>(word: &str, field: Element<'a, Message>) -> Element<'a, Message> {
     column![views::caption_word(word), field]
         .spacing(theme::GAP_XS)
         .into()
-}
-
-fn back_button<'a>() -> Element<'a, Message> {
-    action_button("Back to composing", Some(Message::PlaylistCreationBack)).into()
 }
 
 fn action_button(label: &str, message: Option<Message>) -> iced::widget::Button<'_, Message> {

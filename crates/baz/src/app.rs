@@ -686,16 +686,12 @@ pub(crate) enum Message {
     VibeSubmit,
     /// Open the canonical playlist-creation place at its chooser.
     NewPlaylistOpen,
-    /// Open the creation place with Vibe already chosen (Home shortcut).
-    NewPlaylistOpenVibe,
     /// Leave the door with an empty request, to write your own words.
     VibeStartBlank,
     /// **The smart playlist's own door.** Lands on the moods rather than on
     /// the form, and on a library Baz has never heard it lands on the one
     /// step that has to come first.
     NewSmartPlaylistOpen,
-    PlaylistCreationMode(crate::playlists::CreationMode),
-    PlaylistCreationBack,
     PlaylistCreationName(String),
     PlaylistCreationRemove(usize),
     PlaylistCreationShift(usize, i32),
@@ -2370,7 +2366,13 @@ impl App {
                 persist(move |config| config.vibe_workers = workers);
                 Task::none()
             }
-            Message::NewPlaylistOpen => self.open_playlist_creation(None),
+            // **The plain door makes a plain playlist.** It opened the
+            // *smart* page: `NewPlaylistOpen` passed no mode, and the routing
+            // that had been written when there was one door drew the composing
+            // page for `None`. Two doors, two things made, named at the door.
+            Message::NewPlaylistOpen => {
+                self.open_playlist_creation(Some(crate::playlists::CreationMode::Manual))
+            }
             Message::VibeStartBlank => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.choosing = false;
@@ -2382,30 +2384,6 @@ impl App {
                     state.vibe.begin_choosing();
                 }
                 self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
-            }
-            Message::NewPlaylistOpenVibe => {
-                self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
-            }
-            Message::PlaylistCreationMode(mode) => {
-                self.playlists.creation.mode = Some(mode);
-                self.playlists.creation.error = None;
-                if mode == crate::playlists::CreationMode::Manual
-                    && self.playlists.creation.name.is_empty()
-                {
-                    self.playlists.creation.name_is_suggested = false;
-                }
-                if mode == crate::playlists::CreationMode::Vibe {
-                    let prompt = match &self.screen {
-                        Screen::Shelf(state) => state.vibe.prompt.clone(),
-                        Screen::Setup(_) | Screen::Blocked(_) => String::new(),
-                    };
-                    self.playlists.suggest_creation_name(&prompt);
-                }
-                Task::none()
-            }
-            Message::PlaylistCreationBack => {
-                self.playlists.creation.mode = None;
-                Task::none()
             }
             Message::PlaylistCreationName(name) => {
                 self.playlists.creation.name = name.chars().take(96).collect();
@@ -6804,6 +6782,21 @@ impl App {
         }
         if matches!(from, Place::Playlist(_)) {
             self.playlists.clear_undo();
+        }
+        // **The composing place puts itself away.** Its result, its selected
+        // row, its live count and its debounce clock were all only true while
+        // it was on screen; the request it was built from is kept, because
+        // walking off to check something in the Library is not a reason to
+        // lose what you were asking for.
+        //
+        // The creation draft is deliberately *not* cleared: the manual route
+        // exists to be filled from elsewhere in the product — *use the app-bar
+        // search and choose Add to playlist* — so navigating away is that
+        // route working, not that route being abandoned.
+        if from == Place::NewPlaylist
+            && let Screen::Shelf(state) = &mut self.screen
+        {
+            state.vibe.leave_page();
         }
         Task::none()
     }

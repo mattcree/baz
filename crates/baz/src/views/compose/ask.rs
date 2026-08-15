@@ -37,7 +37,7 @@
 //! starting point stops being lit the moment the words change — not a mode
 //! switching off, a label ceasing to be true.
 
-use iced::widget::{Space, column, container, row, text, text_input};
+use iced::widget::{Space, column, container, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
@@ -236,13 +236,6 @@ fn commitment(shelf: &Shelf, stage: Stage, _layout: Layout) -> Element<'_, Messa
         } else {
             "Every press composes a different list from the same request."
         }),
-        Space::new().height(theme::GAP_SM),
-        row![views::word_button_maybe(
-            "…or start with an empty list",
-            Some(Message::PlaylistCreationMode(
-                crate::playlists::CreationMode::Manual,
-            )),
-        )],
     ]
     .spacing(TIGHT)
     .into()

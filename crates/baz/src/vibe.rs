@@ -1211,6 +1211,39 @@ impl State {
         self.preview = None;
     }
 
+    /// **Leaving the page puts the page away.**
+    ///
+    /// The owner: *"there are issues when navigating away, the page state is
+    /// not cleaned up."* All of this state is *about the page* — a result on
+    /// screen, a row explaining itself, a count describing a phrase, a
+    /// debounce clock ticking — and every bit of it was surviving a
+    /// navigation. Coming back landed on somebody else's screen: a list from
+    /// a request you had stopped making, a selected row you never selected,
+    /// and the door standing open behind a page that had already been used.
+    ///
+    /// **What is deliberately kept** is the *request*: the words, the shape,
+    /// the length and the depth. Those are what you were asking for, and
+    /// walking to the Library to check something is not a reason to lose
+    /// them — the same rule `cancel_analysis` has always followed, and its
+    /// test says so. What goes is everything that was only true while the
+    /// page was on screen.
+    pub(crate) fn leave_page(&mut self) {
+        self.open = false;
+        self.awaiting_create = false;
+        self.choosing = false;
+        self.preview = None;
+        self.selected_row = None;
+        self.hovered_row = None;
+        self.varied = false;
+        self.error = None;
+        // The debounce clock is the one with a cost attached: it keeps a
+        // 120 ms subscription alive, and it was doing that off-page for as
+        // long as a phrase stayed unsettled.
+        self.count_due = None;
+        self.counting = false;
+        self.live = None;
+    }
+
     pub(crate) fn start_preparing(&mut self) {
         self.run = self.run.wrapping_add(1);
         self.preparing = true;
@@ -2272,6 +2305,64 @@ mod tests {
             features: Err("test".to_owned()),
         });
         assert_eq!(state.next_jobs(4).len(), 1);
+    }
+
+    /// **Leaving the page puts the page away, and keeps the request.**
+    ///
+    /// The owner: *"there are issues when navigating away, the page state is
+    /// not cleaned up."* Every field below was surviving a navigation, so
+    /// coming back landed on somebody else's screen — a list from a request
+    /// you had stopped making, a row explaining itself that you never
+    /// selected, a count describing a phrase that was no longer on screen, and
+    /// a debounce clock still holding a 120 ms subscription open off-page.
+    ///
+    /// The second half is the half that is easy to lose later: walking to the
+    /// Library to check something is not a reason to forget what you were
+    /// asking for.
+    #[test]
+    fn leaving_the_page_clears_what_was_only_true_on_it() {
+        let mut state = State {
+            open: true,
+            awaiting_create: true,
+            choosing: true,
+            counting: true,
+            selected_row: Some(2),
+            hovered_row: Some(3),
+            error: Some("something".to_owned()),
+            live: Some(Live {
+                prompt: "warm brass".to_owned(),
+                eligible: 40,
+                analysed: 100,
+                closest: Vec::new(),
+                cloud: Vec::new(),
+            }),
+            preview: Some(Generated::default()),
+            ..State::default()
+        };
+        state.set_prompt("warm brass after midnight");
+        state.set_length(MixLength::TwoHours);
+        state.set_shape(Shape::ALL[4]);
+        state.depth = Depth::Advanced;
+        let shape = state.contour.clone();
+
+        state.leave_page();
+
+        // Gone: everything that was about the page being on screen.
+        assert!(state.preview.is_none(), "a stale result");
+        assert_eq!(state.selected_row, None);
+        assert_eq!(state.hovered_row, None);
+        assert!(state.live.is_none(), "a count of a phrase you have left");
+        assert!(!state.counting);
+        assert!(!state.awaiting_count(), "a clock with nothing to answer");
+        assert!(!state.choosing, "the door standing open behind a used page");
+        assert!(!state.open && !state.awaiting_create);
+        assert!(state.error.is_none());
+
+        // Kept: the request itself.
+        assert_eq!(state.prompt, "warm brass after midnight");
+        assert_eq!(state.length, MixLength::TwoHours);
+        assert_eq!(state.contour, shape);
+        assert_eq!(state.depth, Depth::Advanced);
     }
 
     #[test]
