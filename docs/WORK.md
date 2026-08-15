@@ -1514,6 +1514,22 @@ or not."*
     surface without a separate decision: the place is *New playlist › From a
     mood*.
 
+    **And the relationship between the controls and the list, made visible**
+    (doc 19 §9, note 21b): *"I'm hoping we have a very clear relationship
+    between what they configure and the playlist."* Each control owns a
+    different half of the outcome — the words decide **which** songs are
+    eligible, the line decides **where** each goes, the length decides **how
+    many** — which is what the engine does rather than a metaphor for it. Four
+    readouts show it: a live match count under the field (one debounced text
+    embedding; its real cost is loading the text tower on page open, ~350 MB
+    measured); the cloud behind the line becoming the *eligible* songs rather
+    than the whole library (free, and the clearest picture of cause and effect
+    in the feature); three ticks of match strength per row, which retrieval
+    already computes and discards; and **new/kept after a recompose with a
+    sentence naming the cause**, which is the cheapest item here and teaches
+    the entire model in one use. The list deliberately does **not** update
+    while the line is dragged.
+
 73. **Blocked on a decision — one section-header treatment.** *"the home page
     section headers and this pages section does not match the library and
     playlist. i prefer the library and homepage."*

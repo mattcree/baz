@@ -318,7 +318,57 @@ This also settles the naming question without a separate decision: the place is
 **Vibe** stays the feature's name in conversation and in the changelog rather
 than a word anybody must understand in order to use it.
 
-## 9. Not on the table
+## 9. What you set, and what you get (note 21b)
+
+The owner: *"I think what I'm hoping is that we have a very clear relationship
+between what they configure and the playlist."* There is one, the engine
+already works this way, and it has never been drawn.
+
+**Each control owns a different half of the outcome**, and this is a
+description of the implementation rather than a metaphor for it:
+
+| the control | decides |
+|---|---|
+| what you want to hear | **which** songs are eligible — the text embedding compared against every track baz has heard |
+| how it should move | **where** each one goes — positions along the line, each filled by the nearest eligible song |
+| how long | **how many** positions there are |
+
+Stated on screen, that makes every question answerable without anybody
+understanding an embedding: *why is this song here* (the words let it in, the
+line put it fourth); *why did my change do nothing* (you moved the line, which
+reorders rather than re-selects); *why is it short* (only eleven songs were
+eligible that far up).
+
+**Four readouts make it visible, and three of them are free.**
+
+1. **A live match count under the field** — *"matches 340 songs of the 9 412
+   Baz has heard"* — one text embedding debounced ~400 ms after typing stops,
+   then a comparison against vectors already in memory. Tens of milliseconds.
+   Its real cost is that it loads the text tower when the page opens rather
+   than at the first compose: roughly 350 MB, measured. It could be deferred to
+   the first chip press if that is too much.
+2. **The cloud behind the line becomes the *eligible* songs** rather than the
+   whole library. Free, given the count — the same numbers drawn instead of
+   counted — and it is the clearest picture of cause and effect in the feature:
+   type a narrower phrase and watch the cloud thin out; draw the line where the
+   cloud is not and you already know what will happen.
+3. **Match strength per row**, three ticks filled by strength and never a
+   colour. The retrieval already computes this to choose the song and currently
+   discards it. Three buckets, so a drift in the numbers never changes the
+   picture.
+4. **New / kept after a recompose, with one sentence naming the cause** —
+   *"adding `strings` narrowed the pool from 340 to 291 and changed 6 of the
+   18; the order is the same because you did not move the line."* Keep the
+   previous list, compare by path. **The best value of anything in this
+   document**: one use teaches the whole model, and nobody has to be taught it.
+
+**One deliberate refusal**: the list does not update as the line is dragged. It
+is affordable — retrieval over an analysed library is sub-second — and it is
+still wrong, because a result that changes under your hand cannot be read and
+you would be tuning against a moving target. What updates live is everything
+*about* the answer; the answer itself waits to be asked for.
+
+## 10. Not on the table
 
 - **The engine.** The contour still steers position against a
   collection-relative rank axis, and retrieval still runs per position. That
