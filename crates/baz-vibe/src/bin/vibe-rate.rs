@@ -89,11 +89,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         let index = ((done - 1.0) * quantile) as usize;
         timings[index.min(timings.len() - 1)]
     };
-    println!("analysed        {} tracks ({failures} skipped)", timings.len());
+    println!(
+        "analysed        {} tracks ({failures} skipped)",
+        timings.len()
+    );
     println!("workers         {workers}");
     println!("wall clock      {elapsed:.1} s");
     println!("tracks / hour   {:.0}", done * 3_600.0 / elapsed);
-    println!("seconds / track {:.2} wall, {:.2} cpu-side median", elapsed / done, at(0.5));
+    println!(
+        "seconds / track {:.2} wall, {:.2} cpu-side median",
+        elapsed / done,
+        at(0.5)
+    );
     println!("per-track p10   {:.2} s", at(0.10));
     println!("per-track p90   {:.2} s", at(0.90));
     println!("per-track max   {:.2} s", timings[timings.len() - 1]);

@@ -2416,11 +2416,12 @@ mod tests {
                 .to_owned(),
             request: "ambient music that slowly gathers momentum".to_owned(),
             items: vec![item("An Ending", "/m/eno/ascent.flac")],
-            levels: Vec::new(),
             pool_tracks: 1,
             analyzed_tracks: 1,
+            eligible_tracks: 1,
             tempo_span: Some((72.0, 72.0)),
             target_minutes: 60,
+            ..crate::vibe::Generated::default()
         };
         let id = playlists
             .save_creation(Some(&generated), &library)

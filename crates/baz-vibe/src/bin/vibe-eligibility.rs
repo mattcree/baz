@@ -122,8 +122,8 @@ impl Corpus {
     fn read(store: &Path, library: &Path) -> Result<Self, Box<dyn Error>> {
         let genres = read_genres(library)?;
         let connection = Connection::open(store)?;
-        let mut statement =
-            connection.prepare("SELECT path, semantic_blob FROM features WHERE semantic_blob IS NOT NULL")?;
+        let mut statement = connection
+            .prepare("SELECT path, semantic_blob FROM features WHERE semantic_blob IS NOT NULL")?;
         let mut tracks = Vec::new();
         let rows = statement.query_map([], |row| {
             let path: Vec<u8> = row.get(0)?;
@@ -164,11 +164,18 @@ impl Corpus {
     /// What share of the labelled corpus carries any of these genres — the
     /// base rate a kept set's concentration is a lift over.
     fn base_rate(&self, expected: &[&str]) -> f32 {
-        let labelled: Vec<_> = self.tracks.iter().filter_map(|t| t.genre.as_deref()).collect();
+        let labelled: Vec<_> = self
+            .tracks
+            .iter()
+            .filter_map(|t| t.genre.as_deref())
+            .collect();
         if labelled.is_empty() || expected.is_empty() {
             return 0.0;
         }
-        let hits = labelled.iter().filter(|genre| matches(genre, expected)).count();
+        let hits = labelled
+            .iter()
+            .filter(|genre| matches(genre, expected))
+            .count();
         #[expect(clippy::cast_precision_loss, reason = "library counts are small")]
         {
             hits as f32 / labelled.len() as f32
@@ -234,11 +241,23 @@ fn expected_genres(id: &str) -> &'static [&'static str] {
 /// The six starting points of design 21 §4, measured beside the committed
 /// requests because they are what most listeners will actually send.
 const STARTING_POINTS: [(&str, &str); 6] = [
-    ("start:sunday-morning", "gentle unhurried music for a slow morning"),
-    ("start:late-night-drive", "warm hypnotic music for driving at night"),
-    ("start:focus", "calm instrumental music without vocals for concentrating"),
+    (
+        "start:sunday-morning",
+        "gentle unhurried music for a slow morning",
+    ),
+    (
+        "start:late-night-drive",
+        "warm hypnotic music for driving at night",
+    ),
+    (
+        "start:focus",
+        "calm instrumental music without vocals for concentrating",
+    ),
     ("start:workout", "fast loud driving music with a hard pulse"),
-    ("start:wind-down", "quiet soft slow music for the end of the day"),
+    (
+        "start:wind-down",
+        "quiet soft slow music for the end of the day",
+    ),
     ("start:party", "upbeat energetic danceable music"),
 ];
 
@@ -257,35 +276,143 @@ struct ChipCandidate {
 /// which twelve is what the sweep decides.
 const CHIPS: [ChipCandidate; 27] = [
     // What it is made of.
-    ChipCandidate { row: "made of", word: "piano", expected: &["classical", "jazz"] },
-    ChipCandidate { row: "made of", word: "acoustic guitar", expected: &["folk", "country"] },
-    ChipCandidate { row: "made of", word: "electric guitars", expected: &["rock", "alternative", "indie", "punk"] },
-    ChipCandidate { row: "made of", word: "synthesizers", expected: &["electronic"] },
-    ChipCandidate { row: "made of", word: "strings", expected: &["classical"] },
-    ChipCandidate { row: "made of", word: "brass", expected: &["jazz"] },
-    ChipCandidate { row: "made of", word: "female vocals", expected: &[] },
-    ChipCandidate { row: "made of", word: "no vocals", expected: &["classical", "soundtrack"] },
-    ChipCandidate { row: "made of", word: "drum machine", expected: &["electronic"] },
+    ChipCandidate {
+        row: "made of",
+        word: "piano",
+        expected: &["classical", "jazz"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "acoustic guitar",
+        expected: &["folk", "country"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "electric guitars",
+        expected: &["rock", "alternative", "indie", "punk"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "synthesizers",
+        expected: &["electronic"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "strings",
+        expected: &["classical"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "brass",
+        expected: &["jazz"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "female vocals",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "no vocals",
+        expected: &["classical", "soundtrack"],
+    },
+    ChipCandidate {
+        row: "made of",
+        word: "drum machine",
+        expected: &["electronic"],
+    },
     // What it feels like.
-    ChipCandidate { row: "feels like", word: "warm", expected: &[] },
-    ChipCandidate { row: "feels like", word: "dark", expected: &[] },
-    ChipCandidate { row: "feels like", word: "melancholy", expected: &[] },
-    ChipCandidate { row: "feels like", word: "euphoric", expected: &[] },
-    ChipCandidate { row: "feels like", word: "tense", expected: &[] },
-    ChipCandidate { row: "feels like", word: "dreamy", expected: &[] },
-    ChipCandidate { row: "feels like", word: "raw", expected: &[] },
-    ChipCandidate { row: "feels like", word: "hopeful", expected: &[] },
-    ChipCandidate { row: "feels like", word: "nostalgic", expected: &[] },
+    ChipCandidate {
+        row: "feels like",
+        word: "warm",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "dark",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "melancholy",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "euphoric",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "tense",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "dreamy",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "raw",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "hopeful",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "feels like",
+        word: "nostalgic",
+        expected: &[],
+    },
     // How it moves.
-    ChipCandidate { row: "moves like", word: "slow", expected: &[] },
-    ChipCandidate { row: "moves like", word: "driving", expected: &[] },
-    ChipCandidate { row: "moves like", word: "hypnotic", expected: &[] },
-    ChipCandidate { row: "moves like", word: "sparse", expected: &[] },
-    ChipCandidate { row: "moves like", word: "dense", expected: &[] },
-    ChipCandidate { row: "moves like", word: "danceable", expected: &[] },
-    ChipCandidate { row: "moves like", word: "steady", expected: &[] },
-    ChipCandidate { row: "moves like", word: "swelling", expected: &[] },
-    ChipCandidate { row: "moves like", word: "restless", expected: &[] },
+    ChipCandidate {
+        row: "moves like",
+        word: "slow",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "driving",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "hypnotic",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "sparse",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "dense",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "danceable",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "steady",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "swelling",
+        expected: &[],
+    },
+    ChipCandidate {
+        row: "moves like",
+        word: "restless",
+        expected: &[],
+    },
 ];
 
 /// The base phrases a chip is appended to when its pull is measured. Ordinary
@@ -410,10 +537,21 @@ fn measure(
     let mut policies = Vec::new();
     for floor in FLOORS {
         let kept = similarities.iter().filter(|value| **value >= floor).count();
-        policies.push(policy_row(format!("floor {floor:.2}"), &scored, kept, corpus, expected));
+        policies.push(policy_row(
+            format!("floor {floor:.2}"),
+            &scored,
+            kept,
+            corpus,
+            expected,
+        ));
     }
     for fraction in TOP_FRACTIONS {
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "a bounded share of a library count")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a bounded share of a library count"
+        )]
         let kept = ((scored.len() as f32) * fraction).round() as usize;
         policies.push(policy_row(
             format!("top {:.1}%", fraction * 100.0),
@@ -436,16 +574,18 @@ fn measure(
         ));
     }
     let elbow = elbow_cut(&similarities);
-    policies.push(policy_row("elbow".to_owned(), &scored, elbow, corpus, expected));
+    policies.push(policy_row(
+        "elbow".to_owned(),
+        &scored,
+        elbow,
+        corpus,
+        expected,
+    ));
 
     // Tick boundaries are read inside the elbow pool, as its own terciles —
     // the honest form given that the distribution moves with the phrase.
-    let tick_boundaries = (elbow >= 3).then(|| {
-        [
-            similarities[elbow * 2 / 3],
-            similarities[elbow / 3],
-        ]
-    });
+    let tick_boundaries =
+        (elbow >= 3).then(|| [similarities[elbow * 2 / 3], similarities[elbow / 3]]);
 
     Ok(RequestRow {
         id: id.to_owned(),
@@ -474,7 +614,10 @@ fn policy_row(
     let precision = if labelled.is_empty() || expected.is_empty() {
         0.0
     } else {
-        labelled.iter().filter(|genre| matches(genre, expected)).count() as f32
+        labelled
+            .iter()
+            .filter(|genre| matches(genre, expected))
+            .count() as f32
             / labelled.len() as f32
     };
     let base = corpus.base_rate(expected);
@@ -499,7 +642,12 @@ fn policy_row(
 /// chord distance asks the question that was meant instead — where does this
 /// curve bend — and is invariant to how steep the head happens to be.
 fn elbow_cut(similarities: &[f32]) -> usize {
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "a bounded share of a library count")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a bounded share of a library count"
+    )]
     let horizon = (((similarities.len() as f32) * ELBOW_HORIZON) as usize).max(ELBOW_FLOOR + 1);
     let horizon = horizon.min(similarities.len().saturating_sub(1));
     let (high, low) = (similarities[0], similarities[horizon]);
@@ -508,10 +656,15 @@ fn elbow_cut(similarities: &[f32]) -> usize {
         return ELBOW_FLOOR.min(similarities.len());
     }
     let mut best = (ELBOW_FLOOR.min(similarities.len()), f32::MIN);
-    for index in ELBOW_FLOOR..horizon {
+    for (index, similarity) in similarities
+        .iter()
+        .enumerate()
+        .take(horizon)
+        .skip(ELBOW_FLOOR)
+    {
         #[expect(clippy::cast_precision_loss, reason = "bounded library counts")]
         let chord = high - fall * (index as f32 / horizon as f32);
-        let below = chord - similarities[index];
+        let below = chord - similarity;
         if below > best.1 {
             best = (index, below);
         }
@@ -522,7 +675,12 @@ fn elbow_cut(similarities: &[f32]) -> usize {
 fn distribution(sorted_descending: &[f32]) -> Distribution {
     let count = sorted_descending.len();
     let at = |quantile: f32| {
-        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "a bounded quantile of a library count")]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a bounded quantile of a library count"
+        )]
         let index = (((count - 1) as f32) * (1.0 - quantile)) as usize;
         sorted_descending[index.min(count - 1)]
     };
@@ -566,8 +724,7 @@ fn summarise_policies(requests: &[RequestRow]) -> Vec<PolicyMean> {
                 .filter_map(|request| request.policies.iter().find(|p| p.policy == name))
                 .collect();
             #[expect(clippy::cast_precision_loss, reason = "library counts are small")]
-            let mean_kept =
-                rows.iter().map(|row| row.kept as f32).sum::<f32>() / rows.len() as f32;
+            let mean_kept = rows.iter().map(|row| row.kept as f32).sum::<f32>() / rows.len() as f32;
             #[expect(clippy::cast_precision_loss, reason = "library counts are small")]
             let variation = (rows
                 .iter()
@@ -601,7 +758,12 @@ fn summarise_policies(requests: &[RequestRow]) -> Vec<PolicyMean> {
 }
 
 fn score_chip(corpus: &Corpus, candidate: &ChipCandidate) -> Result<ChipRow, Box<dyn Error>> {
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss, reason = "a bounded share of a library count")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a bounded share of a library count"
+    )]
     let size = (((corpus.tracks.len() as f32) * CHIP_SET) as usize).max(1);
     let own = top_set(corpus, candidate.word, size)?;
     let alone = corpus.against(&baz_vibe::embed_request(candidate.word)?);
@@ -670,7 +832,11 @@ fn top_set(corpus: &Corpus, prompt: &str, size: usize) -> Result<Vec<usize>, Box
     let embedding = baz_vibe::embed_request(prompt)?;
     let scored = corpus.against(&embedding);
     let mut order: Vec<usize> = (0..scored.len()).collect();
-    order.sort_by(|left, right| scored[*right].similarity.total_cmp(&scored[*left].similarity));
+    order.sort_by(|left, right| {
+        scored[*right]
+            .similarity
+            .total_cmp(&scored[*left].similarity)
+    });
     order.truncate(size);
     Ok(order)
 }

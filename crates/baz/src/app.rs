@@ -605,6 +605,17 @@ pub(crate) enum Message {
     VibePrompt(String),
     /// Set the requested listening duration.
     VibeLength(crate::vibe::MixLength),
+    /// Append one word of the vocabulary to the request, with a comma.
+    VibeWord(usize),
+    /// The debounce clock: ask whether the words have been still long enough
+    /// to be worth a text embedding.
+    VibeCountTick,
+    /// A settled phrase came back from the local text tower, beside the phrase
+    /// it was asked about so a stale answer can be discarded.
+    VibeEmbedded(String, Result<Vec<f32>, String>),
+    /// Select a row of the result so it explains itself, or put the
+    /// explanation away.
+    VibePreviewSelected(usize),
     /// **The contour's own gestures** — the shape a generated list is asked
     /// to follow (`crate::contour`). The drag carries the raw geometry the
     /// pointer described and `crate::vibe` decides what a line may be; the
@@ -3971,11 +3982,7 @@ impl App {
                 }
                 state.vibe.begin_request();
                 if state.vibe.has_features() {
-                    state.vibe.create(
-                        config::vibe_db_file().as_deref(),
-                        &state.albums,
-                        &state.edition_choice,
-                    );
+                    state.vibe.create(&state.albums, &state.edition_choice);
                     return Some(Task::none());
                 }
                 // **A cold index is the ordinary first run, not a reason to
@@ -4025,11 +4032,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_preparation(result.clone());
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.create(
-                            config::vibe_db_file().as_deref(),
-                            &state.albums,
-                            &state.edition_choice,
-                        );
+                        state.vibe.create(&state.albums, &state.edition_choice);
                     }
                 }
                 Some(self.next_vibe_job())
@@ -4048,11 +4051,7 @@ impl App {
                         );
                     }
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.create(
-                            config::vibe_db_file().as_deref(),
-                            &state.albums,
-                            &state.edition_choice,
-                        );
+                        state.vibe.create(&state.albums, &state.edition_choice);
                     }
                 }
                 Some(self.next_vibe_job())
@@ -4073,6 +4072,51 @@ impl App {
             Message::VibeLength(length) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_length(*length);
+                }
+                Some(Task::none())
+            }
+            // **A word from the vocabulary**, appended with a comma. Design 21
+            // §4: a chip is a way of writing the one request, never a second
+            // input beside it.
+            Message::VibeWord(word) => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && let Some(chip) = crate::vibe::Chip::ALL.get(*word)
+                {
+                    state.vibe.append_word(chip.word);
+                    self.playlists
+                        .suggest_creation_name(&state.vibe.prompt.clone());
+                }
+                Some(Task::none())
+            }
+            // **The words have been still for 400 ms.** Embed once, off this
+            // thread; the count and the closest three are computed against
+            // vectors already in memory when it comes back.
+            Message::VibeCountTick => {
+                let settled = match &mut self.screen {
+                    Screen::Shelf(state) => state.vibe.settled_prompt(),
+                    _ => None,
+                };
+                Some(settled.map_or_else(Task::none, |prompt| {
+                    Task::perform(crate::vibe::embed(prompt), |(prompt, result)| {
+                        Message::VibeEmbedded(prompt, result)
+                    })
+                }))
+            }
+            Message::VibeEmbedded(prompt, embedding) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    let (albums, chosen) = (&state.albums, &state.edition_choice);
+                    state
+                        .vibe
+                        .accept_embedding(prompt, embedding, albums, chosen);
+                }
+                Some(Task::none())
+            }
+            // **A row explains itself.** Selecting one marks its dot, drops a
+            // tick to the axis and writes the why-line; selecting it again
+            // puts the explanation away.
+            Message::VibePreviewSelected(row) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.select_row(*row);
                 }
                 Some(Task::none())
             }
@@ -4207,11 +4251,7 @@ impl App {
             }
             Message::VibeAnother => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.another(
-                        config::vibe_db_file().as_deref(),
-                        &state.albums,
-                        &state.edition_choice,
-                    );
+                    state.vibe.another(&state.albums, &state.edition_choice);
                 }
                 Some(Task::none())
             }
@@ -7341,6 +7381,15 @@ impl App {
                 subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
             } else {
                 subs.push(iced::time::every(REFRESH_TICK).map(|_| Message::RefreshTick));
+            }
+            // **The live count's clock runs only while a phrase is settling.**
+            // Same rule as the sleep timer and the resource meter: a wake-up
+            // with nothing to answer is a cost with no reader, and the words
+            // are still the vast majority of the time.
+            if state.vibe.awaiting_count() {
+                subs.push(
+                    iced::time::every(Duration::from_millis(120)).map(|_| Message::VibeCountTick),
+                );
             }
         }
     }

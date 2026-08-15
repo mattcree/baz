@@ -11,7 +11,6 @@ use crate::vm::{self, AlbumVm, EditionKey, QueueItemVm};
 
 /// An ordinary generated mix is deliberately bounded and editable.
 pub(crate) const PLAYLIST_CAP: usize = 64;
-const RECENTLY_OFFERED_CAP: usize = PLAYLIST_CAP * 2;
 
 #[cfg(feature = "vibe-analysis")]
 type SonicFeatures = baz_vibe::Features;
@@ -96,11 +95,25 @@ pub(crate) struct ContourPoint {
     pub(crate) level: f32,
 }
 
-/// One dimension, and the shape asked of it.
+/// One dimension, the shape asked of it, and how much it counts against the
+/// others.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Lane {
     pub(crate) dimension: Dimension,
     pub(crate) points: Vec<ContourPoint>,
+    /// **How much this line counts.** Mirrors `baz_vibe::Lane::weight`; see
+    /// [`Contour::BLEND`] for why one default line is five weighted ones.
+    pub(crate) weight: f32,
+}
+
+impl Lane {
+    pub(crate) fn new(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
+        Self {
+            dimension,
+            points,
+            weight: 1.0,
+        }
+    }
 }
 
 /// **The shape the next generated playlist is asked to follow** — a line per
@@ -121,17 +134,60 @@ impl Contour {
     /// The most points one line may carry. Six is four turns — more shape
     /// than a playlist of tens of tracks can express.
     const MAX_POINTS: usize = 6;
-    /// **The most lines at once.** Every line is another thing the library
-    /// must satisfy *simultaneously*, and a request nothing can answer is
-    /// worse than a coarse one: three is enough to say something specific
-    /// while leaving the collection room to answer.
-    pub(crate) const MAX_LANES: usize = 3;
+    /// **The most lines at once** — one per thing baz listens for, which is
+    /// what the blend already is.
+    pub(crate) const MAX_LANES: usize = Dimension::ALL.len();
+
+    /// **The weights of the blended line**, in [`Dimension::ALL`] order,
+    /// energy dominant, summing to one. Mirrors `baz_vibe::Contour::BLEND`;
+    /// the two are pinned together by `the_drawn_line_is_the_scored_line`.
+    ///
+    /// Design 21 §5: an *unweighted* mean of rank axes puts loud-and-slow in
+    /// the same place as quiet-and-fast, so a line through the middle would be
+    /// satisfied by tracks that sound nothing alike — the *"dots aren't
+    /// following my line"* failure, back in a different hat.
+    pub(crate) const BLEND: [f32; 5] = [0.40, 0.20, 0.15, 0.15, 0.10];
 
     /// One line over one dimension.
     pub(crate) fn of(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
         Self {
-            lanes: vec![Lane { dimension, points }],
+            lanes: vec![Lane::new(dimension, points)],
         }
+    }
+
+    /// **The default request's line**: every dimension asked for the same
+    /// shape, weighted with energy dominant.
+    ///
+    /// The listener sees one line. It is five, holding one curve between them,
+    /// which is why design 21 §5's expander *reveals* the per-dimension curves
+    /// rather than seeding them — they were already the blend, and stay it
+    /// until one is dragged away from its neighbours.
+    pub(crate) fn blended(points: &[ContourPoint]) -> Self {
+        Self {
+            lanes: Dimension::ALL
+                .into_iter()
+                .zip(Self::BLEND)
+                .map(|(dimension, weight)| Lane {
+                    dimension,
+                    points: points.to_vec(),
+                    weight,
+                })
+                .collect(),
+        }
+    }
+
+    /// **Whether every line still holds the same curve** — whether, in other
+    /// words, this is still one line as far as the listener is concerned.
+    ///
+    /// The page draws one line while this is true and the five while it is
+    /// not, which is how "tune each thing baz listens for" can be a disclosure
+    /// rather than a mode.
+    pub(crate) fn is_one_line(&self) -> bool {
+        let mut lanes = self.lanes.iter();
+        let Some(first) = lanes.next() else {
+            return true;
+        };
+        lanes.all(|lane| lane.points == first.points)
     }
 
     pub(crate) fn lane(&self, index: usize) -> Option<&Lane> {
@@ -216,7 +272,16 @@ impl Contour {
             .lanes
             .first()
             .map_or_else(|| Shape::DEFAULT.points(), |lane| lane.points.clone());
-        self.lanes.push(Lane { dimension, points });
+        let weight = Dimension::ALL
+            .iter()
+            .position(|held| *held == dimension)
+            .and_then(|index| Self::BLEND.get(index).copied())
+            .unwrap_or(1.0);
+        self.lanes.push(Lane {
+            dimension,
+            points,
+            weight,
+        });
     }
 
     /// Take a dimension's line away, leaving it unconstrained. The first lane
@@ -326,6 +391,98 @@ impl Shape {
             .map(|&(at, level)| ContourPoint { at, level })
             .collect()
     }
+}
+
+/// **One word of the vocabulary** — a way of writing the request, never a
+/// second input beside it. Pressing one appends it to the line with a comma.
+///
+/// There is no language model here. The text tower answers *descriptive
+/// phrases about sound*: "slow sparse piano, melancholy" retrieves, "songs
+/// about my ex" retrieves noise. The vocabulary is the answer to that, and it
+/// is a route rather than a rule — telling somebody to describe the sound and
+/// not the story, without giving them the words, is a scold.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Chip {
+    /// Which row it sits in.
+    pub(crate) row: &'static str,
+    /// The word itself, exactly as it reaches the model.
+    pub(crate) word: &'static str,
+}
+
+impl Chip {
+    /// **The twelve, in two rows, each chosen by measurement** —
+    /// `docs/design/impl/vibe-eligibility/`, finding 6. Twenty-seven
+    /// candidates were scored on how far appending them moves a real request's
+    /// pool *towards the chip's own meaning*, over five ordinary starting
+    /// phrases. These twelve are the ones that did.
+    ///
+    /// **Design 21 §4 asked for three rows and the numbers refused one.** A
+    /// *moves like* row was measured too — `slow`, `driving`, `hypnotic`,
+    /// `sparse`, `danceable` and four more. Every one of them displaced the
+    /// pool heavily and pulled it almost nowhere: its best chip scored 0.046
+    /// against the *made of* row's 0.142, and two of its nine were at or below
+    /// zero. Appending an adjective to a five-word request scrambles the
+    /// embedding rather than steering it, and instrumentation words survive
+    /// that because they name something the audio tower can hear. The row also
+    /// duplicated the question the curve asks directly beneath it.
+    ///
+    /// If it is ever wanted back, the thing to change is not this list: it is
+    /// that movement words should steer the **curve** — press *driving*, get a
+    /// shape — rather than be appended to a sentence that then means something
+    /// else.
+    pub(crate) const ALL: [Self; 12] = [
+        Self {
+            row: "made of",
+            word: "acoustic guitar",
+        },
+        Self {
+            row: "made of",
+            word: "synthesizers",
+        },
+        Self {
+            row: "made of",
+            word: "piano",
+        },
+        Self {
+            row: "made of",
+            word: "strings",
+        },
+        Self {
+            row: "made of",
+            word: "electric guitars",
+        },
+        Self {
+            row: "made of",
+            word: "female vocals",
+        },
+        Self {
+            row: "feels like",
+            word: "hopeful",
+        },
+        Self {
+            row: "feels like",
+            word: "warm",
+        },
+        Self {
+            row: "feels like",
+            word: "dark",
+        },
+        Self {
+            row: "feels like",
+            word: "melancholy",
+        },
+        Self {
+            row: "feels like",
+            word: "dreamy",
+        },
+        Self {
+            row: "feels like",
+            word: "tense",
+        },
+    ];
+
+    /// The rows, in the order the band draws them.
+    pub(crate) const ROWS: [&'static str; 2] = ["made of", "feels like"];
 }
 
 /// **A recipe: a mood you can start from.**
@@ -480,8 +637,34 @@ impl std::fmt::Display for MixLength {
     }
 }
 
+/// **How well one chosen track answered the words.** Mirrors
+/// `baz_vibe::Match`, converted at the one gated call site.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Match {
+    pub(crate) similarity: f32,
+    /// One, two or three ticks. Never a colour — the standing rule.
+    pub(crate) ticks: u8,
+}
+
+/// **What changed since the last compose, and why** — design 21 §6's fourth
+/// readout, the cheapest thing in that document and the most valuable.
+///
+/// One use teaches the whole model: which songs are eligible is the words'
+/// doing, where they go is the line's, and nothing else is moving in the dark.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Diff {
+    /// Tracks in both the old list and the new.
+    pub(crate) kept: usize,
+    /// Tracks the new list has and the old did not.
+    pub(crate) fresh: usize,
+    /// How long the old list was.
+    pub(crate) previous: usize,
+    /// The sentence naming the cause, already assembled.
+    pub(crate) cause: String,
+}
+
 /// The preview before it becomes a normal playlist file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Generated {
     pub(crate) description: String,
     pub(crate) request: String,
@@ -491,10 +674,32 @@ pub(crate) struct Generated {
     /// in the request's own units, so each line can draw what it got over
     /// what it asked for.
     pub(crate) levels: Vec<Vec<f32>>,
+    /// Those lines collapsed by their weights — where each track's dot sits on
+    /// the one blended line.
+    pub(crate) blended: Vec<f32>,
+    /// **The eligible songs on the blended axis**, one level each: design 21
+    /// §6's cloud, which is the eligible set rather than the library and is
+    /// the clearest picture of cause and effect in the feature.
+    pub(crate) cloud: Vec<f32>,
+    /// The same, per drawn line, for when the expander is open.
+    pub(crate) lane_clouds: Vec<Vec<f32>>,
+    /// How well each chosen track answered the words, in listening order.
+    /// Empty when there were no words: a shape-only request has no match
+    /// strength, and drawing one would be an invention.
+    pub(crate) matches: Vec<Match>,
+    /// Every track in the library's selected editions.
     pub(crate) pool_tracks: usize,
+    /// Every track baz has heard.
     pub(crate) analyzed_tracks: usize,
+    /// **How many of them the words let in.**
+    pub(crate) eligible_tracks: usize,
     pub(crate) tempo_span: Option<(f32, f32)>,
     pub(crate) target_minutes: u64,
+    /// The shape this was composed with, kept so the next compose can say
+    /// whether the line moved.
+    pub(crate) contour: Contour,
+    /// What changed against the compose before it, where there was one.
+    pub(crate) diff: Option<Diff>,
 }
 
 impl Generated {
@@ -539,7 +744,6 @@ impl Generated {
 pub(crate) struct Preparation {
     ready: HashMap<PathBuf, SonicFeatures>,
     pending: Vec<PathBuf>,
-    recently_offered: Vec<PathBuf>,
 }
 
 /// Result of one bounded worker task. `run` makes a late completion from a
@@ -585,12 +789,49 @@ pub(crate) struct State {
     /// light that track's own dot. Session state about a pointer and nothing
     /// else: it is cleared by leaving the row, and no decision reads it.
     pub(crate) hovered_row: Option<usize>,
+    /// **Which row of the result is selected**, so it can explain itself:
+    /// design 21 §7 state 6's why-line, and the dot, tick and position that
+    /// go with it.
+    pub(crate) selected_row: Option<usize>,
+    /// **What the words match right now**, before anything is composed —
+    /// design 21 §6's live count and this plan's closest-three beside it.
+    /// `None` until the first phrase settles.
+    pub(crate) live: Option<Live>,
+    /// Whether a live count is in flight, so the page can say *counting…*
+    /// rather than show a stale number as though it were current.
+    pub(crate) counting: bool,
+    /// Whether *another version* is what produced the compose being run, so
+    /// the diff can name the right cause.
+    varied: bool,
+    /// When the words have been still long enough to be worth embedding.
+    /// `None` means there is nothing waiting.
+    count_due: Option<std::time::Instant>,
     features: HashMap<PathBuf, SonicFeatures>,
     pending: VecDeque<PathBuf>,
-    recently_offered: VecDeque<PathBuf>,
     run: u64,
     variation: u64,
     active_workers: usize,
+}
+
+/// **What the words match, live** — one debounced text embedding against
+/// vectors already in memory.
+///
+/// The count is design 21 §6's first readout: *"matches 340 songs of the 9 412
+/// baz has heard"*. The three titles beneath it are this plan's one addition
+/// to that section, and they earn their place because **a count says how many
+/// and never how well**: type *slow sparse piano*, see a death-metal track
+/// first, and you know before spending a compose.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Live {
+    /// The phrase this describes. Held so a settled count that arrives after
+    /// the words moved on can be discarded rather than shown as current.
+    pub(crate) prompt: String,
+    /// How many songs the words let in.
+    pub(crate) eligible: usize,
+    /// How many songs baz has heard at all.
+    pub(crate) analysed: usize,
+    /// The three best matches, nearest first, as *title — artist*.
+    pub(crate) closest: Vec<String>,
 }
 
 impl Default for State {
@@ -608,12 +849,16 @@ impl Default for State {
             current: None,
             error: None,
             preview: None,
-            contour: Contour::of(Dimension::Energy, Shape::DEFAULT.points()),
+            contour: Contour::blended(&Shape::DEFAULT.points()),
             field: HashMap::new(),
             hovered_row: None,
+            selected_row: None,
+            live: None,
+            counting: false,
+            varied: false,
+            count_due: None,
             features: HashMap::new(),
             pending: VecDeque::new(),
-            recently_offered: VecDeque::new(),
             run: 0,
             variation: 0,
             active_workers: 0,
@@ -636,6 +881,50 @@ impl State {
     /// The pointer entered or left one row of the preview.
     pub(crate) fn hover_row(&mut self, row: Option<usize>) {
         self.hovered_row = row;
+    }
+
+    /// **A row explains itself**, or stops. Selecting the selected row puts
+    /// the explanation away, which is the only way back out of it.
+    pub(crate) fn select_row(&mut self, row: usize) {
+        self.selected_row = if self.selected_row == Some(row) {
+            None
+        } else {
+            Some(row)
+        };
+    }
+
+    /// **Why this song is here**, in the two halves design 21 §3 promises an
+    /// answer in: the words let it in, and the line put it where it is.
+    ///
+    /// Every number in it is a fact the engine returned — the match strength,
+    /// the level, the pool size — rather than a second opinion computed here.
+    /// A rank, never a score: the quorum's R9, and the reason the sentence
+    /// says *louder than 78% of this request's songs* instead of *0.63*.
+    pub(crate) fn why(&self, row: usize) -> Option<String> {
+        let preview = self.preview.as_ref()?;
+        let level = preview.blended.get(row).copied()?;
+        // A level is a rank stretched onto −2…+2, so this is the rank back.
+        let percentile = ((level + 2.0) / 4.0 * 100.0).clamp(0.0, 100.0).round();
+        let where_it_went = format!(
+            "your line put it {} of {} — louder, faster and busier than {percentile:.0}% of \
+             this request's songs",
+            row + 1,
+            preview.items.len()
+        );
+        let Some(found) = preview.matches.get(row) else {
+            return Some(format!(
+                "You asked for no words, so every song baz has heard was eligible. {where_it_went}."
+            ));
+        };
+        let strength = match found.ticks {
+            3 => "one of the strongest matches",
+            2 => "a fair match",
+            _ => "a weak match — your line asked for something your words did not have much of",
+        };
+        Some(format!(
+            "Your words let it in: {strength} of the {} eligible. {where_it_went}.",
+            preview.eligible_tracks
+        ))
     }
 
     /// **Start from a recipe**: its words, its shape and its length, all of
@@ -809,7 +1098,6 @@ impl State {
                 self.features = prepared.ready;
                 self.rebuild_field();
                 self.pending = prepared.pending.into();
-                self.recently_offered = prepared.recently_offered.into();
                 self.total = self.features.len() + self.pending.len();
                 self.done = self.features.len();
                 self.analyzing = !self.pending.is_empty();
@@ -874,7 +1162,125 @@ impl State {
     }
 
     pub(crate) fn set_prompt(&mut self, prompt: &str) {
-        self.prompt = prompt.chars().take(240).collect();
+        let prompt: String = prompt.chars().take(240).collect();
+        if prompt.trim() != self.prompt.trim() {
+            self.words_changed();
+        }
+        self.prompt = prompt;
+    }
+
+    /// **Appending a word from the vocabulary**, with a comma — design 21 §4's
+    /// rule, and the one thing a chip does.
+    pub(crate) fn append_word(&mut self, word: &str) {
+        let existing = self.prompt.trim_end().trim_end_matches(',').to_owned();
+        let joined = if existing.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{existing}, {word}")
+        };
+        self.set_prompt(&joined);
+    }
+
+    /// How long the words must be still before they are worth a text
+    /// embedding. Design 21 §6: *debounced ~400 ms after typing stops*.
+    const COUNT_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+    /// The words moved: whatever is on screen describes the old ones.
+    fn words_changed(&mut self) {
+        self.count_due = Some(std::time::Instant::now() + Self::COUNT_SETTLE);
+        self.counting = true;
+    }
+
+    /// Whether a count is waiting on the clock, so the shell can run its tick
+    /// only while there is something to wait for.
+    pub(crate) fn awaiting_count(&self) -> bool {
+        self.count_due.is_some()
+    }
+
+    /// **Have the words been still long enough?** Returns the phrase to embed
+    /// exactly once per settling.
+    pub(crate) fn settled_prompt(&mut self) -> Option<String> {
+        let due = self.count_due?;
+        if std::time::Instant::now() < due {
+            return None;
+        }
+        self.count_due = None;
+        let prompt = self.effective_request();
+        if prompt.is_empty() {
+            // No words is not a narrow request, it is no request: everything
+            // baz has heard is eligible, and it can be said without a model.
+            self.counting = false;
+            self.live = Some(Live {
+                prompt,
+                eligible: self.features.len(),
+                analysed: self.features.len(),
+                closest: Vec::new(),
+            });
+            return None;
+        }
+        Some(prompt)
+    }
+
+    /// The embedded phrase came back. Count against the vectors already in
+    /// memory — a few million multiply-adds, which is why this readout is
+    /// affordable at all — and name the three nearest.
+    #[cfg(feature = "vibe-analysis")]
+    pub(crate) fn accept_embedding(
+        &mut self,
+        prompt: &str,
+        embedding: &Result<Vec<f32>, String>,
+        albums: &[AlbumVm],
+        chosen: &HashMap<u64, EditionKey>,
+    ) {
+        if prompt != self.effective_request() {
+            // The words moved on while the tower was thinking. A stale count
+            // shown as current is worse than no count.
+            return;
+        }
+        self.counting = false;
+        let Ok(embedding) = embedding else {
+            self.live = None;
+            return;
+        };
+        // Borrowed, never cloned: this runs once per settled phrase and the
+        // whole point of the readout is that it costs a scan of vectors that
+        // are already resident.
+        let mut scored: Vec<(f32, &Path)> = Vec::with_capacity(self.features.len());
+        for (path, features) in &self.features {
+            scored.push((features.similarity(embedding), path.as_path()));
+        }
+        scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+        let ranked: Vec<f32> = scored.iter().map(|(value, _)| *value).collect();
+        let eligible = baz_vibe::eligible_count(&ranked);
+        let named = |wanted: &Path| {
+            albums.iter().find_map(|album| {
+                let edition = vm::selected_edition(album, chosen.get(&album.id).copied())?;
+                let track = edition.tracks.iter().find(|track| track.path == wanted)?;
+                Some(format!("{} — {}", track.title, album.artist.label()))
+            })
+        };
+        self.live = Some(Live {
+            prompt: prompt.to_owned(),
+            eligible,
+            analysed: scored.len(),
+            closest: scored
+                .iter()
+                .take(3)
+                .filter_map(|(_, path)| named(path))
+                .collect(),
+        });
+    }
+
+    /// The light build has no tower to ask.
+    #[cfg(not(feature = "vibe-analysis"))]
+    pub(crate) fn accept_embedding(
+        &mut self,
+        _prompt: &str,
+        _embedding: &Result<Vec<f32>, String>,
+        _albums: &[AlbumVm],
+        _chosen: &HashMap<u64, EditionKey>,
+    ) {
+        self.counting = false;
     }
 
     /// **The words, and only the words.**
@@ -894,30 +1300,27 @@ impl State {
         self.length = length;
     }
 
-    pub(crate) fn create(
-        &mut self,
-        index: Option<&Path>,
-        albums: &[AlbumVm],
-        chosen: &HashMap<u64, EditionKey>,
-    ) {
+    /// **Compose.**
+    ///
+    /// Deterministic: the same request composed twice returns the identical
+    /// list. It did not used to be — the seed advanced on every press and a
+    /// freshness penalty pushed recently offered tracks away — and that is why
+    /// the diff below can now state a cause and always be right. *"Identical,
+    /// because nothing changed"* has to be true before it is worth saying.
+    pub(crate) fn create(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
         self.open = true;
         self.awaiting_create = false;
-        #[cfg(not(feature = "vibe-analysis"))]
-        let _ = index;
-        let recently_offered = self.recently_offered.iter().cloned().collect();
         let request = self.effective_request();
         let generated = generate(
             &request,
             &self.contour,
             self.length,
             self.variation,
-            &recently_offered,
             &self.features,
             albums,
             chosen,
         );
-        self.variation = self.variation.wrapping_add(1);
-        let preview = match generated {
+        let mut preview = match generated {
             Ok(preview) => {
                 self.error = None;
                 preview
@@ -927,40 +1330,26 @@ impl State {
                 None
             }
         };
-        if let Some(preview) = &preview {
-            for item in &preview.items {
-                self.recently_offered.retain(|path| path != &item.path);
-                self.recently_offered.push_back(item.path.clone());
-            }
-            while self.recently_offered.len() > RECENTLY_OFFERED_CAP {
-                self.recently_offered.pop_front();
-            }
-            #[cfg(feature = "vibe-analysis")]
-            {
-                if let Some(index) = index
-                    && let Err(error) = baz_vibe::remember_offered(
-                        index,
-                        &preview
-                            .items
-                            .iter()
-                            .map(|item| item.path.clone())
-                            .collect::<Vec<_>>(),
-                    )
-                {
-                    self.error = Some(format!("Could not retain mix freshness: {error}"));
-                }
-            }
+        if let Some(preview) = &mut preview {
+            preview.diff = self
+                .preview
+                .as_ref()
+                .map(|previous| diff(previous, preview, self.varied));
         }
+        self.varied = false;
         self.preview = preview;
     }
 
-    pub(crate) fn another(
-        &mut self,
-        index: Option<&Path>,
-        albums: &[AlbumVm],
-        chosen: &HashMap<u64, EditionKey>,
-    ) {
-        self.create(index, albums, chosen);
+    /// **Another version**: the same request, a different draw.
+    ///
+    /// The visible press that carries the power the old auto-incrementing seed
+    /// took invisibly. It is a distinct act, and the diff names it as the
+    /// cause, so variation is something the listener asked for rather than
+    /// something that happened to them.
+    pub(crate) fn another(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+        self.variation = self.variation.wrapping_add(1);
+        self.varied = true;
+        self.create(albums, chosen);
     }
 
     pub(crate) fn remove_preview(&mut self, row: usize) {
@@ -1011,6 +1400,67 @@ impl State {
     }
 }
 
+/// **What changed, and the sentence naming why** — design 21 §6's fourth
+/// readout.
+///
+/// Every cause here is one the listener performed, and each is read off a fact
+/// the engine returned rather than guessed at in the view: the words show up
+/// as a changed eligible count, the line as a changed contour, the length as a
+/// changed target, and *another version* as the press that was made. Nothing
+/// else can move a list, which is exactly what the sentence is for.
+fn diff(previous: &Generated, current: &Generated, varied: bool) -> Diff {
+    let before: HashSet<&PathBuf> = previous.items.iter().map(|item| &item.path).collect();
+    let kept = current
+        .items
+        .iter()
+        .filter(|item| before.contains(&item.path))
+        .count();
+    let fresh = current.items.len().saturating_sub(kept);
+    let changed = |what: &str| {
+        if fresh == 0 && kept == current.items.len() && previous.items.len() == current.items.len()
+        {
+            format!("{what}, and the list is the same")
+        } else {
+            format!("{what} — changed {fresh} of {}", current.items.len())
+        }
+    };
+    let words_moved = previous.request != current.request;
+    let line_moved = previous.contour != current.contour;
+    let length_moved = previous.target_minutes != current.target_minutes;
+    let cause = if words_moved {
+        let narrowed = match current.eligible_tracks.cmp(&previous.eligible_tracks) {
+            std::cmp::Ordering::Less => "narrowed",
+            std::cmp::Ordering::Greater => "widened",
+            std::cmp::Ordering::Equal => "left",
+        };
+        changed(&format!(
+            "your words {narrowed} what is eligible, from {} to {}",
+            previous.eligible_tracks, current.eligible_tracks
+        ))
+    } else if varied {
+        changed("another version: the same request, a different draw")
+    } else if line_moved && length_moved {
+        changed("you moved the line and changed the length")
+    } else if line_moved {
+        // The claim design 21 §3 makes, and Phase 1's invariant I3 backs: the
+        // pool is the words' doing, so a moved line reorders the same songs.
+        changed(&format!(
+            "you moved the line, which reorders the same {} eligible songs",
+            current.eligible_tracks
+        ))
+    } else if length_moved {
+        changed("you changed the length")
+    } else {
+        "identical, because nothing changed".to_owned()
+    };
+    Diff {
+        kept,
+        fresh,
+        previous: previous.items.len(),
+        cause,
+    }
+}
+
 /// Paths in the selected editions are the complete, visible analysis scope.
 pub(crate) fn library_paths(albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) -> Vec<PathBuf> {
     albums
@@ -1028,7 +1478,6 @@ pub(crate) async fn prepare(index: PathBuf, paths: Vec<PathBuf>) -> Result<Prepa
         .map(|prepared| Preparation {
             ready: prepared.ready,
             pending: prepared.pending,
-            recently_offered: prepared.recently_offered,
         })
         .map_err(|error| error.to_string())
 }
@@ -1040,6 +1489,30 @@ pub(crate) fn prepare(
 ) -> impl Future<Output = Result<Preparation, String>> {
     std::future::ready(Err(
         "This is the light build; local sonic analysis is not included.".to_owned(),
+    ))
+}
+
+/// **Embed one settled phrase**, off the interface thread.
+///
+/// This is the cost design 21 §10 names: the text tower is roughly 350 MiB and
+/// the first call is what pays for it. The phrase comes back beside the vector
+/// so a result that arrives after the words moved on can be discarded rather
+/// than shown as current.
+#[cfg(feature = "vibe-analysis")]
+pub(crate) async fn embed(prompt: String) -> (String, Result<Vec<f32>, String>) {
+    let asked = prompt.clone();
+    let result = tokio::task::spawn_blocking(move || baz_vibe::embed_request(&prompt))
+        .await
+        .map_err(|error| format!("local model worker stopped: {error}"))
+        .and_then(|result| result.map_err(|error| error.to_string()));
+    (asked, result)
+}
+
+#[cfg(not(feature = "vibe-analysis"))]
+pub(crate) fn embed(prompt: String) -> impl Future<Output = (String, Result<Vec<f32>, String>)> {
+    std::future::ready((
+        prompt,
+        Err("This is the light build; local sonic analysis is not included.".to_owned()),
     ))
 }
 
@@ -1137,6 +1610,7 @@ fn engine_contour(contour: &Contour) -> baz_vibe::Contour {
                         level: point.level,
                     })
                     .collect(),
+                weight: lane.weight,
             })
             .collect(),
     }
@@ -1145,7 +1619,6 @@ fn engine_contour(contour: &Contour) -> baz_vibe::Contour {
 #[cfg(feature = "vibe-analysis")]
 #[expect(
     clippy::too_many_lines,
-    clippy::too_many_arguments,
     reason = "candidate projection, duration convergence and result construction form one generation boundary"
 )]
 fn generate(
@@ -1153,7 +1626,6 @@ fn generate(
     contour: &Contour,
     length: MixLength,
     variation: u64,
-    recently_offered: &HashSet<PathBuf>,
     features: &HashMap<PathBuf, SonicFeatures>,
     albums: &[AlbumVm],
     chosen: &HashMap<u64, EditionKey>,
@@ -1207,21 +1679,29 @@ fn generate(
     let mut limit = usize::try_from(target_seconds.div_ceil(average_seconds))
         .unwrap_or(PLAYLIST_CAP)
         .clamp(1, PLAYLIST_CAP.min(candidates.len()));
+    // **The words choose the pool; the shape chooses the walk.**
+    //
+    // The pool is drawn once, here, and the convergence below walks it four
+    // times at different lengths — so the text tower is paid for once per
+    // press rather than once per attempt, and so every attempt is choosing
+    // from the same eligible set the readouts are describing.
+    let request = if prompt.trim().is_empty() {
+        None
+    } else {
+        Some(baz_vibe::embed_request(prompt).map_err(|error| error.to_string())?)
+    };
+    let engine_contour = engine_contour(contour);
+    let pool = baz_vibe::eligible(request.as_deref(), &candidates);
     let mut best = None;
     for _ in 0..4 {
-        // **The words choose the pool; the shape chooses the walk.** Either
-        // may be absent, and `select_contour` is the one selector both the
-        // older entry points are written in terms of — so a request with no
-        // line still behaves exactly as the free-text one always did.
-        let selection = baz_vibe::select_contour(
-            prompt,
-            &engine_contour(contour),
+        let selection = baz_vibe::compose(
+            request.as_deref(),
+            &pool,
+            &engine_contour,
             &candidates,
             limit,
             variation,
-            recently_offered,
-        )
-        .map_err(|error| error.to_string())?;
+        );
         let selected_seconds = selection
             .paths
             .iter()
@@ -1269,13 +1749,19 @@ fn generate(
         .iter()
         .filter_map(|&index| items.remove(&selection.paths[index]))
         .collect();
-    let levels: Vec<Vec<f32>> = selection
-        .levels
+    let in_step = |row: &[f32]| -> Vec<f32> {
+        kept.iter()
+            .filter_map(|&index| row.get(index).copied())
+            .collect()
+    };
+    let levels: Vec<Vec<f32>> = selection.levels.iter().map(|lane| in_step(lane)).collect();
+    let blended = in_step(&selection.blended);
+    let matches: Vec<Match> = kept
         .iter()
-        .map(|lane| {
-            kept.iter()
-                .filter_map(|&index| lane.get(index).copied())
-                .collect()
+        .filter_map(|&index| selection.matches.get(index))
+        .map(|found| Match {
+            similarity: found.similarity,
+            ticks: found.strength.ticks(),
         })
         .collect();
     let description = format!(
@@ -1288,10 +1774,17 @@ fn generate(
         request: prompt.trim().to_owned(),
         items: selected,
         levels,
+        blended,
+        cloud: selection.blended_cloud,
+        lane_clouds: selection.cloud,
+        matches,
         pool_tracks,
-        analyzed_tracks: selection.pool_tracks,
+        analyzed_tracks: selection.analysed_tracks,
+        eligible_tracks: selection.eligible_tracks,
         tempo_span: selection.tempo_span,
         target_minutes: length.minutes(),
+        contour: contour.clone(),
+        diff: None,
     }))
 }
 
@@ -1305,7 +1798,6 @@ fn generate(
     _contour: &Contour,
     _length: MixLength,
     _variation: u64,
-    _recently_offered: &HashSet<PathBuf>,
     _features: &HashMap<PathBuf, SonicFeatures>,
     _albums: &[AlbumVm],
     _chosen: &HashMap<u64, EditionKey>,
@@ -1637,6 +2129,119 @@ mod tests {
         );
     }
 
+    /// **The diff names the cause, and the cause is always something the
+    /// listener did.** Design 21 §6: one use teaches the whole model, so the
+    /// sentence has to be right in every case rather than plausible in most.
+    #[test]
+    fn the_diff_names_what_actually_changed() {
+        let list = |titles: &[&str]| -> Vec<QueueItemVm> {
+            titles
+                .iter()
+                .map(|title| QueueItemVm {
+                    title: (*title).to_owned(),
+                    artist: None,
+                    album: None,
+                    album_artist: None,
+                    duration: None,
+                    path: PathBuf::from(format!("/{title}.flac")),
+                })
+                .collect()
+        };
+        let generated = |request: &str, titles: &[&str], eligible: usize, minutes: u64| Generated {
+            request: request.to_owned(),
+            items: list(titles),
+            eligible_tracks: eligible,
+            target_minutes: minutes,
+            contour: Contour::blended(&Shape::DEFAULT.points()),
+            ..Generated::default()
+        };
+
+        // Nothing moved, so the sentence must say so — which it can only do
+        // because compose is deterministic now.
+        let same = generated("warm brass", &["a", "b"], 300, 60);
+        assert_eq!(
+            diff(&same, &same.clone(), false).cause,
+            "identical, because nothing changed"
+        );
+
+        // The words narrowed the pool, with both counts named.
+        let narrowed = generated("warm brass, strings", &["a", "c"], 240, 60);
+        let sentence = diff(&same, &narrowed, false).cause;
+        assert!(sentence.contains("narrowed"), "{sentence}");
+        assert!(
+            sentence.contains("300") && sentence.contains("240"),
+            "{sentence}"
+        );
+        assert_eq!(diff(&same, &narrowed, false).kept, 1);
+        assert_eq!(diff(&same, &narrowed, false).fresh, 1);
+
+        // The line moved: the same eligible songs, in another order. This is
+        // the sentence design 21 §3 promises and Phase 1's I3 backs.
+        let mut moved = generated("warm brass", &["b", "a"], 300, 60);
+        moved.contour = Contour::blended(&Shape::ALL[4].points());
+        let sentence = diff(&same, &moved, false).cause;
+        assert!(sentence.contains("reorders the same 300"), "{sentence}");
+
+        // …and the visible press names itself rather than hiding behind the
+        // request, which is exactly what the old auto-incrementing seed did.
+        let drawn = generated("warm brass", &["c", "d"], 300, 60);
+        let sentence = diff(&same, &drawn, true).cause;
+        assert!(sentence.contains("another version"), "{sentence}");
+    }
+
+    /// **A row explains itself as a rank, never a score** — the quorum's R9.
+    #[test]
+    fn a_selected_row_explains_itself_without_a_number_nobody_asked_for() {
+        let mut state = State {
+            preview: Some(Generated {
+                items: vec![QueueItemVm {
+                    title: "One".to_owned(),
+                    artist: None,
+                    album: None,
+                    album_artist: None,
+                    duration: None,
+                    path: PathBuf::from("/one.flac"),
+                }],
+                blended: vec![1.12],
+                matches: vec![Match {
+                    similarity: 0.41,
+                    ticks: 3,
+                }],
+                eligible_tracks: 260,
+                ..Generated::default()
+            }),
+            ..State::default()
+        };
+        let why = state.why(0).expect("a selected row explains itself");
+        assert!(why.contains("Your words let it in"), "{why}");
+        assert!(why.contains("260 eligible"), "{why}");
+        assert!(why.contains("78%"), "{why}");
+        assert!(!why.contains("0.41"), "a rank, never a score: {why}");
+
+        // Selecting the same row again puts the explanation away.
+        state.select_row(0);
+        assert_eq!(state.selected_row, Some(0));
+        state.select_row(0);
+        assert_eq!(state.selected_row, None);
+    }
+
+    /// **A chip appends; it never replaces.** Design 21 §4's rules table.
+    #[test]
+    fn the_vocabulary_appends_to_the_one_request() {
+        let mut state = State::default();
+        state.append_word("piano");
+        assert_eq!(state.prompt, "piano");
+        state.append_word("melancholy");
+        assert_eq!(state.prompt, "piano, melancholy");
+        state.set_prompt("warm brass,");
+        state.append_word("dark");
+        assert_eq!(state.prompt, "warm brass, dark");
+        // Every chip is in a row the band actually draws.
+        for chip in Chip::ALL {
+            assert!(Chip::ROWS.contains(&chip.row), "{}", chip.word);
+        }
+    }
+
     #[test]
     fn the_request_survives_consent_and_preview_edits_are_in_memory() {
         let mut state = State::default();
@@ -1659,11 +2264,11 @@ mod tests {
             description: "request".to_owned(),
             request: "warm brass becoming urgent, then calm".to_owned(),
             items: vec![item("one"), item("two"), item("three")],
-            levels: Vec::new(),
             pool_tracks: 3,
             analyzed_tracks: 3,
-            tempo_span: None,
+            eligible_tracks: 3,
             target_minutes: 90,
+            ..Generated::default()
         });
         assert!(!state.request_changed());
         state.set_length(MixLength::Hour);

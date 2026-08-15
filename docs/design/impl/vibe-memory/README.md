@@ -63,6 +63,41 @@ trade. It is the one change the measurement justifies on its own.
 
 None of those is a guess-and-ship: this file exists because the last one was.
 
+## How long listening actually takes — plan 22 item 0.4
+
+Design 21 §10 recorded that **nobody had measured a per-track analysis rate on
+a real library**, and design 21 §7's first-run copy quotes one anyway: *9 412
+tracks · roughly two hours*. Plan 22 §0.4 makes that sentence wait for the
+number. `crates/baz-vibe/src/bin/vibe-rate.rs` runs the shipping analysis path
+— decode, bliss features, CLAP audio embedding, store — at the shipping worker
+count, over tracks drawn from a real library database into a throwaway store.
+
+| workers | tracks | wall clock | **tracks / hour** | median per track | p90 | max |
+|---|---|---|---|---|---|---|
+| 4 | 180 | 144.3 s | **4 490** | 3.02 s | 4.62 s | 7.21 s |
+
+Twenty of the two hundred were skipped as *no such file* — library rows whose
+files are no longer at that path — which is a scanner fact rather than an
+analysis failure, and they are excluded from the rate.
+
+**What the copy may now say.** At 4 490 tracks/hour, a 9 412-track library is
+**2 h 06 m** and this 5 076-track one is **68 minutes**. Design 21's *"roughly
+two hours"* was right, and is now measured rather than assumed.
+
+**The condition this was taken under, because it bounds the number.** The
+library sits on an SMB share reached through gvfs, so every track is decoded
+across a network mount. That is the owner's real setup and therefore the
+honest case to quote, but a local-disk library should be faster and the copy
+should not promise the same figure as a floor. The per-track spread — p10
+1.81 s against a 7.21 s maximum — is why the first-run reading is a real
+progress bar with a count on it rather than a single estimate: a four-fold
+spread makes any one number wrong for most of the run.
+
+```sh
+toolbox run -c baz-dev ./target/release/vibe-rate \
+  <copy-of>/library.db /tmp/scratch/rate-store.db 200 4
+```
+
 ## Running it
 
 ```sh

@@ -21,7 +21,17 @@ const ANALYSIS_RATE: u32 = 22_050;
 /// Stereo channels produced by baz-core's offline decoder.
 const CHANNELS: usize = 2;
 /// Schema of the independent, disposable analysis cache.
-const STORE_VERSION: i64 = 2;
+///
+/// Version 3 is version 2 minus a promise. `recent_offers` held a freshness
+/// history that biased every generated playlist away from tracks recently
+/// offered — invisibly, against weights summing to under one, at a penalty of
+/// 2.0, which made it a ban rather than a tiebreak. Design 21 §4 says *"no
+/// hidden state, nothing accumulating out of sight"*, and a diff sentence
+/// reading *"you changed nothing"* over a changed list would have been the
+/// first thing a listener saw. The table is no longer created and no longer
+/// read; an existing one is left where it is, inert, because a disposable
+/// cache does not need a migration to stop using a column.
+const STORE_VERSION: i64 = 3;
 
 /// A conventional local description of one track.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,13 +159,37 @@ pub struct ContourPoint {
     pub level: f32,
 }
 
-/// **One line of a contour**: a dimension, and the shape asked of it.
+/// **One line of a contour**: a dimension, the shape asked of it, and how much
+/// it counts against the others.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lane {
     /// What this line is about.
     pub dimension: Dimension,
     /// Its points, in order of position through the playlist.
     pub points: Vec<ContourPoint>,
+    /// **How much this line counts**, against the other lines of the same
+    /// request.
+    ///
+    /// One line drawn alone can leave this at 1.0 and nothing changes. It
+    /// exists for the blend: design 21 §5 asks for one default line standing
+    /// for every dimension at once, and says it must be a **weighted** mean
+    /// with energy dominant, because every dimension here is a rank within
+    /// the collection — so an unweighted mean puts loud-and-slow in the same
+    /// place as quiet-and-fast, and a line drawn through the middle would be
+    /// satisfied by tracks that sound nothing alike.
+    pub weight: f32,
+}
+
+impl Lane {
+    /// One line, counting for one.
+    #[must_use]
+    pub fn new(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
+        Self {
+            dimension,
+            points,
+            weight: 1.0,
+        }
+    }
 }
 
 /// **The shape a generated playlist is asked to follow** — a line per
@@ -173,11 +207,45 @@ pub struct Contour {
 }
 
 impl Contour {
-    /// A contour of one line.
+    /// **The weights of the blended line**, in [`Dimension::ALL`] order,
+    /// energy dominant.
+    ///
+    /// They sum to one, which is what makes [`Contour::blended`] consistent:
+    /// give every dimension the same curve and the weighted mean *is* that
+    /// curve, whatever the weights are. Design 21 §5 predicted that somebody
+    /// would later simplify this away without knowing why it held, so it is
+    /// pinned by `a_blend_of_one_curve_is_that_curve` rather than only
+    /// written down.
+    pub const BLEND: [f32; 5] = [0.40, 0.20, 0.15, 0.15, 0.10];
+
+    /// A contour of one line, counting for one.
     #[must_use]
     pub fn of(dimension: Dimension, points: Vec<ContourPoint>) -> Self {
         Self {
-            lanes: vec![Lane { dimension, points }],
+            lanes: vec![Lane::new(dimension, points)],
+        }
+    }
+
+    /// **The default request's line**: every dimension asked for the same
+    /// shape, weighted with energy dominant.
+    ///
+    /// The listener sees one line. It is five, holding one curve between
+    /// them, which is why opening design 21 §5's expander changes nothing
+    /// until a line is dragged apart from its neighbours: the expander does
+    /// not *seed* the per-dimension curves from the blend, it reveals that
+    /// they were already the blend.
+    #[must_use]
+    pub fn blended(points: &[ContourPoint]) -> Self {
+        Self {
+            lanes: Dimension::ALL
+                .into_iter()
+                .zip(Self::BLEND)
+                .map(|(dimension, weight)| Lane {
+                    dimension,
+                    points: points.to_vec(),
+                    weight,
+                })
+                .collect(),
         }
     }
 
@@ -216,11 +284,18 @@ impl Contour {
         Some(pair[0].level + (pair[1].level - pair[0].level) * mix)
     }
 
-    /// Every lane's target at one position, in lane order.
-    fn targets_at(&self, fraction: f32) -> Vec<(Dimension, Option<f32>)> {
+    /// Every lane's target at one position, in lane order, with the weight it
+    /// counts for.
+    fn targets_at(&self, fraction: f32) -> Vec<(Dimension, Option<f32>, f32)> {
         self.lanes
             .iter()
-            .map(|lane| (lane.dimension, Self::level_at(&lane.points, fraction)))
+            .map(|lane| {
+                (
+                    lane.dimension,
+                    Self::level_at(&lane.points, fraction),
+                    lane.weight,
+                )
+            })
             .collect()
     }
 }
@@ -238,23 +313,86 @@ pub struct Candidate {
     pub features: Features,
 }
 
+/// **How well one chosen track answered the words**, in the two forms a
+/// surface needs: the number, and the bucket it is drawn as.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Match {
+    /// Cosine against the request embedding.
+    pub similarity: f32,
+    /// Which third of the eligible pool it sits in.
+    pub strength: Strength,
+}
+
+/// **Three buckets of match strength**, never more.
+///
+/// Three, because the underlying cosines drift with the phrase and with the
+/// library, and a picture that changes when the numbers drift is a picture
+/// that cannot be read. The boundaries are the *pool's own terciles*, decided
+/// by measurement in `docs/design/impl/vibe-eligibility/`: absolute cosine
+/// boundaries would show three ticks on every row of one request and one tick
+/// on every row of another, which is drift wearing a hat.
+///
+/// A weak tick is not a failure to hide. It says the line asked for something
+/// the words did not have much of, which is true and useful.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strength {
+    /// The bottom third of the eligible pool.
+    Weak,
+    /// The middle third.
+    Fair,
+    /// The top third.
+    Strong,
+}
+
+impl Strength {
+    /// How many of three ticks to fill.
+    #[must_use]
+    pub const fn ticks(self) -> u8 {
+        match self {
+            Self::Weak => 1,
+            Self::Fair => 2,
+            Self::Strong => 3,
+        }
+    }
+}
+
 /// Ranked and sequenced sonic result.
 #[derive(Debug, Clone, Default)]
 pub struct Selection {
     /// Paths in listening order.
     pub paths: Vec<PathBuf>,
-    /// Complete analyzed candidate pool.
-    pub pool_tracks: usize,
+    /// Every analysed track the request was offered.
+    pub analysed_tracks: usize,
+    /// **How many of them the words let in** — the eligible set, and the
+    /// number design 21 §6's live count states. With no words this is every
+    /// analysed track, which is the truth rather than a special case.
+    pub eligible_tracks: usize,
     /// Tempo span of the selected tracks, rounded only by the UI.
     pub tempo_span: Option<(f32, f32)>,
-    /// Where each chosen track sits on the −2…+2 collection-relative axes the
-    /// request was made on: one row per [`Lane`], in lane order, each holding
-    /// a level per chosen track in listening order.
+    /// Where each chosen track sits on the −2…+2 axes the request was made
+    /// on: one row per [`Lane`], in lane order, each holding a level per
+    /// chosen track in listening order.
     ///
     /// It is the *result* in the request's own units, which is what lets a
     /// surface draw what it got over what it asked for instead of asking the
     /// listener to take the answer on faith.
     pub levels: Vec<Vec<f32>>,
+    /// [`Self::levels`] collapsed by the lanes' own weights — one level per
+    /// chosen track, which is what the blended line draws its dots at.
+    pub blended: Vec<f32>,
+    /// **The eligible songs, on the same axes** — one row per lane, each
+    /// holding a level for every track the words let in.
+    ///
+    /// This is design 21 §6's cloud: narrow the phrase and watch it thin out
+    /// under the curve. It is the eligible set rather than the library, which
+    /// is the whole of what makes it a picture of cause and effect.
+    pub cloud: Vec<Vec<f32>>,
+    /// [`Self::cloud`] collapsed by the lanes' own weights.
+    pub blended_cloud: Vec<f32>,
+    /// How well each chosen track answered the words, in listening order.
+    /// Empty for a request with no words, because a shape-only request has no
+    /// match strength and drawing one would be an invention.
+    pub matches: Vec<Match>,
 }
 
 impl Features {
@@ -356,6 +494,187 @@ pub fn embed_request(prompt: &str) -> Result<Vec<f32>, Error> {
     semantic::embed_text(prompt.trim()).map_err(Error::Semantic)
 }
 
+/// **The songs the words let in** — the eligible set, and the first of the two
+/// stages selection now has.
+///
+/// Design 21 §3 says the words decide *which* songs are eligible and the line
+/// decides *where* each one goes. Until this existed that was a metaphor: the
+/// walk scored one blended cost over every analysed track, so a poor
+/// word-match could win a slot by sitting at the right height, and moving the
+/// line changed which tracks were even in the room. A pool is what makes the
+/// two sentences true — *the words let it in; the line put it fourth* — and it
+/// is what the match count, the cloud and the ticks are all readings of.
+///
+/// The policy is the **knee** of the ranked similarity curve, chosen by the
+/// sweep in `docs/design/impl/vibe-eligibility/`: a fixed cosine floor is
+/// unusable because the distribution moves wholesale with the phrase (a floor
+/// that keeps 3 749 tracks for one request keeps one for another), and a
+/// top-K-per-cent cut answers the same number for every phrase anybody types,
+/// which makes the count a decoration. The knee's relevance matches
+/// top-K-per-cent's at matched pool size and its size responds to the words,
+/// which is the whole point of drawing it.
+#[derive(Debug, Clone, Default)]
+pub struct Pool {
+    /// Indices into the candidates, best match first.
+    ranked: Vec<usize>,
+    /// Each ranked track's cosine, in the same order.
+    similarities: Vec<f32>,
+    /// Whether words drew this pool at all.
+    from_words: bool,
+}
+
+/// The knee is searched only within this share of the ranking: past it, a bend
+/// is the tail's noise rather than the end of the answer.
+const KNEE_HORIZON: f32 = 0.25;
+/// …and never cuts above this many tracks, so a pool always has room for a
+/// playlist and its diversity rules.
+const KNEE_FLOOR: usize = 24;
+/// Below this many analysed tracks a ranking has no distribution to find a
+/// knee in, and the honest pool is everything there is.
+const KNEE_MINIMUM_LIBRARY: usize = KNEE_FLOOR * 4;
+
+impl Pool {
+    /// How many songs the words let in.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ranked.len()
+    }
+
+    /// Whether nothing at all is eligible.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ranked.is_empty()
+    }
+
+    /// The eligible candidates, best match first.
+    #[must_use]
+    pub fn ranked(&self) -> &[usize] {
+        &self.ranked
+    }
+
+    /// The best matches first, as `(candidate index, cosine)` — what design
+    /// 21 §6's *closest three* is read off, because a count says how many and
+    /// never how well.
+    pub fn closest(&self, count: usize) -> impl Iterator<Item = (usize, f32)> + '_ {
+        self.ranked
+            .iter()
+            .copied()
+            .zip(self.similarities.iter().copied())
+            .take(count)
+    }
+
+    /// Which third of the pool a candidate sits in, or `None` where it is not
+    /// eligible — or where there were no words, in which case there is no
+    /// match strength to report and inventing one would be a lie.
+    #[must_use]
+    pub fn strength(&self, candidate: usize) -> Option<Strength> {
+        if !self.from_words {
+            return None;
+        }
+        let place = self.ranked.iter().position(|index| *index == candidate)?;
+        let third = self.ranked.len().div_ceil(3).max(1);
+        Some(match place / third {
+            0 => Strength::Strong,
+            1 => Strength::Fair,
+            _ => Strength::Weak,
+        })
+    }
+
+    /// A candidate's cosine against the request, where it is eligible.
+    #[must_use]
+    pub fn similarity(&self, candidate: usize) -> Option<f32> {
+        let place = self.ranked.iter().position(|index| *index == candidate)?;
+        self.similarities.get(place).copied()
+    }
+}
+
+/// **Draw the eligible set** for an embedded request over an analysed pool.
+///
+/// With no words every analysed track is eligible, which is the truth about a
+/// shape-only request rather than a special case: nothing was asked of the
+/// words, so the words exclude nothing.
+#[must_use]
+pub fn eligible(request: Option<&[f32]>, candidates: &[Candidate]) -> Pool {
+    let Some(request) = request else {
+        return Pool {
+            ranked: (0..candidates.len()).collect(),
+            similarities: vec![0.0; candidates.len()],
+            from_words: false,
+        };
+    };
+    let mut ranked: Vec<usize> = (0..candidates.len()).collect();
+    let similarities: Vec<f32> = candidates
+        .iter()
+        .map(|candidate| candidate.features.similarity(request))
+        .collect();
+    ranked.sort_by(|left, right| {
+        similarities[*right]
+            .total_cmp(&similarities[*left])
+            .then_with(|| left.cmp(right))
+    });
+    let sorted: Vec<f32> = ranked.iter().map(|index| similarities[*index]).collect();
+    let kept = knee(&sorted);
+    ranked.truncate(kept);
+    Pool {
+        similarities: ranked.iter().map(|index| similarities[*index]).collect(),
+        ranked,
+        from_words: true,
+    }
+}
+
+/// **How many of a ranked similarity list the words let in** — the same
+/// policy [`eligible`] applies, over nothing but the numbers.
+///
+/// Separated so a live count can be paid for in a few million multiply-adds
+/// against vectors already in memory, rather than by projecting the whole
+/// library into candidates once per settled phrase. The count on screen and
+/// the pool a compose walks are then the same rule reading the same ranking,
+/// which is the only way *"matches 340 songs"* can be a promise.
+///
+/// `sorted_descending` must be sorted, highest first; nothing else is assumed.
+#[must_use]
+pub fn eligible_count(sorted_descending: &[f32]) -> usize {
+    knee(sorted_descending)
+}
+
+/// **Where the answer stops falling steeply**: the ranked curve's furthest
+/// point below the chord joining the two ends of the search window.
+///
+/// Not the largest single gap. A decaying curve's biggest step is almost
+/// always at its head, so a largest-gap rule reliably answers *"the top"*
+/// whatever the phrase — measured, and it pinned all eighteen swept prompts to
+/// the smallest pool they were allowed. The chord distance asks the question
+/// that was meant, and is invariant to how steep the head happens to be.
+fn knee(sorted_descending: &[f32]) -> usize {
+    let count = sorted_descending.len();
+    if count < KNEE_MINIMUM_LIBRARY {
+        return count;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "a bounded share of a library count"
+    )]
+    let horizon = ((count as f32 * KNEE_HORIZON) as usize)
+        .max(KNEE_FLOOR + 1)
+        .min(count - 1);
+    let fall = sorted_descending[0] - sorted_descending[horizon];
+    if fall <= f32::EPSILON {
+        return count;
+    }
+    let mut best = (KNEE_FLOOR, f32::MIN);
+    for index in KNEE_FLOOR..horizon {
+        #[expect(clippy::cast_precision_loss, reason = "bounded library counts")]
+        let chord = fall.mul_add(-(index as f32 / horizon as f32), sorted_descending[0]);
+        let below = chord - sorted_descending[index];
+        if below > best.1 {
+            best = (index, below);
+        }
+    }
+    best.0
+}
+
 /// Select tracks near the requested collection-relative targets, then order
 /// the shortlist by local sonic continuity while enforcing artist and album
 /// diversity. Retrieval and sequencing are deliberately separate: nearest
@@ -376,23 +695,10 @@ pub fn select_journey(
     limit: usize,
     variation: u64,
 ) -> Selection {
-    select_journey_avoiding(profiles, candidates, limit, variation, &HashSet::new())
-}
-
-/// Select a journey while strongly preferring tracks that have not appeared
-/// in the listener's recent generated previews. Recent tracks remain a
-/// fallback for very small libraries or tightly constrained requests.
-#[must_use]
-pub fn select_journey_avoiding<S: std::hash::BuildHasher>(
-    profiles: &[Profile],
-    candidates: &[Candidate],
-    limit: usize,
-    variation: u64,
-    recently_offered: &HashSet<PathBuf, S>,
-) -> Selection {
     if profiles.is_empty() || profiles.iter().all(Profile::is_empty) {
         return Selection {
-            pool_tracks: candidates.len(),
+            analysed_tracks: candidates.len(),
+            eligible_tracks: candidates.len(),
             ..Selection::default()
         };
     }
@@ -402,95 +708,120 @@ pub fn select_journey_avoiding<S: std::hash::BuildHasher>(
             contour: &profiles_as_contour(profiles),
             seed: profiles.iter().find_map(|profile| profile.seed.as_ref()),
         },
+        &eligible(None, candidates),
         candidates,
         limit,
         variation,
-        recently_offered,
     )
 }
 
 /// Retrieve and sequence tracks for an ordinary-language musical request.
-/// Text and audio are embedded by the paired bundled CLAP towers; all ranking
-/// remains local and the recent-preview policy applies across generations.
+/// Text and audio are embedded by the paired bundled CLAP towers, and all
+/// ranking remains local.
 ///
 /// # Errors
 ///
 /// Returns an inference error if the bundled model cannot embed the prompt.
-pub fn select_semantic<S: std::hash::BuildHasher>(
+pub fn select_semantic(
     prompt: &str,
     candidates: &[Candidate],
     limit: usize,
     variation: u64,
-    recently_offered: &HashSet<PathBuf, S>,
 ) -> Result<Selection, Error> {
-    select_contour(
-        prompt,
-        &Contour::default(),
-        candidates,
-        limit,
-        variation,
-        recently_offered,
-    )
+    select_contour(prompt, &Contour::default(), candidates, limit, variation)
 }
 
-/// **Retrieve by words, sequence by shape** — the one selector the other two
-/// are written in terms of.
+/// **The words choose the pool; the shape chooses the walk** — the one
+/// selector the other two are written in terms of.
 ///
-/// `prompt` chooses *what* the pool is, in ordinary language, through the
-/// bundled CLAP towers; `contour` chooses *when* it happens, by asking each
-/// position in the finished list for a level on the collection's own energy
-/// and brightness axes. Either may be absent: with no contour this is exactly
-/// the semantic retrieval that shipped before it, and with no prompt it is
-/// exactly the profile journey — the cost weights below say so per case, so
-/// neither shipped behaviour moved to make room for the third.
+/// Two stages, and the order of them is the design. `prompt` draws the
+/// eligible set through the bundled CLAP towers ([`eligible`]); `contour`
+/// then walks **within that set only**, asking each position in the finished
+/// list for a level on the pool's own axes. Either may be absent: with no
+/// contour this is retrieval ordered by continuity, and with no prompt the
+/// pool is the whole analysed library and the shape does all the choosing.
 ///
-/// The diversity rules (an artist twice at most, never twice in a row, a
-/// fresh album while one is available) and the recent-preview policy are the
-/// same in all three, because they are properties of *a playlist* rather than
-/// of how it was asked for.
+/// What changed when this stopped being one blended cost, and why it had to:
+/// relevance and fit used to *trade against each other*, at 0.45 against
+/// 0.30, so a track could win a slot by sitting at the right height however
+/// poorly it answered the words — which is how a lullaby became eligible for
+/// a workout. Relevance no longer buys position. It decides membership, and
+/// inside the pool it is only a tiebreak.
+///
+/// The diversity rules — an artist twice at most, never twice in a row, a
+/// fresh album while one is available — are the same in all three, because
+/// they are properties of *a playlist* rather than of how it was asked for.
 ///
 /// # Errors
 ///
 /// Returns an inference error if the bundled model cannot embed the prompt.
-pub fn select_contour<S: std::hash::BuildHasher>(
+pub fn select_contour(
     prompt: &str,
     contour: &Contour,
     candidates: &[Candidate],
     limit: usize,
     variation: u64,
-    recently_offered: &HashSet<PathBuf, S>,
 ) -> Result<Selection, Error> {
     let prompt = prompt.trim();
     if (prompt.is_empty() && contour.is_empty()) || candidates.is_empty() || limit == 0 {
         return Ok(Selection {
-            pool_tracks: candidates.len(),
+            analysed_tracks: candidates.len(),
+            eligible_tracks: candidates.len(),
             ..Selection::default()
         });
     }
     let semantic = if prompt.is_empty() {
         None
     } else {
-        Some(semantic::embed_text(prompt).map_err(Error::Semantic)?)
+        Some(embed_request(prompt)?)
     };
-    Ok(walk(
-        &Request {
-            semantic: semantic.as_deref(),
-            contour,
-            seed: None,
-        },
+    let pool = eligible(semantic.as_deref(), candidates);
+    Ok(compose(
+        semantic.as_deref(),
+        &pool,
+        contour,
         candidates,
         limit,
         variation,
-        recently_offered,
     ))
+}
+
+/// **The second stage on its own**: walk a shape through an eligible set that
+/// has already been drawn.
+///
+/// Separated from [`select_contour`] because a caller converging on a target
+/// listening time walks the same pool several times with different lengths,
+/// and re-embedding the prompt once per attempt would pay for the text tower
+/// four times to answer one press. The pool is what is expensive to think
+/// about; the walk is cheap.
+#[must_use]
+pub fn compose(
+    request: Option<&[f32]>,
+    pool: &Pool,
+    contour: &Contour,
+    candidates: &[Candidate],
+    limit: usize,
+    variation: u64,
+) -> Selection {
+    walk(
+        &Request {
+            semantic: request,
+            contour,
+            seed: None,
+        },
+        pool,
+        candidates,
+        limit,
+        variation,
+    )
 }
 
 /// **Where every candidate sits on one dimension's axis** — −2…+2, in the
 /// order given.
 ///
-/// The scale is collection-relative by construction: the pool's own ranking
+/// The scale is pool-relative by construction: the given pool's own ranking
 /// stretched onto −2…+2, which is the same mapping the fit scores against. A
-/// surface can therefore draw the library behind a lane, and the chosen
+/// surface can therefore draw the eligible songs behind a lane, and the chosen
 /// tracks over it, without holding a second opinion about what *energetic*
 /// means.
 #[must_use]
@@ -506,10 +837,16 @@ pub fn levels(candidates: &[Candidate], dimension: Dimension) -> Vec<f32> {
         .collect()
 }
 
-/// How many candidates the walk gets to choose from, per track it will
-/// place. Five is enough room for the diversity rules to have somewhere to go
-/// and tight enough that the walk stays a walk rather than a search.
-const SHORTLIST_PER_TRACK: usize = 5;
+/// **How much of the pool the walk may hold in the room at once**, per track
+/// it will place.
+///
+/// With words this never fires: an eligible set is a few hundred tracks and
+/// the walk simply chooses from all of it, which is what makes *"moving the
+/// line reorders rather than re-selects"* literally true rather than nearly
+/// true. It exists for the shape-only request, whose pool is the whole
+/// analysed library and which cannot afford a scoring pass over tens of
+/// thousands of tracks per position.
+const SHORTLIST_PER_TRACK: usize = 32;
 
 /// Where a shaped request retrieves from: evenly along the list, one sample
 /// per track up to eight. Eight is more turns than a contour can have (the
@@ -540,9 +877,18 @@ struct Request<'a> {
     seed: Option<&'a PathBuf>,
 }
 
-/// How the cost is split between wanting the *right* music and wanting it in
-/// the *right order*. One row per kind of request, so adding the hybrid could
-/// not move the two that shipped before it.
+/// **How the cost inside the pool is split.**
+///
+/// Note what is *not* here any more: a three-way trade in which relevance and
+/// fit bid against each other. That trade is what made a lullaby eligible for
+/// a workout — at 0.45 relevance against 0.30 fit, a track that answered the
+/// words poorly could still take a slot by standing at the right height — and
+/// it is exactly the thing design 21 §3 promised could not happen.
+///
+/// Membership is now the words' job and position is the line's, so relevance
+/// does not buy position. It stays in the cost at a weight small enough to be
+/// only what it should be: a tiebreak between two tracks the line likes
+/// equally, both of which the words already let in.
 struct Weights {
     relevance: f32,
     fit: f32,
@@ -552,28 +898,23 @@ struct Weights {
 impl Weights {
     const VARIATION: f32 = 0.05;
 
-    const fn for_request(words: bool, shape: bool) -> Self {
-        match (words, shape) {
-            // Words alone: retrieval dominates and continuity keeps the walk
-            // from lurching between neighbours.
-            (true, false) => Self {
+    const fn for_request(shape: bool) -> Self {
+        if shape {
+            // The line decides where in the pool to be; relevance breaks ties
+            // and continuity keeps the walk from lurching between neighbours.
+            Self {
+                relevance: 0.05,
+                fit: 0.70,
+                continuity: 0.25,
+            }
+        } else {
+            // No line: nothing asks for a position, so the pool's own order is
+            // the order, softened by continuity.
+            Self {
                 relevance: 0.72,
                 fit: 0.0,
-                continuity: 0.23,
-            },
-            // A shape alone: the position's target *is* the retrieval.
-            (false, true) => Self {
-                relevance: 0.0,
-                fit: 0.67,
                 continuity: 0.28,
-            },
-            // Both: the words say what the pool is and the shape says where
-            // in it to be, so neither may drown the other.
-            _ => Self {
-                relevance: 0.45,
-                fit: 0.30,
-                continuity: 0.20,
-            },
+            }
         }
     }
 }
@@ -584,22 +925,34 @@ impl Weights {
     clippy::too_many_lines,
     reason = "one pass over one policy: shortlist, then a diversity-constrained walk"
 )]
-fn walk<S: std::hash::BuildHasher>(
+fn walk(
     request: &Request<'_>,
+    pool: &Pool,
     candidates: &[Candidate],
     limit: usize,
     variation: u64,
-    recently_offered: &HashSet<PathBuf, S>,
 ) -> Selection {
-    if candidates.is_empty() || limit == 0 {
+    if pool.is_empty() || limit == 0 {
         return Selection {
-            pool_tracks: candidates.len(),
+            analysed_tracks: candidates.len(),
+            eligible_tracks: pool.len(),
             ..Selection::default()
         };
     }
-    // One rank axis per dimension the request mentions, over this pool.
+    // **One rank axis per dimension the request mentions, over the eligible
+    // set** — not over the library.
+    //
+    // Plan 22 §1.3, decision 4. *How should it move* means *how should the
+    // music you asked for move*: the axis words stay true within the request,
+    // the line is always fillable, and a phrase whose whole answer is quiet
+    // still has a top and a bottom to climb between. The cost is that the same
+    // drawn line means a different absolute loudness for different phrases —
+    // but the axis was already collection-relative and never absolute, so this
+    // narrows what it is relative *to* rather than changing its kind.
+    let members = pool.ranked();
     let axes = Axes::over(
         request.contour.lanes.iter().map(|lane| lane.dimension),
+        members,
         candidates,
     );
     let seed = request.seed.and_then(|path| {
@@ -609,9 +962,9 @@ fn walk<S: std::hash::BuildHasher>(
             .map(|candidate| &candidate.features)
     });
     let max_seed_distance = seed.map_or(1.0, |seed| {
-        candidates
+        members
             .iter()
-            .map(|candidate| seed.distance(&candidate.features))
+            .map(|index| seed.distance(&candidates[*index].features))
             .fold(0.0_f32, f32::max)
             .max(f32::EPSILON)
     });
@@ -624,10 +977,7 @@ fn walk<S: std::hash::BuildHasher>(
         },
         |_| max_seed_distance,
     );
-    let weights = Weights::for_request(
-        request.semantic.is_some(),
-        !request.contour.is_empty() || seed.is_some(),
-    );
+    let weights = Weights::for_request(!request.contour.is_empty() || seed.is_some());
     let relevance = |candidate: &Candidate| {
         request
             .semantic
@@ -642,41 +992,33 @@ fn walk<S: std::hash::BuildHasher>(
             max_seed_distance,
         )
     };
-    let freshness = |candidate: &Candidate| {
-        if recently_offered.contains(&candidate.path) {
-            2.0
-        } else {
-            0.0
-        }
-    };
-    let shortlist_len = (limit.saturating_mul(SHORTLIST_PER_TRACK))
-        .max(limit)
-        .min(candidates.len());
-    // **The shortlist has to be able to answer the whole shape.**
+    // **Ordinarily the room *is* the pool.**
     //
-    // One global ranking cannot: with words *and* a line, relevance carries
-    // the larger weight, so the best `5 × limit` tracks are the most relevant
-    // ones — and if those all sit at one height, no walk over them can climb.
-    // That is precisely what the owner saw: *"the little dots seem to all be
-    // more or less in a line and not following my line."*
+    // An eligible set is a few hundred tracks, so the walk chooses from all of
+    // it and moving the line cannot change which tracks are present — which is
+    // what design 21 §3's answer to *"why did my change do nothing?"* asserts
+    // and what invariant I3 checks.
     //
-    // So a shaped request retrieves **per position**: the curve is sampled,
-    // each sample takes its own best few, and the union is what the walk
-    // chooses from. Every height the line asks for therefore has candidates
-    // in the room, and the walk's job goes back to being what it is — order
-    // and diversity — rather than making bricks without straw.
-    //
-    // A request with no shape keeps the single global ranking it always had.
-    let mut scored: Vec<(usize, f32)> = if request.contour.is_empty() {
-        let mut scored: Vec<(usize, f32)> = candidates
+    // The narrowing below fires only for a request with no words at all, whose
+    // pool is the whole analysed library. There, one global ranking would not
+    // do: if the best few thousand all sit at one height no walk over them can
+    // climb, which is exactly what the owner saw — *"the little dots seem to
+    // all be more or less in a line and not following my line."* So a shaped
+    // request narrows **per position**: the curve is sampled, each sample
+    // takes its own best few, and the union is the room, so every height the
+    // line asks for has candidates in it.
+    let shortlist_len = limit.saturating_mul(SHORTLIST_PER_TRACK).max(limit);
+    let mut scored: Vec<(usize, f32)> = if shortlist_len >= members.len() {
+        members.iter().map(|index| (*index, 0.0)).collect()
+    } else if request.contour.is_empty() {
+        let mut scored: Vec<(usize, f32)> = members
             .iter()
-            .enumerate()
-            .map(|(index, candidate)| {
+            .map(|index| {
                 (
-                    index,
-                    weights.relevance * relevance(candidate)
-                        + weights.fit * fit_at(candidate, 0.0)
-                        + freshness(candidate),
+                    *index,
+                    weights
+                        .relevance
+                        .mul_add(relevance(&candidates[*index]), 0.0),
                 )
             })
             .collect();
@@ -693,16 +1035,17 @@ fn walk<S: std::hash::BuildHasher>(
         let mut taken: HashSet<usize> = HashSet::new();
         let mut shortlist: Vec<(usize, f32)> = Vec::with_capacity(shortlist_len);
         for fraction in samples {
-            let mut at_position: Vec<(usize, f32)> = candidates
+            let mut at_position: Vec<(usize, f32)> = members
                 .iter()
-                .enumerate()
-                .filter(|(index, _)| !taken.contains(index))
-                .map(|(index, candidate)| {
+                .filter(|index| !taken.contains(*index))
+                .map(|index| {
+                    let candidate = &candidates[*index];
                     (
-                        index,
-                        weights.relevance * relevance(candidate)
-                            + weights.fit * fit_at(candidate, fraction)
-                            + freshness(candidate),
+                        *index,
+                        weights.relevance.mul_add(
+                            relevance(candidate),
+                            weights.fit * fit_at(candidate, fraction),
+                        ),
                     )
                 })
                 .collect();
@@ -763,16 +1106,10 @@ fn walk<S: std::hash::BuildHasher>(
                             previous.distance(&candidate.features) / transition_scale
                         }
                     });
-                    let freshness = if recently_offered.contains(&candidate.path) {
-                        2.0
-                    } else {
-                        0.0
-                    };
                     weights.relevance * relevance(candidate)
                         + weights.fit * fit_at(candidate, fraction)
                         + weights.continuity * continuity
                         + Weights::VARIATION * variation_noise(&candidate.path, variation)
-                        + freshness
                 };
                 cost(*left_index)
                     .total_cmp(&cost(*right_index))
@@ -798,33 +1135,77 @@ fn walk<S: std::hash::BuildHasher>(
             (low.min(tempo), high.max(tempo))
         })
     });
+    // One row per lane of the request, each holding that lane's level for
+    // every chosen track — the result in the request's own units, lane by
+    // lane, so a surface can draw each line's dots over its own line.
+    let level_of = |index: usize, lane: &Lane| {
+        axes.level(
+            lane.dimension,
+            candidates[index].features.value(lane.dimension),
+        )
+    };
+    let levels: Vec<Vec<f32>> = request
+        .contour
+        .lanes
+        .iter()
+        .map(|lane| chosen.iter().map(|&index| level_of(index, lane)).collect())
+        .collect();
+    let cloud: Vec<Vec<f32>> = request
+        .contour
+        .lanes
+        .iter()
+        .map(|lane| members.iter().map(|&index| level_of(index, lane)).collect())
+        .collect();
+    let blend = |rows: &[Vec<f32>], count: usize| blended(&request.contour.lanes, rows, count);
     Selection {
-        // One row per lane of the request, each holding that lane's level for
-        // every chosen track — the result in the request's own units, lane by
-        // lane, so a surface can draw each line's dots over its own line.
-        levels: request
-            .contour
-            .lanes
+        blended: blend(&levels, chosen.len()),
+        blended_cloud: blend(&cloud, members.len()),
+        // The engine says how well each chosen track answered the words, in
+        // both the forms a surface needs, so that a tick on a row is a reading
+        // of what selection did rather than a second opinion computed in the
+        // view.
+        matches: chosen
             .iter()
-            .map(|lane| {
-                chosen
-                    .iter()
-                    .map(|&index| {
-                        axes.level(
-                            lane.dimension,
-                            candidates[index].features.value(lane.dimension),
-                        )
-                    })
-                    .collect()
+            .filter_map(|&index| {
+                Some(Match {
+                    similarity: pool.similarity(index)?,
+                    strength: pool.strength(index)?,
+                })
             })
             .collect(),
+        levels,
+        cloud,
         paths: chosen
             .into_iter()
             .map(|index| candidates[index].path.clone())
             .collect(),
-        pool_tracks: candidates.len(),
+        analysed_tracks: candidates.len(),
+        eligible_tracks: members.len(),
         tempo_span,
     }
+}
+
+/// **The lanes collapsed by their own weights** — one level per column of
+/// `rows`, which is what the single blended line draws.
+///
+/// The arithmetic lives here rather than in a view because design 21 §5's
+/// consistency claim is a property of the engine's own numbers: give every
+/// lane the same curve and this returns that curve, whatever the weights are.
+fn blended(lanes: &[Lane], rows: &[Vec<f32>], count: usize) -> Vec<f32> {
+    let total: f32 = lanes.iter().map(|lane| lane.weight).sum();
+    if rows.is_empty() || total <= f32::EPSILON {
+        return Vec::new();
+    }
+    (0..count)
+        .map(|column| {
+            lanes
+                .iter()
+                .zip(rows)
+                .map(|(lane, row)| lane.weight * row.get(column).copied().unwrap_or(0.0))
+                .sum::<f32>()
+                / total
+        })
+        .collect()
 }
 
 /// The profiles a journey names, as the contour they always described: one
@@ -864,16 +1245,10 @@ fn profiles_as_contour(profiles: &[Profile]) -> Contour {
     }
     let mut lanes = Vec::new();
     if !energy.is_empty() {
-        lanes.push(Lane {
-            dimension: Dimension::Energy,
-            points: energy,
-        });
+        lanes.push(Lane::new(Dimension::Energy, energy));
     }
     if !brightness.is_empty() {
-        lanes.push(Lane {
-            dimension: Dimension::Brightness,
-            points: brightness,
-        });
+        lanes.push(Lane::new(Dimension::Brightness, brightness));
     }
     Contour { lanes }
 }
@@ -882,21 +1257,24 @@ fn profiles_as_contour(profiles: &[Profile]) -> Contour {
 ///
 /// An axis with no target does not enter the average, which is what makes an
 /// unconstrained line cost nothing rather than pull everything to the middle.
-/// A seed, where one is given, is worth one and a half axes: it is a whole
-/// feature vector rather than a single number.
+/// Each axis counts for its lane's own weight, which is what makes the blended
+/// default line a *weighted* mean with energy dominant rather than the plain
+/// average design 21 §5 rejects. A seed, where one is given, is worth one and
+/// a half axes: it is a whole feature vector rather than a single number.
 fn target_fit(
     candidate: &Candidate,
-    targets: &[(Dimension, Option<f32>)],
+    targets: &[(Dimension, Option<f32>, f32)],
     axes: &Axes,
     seed: Option<&Features>,
     max_seed_distance: f32,
 ) -> f32 {
     let mut score = 0.0_f32;
     let mut weights = 0.0_f32;
-    for (dimension, target) in targets {
+    for (dimension, target, weight) in targets {
         if let Some(target) = target {
-            score += axes.distance(*dimension, candidate.features.value(*dimension), *target);
-            weights += 1.0;
+            score +=
+                weight * axes.distance(*dimension, candidate.features.value(*dimension), *target);
+            weights += weight;
         }
     }
     if let Some(seed) = seed {
@@ -912,15 +1290,20 @@ struct Axes {
 }
 
 impl Axes {
-    /// Build the axes the request needs, over the pool it will choose from.
-    fn over(dimensions: impl Iterator<Item = Dimension>, candidates: &[Candidate]) -> Self {
+    /// Build the axes the request needs, over the eligible set it will choose
+    /// from — `members` indexes `candidates`.
+    fn over(
+        dimensions: impl Iterator<Item = Dimension>,
+        members: &[usize],
+        candidates: &[Candidate],
+    ) -> Self {
         let mut axes = HashMap::new();
         for dimension in dimensions {
             axes.entry(dimension).or_insert_with(|| {
                 Axis::of(
-                    candidates
+                    members
                         .iter()
-                        .map(|candidate| candidate.features.value(dimension)),
+                        .map(|index| candidates[*index].features.value(dimension)),
                 )
             });
         }
@@ -1046,8 +1429,6 @@ pub struct Prepared {
     pub ready: HashMap<PathBuf, Features>,
     /// Missing or stale paths, in the caller's library order.
     pub pending: Vec<PathBuf>,
-    /// Most recently offered generated tracks, newest last.
-    pub recently_offered: Vec<PathBuf>,
 }
 
 /// Analysis/cache failure. A single unreadable track is recoverable by the
@@ -1132,9 +1513,6 @@ pub fn prepare(store_path: &Path, paths: Vec<PathBuf>) -> Result<Prepared, Error
     let store = Store::open(store_path)?;
     let mut prepared = Prepared::default();
     for path in paths {
-        if store.was_recently_offered(&path)? {
-            prepared.recently_offered.push(path.clone());
-        }
         let Ok(stamp) = Stamp::read(&path) else {
             prepared.pending.push(path);
             continue;
@@ -1147,31 +1525,6 @@ pub fn prepare(store_path: &Path, paths: Vec<PathBuf>) -> Result<Prepared, Error
         }
     }
     Ok(prepared)
-}
-
-/// Persist a bounded freshness history so a conspicuously strong match does
-/// not dominate generated playlists after Baz restarts.
-///
-/// # Errors
-///
-/// Returns a cache error if the disposable local index cannot be updated.
-pub fn remember_offered(store_path: &Path, paths: &[PathBuf]) -> Result<(), Error> {
-    let store = Store::open(store_path)?;
-    for path in paths {
-        store.connection.execute(
-            "INSERT INTO recent_offers(path, offered_order)
-             VALUES (?1, (SELECT COALESCE(MAX(offered_order), 0) + 1 FROM recent_offers))
-             ON CONFLICT(path) DO UPDATE SET offered_order=excluded.offered_order",
-            [path_bytes(path)],
-        )?;
-    }
-    store.connection.execute(
-        "DELETE FROM recent_offers WHERE path NOT IN (
-             SELECT path FROM recent_offers ORDER BY offered_order DESC LIMIT 128
-         )",
-        [],
-    )?;
-    Ok(())
 }
 
 /// Decode, analyze and persist one track. Intended for a cancellable sequence
@@ -1247,10 +1600,6 @@ impl Store {
                  values_blob BLOB NOT NULL,
                  semantic_blob BLOB
              );
-             CREATE TABLE IF NOT EXISTS recent_offers (
-                 path BLOB PRIMARY KEY NOT NULL,
-                 offered_order INTEGER NOT NULL
-             );
              ",
         )?;
         if found < 2 {
@@ -1265,18 +1614,6 @@ impl Store {
         }
         connection.execute_batch(&format!("PRAGMA user_version={STORE_VERSION};"))?;
         Ok(Self { connection })
-    }
-
-    fn was_recently_offered(&self, path: &Path) -> Result<bool, Error> {
-        self.connection
-            .query_row(
-                "SELECT 1 FROM recent_offers WHERE path = ?1",
-                [path_bytes(path)],
-                |_| Ok(true),
-            )
-            .optional()
-            .map(Option::unwrap_or_default)
-            .map_err(Error::Store)
     }
 
     fn current(&self, path: &Path, stamp: Stamp) -> Result<Option<Features>, Error> {
@@ -1423,6 +1760,248 @@ mod tests {
         }
     }
 
+    /// A candidate whose *words* answer at a stated strength: the semantic
+    /// vector is placed at angle `angle` in one plane, so its cosine against
+    /// the request below is exactly `angle.cos()` and a library can be given a
+    /// distribution to find a knee in.
+    fn worded(path: &str, album: u64, energy: f32, angle: f32) -> Candidate {
+        let mut candidate = synthetic(path, album, &format!("Artist {album}"), energy, energy);
+        candidate.features.semantic = {
+            let mut semantic = vec![0.0; 512];
+            semantic[0] = angle.cos();
+            semantic[1] = angle.sin();
+            semantic
+        };
+        candidate
+    }
+
+    /// The request `worded` is answered at: the first axis of that plane.
+    fn request() -> Vec<f32> {
+        let mut request = vec![0.0; 512];
+        request[0] = 1.0;
+        request
+    }
+
+    /// A library with a real similarity distribution and a real spread of
+    /// energies — enough of both for the knee to have something to find.
+    fn library(count: u64) -> Vec<Candidate> {
+        #[expect(clippy::cast_precision_loss, reason = "a bounded fixture count")]
+        (0..count)
+            .map(|index| {
+                let through = index as f32 / count as f32;
+                worded(
+                    &format!("/track-{index}"),
+                    index,
+                    (through - 0.5) * 1.8,
+                    // A steep head and a long shoulder, which is the shape a
+                    // real retrieval curve has.
+                    through.powi(2) * 1.4,
+                )
+            })
+            .collect()
+    }
+
+    /// A rising line, drawn as the blend.
+    fn rising() -> Contour {
+        Contour::blended(&[
+            ContourPoint {
+                at: 0.0,
+                level: -1.6,
+            },
+            ContourPoint {
+                at: 1.0,
+                level: 1.6,
+            },
+        ])
+    }
+
+    fn falling() -> Contour {
+        Contour::blended(&[
+            ContourPoint {
+                at: 0.0,
+                level: 1.6,
+            },
+            ContourPoint {
+                at: 1.0,
+                level: -1.6,
+            },
+        ])
+    }
+
+    fn composed(
+        contour: &Contour,
+        pool: &Pool,
+        candidates: &[Candidate],
+        limit: usize,
+    ) -> Selection {
+        walk(
+            &Request {
+                semantic: Some(&request()),
+                contour,
+                seed: None,
+            },
+            pool,
+            candidates,
+            limit,
+            0,
+        )
+    }
+
+    /// **I1 — the words let it in.** Every chosen track is in the eligible set,
+    /// which is design 21 §3's first sentence and was not true before: the old
+    /// walk scored one blended cost over the whole library, so relevance and
+    /// fit traded, and a track could win a slot by standing at the right
+    /// height however poorly it answered the words.
+    #[test]
+    fn every_chosen_track_is_one_the_words_let_in() {
+        let candidates = library(400);
+        let pool = eligible(Some(&request()), &candidates);
+        assert!(pool.len() < candidates.len(), "the words excluded nothing");
+        assert!(pool.len() >= KNEE_FLOOR);
+        let eligible_paths: HashSet<&PathBuf> = pool
+            .ranked()
+            .iter()
+            .map(|index| &candidates[*index].path)
+            .collect();
+        for contour in [rising(), falling()] {
+            let selection = composed(&contour, &pool, &candidates, 18);
+            assert!(!selection.paths.is_empty());
+            for path in &selection.paths {
+                assert!(
+                    eligible_paths.contains(path),
+                    "{} was chosen without being eligible",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    /// **I3 — the line does not re-select the pool.** Move the curve with the
+    /// words held still and the eligible set is identical, count and cloud
+    /// alike. This is what makes design 21 §3's answer to *"why did my change
+    /// do nothing?"* — *"you moved the line, which reorders rather than
+    /// re-selects"* — a description rather than a claim.
+    #[test]
+    fn moving_the_line_does_not_change_what_is_eligible() {
+        let candidates = library(400);
+        let pool = eligible(Some(&request()), &candidates);
+        let up = composed(&rising(), &pool, &candidates, 18);
+        let down = composed(&falling(), &pool, &candidates, 18);
+        assert_eq!(up.eligible_tracks, down.eligible_tracks);
+        assert_eq!(up.cloud[0].len(), down.cloud[0].len());
+        let sorted = |cloud: &[f32]| {
+            let mut values = cloud.to_vec();
+            values.sort_by(f32::total_cmp);
+            values
+        };
+        assert_eq!(sorted(&up.cloud[0]), sorted(&down.cloud[0]));
+        // …and the result really did move, or the invariant is vacuous.
+        assert_ne!(up.paths, down.paths);
+    }
+
+    /// **I4 — a small pool is honest.** When the eligible set is no larger
+    /// than the list being built, moving the line changes the order and never
+    /// the membership. This is the one case where *"reorders rather than
+    /// re-selects"* must be literally, exactly true.
+    #[test]
+    fn a_pool_no_bigger_than_the_list_only_ever_reorders() {
+        let candidates = library(10);
+        let pool = eligible(Some(&request()), &candidates);
+        assert_eq!(pool.len(), candidates.len(), "a small library is all pool");
+        let up = composed(&rising(), &pool, &candidates, 10);
+        let down = composed(&falling(), &pool, &candidates, 10);
+        let members = |selection: &Selection| {
+            let mut paths = selection.paths.clone();
+            paths.sort();
+            paths
+        };
+        assert_eq!(members(&up), members(&down), "membership moved");
+        assert_ne!(up.paths, down.paths, "and nothing was reordered");
+    }
+
+    /// **I5 — no padding.** A result is never longer than the pool supports,
+    /// however many positions were asked for. Design 21 §12: *a request the
+    /// library cannot fill returns fewer songs and says why.*
+    #[test]
+    fn a_result_never_outgrows_the_pool_it_came_from() {
+        let candidates = library(10);
+        let pool = eligible(Some(&request()), &candidates);
+        let selection = composed(&rising(), &pool, &candidates, 40);
+        assert!(selection.paths.len() <= pool.len());
+        assert!(selection.paths.len() <= 10);
+        assert_eq!(selection.eligible_tracks, pool.len());
+        assert_eq!(selection.matches.len(), selection.paths.len());
+    }
+
+    /// **The blend is consistent under weighting.** Set every dimension to one
+    /// curve and the weighted mean is that curve, whatever the weights are —
+    /// which is what lets design 21 §5's expander *reveal* the per-dimension
+    /// lines rather than seed them, and what makes "one line" and "five lines
+    /// holding one curve" the same request.
+    ///
+    /// Design 21 §5 predicted this would be simplified away later by somebody
+    /// who did not know why it held. This is the pin.
+    #[test]
+    fn a_blend_of_one_curve_is_that_curve() {
+        let candidates = library(200);
+        let pool = eligible(Some(&request()), &candidates);
+        let contour = rising();
+        assert_eq!(contour.lanes.len(), Dimension::ALL.len());
+        let selection = composed(&contour, &pool, &candidates, 12);
+        // Every lane holds the same curve, so the blend of the lanes' results
+        // is the mean of identical inputs — per track, exactly.
+        for (position, blended) in selection.blended.iter().enumerate() {
+            let lane_levels: Vec<f32> = selection.levels.iter().map(|row| row[position]).collect();
+            let weighted: f32 = Contour::BLEND
+                .iter()
+                .zip(&lane_levels)
+                .map(|(weight, level)| weight * level)
+                .sum::<f32>()
+                / Contour::BLEND.iter().sum::<f32>();
+            assert!(
+                (blended - weighted).abs() < 0.0001,
+                "position {position}: {blended} against {weighted}"
+            );
+        }
+        // …and the weights are what design 21 §5 asked for: energy dominant,
+        // summing to one, so the identity above holds for any of them.
+        assert!((Contour::BLEND.iter().sum::<f32>() - 1.0).abs() < 0.0001);
+        assert!(
+            Contour::BLEND
+                .iter()
+                .skip(1)
+                .all(|weight| *weight < Contour::BLEND[0])
+        );
+    }
+
+    /// **The pool's own terciles**, and nothing absolute. The strongest third
+    /// of what the words let in reads as three ticks whatever the phrase's
+    /// cosines happen to be, which is what keeps the picture stable while the
+    /// underlying numbers drift.
+    #[test]
+    fn match_strength_is_a_place_in_the_pool_rather_than_a_score() {
+        let candidates = library(400);
+        let pool = eligible(Some(&request()), &candidates);
+        let ranked = pool.ranked().to_vec();
+        assert_eq!(pool.strength(ranked[0]), Some(Strength::Strong));
+        assert_eq!(
+            pool.strength(ranked[ranked.len() - 1]),
+            Some(Strength::Weak)
+        );
+        assert_eq!(Strength::Strong.ticks(), 3);
+        assert_eq!(Strength::Weak.ticks(), 1);
+        // Every third is populated rather than one bucket taking everything.
+        let mut seen = [0_usize; 3];
+        for index in &ranked {
+            seen[usize::from(pool.strength(*index).expect("eligible").ticks()) - 1] += 1;
+        }
+        assert!(seen.iter().all(|count| *count > 0), "{seen:?}");
+        // A request with no words has no match strength to report.
+        let shapeless = eligible(None, &candidates);
+        assert_eq!(shapeless.len(), candidates.len());
+        assert_eq!(shapeless.strength(ranked[0]), None);
+    }
+
     #[test]
     fn controls_rank_real_features_then_diversify_the_sequence() {
         let candidates = vec![
@@ -1466,7 +2045,7 @@ mod tests {
                 .len(),
             3
         );
-        assert_eq!(selection.pool_tracks, 5);
+        assert_eq!(selection.analysed_tracks, 5);
     }
 
     #[test]
@@ -1699,8 +2278,8 @@ mod tests {
                 },
             ],
         );
-        let selection = select_contour("", &contour, &candidates, 8, 0, &HashSet::new())
-            .expect("no prompt needs no model");
+        let selection =
+            select_contour("", &contour, &candidates, 8, 0).expect("no prompt needs no model");
         assert_eq!(selection.paths.len(), 8);
         let energy = selection.levels.first().expect("one lane, one row");
         assert_eq!(energy.len(), selection.paths.len());
@@ -1782,8 +2361,8 @@ mod tests {
                 },
             ],
         );
-        let selection = select_contour("", &contour, &candidates, 10, 0, &HashSet::new())
-            .expect("no prompt needs no model");
+        let selection =
+            select_contour("", &contour, &candidates, 10, 0).expect("no prompt needs no model");
         let energy = selection.levels.first().expect("one lane, one row");
         let opening = *energy.first().expect("an opening");
         let landing = *energy.last().expect("a landing");
@@ -1825,8 +2404,7 @@ mod tests {
                 level: 2.0,
             }],
         );
-        let selection =
-            select_contour("", &loud, &candidates, 2, 0, &HashSet::new()).expect("no prompt");
+        let selection = select_contour("", &loud, &candidates, 2, 0).expect("no prompt");
         assert!(!selection.paths.contains(&PathBuf::from("/dark-calm")));
         assert_eq!(selection.paths.len(), 2, "both loud tracks, either order");
     }
@@ -1854,8 +2432,18 @@ mod tests {
         assert_ne!(first.paths, another.paths);
     }
 
+    /// **I2 — the same request twice is the same list.**
+    ///
+    /// This replaces `recent_previews_do_not_keep_winning_new_mixes`, and the
+    /// swap is the point. That test pinned a +2.0 penalty on recently offered
+    /// tracks — against weights summing to under one, a ban rather than a
+    /// tiebreak — applied invisibly on every compose. Design 21 §4 promises
+    /// *"no hidden state, nothing accumulating out of sight"*, and §6's diff
+    /// sentence has to be able to say *"identical, because nothing changed"*
+    /// and be right. Variation is a visible press now, and it is the seed that
+    /// carries it.
     #[test]
-    fn recent_previews_do_not_keep_winning_new_mixes() {
+    fn an_unchanged_request_returns_an_identical_list() {
         let candidates: Vec<_> = (0_u64..12)
             .map(|index| {
                 synthetic(
@@ -1873,9 +2461,11 @@ mod tests {
             seed: None,
         };
         let first = select_journey(std::slice::from_ref(&profile), &candidates, 6, 0);
-        let recent: HashSet<PathBuf> = first.paths.iter().cloned().collect();
-        let next = select_journey_avoiding(&[profile], &candidates, 6, 1, &recent);
-        assert!(next.paths.iter().all(|path| !recent.contains(path)));
+        let again = select_journey(std::slice::from_ref(&profile), &candidates, 6, 0);
+        assert_eq!(first.paths, again.paths, "the same request twice");
+        // …and the visible press is what changes it.
+        let another = select_journey(&[profile], &candidates, 6, 1);
+        assert_ne!(first.paths, another.paths, "another version");
     }
 
     #[test]
@@ -1930,30 +2520,19 @@ mod tests {
     }
 
     #[test]
-    fn generated_track_freshness_survives_reopening_the_index() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let audio = dir.path().join("track.wav");
-        let store = dir.path().join("vibe.db");
-        write_wave(&audio, 44_100);
-        remember_offered(&store, std::slice::from_ref(&audio)).expect("remember");
-        let prepared = prepare(&store, vec![audio.clone()]).expect("reopen");
-        assert_eq!(prepared.recently_offered, [audio]);
-    }
-
-    #[test]
     fn a_newer_store_is_refused_without_stamping_it_backwards() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = dir.path().join("vibe.db");
         let connection = Connection::open(&store).expect("store");
         connection
-            .execute_batch("PRAGMA user_version=3")
+            .execute_batch("PRAGMA user_version=4")
             .expect("future version");
         drop(connection);
 
         assert!(matches!(
             prepare(&store, Vec::new()),
             Err(Error::UnsupportedStoreVersion {
-                found: 3,
+                found: 4,
                 supported: STORE_VERSION
             })
         ));
@@ -1961,7 +2540,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     fn write_wave(path: &Path, frames: usize) {
