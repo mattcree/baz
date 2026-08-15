@@ -130,7 +130,7 @@ pub(crate) fn view<'a>(
         );
     }
 
-    let ask = ask::view(shelf, playlists, stage, layout);
+    let ask = ask::view(shelf, stage, layout);
     let answer = column![
         shape::view(vibe, layout),
         result::view(shelf, playlists, stage, layout),

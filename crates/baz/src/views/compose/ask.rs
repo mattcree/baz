@@ -18,16 +18,10 @@ use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
-use crate::playlists::Playlists;
 use crate::views::compose::{Layout, Stage, chip, heading, wrap_chips};
 use crate::{theme, views};
 
-pub(crate) fn view<'a>(
-    shelf: &'a Shelf,
-    playlists: &'a Playlists,
-    stage: Stage,
-    layout: Layout,
-) -> Element<'a, Message> {
+pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
     let mut band = column![
@@ -94,7 +88,7 @@ pub(crate) fn view<'a>(
 
     band = band
         .push(Space::new().height(theme::GAP_SM))
-        .push(commitment(shelf, playlists, stage, layout));
+        .push(commitment(shelf, stage, layout));
     container(band).width(Length::Fill).into()
 }
 
@@ -166,12 +160,7 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
 /// Its words change with what it can actually do. On a library baz has never
 /// heard it says so and offers to listen; while it is listening it says how
 /// much it can already compose from, which is true at every point of the bar.
-fn commitment<'a>(
-    shelf: &'a Shelf,
-    playlists: &'a Playlists,
-    stage: Stage,
-    _layout: Layout,
-) -> Element<'a, Message> {
+fn commitment(shelf: &Shelf, stage: Stage, _layout: Layout) -> Element<'_, Message> {
     let vibe = &shelf.vibe;
     let ready = vibe.done.saturating_sub(vibe.failed);
     let (label, message) = match stage {
@@ -230,7 +219,6 @@ fn commitment<'a>(
                 .spacing(theme::GAP_SM),
             );
     }
-    let _ = playlists;
     // **The other way to make a playlist**, as a quiet act rather than as a
     // fork asked before anything is shown. One press either way, and nobody
     // has to classify themselves to see the page.

@@ -41,7 +41,6 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::player::PlayerState;
 use crate::playlists::{CreationMode, Playlists};
 use crate::vm::QueueItemVm;
 use crate::{theme, views};
@@ -49,7 +48,6 @@ use crate::{theme, views};
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
-    player: &'a PlayerState,
     size: iced::Size,
 ) -> Element<'a, Message> {
     let width = size.width;
@@ -74,7 +72,6 @@ pub(crate) fn view<'a>(
         // form: two panes, its own states, its own readouts. It draws its own
         // scroller, so it returns before this one wraps the body.
         None | Some(CreationMode::Vibe) => {
-            let _ = player;
             return column![header, views::compose::view(shelf, playlists, size)].into();
         }
     };

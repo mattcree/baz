@@ -4205,9 +4205,18 @@ impl App {
                 {
                     state.vibe.start_from(*recipe);
                     // The suggested name follows the words, exactly as typing
-                    // them would — a recipe is the form filled in, not a
-                    // second way of asking.
+                    // them would — a mood is the form filled in, not a second
+                    // way of asking.
                     self.playlists.suggest_creation_name(recipe.prompt);
+                    // **One press to a list**, which design 21 §11 calls the
+                    // strongest moment in the feature — and only once there is
+                    // something to compose from, because a press that composed
+                    // nothing would be a worse first moment than a press that
+                    // filled the form.
+                    if state.vibe.has_features() && !state.vibe.preparing {
+                        let (albums, chosen) = (&state.albums, &state.edition_choice);
+                        state.vibe.create(albums, chosen);
+                    }
                 }
                 Some(Task::none())
             }
@@ -6892,7 +6901,6 @@ impl App {
             (Screen::Shelf(state), Place::NewPlaylist) => views::new_playlist::view(
                 state,
                 &self.playlists,
-                &self.player,
                 iced::Size::new(self.body_width(), self.body_height()),
             ),
             (Screen::Shelf(state), Place::Favourites) => views::favourites::view(

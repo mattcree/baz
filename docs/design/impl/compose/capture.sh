@@ -104,8 +104,11 @@ sleep 8
 move 1400 940
 shot "04-ready"
 
-# **4 · Asked.** A starting point writes into the one input there is.
-click 323 307
+# **4 · Asked.** A starting point writes into the one input there is. The
+# coordinate assumes the count and its three closest titles are already
+# standing above the chips, which they are by this point in the run — the
+# band grows downward as the readouts arrive.
+click 323 387
 sleep 3
 move 1400 940
 shot "05-started-from-a-mood"
