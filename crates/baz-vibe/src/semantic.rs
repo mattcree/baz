@@ -411,11 +411,7 @@ mod tests {
             .position(|path| path.ends_with("Contents/Resources/models/vibe"));
         assert!(plain < bundled, "{candidates:?}");
         // An explicit override still wins over everything.
-        let forced = model_candidates(
-            Some(PathBuf::from("/tmp/models")),
-            Some(executable),
-            None,
-        );
+        let forced = model_candidates(Some(PathBuf::from("/tmp/models")), Some(executable), None);
         assert_eq!(forced.first(), Some(&PathBuf::from("/tmp/models")));
     }
 

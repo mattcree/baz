@@ -5,11 +5,18 @@
 //! but contains no analyzer dependency or model/runtime payload.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+#[cfg(feature = "vibe-analysis")]
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::vm::{self, AlbumVm, EditionKey, QueueItemVm};
 
 /// An ordinary generated mix is deliberately bounded and editable.
+///
+/// Behind the feature because the light build has no generator to bound: it
+/// keeps the same Home seam and contains no analyser at all, and a constant
+/// nothing can reach is a constant nobody maintains.
+#[cfg(feature = "vibe-analysis")]
 pub(crate) const PLAYLIST_CAP: usize = 64;
 
 #[cfg(feature = "vibe-analysis")]
@@ -1479,11 +1486,6 @@ impl State {
         field_of(blended.into_iter().map(|level| level / total))
     }
 
-    #[cfg(not(feature = "vibe-analysis"))]
-    fn cloud_of<'a>(&self, _members: impl Iterator<Item = &'a Path>) -> Vec<f32> {
-        Vec::new()
-    }
-
     /// The light build has no tower to ask.
     #[cfg(not(feature = "vibe-analysis"))]
     pub(crate) fn accept_embedding(
@@ -2028,6 +2030,10 @@ fn generate(
 }
 
 /// Name shown for the current seed without exposing a full path in Home.
+///
+/// Its one caller is `compact_track_name`, which shortens an analysis failure
+/// for a listener — so it belongs to the build that can fail an analysis.
+#[cfg(feature = "vibe-analysis")]
 pub(crate) fn seed_name(path: &Path) -> &str {
     path.file_stem()
         .and_then(|name| name.to_str())
