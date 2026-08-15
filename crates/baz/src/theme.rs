@@ -4174,6 +4174,67 @@ pub fn selectable_track_row(
     }
 }
 
+/// The same card as [`selectable_track_row`], as a **container** style.
+///
+/// A track row is not only its press target: on three of baz's surfaces it
+/// carries trailing controls — a heart, a `+`, the ▲▼✕ of an editable list —
+/// that sit *beside* the pressable body rather than inside it. Painting the
+/// card from the button therefore stopped the highlight short of the controls,
+/// and a listener saw a lit row with two unlit icons hanging off its end
+/// (BACKLOG item 53). Drawing the card from a container that holds the whole
+/// row fixes the picture without touching what a press means: the body keeps
+/// its own press and the controls keep theirs, and no control is nested inside
+/// another control's bounds.
+///
+/// The pointer's answer arrives as a `bool` because a container has no
+/// `Status`. That costs nothing: every surface that uses this already tracks
+/// which row the pointer is on — `hovered_queue_row` and its two siblings —
+/// for the reserved slots, so this reads the one answer that already exists.
+#[must_use]
+pub fn track_row_card(
+    p: &Palette,
+    ground: Color,
+    hovered: bool,
+    playing: bool,
+    selected: bool,
+) -> container::Style {
+    let status = if hovered {
+        button::Status::Hovered
+    } else {
+        button::Status::Active
+    };
+    let card = selectable_track_row(p, ground, status, playing, selected);
+    container::Style {
+        text_color: None,
+        background: card.background,
+        border: card.border,
+        shadow: card.shadow,
+        snap: true,
+    }
+}
+
+/// A track row's **press target**, carrying no paint of its own.
+///
+/// The card behind it is [`track_row_card`]'s. This exists so that the body and
+/// the card cannot disagree about which row is lit: there is one background in
+/// the row and one function that decides it.
+#[must_use]
+pub fn track_row_body(p: &Palette) -> button::Style {
+    button::Style {
+        snap: true,
+        background: None,
+        // The row's inks are set per-line by the view; this is the inherited
+        // default for anything that states none, exactly as before.
+        text_color: p.paper,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // New tokens for surfaces landing in the visual redesign
 //
@@ -4919,6 +4980,43 @@ pub fn status_dot(tone: Color) -> container::Style {
             ..Border::default()
         },
         ..container::Style::default()
+    }
+}
+
+#[cfg(test)]
+mod row_card_tests {
+    use super::{Room, button, track_row_body, track_row_card};
+
+    /// **The card and the body cannot disagree about which row is lit.**
+    ///
+    /// A track row's paint moved off its button and onto a container behind
+    /// the whole row (item 53), which is two functions where there was one.
+    /// This pins them to the same source: the container's background for a
+    /// hovered row is exactly the button's, and the button now paints nothing.
+    #[test]
+    fn a_rows_card_paints_what_its_button_used_to() {
+        let room = Room::ClosingTime.palette();
+        for (playing, selected) in [(false, false), (false, true), (true, false)] {
+            for hovered in [false, true] {
+                let status = if hovered {
+                    button::Status::Hovered
+                } else {
+                    button::Status::Active
+                };
+                let was = super::selectable_track_row(room, room.wall, status, playing, selected);
+                let now = track_row_card(room, room.wall, hovered, playing, selected);
+                assert_eq!(
+                    format!("{:?}", was.background),
+                    format!("{:?}", now.background),
+                    "hovered {hovered}, playing {playing}, selected {selected}"
+                );
+                assert_eq!(format!("{:?}", was.border), format!("{:?}", now.border));
+            }
+        }
+        assert!(
+            track_row_body(room).background.is_none(),
+            "the body must paint nothing, or two backgrounds stack"
+        );
     }
 }
 

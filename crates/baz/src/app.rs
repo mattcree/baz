@@ -617,11 +617,29 @@ pub(crate) enum Message {
     /// One second of the sleep timer's own clock, which exists only while it
     /// is armed.
     SleepTimerTick,
-    /// **The pointer entered or left one row of the composed preview**, so
-    /// the contour can light that track's own place on the line. The owner:
-    /// *"when we hover the playlist items it is showing where on the curve
-    /// it's meant to be… so a person can see it really worked."*
-    VibePreviewHovered(Option<usize>),
+    /// **The pointer entered one row of the composed preview**, so the contour
+    /// can light that track's own place on the line. The owner: *"when we
+    /// hover the playlist items it is showing where on the curve it's meant to
+    /// be… so a person can see it really worked."*
+    VibePreviewEntered(usize),
+    /// **…and left it**, guarded by the row it names — see
+    /// [`Self::DraftRowLeft`] for why the two cross.
+    VibePreviewLeft(usize),
+    /// **The pointer entered one row of the manual draft**, so the row's card
+    /// can reach its editing controls. The same toolkit limit
+    /// [`Self::QueueRowEntered`] works around, on the one draft list that had
+    /// no hover answer of its own.
+    DraftRowEntered(usize),
+    /// **…and left it.** Separate from the enter, and guarded by the row it
+    /// names, because the two cross: moving from row 3 to row 4 delivers
+    /// row 4's enter *before* row 3's exit, so an exit that cleared the state
+    /// unconditionally would unlight the row the pointer is actually on.
+    DraftRowLeft(usize),
+    /// **The pointer entered one row of Favourites**, for the same reason as
+    /// [`Self::DraftRowEntered`].
+    FavouriteRowEntered(usize),
+    /// **…and left it**, guarded exactly as [`Self::DraftRowLeft`] is.
+    FavouriteRowLeft(usize),
     /// **Start from one of the offered moods** — its words, its shape and its
     /// length, all of which stay editable. The owner: *"as part of the wizard
     /// we should be asking users if they want to make a preset one."*
@@ -1331,6 +1349,9 @@ struct App {
     /// Which track row of the **record's page** the pointer is on — the same
     /// mechanism again, for the row's reserved `+` slot (ADR-0024 §6).
     hovered_album_row: Option<usize>,
+    /// Which row of the built-in **Favourites** place the pointer is on — the
+    /// same mechanism again, so the row's card reaches its heart.
+    hovered_favourite_row: Option<usize>,
     /// The reorder drag in flight, `None` at rest ([`crate::drag`],
     /// doc 09 §13 step 8). **One `Option` is the whole gesture state** —
     /// the menu's own construction — so one drag at a time is structural,
@@ -1947,6 +1968,7 @@ impl App {
             playlists_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
+            hovered_favourite_row: None,
             drag: None,
             queue_undo: crate::undo::History::new(),
             menu: None,
@@ -4024,9 +4046,37 @@ impl App {
             // the listener asks for it. It exists so the widget has one
             // message to publish on release rather than a silent edge.
             Message::ContourReleased => Some(Task::none()),
-            Message::VibePreviewHovered(row) => {
+            Message::FavouriteRowEntered(row) => {
+                self.hovered_favourite_row = Some(*row);
+                Some(Task::none())
+            }
+            Message::FavouriteRowLeft(row) => {
+                if self.hovered_favourite_row == Some(*row) {
+                    self.hovered_favourite_row = None;
+                }
+                Some(Task::none())
+            }
+            Message::DraftRowEntered(row) => {
+                self.playlists.creation.hovered_row = Some(*row);
+                Some(Task::none())
+            }
+            Message::DraftRowLeft(row) => {
+                if self.playlists.creation.hovered_row == Some(*row) {
+                    self.playlists.creation.hovered_row = None;
+                }
+                Some(Task::none())
+            }
+            Message::VibePreviewEntered(row) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.hover_row(*row);
+                    state.vibe.hover_row(Some(*row));
+                }
+                Some(Task::none())
+            }
+            Message::VibePreviewLeft(row) => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && state.vibe.hovered_row == Some(*row)
+                {
+                    state.vibe.hover_row(None);
                 }
                 Some(Task::none())
             }
@@ -6722,9 +6772,12 @@ impl App {
             (Screen::Shelf(state), Place::NewPlaylist) => {
                 views::new_playlist::view(state, &self.playlists, &self.player, self.body_width())
             }
-            (Screen::Shelf(state), Place::Favourites) => {
-                views::favourites::view(state, &self.player, self.body_width())
-            }
+            (Screen::Shelf(state), Place::Favourites) => views::favourites::view(
+                state,
+                &self.player,
+                self.body_width(),
+                self.hovered_favourite_row,
+            ),
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,

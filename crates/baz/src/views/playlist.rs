@@ -530,7 +530,6 @@ fn entry_row<'a>(
         )),
         duration: page_row.duration.as_str().into(),
         playing,
-        selected,
         // A missing entry is not a control: pressing a row plays from it, and
         // there is nothing there to play.
         press: (live && !page_row.missing).then_some(Message::ContentPressed(
@@ -613,7 +612,7 @@ fn entry_row<'a>(
     // the transfer verbs, each a press this row's own controls already
     // make. A missing entry's menu offers nothing, exactly as its row does.
     crate::menu::selection_area(
-        mouse_area(slots)
+        mouse_area(page::row_card(hovered, playing, selected, slots))
             .on_enter(Message::PlaylistRowEntered(index))
             .on_exit(Message::PlaylistRowLeft(index)),
         crate::menu::Target::PlaylistTrack {

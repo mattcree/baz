@@ -104,15 +104,22 @@ fn manual_form<'a>(shelf: &'a Shelf, playlists: &'a Playlists, width: f32) -> El
     ]
     .spacing(theme::GAP_SM);
     for (index, item) in draft.items.iter().enumerate() {
-        form = form.push(draft_row(
-            shelf,
-            item,
-            index,
-            draft.items.len(),
-            width,
-            &|row, delta| Message::PlaylistCreationShift(row, delta),
-            &Message::PlaylistCreationRemove,
-        ));
+        form = form.push(
+            iced::widget::mouse_area(draft_row(
+                shelf,
+                item,
+                index,
+                draft.items.len(),
+                width,
+                draft.hovered_row == Some(index),
+                &DraftEdits {
+                    shift: &|row, delta| Message::PlaylistCreationShift(row, delta),
+                    remove: &Message::PlaylistCreationRemove,
+                },
+            ))
+            .on_enter(Message::DraftRowEntered(index))
+            .on_exit(Message::DraftRowLeft(index)),
+        );
     }
     if let Some(reason) = playlists.creation_refusal() {
         form = form.push(error(reason));
@@ -351,11 +358,14 @@ fn vibe_form<'a>(
                     position,
                     preview.items.len(),
                     width,
-                    &|row, delta| Message::VibePreviewShift(row, delta),
-                    &Message::VibePreviewRemove,
+                    state.hovered_row == Some(position),
+                    &DraftEdits {
+                        shift: &|row, delta| Message::VibePreviewShift(row, delta),
+                        remove: &Message::VibePreviewRemove,
+                    },
                 ))
-                .on_enter(Message::VibePreviewHovered(Some(position)))
-                .on_exit(Message::VibePreviewHovered(None)),
+                .on_enter(Message::VibePreviewEntered(position))
+                .on_exit(Message::VibePreviewLeft(position)),
             );
         }
         let can_act = !preview.items.is_empty();
@@ -746,15 +756,21 @@ fn result_dots(state: &crate::vibe::State, lane: usize) -> Vec<(f32, f32)> {
 /// while Vibe's preview used the shared track row — two anatomies for one act,
 /// in one place, three lines apart in the same file. Both hold
 /// [`QueueItemVm`]s, so both draw this.
+struct DraftEdits<'a> {
+    shift: &'a dyn Fn(usize, i32) -> Message,
+    remove: &'a dyn Fn(usize) -> Message,
+}
+
 fn draft_row<'a>(
     shelf: &'a Shelf,
     item: &'a QueueItemVm,
     position: usize,
     len: usize,
     width: f32,
-    shift: &dyn Fn(usize, i32) -> Message,
-    remove: &dyn Fn(usize) -> Message,
+    hovered: bool,
+    edits: &DraftEdits<'_>,
 ) -> Element<'a, Message> {
+    let (shift, remove) = (edits.shift, edits.remove);
     let room = theme::active();
     let marker: Element<'a, Message> = text(format!("{:02}", position + 1))
         .size(theme::SIZE_META)
@@ -783,10 +799,9 @@ fn draft_row<'a>(
             .unwrap_or_default()
             .into(),
         playing: false,
-        selected: false,
         press: None,
     });
-    row![
+    let row = row![
         track,
         views::page::favourite_slot(&item.path, is_favourite(shelf, &item.path)),
         views::page::icon_slot(
@@ -812,8 +827,10 @@ fn draft_row<'a>(
         ),
     ]
     .spacing(theme::GAP_XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    .align_y(iced::Alignment::Center);
+    // The card reaches the row's editing controls rather than stopping at the
+    // body, so a lit row is lit all the way across (item 53).
+    views::page::row_card(hovered, false, false, row)
 }
 
 fn is_favourite(shelf: &Shelf, path: &Path) -> bool {

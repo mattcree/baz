@@ -1044,7 +1044,7 @@ in `BACKLOG.md`.
     whether an authored image replaces the collage everywhere or only on the
     wall.
 
-53. **Not started — the row's controls stand inside the row's own card.**
+53. **Done 2026-08-15 — the row's controls stand inside the row's own card.**
     *"can we make sure the playlist row controls are inside the highlighted
     row as well."*
 
@@ -1057,6 +1057,30 @@ in `BACKLOG.md`.
     `views::bottom_bar`'s Favourites slot carries the same note, and it is
     there because that bug shipped once. The card is what should widen; the
     press targets stay separate.
+
+    **That is how it went in.** `theme::track_row_card` is
+    `selectable_track_row` in container form — one function decides the
+    background, and a test asserts the two agree for every
+    hovered/playing/selected combination — while `theme::track_row_body` paints
+    nothing, so the two cannot drift. `page::row_card` wraps the assembled
+    `row![body, slots…]`. **No press moved.**
+
+    The obvious future mistake is silent (a surface that forgets the wrapper
+    draws a row that never lights), so it is asserted over the source:
+    `every_track_row_is_wrapped_in_its_card`, five surfaces in the walk.
+
+    **Two surfaces had no idea where the pointer was** and gained one apiece —
+    `hovered_favourite_row`, `CreationDraft::hovered_row` — and the first
+    version of both got the shape wrong. A single `Hovered(Option<usize>)`
+    message unlights the row the pointer is on, because moving from row 3 to
+    row 4 delivers row 4's enter *before* row 3's exit. The existing three
+    surfaces already guarded this; the two new ones now do, and so does the
+    vibe preview's own hover, which carried the same latent crossing and would
+    have dropped the contour's highlight.
+
+    Photographed at 1280 × 860 in `docs/design/impl/row-card/`, with the
+    measurement rather than the impression: at x = 1200 — in the controls' own
+    lane — the hovered row reads `srgb(20,21,23)` against `srgb(12,13,14)`.
 
     Open: whether the trailing slots need their own hover treatment adjusted
     once they light *inside* a lit card.
@@ -1332,9 +1356,9 @@ because a player without it is missing a floor rather than a feature.
 
 ## Doing
 
-- Nothing active — items 1–51, 55, 56, 61 and 63 are complete, and the parity run
+- Nothing active — items 1–51, 53, 55, 56, 61 and 63 are complete, and the parity run
   shipped two of its own findings (repeat-the-list and the sleep timer).
-  **Items 52–54, 57–60, 62 and 64–71 are recorded and not started**: each is a
+  **Items 52, 54, 57–60, 62 and 64–71 are recorded and not started**: each is a
   decision with a real fork in it (where a playlist's authored image lives; how
   a row's card widens without nesting its controls; what live theme switching
   does to the process-cached sprite sheets; whether a rule-based list is a

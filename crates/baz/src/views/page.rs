@@ -687,10 +687,9 @@ pub(crate) struct TrackRow<'a> {
     pub(crate) context: Option<(std::borrow::Cow<'a, str>, Option<Message>, bool)>,
     /// The duration, already formatted.
     pub(crate) duration: std::borrow::Cow<'a, str>,
-    /// Whether this is the sounding row — the medium weight and the card.
+    /// Whether this is the sounding row — the medium weight, and the card
+    /// [`row_card`] paints behind the whole row.
     pub(crate) playing: bool,
-    /// Whether one ordinary press selected this row.
-    pub(crate) selected: bool,
     /// What pressing it does, or `None` where it cannot act: no engine, or a
     /// missing file with nothing to play.
     pub(crate) press: Option<Message>,
@@ -720,7 +719,6 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
         context,
         duration,
         playing,
-        selected,
         press,
     } = row;
     let heading = text(title)
@@ -809,10 +807,34 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
     button(contents)
         .width(Length::Fill)
         .padding(theme::pad(theme::GAP_XS, 0.0))
-        .style(move |_theme, status| {
-            theme::selectable_track_row(room, room.wall, status, playing, selected)
-        })
+        // No paint here: the card is drawn behind the whole row — body *and*
+        // trailing controls — by [`row_card`]. See [`theme::track_row_card`].
+        .style(move |_theme, _status| theme::track_row_body(room))
         .on_press_maybe(press)
+        .into()
+}
+
+/// Put a track row's card behind everything the row is made of.
+///
+/// Every caller of [`track_row`] hangs trailing slots off the body with
+/// [`icon_slot`] and its relatives, and until 2026-08-15 the highlight stopped
+/// where the body did — the lit row ended and the heart beside it stayed on
+/// bare wall. This wraps the assembled `row![body, slots…]` so the paint
+/// reaches the row's full width while every press target stays exactly where
+/// it was.
+///
+/// `hovered` is the surface's own answer (`hovered_album_row` and its
+/// siblings), which each caller already computes for the reserved slots.
+pub(crate) fn row_card<'a>(
+    hovered: bool,
+    playing: bool,
+    selected: bool,
+    contents: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    container(contents)
+        .width(Length::Fill)
+        .style(move |_theme| theme::track_row_card(room, room.wall, hovered, playing, selected))
         .into()
 }
 

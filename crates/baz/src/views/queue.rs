@@ -544,7 +544,6 @@ fn queue_row(
         )),
         duration: row_state.duration.into(),
         playing,
-        selected,
         press: live.then_some(Message::ContentPressed(Content::QueueTrack(index))),
     });
     // The drag wrapper owns the pointer for the body (crate::drag's module
@@ -609,7 +608,7 @@ fn queue_row(
     // the transfer verbs, remove — each a press this row's own controls
     // already make.
     crate::menu::selection_area(
-        mouse_area(slots)
+        mouse_area(page::row_card(hovered, playing, selected, slots))
             .on_enter(Message::QueueRowEntered(index))
             .on_exit(Message::QueueRowLeft(index)),
         crate::menu::Target::QueueRow { row: index },

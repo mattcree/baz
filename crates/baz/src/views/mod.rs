@@ -1024,6 +1024,59 @@ mod tests {
         assert!(sites >= 6, "only {sites} row call sites found");
     }
 
+    /// **Every surface that draws a track row also draws its card.**
+    ///
+    /// The row's highlight used to come from the row's own button, which meant
+    /// it stopped where the button did — and every surface that has a track row
+    /// hangs controls off the side of it (a heart, the transfer `+`, an
+    /// editable list's ▲▼✕). The owner, 2026-08-15: *"can we make sure the
+    /// playlist row controls are inside the highlighted row as well."* So the
+    /// card moved out to [`page::row_card`], which wraps the assembled row.
+    ///
+    /// The failure this refuses is a **silent** one: a new surface that calls
+    /// [`page::track_row`] and forgets the wrapper compiles, draws, and simply
+    /// never lights — [`theme::track_row_body`] paints nothing at all. There is
+    /// no type that can catch it, so the source is read instead.
+    #[test]
+    fn every_track_row_is_wrapped_in_its_card() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sites = 0_u32;
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("views"))
+            .expect("the views directory")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        files.sort();
+        for path in files {
+            let source = std::fs::read_to_string(&path)
+                .expect("a view source")
+                .replace("\r\n", "\n");
+            let source = source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head");
+            let name = path.file_name().expect("a file name").to_string_lossy();
+            // `page.rs` is where both live; it defines them rather than using
+            // them.
+            if name == "page.rs" {
+                continue;
+            }
+            let draws = source.contains("page::TrackRow {") || source.contains("page::TrackRow{");
+            if !draws {
+                continue;
+            }
+            assert!(
+                source.contains("row_card("),
+                "{name}: draws a track row and never wraps it in \
+                 `page::row_card`, so its rows can never light"
+            );
+            sites += 1;
+        }
+        // Not vacuous: a record's page, a playlist's, the queue, Favourites and
+        // the new-playlist draft all draw one.
+        assert!(sites >= 5, "only {sites} track-row surfaces found");
+    }
+
     /// **Every place that hangs works hangs them on one grid** — the shell's,
     /// resolved once, handed down.
     ///

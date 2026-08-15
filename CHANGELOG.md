@@ -109,6 +109,11 @@ describe.
   return nothing at the heights the shape asked for. The axis is now a place
   in your collection — the median track sits in the middle — and a shaped
   request retrieves candidates for every part of the line.
+- **A hovered track row lit up and then stopped** just before the controls that
+  belong to it — the heart, and a list's move and remove marks sat outside the
+  highlight on bare background. The highlight now runs the full width of the
+  row it belongs to, on every list in the app. Nothing about pressing them
+  changed.
 - The bottom bar and Now playing drew **no artist at all** for a record with no
   named album artist — a compilation, or an untagged rip — whose file also
   carried no artist tag, where the album page, the wall tile and the picker

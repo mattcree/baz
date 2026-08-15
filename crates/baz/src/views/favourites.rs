@@ -27,6 +27,7 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     window_width: f32,
+    hovered: Option<usize>,
 ) -> Element<'a, Message> {
     let list = queue(shelf);
     let room = theme::active();
@@ -83,21 +84,30 @@ pub(crate) fn view<'a>(
                 .unwrap_or_default()
                 .into(),
             playing,
-            selected: false,
             press: player
                 .engine_ready()
                 .then_some(Message::FavouritesPlayTrack(index)),
         });
+        // The card is drawn behind the whole row — heart included — and the
+        // row reports its own crossings, which is the only way a sibling can
+        // learn the pointer is on it (item 53).
         rows.push(
-            row![
-                body,
-                page::favourite_slot(&item.path, true),
-                Space::new().width(Length::Fixed(
-                    3.0 * theme::STEPPER_HIT + 2.0 * theme::GAP_XS
-                )),
-            ]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center)
+            iced::widget::mouse_area(page::row_card(
+                hovered == Some(index),
+                playing,
+                false,
+                row![
+                    body,
+                    page::favourite_slot(&item.path, true),
+                    Space::new().width(Length::Fixed(
+                        3.0 * theme::STEPPER_HIT + 2.0 * theme::GAP_XS
+                    )),
+                ]
+                .spacing(theme::GAP_XS)
+                .align_y(iced::Alignment::Center),
+            ))
+            .on_enter(Message::FavouriteRowEntered(index))
+            .on_exit(Message::FavouriteRowLeft(index))
             .into(),
         );
     }

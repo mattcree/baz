@@ -593,7 +593,6 @@ fn track_row(
         context: None,
         duration: duration.into(),
         playing,
-        selected,
         press,
     });
     // The row's right press opens its mirror menu (doc 09 §5.2): the same
@@ -610,7 +609,7 @@ fn track_row(
         ));
     }
     crate::menu::selection_area(
-        mouse_area(slots)
+        mouse_area(page::row_card(hovered, playing, selected, slots))
             .on_enter(Message::AlbumRowEntered(index))
             .on_exit(Message::AlbumRowLeft(index)),
         target,

@@ -490,6 +490,10 @@ pub(crate) struct CreationDraft {
     pub(crate) items: Vec<QueueItemVm>,
     pub(crate) error: Option<String>,
     pub(crate) saved: bool,
+    /// Which draft row the pointer is on, so the row's card can be drawn
+    /// behind its editing controls as well as behind its body (item 53).
+    /// Session state about a pointer: nothing decides anything from it.
+    pub(crate) hovered_row: Option<usize>,
 }
 
 impl Default for CreationDraft {
@@ -501,6 +505,7 @@ impl Default for CreationDraft {
             items: Vec::new(),
             error: None,
             saved: false,
+            hovered_row: None,
         }
     }
 }
