@@ -474,6 +474,60 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **A library's own spread is measured, known, and never shown.** *(The owner,
+  2026-08-16: "so we're sort of making a determination based on my music pool?
+  that there are certain signals that stand out way more than others? is there
+  a way to make that available to users on a per-library basis?")*
+
+  Yes to both halves, and the second is nearly free — everything needed is
+  already in the analysis store.
+
+  Measured on the owner's own 5 076 analysed tracks, the p05–p95 span of each
+  drawn dimension, as a share of the widest one in **that** library:
+
+  | dimension | span | in real units where they exist |
+  |---|---|---|
+  | Texture | 100% | |
+  | Tempo | 96% | 91 → 167 BPM |
+  | Dynamics | 65% | |
+  | Energy | 53% | |
+  | Brightness | 51% | |
+
+  **The caveat is load-bearing and this entry is worthless without it.** Those
+  are raw bliss features in different units — spectral flatness against
+  loudness variance — so the column does *not* say texture is twice as useful
+  as brightness. Comparing dimensions against each other needs a perceptual
+  normalisation nobody here has. What it does support is comparing **one
+  dimension across libraries**, and spotting the degenerate case: a collection
+  of solo piano has no meaningful brightness axis, and a DJ set has no
+  meaningful tempo axis.
+
+  **And it exposes something about the rank axis worth stating.** A rank axis
+  spreads whatever it is given across the full −2…+2 by construction — that is
+  exactly why the line is always fillable, and why it fixed the *"dots aren't
+  following my line"* failure. The cost is that **every dimension looks
+  equally responsive whether or not the library varies on it at all.** Draw a
+  tempo curve over a library with one tempo and the dots follow the line
+  perfectly while the music does not change. Nothing on screen could tell you.
+
+  **Wanted:** a per-library reading, computed once after listening and kept
+  with the analysis. Two honest forms, in order of confidence:
+
+  1. **Name the degenerate axes.** Where a library's spread on a dimension is
+     genuinely tiny, say so beside that line — *your music barely varies in
+     tempo, so this line will not change much*. Defensible with no
+     cross-dimension comparison at all.
+  2. **A "what Baz heard" reading** after the listening step: the tempo range
+     in BPM, how varied the collection is, what it is mostly made of. This
+     also gives the listening step a **reward** rather than only a cost, which
+     is the other thing the owner has pushed on — an hour of analysis
+     currently buys the *ability* to compose and shows nothing for itself.
+
+  Related and unresolved: `docs/design/23-the-three-dimensions.md` asks
+  whether the semantic step earns its place at all. If it does not, a
+  per-library profile becomes *more* valuable rather than less, because it is
+  the honest half.
+
 - **Listening produces numbers, not tags — and the two are one short step
   apart.** *(The owner, 2026-08-16: "should we show tags on the tracks? does
   that exist in terms of our 'listen to my music' step? does it allow us to
