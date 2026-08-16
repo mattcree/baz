@@ -102,7 +102,7 @@ shot "03-the-example-is-their-music"
 # **The count under the field**, which no longer says *match* and no longer
 # waits for the advanced depth. The field sits under the line, in the request
 # column, because the line is the question and the words narrow its answer.
-click 588 624
+click 588 664
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940

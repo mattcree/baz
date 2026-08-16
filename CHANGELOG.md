@@ -36,6 +36,13 @@ Every release is built from a tag by CI, gated on the full test suite — see
   real measurements and you can check it by ear; the description is a model's
   guess that, for two of six measured test phrases, was no better than
   picking at random. The page led with the guess.
+- **The five things baz listens for say how much each one counts, and what
+  they count towards.** Open the lines and each says *40% of the decision*
+  rather than *40% of the blend* — a share of something you can name — and the
+  control says once, at the top, that a song cannot be in five places at once,
+  so where the lines disagree the shares settle it. That is also why a 40%
+  line's songs sit closer to it than a 10% line's do, which looked like a
+  fault and is the mechanism working.
 - **The line starts with ten points, and the playlist stays on the right.**
   Two points was a line you could only tilt. Ten is one you can draw with, and
   the shape presets load at the same resolution without changing shape. On a

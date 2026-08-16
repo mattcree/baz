@@ -35,6 +35,27 @@ use crate::{theme, views};
 pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Message> {
     let mut block = column![heading("How should it move?")].spacing(theme::GAP_SM);
     block = block.push(views::hint(crate::vibe::shape_words(&vibe.contour)));
+    // **What the line is, said once, at the top of it.**
+    //
+    // The owner: *"the concept of the 'blend' of the curves isn't that
+    // clear."* It was not said anywhere — the word appeared beside each
+    // percentage as though it were a thing the reader already had, and the
+    // single line said nothing about being five.
+    //
+    // The expanded sentence is the one that matters, and it is the same
+    // answer as *"the stuff is not conforming to each"*: the walk satisfies
+    // the shares, not each line, because it cannot satisfy each line. Saying
+    // so turns a control that looks broken into one that is behaving
+    // visibly.
+    block = block.push(views::hint(if vibe.expanded {
+        "One line each — and a song cannot be in five places at once, so where the \
+         lines disagree the shares below settle it. That is why the dots track a \
+         40% line closely and a 10% line loosely."
+    } else {
+        "One line asking for five things at once: energy counts most, then tempo, \
+         then brightness and dynamics, and texture least. Advanced shapes each of \
+         them on its own."
+    }));
     if layout.draw_curve {
         if vibe.expanded {
             for (index, lane) in vibe.contour.lanes.iter().enumerate() {
@@ -138,13 +159,17 @@ fn line<'a>(
         // spectral centroid, rolloff and zero crossings, and is entitled to
         // know it — none of these is a mood and none of them pretends to be.
         // **What it measures, and how much it counts.** The five lines do not
-        // influence a result equally — the blend is weighted with energy
-        // dominant — so a line that says only what it measures leaves the
-        // listener to discover by experiment that dragging texture moves the
-        // list a quarter as far as dragging energy does.
+        // influence a result equally — energy is dominant — so a line that
+        // says only what it measures leaves the listener to discover by
+        // experiment that dragging texture moves the list a quarter as far as
+        // dragging energy does.
+        //
+        // *Of the decision*, not *of the blend*: a share has to be a share of
+        // something the reader can name, and nothing on this page ever said
+        // what a blend was.
         block = block
             .push(views::caption_word(&format!(
-                "{} · {}% OF THE BLEND",
+                "{} · {}% OF THE DECISION",
                 dimension.label().to_uppercase(),
                 dimension.share()
             )))
@@ -265,10 +290,8 @@ fn expander(vibe: &crate::vibe::State) -> Element<'_, Message> {
     column![
         chip(label, open, Message::ContourExpander),
         views::hint(if open {
-            "One line each. Drag energy and the list gets louder or quieter where you \
-             drew it; drag brightness and it gets darker or crisper there instead. They \
-             do not count equally — the share beside each name is how much it moves the \
-             result."
+            "Drag energy and the list gets louder or quieter where you drew it; drag \
+             brightness and it gets darker or crisper there instead."
         } else {
             "One line moves all five things Baz listens for together. Open this to make \
              the list climb in energy while it steadies in tempo, or any other \

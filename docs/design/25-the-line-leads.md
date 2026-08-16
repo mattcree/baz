@@ -64,7 +64,7 @@ by ear beats one that cannot.
 
 ## 3a. What the owner asked for once he could see it
 
-Three corrections, the same day, and each of them follows from the line being
+Four corrections, the same day, and each of them follows from the line being
 the page's subject rather than a setting on it:
 
 1. **Ten points, not two.** *"Can we just make the line default to having
@@ -99,6 +99,34 @@ the page's subject rather than a setting on it:
    Both columns now grow from their own floors rather than one being pinned,
    because the drawn line is the one thing on this page that is better for
    room.
+
+4. **The blend got a name, and the shares got a referent.** *"The concept of
+   the 'blend' of the curves isn't that clear."* It was not explained
+   anywhere: the word stood beside each percentage as though the reader
+   already had it, and in simple mode nothing said the single line was five
+   lines at all — which the previous arrangement had hidden behind a tab and
+   this one puts at the top of the page.
+
+   `40% OF THE BLEND` reads `40% OF THE DECISION` now, because a share has to
+   be a share of something a reader can name. And the control says what it is,
+   once, at the head of it:
+
+   > *One line asking for five things at once: energy counts most, then tempo,
+   > then brightness and dynamics, and texture least. Advanced shapes each of
+   > them on its own.*
+
+   > *One line each — and a song cannot be in five places at once, so where
+   > the lines disagree the shares below settle it. That is why the dots track
+   > a 40% line closely and a 10% line loosely.*
+
+   **The second sentence is also the answer to a bug report that was not
+   one.** The owner, on the opened lines: *"the stuff is not conforming to
+   each."* The per-lane dots are each track's real reading on that dimension —
+   checked in `baz_vibe`, not assumed — and they do not sit on their line
+   because the walk satisfies the *weighted* request rather than each line
+   separately, which it cannot do when the lines disagree. Nothing was broken.
+   What was missing was the sentence saying so, and without it a working
+   control looked like a failing one.
 
 And one thing that fell out rather than being asked for: **the match count
 moved to both depths.** It was advanced-only when the words were the request
