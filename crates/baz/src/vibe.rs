@@ -3102,6 +3102,58 @@ mod tests {
         pub(super) const STD_LOUDNESS: usize = 9;
     }
 
+    /// **All five together means all five**, including after they have been
+    /// pulled apart.
+    ///
+    /// The owner: *"if you go back to all five mode it should start to
+    /// control all lines."* It does, and this is the part worth pinning: a
+    /// drag on that tab moves every line **by what the pointer moved**, so
+    /// the spread somebody built by shaping one line on its own survives
+    /// being nudged from the tab that owns all of them. Setting them all to
+    /// where the pointer landed would be the other, lossy, reading of the
+    /// same sentence.
+    #[test]
+    fn the_all_five_tab_moves_every_line_and_keeps_what_was_shaped_apart() {
+        let mut state = State::default();
+        state.set_shape(Shape::DEFAULT);
+        let level = |state: &State, lane: usize, point: usize| {
+            state.contour.lane(lane).expect("a lane").points[point].level
+        };
+
+        // Shape one line on its own: brightness, dragged well clear.
+        state.show_line(Some(2));
+        state.drag_contour(2, 0, 0.0, 1.2);
+        let apart = level(&state, 2, 0) - level(&state, 0, 0);
+        assert!(apart > 2.0, "brightness did not move clear: {apart}");
+        for other in [1_usize, 3, 4] {
+            assert!(
+                (level(&state, other, 0) - level(&state, 0, 0)).abs() < 1e-4,
+                "line {other} moved when only brightness was held"
+            );
+        }
+
+        // Back to all five, and a nudge upward.
+        state.show_line(None);
+        let before: Vec<f32> = (0..5).map(|lane| level(&state, lane, 0)).collect();
+        state.drag_contour(0, 0, 0.0, before[0] + 0.5);
+        for (lane, was) in before.iter().enumerate() {
+            let moved = level(&state, lane, 0) - was;
+            assert!(
+                (moved - 0.5).abs() < 1e-4,
+                "line {lane} moved by {moved}, not by what the pointer moved"
+            );
+        }
+        // …and the shape somebody built is still there.
+        assert!(
+            ((level(&state, 2, 0) - level(&state, 0, 0)) - apart).abs() < 1e-4,
+            "the spread was flattened by a drag on all five"
+        );
+
+        // And it can be given up deliberately, which is the only way back.
+        state.gather_lines();
+        assert!(state.contour.is_one_line());
+    }
+
     /// **The shape opens the sentence, and the words close it.**
     ///
     /// Design note 25 reordered the one line that states the whole request,

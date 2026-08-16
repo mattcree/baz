@@ -44,6 +44,12 @@ Every release is built from a tag by CI, gated on the full test suite — see
   length and the press all fit on screen together. The wording throughout is
   plainer: *how bright or dark a song sounds* rather than *spectral centroid,
   rolloff and zero crossings*.
+- **All five together is one control, and the five are the alternative.** The
+  chip that holds all of them stands on its own with *or* after it, above the
+  five that shape one at a time — and on that tab every line is drawn at full
+  strength, because dragging moves every one of them and keeps whatever shape
+  you gave each. Before, one solid line over four faint ones made it look like
+  you had hold of only the solid one.
 - **Each of the five lines has its own dash and colour**, matching the button
   that selects it, so you can tell which is which on the shared graph. The
   dash is the part that has to work — nothing in baz asks you to tell two

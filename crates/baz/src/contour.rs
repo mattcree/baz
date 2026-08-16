@@ -76,6 +76,7 @@ type OnDrag<'a, Message> = Box<dyn Fn(usize, f32, f32) -> Message + 'a>;
 pub(crate) struct Contour<'a, Message> {
     points: &'a [ContourPoint],
     ghosts: Vec<(&'a [ContourPoint], usize)>,
+    ghosts_held: bool,
     series: Option<usize>,
     field: &'a [f32],
     result: Vec<(f32, f32)>,
@@ -124,6 +125,7 @@ impl<'a, Message> Contour<'a, Message> {
         Self {
             points,
             ghosts: Vec::new(),
+            ghosts_held: false,
             series: None,
             field: &[],
             result: Vec::new(),
@@ -149,6 +151,23 @@ impl<'a, Message> Contour<'a, Message> {
     #[must_use]
     pub(crate) fn ghosts(mut self, ghosts: Vec<(&'a [ContourPoint], usize)>) -> Self {
         self.ghosts = ghosts;
+        self
+    }
+
+    /// **Whether the other lines are being held too.**
+    ///
+    /// On *all five together* they are: a drag moves every one of them, so
+    /// they are drawn at full strength — five lines a listener is holding,
+    /// not four they are not. Faint is for the other case, where one line is
+    /// selected and the rest are context.
+    ///
+    /// The owner had to say it twice — *"basically the all thing should be
+    /// controlling all lines"* — and both times the behaviour was already
+    /// right and the picture was wrong: one solid line over four faint ones
+    /// says you have hold of the solid one.
+    #[must_use]
+    pub(crate) fn ghosts_held(mut self, held: bool) -> Self {
+        self.ghosts_held = held;
         self
     }
 
@@ -523,7 +542,10 @@ where
                 continue;
             }
             let dash = theme::contour_dash(*series);
-            let ink = theme::alpha(theme::contour_series(room, *series), 0.55);
+            let ink = theme::alpha(
+                theme::contour_series(room, *series),
+                if self.ghosts_held { 1.0 } else { 0.55 },
+            );
             let mut x = field.x;
             while x < field.x + field.width {
                 let width = theme::CONTOUR_STEP.min(field.x + field.width - x);

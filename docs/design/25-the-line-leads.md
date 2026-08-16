@@ -145,6 +145,20 @@ the page's subject rather than a setting on it:
    back to one shape is its own act now, named for what it does, rather than
    the side effect of closing an expander.
 
+   **`All five together` had to be told twice**, and both times the behaviour
+   was already right and the picture was wrong. *"If you go back to all five
+   mode it should start to control all lines… basically the all thing should
+   be controlling all lines."* It did — a drag there moves every line — but
+   the canvas drew one solid line over four faint ones, which says you have
+   hold of the solid one. On that tab the other four are drawn at **full
+   strength** now, because they are being held too; faint is for the other
+   case, where one line is selected and the rest are context.
+
+   And the row says which of the two you are in. Six chips in a line read as
+   six peers, one of them lit; the *all* chip stands on its own row with the
+   word `or` after it, above the five. *"It should be a bit more obvious that
+   it's an alternative i.e. All five OR the rest."*
+
    On `All five` a drag moves every line **by what the pointer moved** rather
    than setting them all to where it landed. The difference only shows once
    the lines have been pulled apart — which is exactly when the old behaviour

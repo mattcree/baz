@@ -51,8 +51,8 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
         "A song can only be in one place at a time, so the bigger a line's share, the \
          more closely the songs follow it."
     } else {
-        "Your line asks all five of these at once. Energy matters most, texture least. \
-         Pick one to shape it on its own."
+        "Baz listens for five things. One line asks for all five at once — energy \
+         matters most, texture least."
     }));
     // **One graph, and a row of tabs over it.** The owner: *"I like the idea
     // of all lines being on the same graph and a way to kinda toggle between
@@ -139,15 +139,27 @@ fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
 /// request.
 fn tabs(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let room = theme::active();
-    let mut all = vec![chip(
-        "All five",
-        vibe.shown.is_none(),
-        Message::VibeLine(None),
-    )];
+    let together = vibe.shown.is_none();
+    // **One control or the other, and the word `or` says so.** The owner:
+    // *"it should be a bit more obvious that it's an alternative i.e. All
+    // five OR the rest."* Six chips in a row read as six peers, one of which
+    // happens to be lit. A chip, then the word, then the other five reads as
+    // the choice it actually is — and the lit chip says which way you went.
+    let head = row![
+        chip("All five together", together, Message::VibeLine(None)),
+        joining(if together {
+            "— drag the line and all five move"
+        } else {
+            "or"
+        }),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center);
+    let mut each = Vec::new();
     for (index, lane) in vibe.contour.lanes.iter().enumerate() {
         let lit = vibe.shown == Some(index);
         let label = format!("{} · {}%", lane.dimension.label(), lane.dimension.share());
-        all.push(
+        each.push(
             iced::widget::button(
                 row![
                     swatch(index),
@@ -165,7 +177,20 @@ fn tabs(vibe: &crate::vibe::State) -> Element<'_, Message> {
             .into(),
         );
     }
-    wrap_chips(all, 3)
+    column![head, wrap_chips(each, 3)]
+        .spacing(theme::GAP_SM)
+        .into()
+}
+
+/// The quietest voice on this block, for the word that joins two controls
+/// into one either-or.
+fn joining(line: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    iced::widget::text(line.to_owned())
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION)
+        .color(room.paper_faint)
+        .into()
 }
 
 /// **A sample of one line**, drawn as that line's own dash in that line's own
@@ -235,6 +260,7 @@ fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
     // there is the whole measure for them, and no legend anywhere.
     let canvas = crate::contour::Contour::new(points, room, theme::CONTOUR_H)
         .ghosts(ghosts)
+        .ghosts_held(shown.is_none())
         .series(shown)
         .field(cloud(vibe, shown))
         .result(dots(vibe, shown))
@@ -275,13 +301,23 @@ fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
                 dimension.label().to_lowercase()
             )));
         }
-        if !vibe.contour.is_one_line() {
-            block = block.push(chip(
-                "Put every line back on one shape",
+    }
+    // **The way back, wherever you notice you want it.** It appeared only
+    // while a single line was selected, which is the one place you are *not*
+    // looking at all five drifting apart.
+    if !vibe.contour.is_one_line() {
+        block = block
+            .push(views::hint(if vibe.shown.is_some() {
+                "The faint lines behind are the four you are not holding."
+            } else {
+                "All five are drawn because you are holding all five: dragging moves \
+                 every one of them and keeps the shapes you gave them."
+            }))
+            .push(chip(
+                "Put all five back on one shape",
                 false,
                 Message::VibeGatherLines,
             ));
-        }
     }
     block.into()
 }

@@ -103,9 +103,9 @@ shot "03-the-example-is-their-music"
 # waits for the advanced depth. The field sits under the line, in the request
 # column, because the line is the question and the words narrow its answer.
 # The words are folded away until asked for, so the disclosure comes first.
-click 334 602
+click 334 634
 sleep 1
-click 588 636
+click 588 668
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940
@@ -115,10 +115,25 @@ shot "04-drew-rather-than-matched"
 # tabs over the graph pick which of the five you are shaping; the other four
 # stay behind it as ghosts. A tone at one frequency has nothing to say about
 # brightness, and picking that line says so.
-click 337 262
+click 570 266
 sleep 3
 move 1400 940
 shot "05-flat-axes-admit-it"
+
+# **All five means all five.** Pull the brightness line clear of the others,
+# then go back to the tab that owns all of them: every line is drawn at full
+# strength there, because a drag moves every one of them.
+xdotool mousemove 621 397
+sleep 0.3
+xdotool mousedown 1
+xdotool mousemove 621 347
+sleep 0.4
+xdotool mouseup 1
+sleep 2
+click 327 234
+sleep 3
+move 1400 940
+shot "06-all-five-holds-all-five"
 
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
 kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null
