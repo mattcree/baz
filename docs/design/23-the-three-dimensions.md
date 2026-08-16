@@ -135,7 +135,9 @@ to an escape hatch that says it is a guess. *Follows the evidence. Loses
 "warm hypnotic music for driving at night" as a headline capability — which
 may be the capability that sells the feature.*
 
-**C — drop semantic retrieval; make "which" a set of facts.** Genre, year,
+**C — drop semantic retrieval; make "which" a set of facts.** *(Ruled out by
+§7a: a tag filter does not reproduce what the model does, and half the
+requests have no tag to filter on.)* Genre, year,
 artist, folder, not-played-recently — all from tags and the ledger, all true.
 The line then shapes that set. *Fully explicable, zero inference. Deletes the
 350 MiB text tower and most of the per-track analysis cost. Becomes
@@ -165,6 +167,49 @@ Two experiments. One needs the owner; one does not.
 
 Doing (2) first is the obvious order: it is free, it is decisive in one
 direction, and it sharpens what (1) would need to show.
+
+## 7a. The free experiment, run — and it settles one thing
+
+Ran 2026-08-16 on the owner's 5 076-track library. For each request with an
+obvious genre word, the model's pool against *"tracks whose genre tag already
+contains that word"*:
+
+| request | model pool | tag set | overlap | of the tag set, found | of the pool, beyond tags | lift |
+|---|---|---|---|---|---|---|
+| `calm-piano` | 179 | 661 | 0.12 | 14% | 48% | 3.94 |
+| `bright-rock` | 199 | 1 661 | 0.09 | 9% | 24% | 2.29 |
+| `focus` | 226 | 689 | 0.08 | 9% | 71% | 2.10 |
+| `industrial` | 410 | 340 | 0.07 | 15% | 88% | 1.84 |
+| `dream-pop` | 185 | 548 | 0.03 | 4% | 89% | 0.99 |
+| `gentle-jazz` | 319 | 511 | 0.02 | 3% | 95% | 0.46 |
+
+**The model is not a tag filter in disguise.** The sets barely overlap
+anywhere. Option C's implied hope — that a genre filter would reproduce the
+model for free — is wrong, and drops out of the running as a straight
+replacement.
+
+What it is doing instead, where it works, is **selecting**. `calm-piano`
+returns 179 tracks of which 93 are tagged classical or new age; the tag filter
+returns 661 undifferentiated ones. Half the model's pool is on-genre and it
+has chosen a fifth of the candidates — which is the behaviour wanted, because
+*calm piano instrumental* is a much narrower request than *classical*.
+
+Where it fails it does not fail towards tags, it wanders: `gentle-jazz` and
+`dream-pop` put 89–95% of their pool outside the tag set **and** score at or
+below chance, which is the signature of a pool assembled on something other
+than what was asked for.
+
+**And half the committed requests cannot be a tag filter at all.** Six of
+twelve — *wistful but not tragic*, *dark tense music*, *tension gradually
+clearing into warmth*, *a patient nocturnal electronic journey* — have no
+genre word to filter on. That is the model's unique territory and it is half
+the request set, which is the strongest argument for keeping it.
+
+**So the decision this note was opened to make: keep the semantic step.** Not
+because it is proven — two of six are still at chance — but because the
+cheapest alternative demonstrably does not do its job, and the job is half of
+what the feature is for. What remains true is §4's charge: the *count*
+overclaims, and that is fixable today without waiting for anybody's ears.
 
 ## 8. What this note does not do
 

@@ -462,6 +462,29 @@ struct RequestRow {
     /// Where the two tick boundaries fall inside the recommended pool, as
     /// cosines and as fractions of the pool.
     tick_boundaries: Option<[f32; 2]>,
+    /// **Against the dumbest possible baseline**: the tracks whose genre tag
+    /// already contains the word the request is obviously about.
+    ///
+    /// Doc 23 §7.2. The question is not *which is more accurate* — judging a
+    /// tag filter by tags would be circular and it would win by construction
+    /// — but **whether the model is doing anything a tag filter does not
+    /// already do**. If the two sets are nearly the same, the tags are free,
+    /// exact and instant, and the model is 350 MiB and an hour of analysis
+    /// spent reproducing them.
+    tags: Option<TagBaseline>,
+}
+
+#[derive(Serialize)]
+struct TagBaseline {
+    /// How many tracks the tag filter alone returns.
+    kept: usize,
+    /// How much of the model's pool the tag filter also holds.
+    overlap: f32,
+    /// How much of the tag filter's set the model found.
+    recall: f32,
+    /// …and how much of the model's pool is *not* in the tag set, which is
+    /// the only place its value can be.
+    beyond_tags: f32,
 }
 
 #[derive(Serialize)]
@@ -587,6 +610,41 @@ fn measure(
     let tick_boundaries =
         (elbow >= 3).then(|| [similarities[elbow * 2 / 3], similarities[elbow / 3]]);
 
+    // The tag baseline, over the same corpus and the same expected words.
+    let tags = (!expected.is_empty()).then(|| {
+        let tagged: Vec<bool> = scored
+            .iter()
+            .map(|track| {
+                track
+                    .genre
+                    .as_deref()
+                    .is_some_and(|genre| matches(genre, expected))
+            })
+            .collect();
+        let kept = tagged.iter().filter(|held| **held).count();
+        let shared = tagged[..elbow].iter().filter(|held| **held).count();
+        let union = elbow + kept - shared;
+        #[expect(clippy::cast_precision_loss, reason = "library counts are small")]
+        TagBaseline {
+            kept,
+            overlap: if union == 0 {
+                0.0
+            } else {
+                shared as f32 / union as f32
+            },
+            recall: if kept == 0 {
+                0.0
+            } else {
+                shared as f32 / kept as f32
+            },
+            beyond_tags: if elbow == 0 {
+                0.0
+            } else {
+                (elbow - shared) as f32 / elbow as f32
+            },
+        }
+    });
+
     Ok(RequestRow {
         id: id.to_owned(),
         query: query.to_owned(),
@@ -595,6 +653,7 @@ fn measure(
         distribution: distribution(&similarities),
         policies,
         tick_boundaries,
+        tags,
     })
 }
 
