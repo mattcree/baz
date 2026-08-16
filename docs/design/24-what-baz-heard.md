@@ -1,8 +1,9 @@
 # 24 — What Baz heard
 
 An hour of listening currently buys the *ability* to compose and shows nothing
-for itself. This note is about whether it should show something, and what
-would keep that from becoming a nightmare.
+for itself. This note is about whether it should show something, what would
+keep that from becoming a nightmare — and, by §7, why a local player can be
+far more personal than a hosted one without becoming one.
 
 ## 1. The rule, located rather than repealed
 
@@ -132,6 +133,27 @@ principle, because it is the natural identity of a local player and the exact
 opposite of the streaming model — where the application is identical for
 everyone and **you** are the variable being optimised. Here the application
 could be the variable and the library the constant.
+
+**And locality is what makes it safe, which is the whole reason it is
+available.** The owner: *"if we keep it local, we can do anything."* He is
+right, and it is worth being precise about why, because the same behaviours
+are creepy or benign depending on one fact:
+
+| what baz would do | in a cloud product | here |
+|---|---|---|
+| know every file, and be opinionated about it | a profile it sells | it read your folder, which it had to |
+| know what you have never played | a retention lever | a shelf you forgot about |
+| derive its own vocabulary from your collection | a model trained on you | arithmetic on your disk |
+| notice what you reach for | targeting | knowing your taste |
+
+Nothing here leaves the machine, so none of it can be sold, shared, subpoenaed
+or A/B tested against you. **The intimacy is affordable precisely because it is
+inert.**
+
+Which cuts the other way too, and is the obligation the boldness carries: the
+moment any of it phones home, every item in the right-hand column becomes the
+left-hand one. This principle is not *baz may be nosy*; it is *baz may be nosy
+because it stays put*, and the second clause is doing all the work.
 
 **No generic content anywhere.** Every example, every suggestion, every
 default drawn from what the listener actually owns. Nothing a stock photo.
