@@ -1696,27 +1696,30 @@ or not."*
     if a pass is running, if the library is empty, or if every track has
     already been heard.
 
-76. **Shipped 2026-08-16 — compose from what you haven't played.** *(From the
-    quorum, Q3.)* baz keeps a play ledger, so it can answer *"something I
-    haven't played in a while"*, which is the request people actually make of
-    a large library. Ines proposed it, Marcus reframed it as a filter, Toby
-    said he would press it every time.
+76. **Closed 2026-08-16 without shipping — lean towards what you haven't
+    played.** *(From the quorum, Q3.)* Built as a filter, tested against the
+    owner's own library, and taken straight back out. His word: *"it's
+    irrelevant."*
 
-    **Marcus's reading won**, and the reason is the one design note 23 spends
-    its length on: a filter is a *fact* — these are songs the ledger holds no
-    play of, and a listener can check any row against their own memory —
-    while a lean is one more thing happening for reasons nobody can read, on
-    a feature whose credibility already rests on the half that is
-    measurement.
+    **The premise does not hold, and the measurement is the argument.** The
+    idea needs a play ledger that spans years. baz's spans **eight days**:
 
-    A chip beside the words, not a seventh mood, so it composes with every
-    one of them; and the never-played count on the door is a press that
-    leaves the door with it already on, which is what design note 24 §3 asks
-    of that line — *the one item on the reading that leads somewhere*. The
-    restriction is applied before anything is scored, so the ranks and the
-    eligibility knee are computed within the pool that was asked for. Absent
-    entirely where the ledger cannot answer, because a toggle that silently
-    does nothing is worse than one that is not there.
+    ```text
+    plays recorded:    864, from 2026-08-08
+    distinct songs:    262
+    analysed tracks:  5076
+    ```
+
+    So *"you have never played 4 814 of these"* is not a fact about a
+    listener's habits. It is a fact about **how long baz has been installed**,
+    dressed as one about them — and it sat inside the door's *what Baz heard*
+    block, whose entire worth is that every line in it is a claim you can
+    check. One artefact-shaped line in there costs more than the line is
+    worth. The filter, meanwhile, excluded 5% of the library, which is not a
+    filter.
+
+    It could become true after a year of use. That is not a reason to ship it
+    now, and if it is ever wanted again this entry has the reason it was not.
 
 77. **Half done 2026-08-15 — one control style for quiet acts.** *"the general
     idea isn't wrong around some of the controls. I think we could tackle that

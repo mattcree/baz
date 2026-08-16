@@ -277,7 +277,7 @@ fn heard_reading(profile: &crate::vibe::Profile) -> Option<Element<'static, Mess
             if plural { "those lines" } else { "that line" }
         ));
     }
-    if profile.extremes.is_empty() && sentences.is_empty() && profile.never_played.is_none() {
+    if profile.extremes.is_empty() && sentences.is_empty() {
         return None;
     }
     if !profile.extremes.is_empty() {
@@ -289,22 +289,6 @@ fn heard_reading(profile: &crate::vibe::Profile) -> Option<Element<'static, Mess
     }
     for sentence in sentences {
         lines = lines.push(views::hint(&sentence));
-    }
-    // **The one line here that leads somewhere.** Design note 24 §3: the
-    // measurements are a one-time curio, and this is the item that changes as
-    // you listen and is a route back into your own collection — so it is a
-    // press, not a sentence. Last, because everything above it is something
-    // to read and this is something to do.
-    if let Some(never) = profile.never_played
-        && never > 0
-    {
-        lines = lines
-            .push(Space::new().height(theme::GAP_XS))
-            .push(crate::views::compose::chip(
-                &format!("Compose from the {never} you have never played"),
-                false,
-                Message::VibeStartUnplayed,
-            ));
     }
 
     Some(

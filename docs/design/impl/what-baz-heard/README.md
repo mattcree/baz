@@ -29,7 +29,6 @@ check out:
 | Quietest and Slowest — Ini Kovac | record 01, 62 BPM at amplitude 0.18 — the bottom of both walks |
 | Loudest and Fastest — Studio Hain | record 06, 168 BPM at 1.00 — the top of both |
 | Tempo runs 66 to 176 BPM, centred on 117 | brackets the fixture's 58–172 BPM span, p05–p95 |
-| You have never played 22 of these | the seeded ledger holds exactly two plays |
 | barely varies in brightness and texture | one tone at one frequency, so there is nothing on either axis to vary |
 
 The last row is the one worth dwelling on. A rank axis spreads whatever it is
@@ -41,6 +40,17 @@ threshold under it is measured rather than guessed: `vibe-spread` over a real
 `FLAT_AXIS` is 0.12, a third of it.
 
 ### What is not on this door, and why
+
+**A never-played count** was here for a day. Design note 24 §3 argued it was
+the one line on the reading that *leads somewhere* — and the premise, *baz
+keeps a play ledger*, turned out to mean an eight-day one. Measured on the
+owner's library: 864 plays over 262 distinct songs against 5 076 analysed
+tracks, so the line would have read *you have never played 4 814 of these*.
+That is a fact about how long baz has been installed, standing among named
+records that can be graded in a second and borrowing their credibility. His
+word: *"it's irrelevant."* `docs/WORK.md` item 76 carries the numbers.
+
+**A mood's own pool size**, likewise:
 
 *"Only N songs to draw from"* on a mood the library cannot answer was built,
 measured, and taken back out the same day. Design note 24 §7 item 2 assumed
@@ -64,32 +74,11 @@ recorded: **CLAP text-audio similarities are not comparable across prompts**,
 and *does this library contain X* is exactly a cross-prompt question. A
 control that fires at random is worse than no control, so there is no control.
 
-## 03 · Composing from what you forgot
-
-The never-played count is a **press**, not a sentence. Design note 24 §3
-argues that a profile of measurements is a one-time curio while a never-played
-count changes as you listen and is a route back into your own collection —
-so it is the one item here that leads somewhere, and it leads somewhere by
-being pressable.
-
-It leaves the door with the filter already on, and the request sentence says
-so: **`Any song you have never played, starting quiet and climbing the whole
-way, for about an hour.`** The chip beside the words carries the same state
-and the same number, because they are one control seen twice.
-
-It is a **filter, not a lean** (`docs/WORK.md` item 76, Marcus's reading). A
-filter is a fact a listener can check against their own memory; a weighting
-that quietly *preferred* unplayed songs would be one more thing happening for
-reasons nobody could read. The restriction is applied before anything is
-scored, so the ranks and the eligibility knee are computed within the pool
-that was asked for rather than within the library and then filtered — which
-would put a "loud" song at the quiet end of its own list.
-
-## 04 · The example is their music
+## 03 · The example is their music
 
 > These last three shots also show the page after
 > `docs/design/25-the-line-leads.md`: the line is the question, first and at
-> both depths, and the words are the filter column on the right. Shot 04 is
+> both depths, and the words are the filter column on the right. Shot 03 is
 > the simple depth, which had **no curve at all** before that note.
 
 The field's placeholder reads **`warm electronic, slow and sparse`**, built
@@ -98,7 +87,7 @@ only the noun is theirs, which is design note 24 §7's own recommendation: a
 surface that differs per library is one nobody can screenshot or support, so
 the rows stay put and their contents are the listener's.
 
-## 05 · Drew, rather than matched
+## 04 · Drew, rather than matched
 
 The count under the field used to read *N of M songs match*. Two of the six
 requests measured in `docs/design/impl/vibe-eligibility/` were at or below
@@ -106,15 +95,12 @@ chance against their own genre, so that sentence claimed a precision the
 retrieval does not have — design note 23 §4's charge, and the worst kind
 available, because it is a dishonesty rather than a limitation.
 
-It now reads **`Baz drew 22 of 24 to choose from`** — the numerator carries
-the request's restrictions and the denominator stays the library, so the
-sentence says how much was set aside as well as how much was kept. Same
-arithmetic with the claim removed, and the three nearest carry the grading
-out loud: *if these are not what you meant, it has not understood the
+It now reads **`Baz drew 24 of 24 to choose from`** — the same arithmetic with
+the claim removed, and the three nearest carry the grading out loud: *if these are not what you meant, it has not understood the
 phrase.* The titles are the only part of that readout anybody can check,
 which is why they are the part that asks to be checked.
 
-## 06 · The flat axes admit it
+## 05 · The flat axes admit it
 
 Opened, `ENERGY` and `TEMPO` carry no warning — the fixture genuinely varies
 in both — and `BRIGHTNESS` says *your music barely varies in brightness —

@@ -90,12 +90,6 @@ Every release is built from a tag by CI, gated on the full test suite — see
   a line there would be followed perfectly by the songs while nothing about
   them changed. The threshold is measured against a real library rather than
   picked.
-- **Compose from what you have never played.** The never-played count on the
-  smart playlist door is a press, and it leaves the door with the filter
-  already on; the chip beside the description turns it on and off from there.
-  It composes with every mood rather than being a seventh one. A filter and
-  not a preference: what comes back is exactly the songs your play history
-  holds no play of, which is something you can check.
 - **The description's example is made of your own music** — *warm shoegaze,
   slow and sparse*, using the genre you actually own most of, instead of a
   sentence about nobody's library.

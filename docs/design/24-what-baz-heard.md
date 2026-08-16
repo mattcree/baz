@@ -92,6 +92,21 @@ twice?** A profile of measurements is a one-time curio. A never-played count
 changes as you listen and is a route back into your own collection, so the
 page has a reason to be revisited.
 
+> **Built and removed, 2026-08-16.** This section is wrong, and the flaw is in
+> its first sentence: *baz keeps a play ledger.* It does — an eight-day one.
+> Measured on the owner's library the day this shipped: 864 plays over 262
+> distinct songs, against 5 076 analysed tracks. So the line would have read
+> *you have never played 4 814 of these*, which is a fact about **how long baz
+> has been installed** wearing the clothes of a fact about its owner — and it
+> sat among named records that can be graded in a second, borrowing their
+> credibility. The owner, shown the numbers: *"it's irrelevant."*
+>
+> The lesson generalises past this line. §2 argues the valuable items here are
+> **falsifiable claims**, and a claim is only falsifiable if the reader can
+> tell what it is a claim *about*. This one could not, and no wording fixed
+> that — *Baz has watched you play 262 of these* is accurate and still useless.
+> `docs/WORK.md` item 76 carries the measurement.
+
 ## 4. What it must not claim
 
 **The units problem.** *"Most varied in texture, least in brightness"* is the

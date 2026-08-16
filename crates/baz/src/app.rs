@@ -690,12 +690,6 @@ pub(crate) enum Message {
     NewPlaylistOpen,
     /// Leave the door with an empty request, to write your own words.
     VibeStartBlank,
-    /// **Compose only from songs the ledger has never seen a play of**, or
-    /// stop doing so.
-    VibeUnplayedOnly(bool),
-    /// Leave the door straight into that request, which is what makes the
-    /// never-played count a door rather than a fact.
-    VibeStartUnplayed,
     /// **The smart playlist's own door.** Lands on the moods rather than on
     /// the form, and on a library Baz has never heard it lands on the one
     /// step that has to come first.
@@ -2387,13 +2381,6 @@ impl App {
                 }
                 Task::none()
             }
-            Message::VibeStartUnplayed => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.choosing = false;
-                    state.vibe.set_unplayed_only(true);
-                }
-                Task::none()
-            }
             // **Opening this door is the request.**
             //
             // The owner: *"what's the point of me having to make the system
@@ -4039,11 +4026,9 @@ impl App {
                     // and doing it here means a returning listener sees the
                     // reading without waiting for a scan they already paid
                     // for.
-                    state.vibe.rebuild_profile(
-                        &state.albums,
-                        &state.edition_choice,
-                        state.history.as_ref(),
-                    );
+                    state
+                        .vibe
+                        .rebuild_profile(&state.albums, &state.edition_choice);
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
                         state.vibe.compose(&state.albums, &state.edition_choice);
                     }
@@ -4056,11 +4041,9 @@ impl App {
                     // Once, when the scan settles — not per track, which
                     // would sort the whole library a few thousand times.
                     if !state.vibe.analyzing {
-                        state.vibe.rebuild_profile(
-                            &state.albums,
-                            &state.edition_choice,
-                            state.history.as_ref(),
-                        );
+                        state
+                            .vibe
+                            .rebuild_profile(&state.albums, &state.edition_choice);
                     }
                     if !state.vibe.analyzing
                         && state.vibe.failed > 0
@@ -4114,14 +4097,6 @@ impl App {
             // **The words have been still for 400 ms.** Embed once, off this
             // thread; the count and the closest three are computed against
             // vectors already in memory when it comes back.
-            Message::VibeUnplayedOnly(only) => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.set_unplayed_only(*only);
-                }
-                // The eligible set just changed, so everything describing it
-                // is describing the old one. Same path the words take.
-                Some(Task::none())
-            }
             Message::VibeDepth(depth) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.depth = *depth;
@@ -5948,12 +5923,6 @@ impl App {
                     Event::PlayRecorded { .. } => {
                         if let Screen::Shelf(state) = &mut self.screen {
                             state.history = read_history();
-                            // **A play changes what has never been played.**
-                            // The count and the filter are both readings of
-                            // the ledger, so they are re-read when it moves
-                            // rather than measured once after a scan and left
-                            // to go quietly wrong.
-                            state.vibe.rebuild_unplayed(state.history.as_ref());
                         }
                     }
                     _ => {}

@@ -83,21 +83,6 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         quiet("Optional. Leave it empty and Baz draws from everything it has heard."),
     ]
     .spacing(TIGHT);
-    // **The shelf you forgot about, as a filter on the request.** It sits
-    // with the field rather than under the moods because it narrows *which
-    // songs*, which is the field's own question — and it composes with every
-    // mood rather than being a seventh one, which is what makes it worth
-    // having at all.
-    //
-    // Absent until the ledger can answer it: a toggle that silently does
-    // nothing is worse than a control that is not there.
-    if !vibe.never_played.is_empty() {
-        asked = asked.push(Space::new().height(theme::GAP_XS)).push(chip(
-            &format!("Only the {} I've never played", vibe.never_played.len()),
-            vibe.unplayed_only,
-            Message::VibeUnplayedOnly(!vibe.unplayed_only),
-        ));
-    }
     if advanced {
         asked = asked.push(matches_note(vibe));
     }
