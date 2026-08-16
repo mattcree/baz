@@ -2021,6 +2021,17 @@ pub fn contour_line(p: &Palette) -> Color {
     p.paper_dim
 }
 
+/// **A line you are not editing**, behind the one you are.
+///
+/// Faint enough to sit under the drawn line and the field's own bands without
+/// competing, present enough that four of them still read as lines rather
+/// than as smudges — because where they part from the line in front is the
+/// whole reason they are drawn.
+#[must_use]
+pub fn contour_ghost(p: &Palette) -> Color {
+    alpha(p.paper_muted, 0.55)
+}
+
 /// A point on the line, brighter under the hand.
 #[must_use]
 pub fn contour_point(p: &Palette, lit: bool) -> Color {

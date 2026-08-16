@@ -678,7 +678,10 @@ pub(crate) enum Message {
     /// **Open or close the per-dimension lines** — design 21 §5's labelled
     /// expander. Closing puts every line back on the first one's curve, which
     /// is why it says *back to one line* rather than *close*.
-    ContourExpander,
+    /// **Show one of the five lines, or all of them.** A view, not a request.
+    VibeLine(Option<usize>),
+    /// Put every line back on one shape.
+    VibeGatherLines,
     /// Edit the in-memory preview without touching music or playlist files.
     VibePreviewRemove(usize),
     VibePreviewShift(usize, i32),
@@ -4099,7 +4102,7 @@ impl App {
             // vectors already in memory when it comes back.
             Message::VibeDepth(depth) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.set_depth(*depth);
+                    state.vibe.depth = *depth;
                 }
                 Some(Task::none())
             }
@@ -4261,9 +4264,15 @@ impl App {
                 self.recompose();
                 Some(Task::none())
             }
-            Message::ContourExpander => {
+            Message::VibeLine(lane) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.toggle_expander();
+                    state.vibe.show_line(*lane);
+                }
+                Some(Task::none())
+            }
+            Message::VibeGatherLines => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.gather_lines();
                 }
                 Some(Task::none())
             }

@@ -47,23 +47,26 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
     // the shares, not each line, because it cannot satisfy each line. Saying
     // so turns a control that looks broken into one that is behaving
     // visibly.
-    block = block.push(views::hint(if vibe.expanded {
-        "One line each — and a song cannot be in five places at once, so where the \
-         lines disagree the shares below settle it. That is why the dots track a \
-         40% line closely and a 10% line loosely."
+    block = block.push(views::hint(if vibe.shown.is_some() {
+        "A song cannot be in five places at once, so where the lines disagree the \
+         shares settle it. That is why the dots track a 40% line closely and a 10% \
+         line loosely."
     } else {
-        "One line asking for five things at once: energy counts most, then tempo, \
-         then brightness and dynamics, and texture least. Advanced shapes each of \
-         them on its own."
+        "One shape, asked of five things at once: energy counts most, then tempo, then \
+         brightness and dynamics, and texture least. Pick one below to shape it on its \
+         own."
     }));
+    // **One graph, and a row of tabs over it.** The owner: *"I like the idea
+    // of all lines being on the same graph and a way to kinda toggle between
+    // all and individual… then selecting each individually to be able to
+    // configure that line."*
+    //
+    // It replaces five stacked canvases — 1 100 px of them — with one, and it
+    // is the only arrangement in which the **disagreement between the lines**
+    // is a thing you can see rather than a thing a sentence has to describe.
     if layout.draw_curve {
-        if vibe.expanded {
-            for (index, lane) in vibe.contour.lanes.iter().enumerate() {
-                block = block.push(line(vibe, index, &lane.points, Some(lane.dimension)));
-            }
-        } else if let Some(lane) = vibe.contour.lane(0) {
-            block = block.push(line(vibe, 0, &lane.points, None));
-        }
+        block = block.push(tabs(vibe));
+        block = block.push(line(vibe));
     }
     // **One shape row, not two.** The named presets and the point count were
     // the same control twice — a preset *is* a shape plus a number of points,
@@ -73,15 +76,6 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
     // is a count plus dragging, and the sentence above names what you drew in
     // the words the presets used to supply.
     block = block.push(points(vibe));
-    // **The line stands at both depths; opening it into five does not.**
-    // Design note 25 moved the curve to the front of the page, which means
-    // simple mode has one now — and one line is the whole of what simple
-    // mode should have. Five of them, each with its share of the blend and
-    // what it measures, is the query builder admitting to being one, which is
-    // exactly what the other depth is for.
-    if vibe.depth == crate::vibe::Depth::Advanced {
-        block = block.push(expander(vibe));
-    }
     block.into()
 }
 
@@ -99,10 +93,18 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
 /// pills, lit at the current number, so the whole range is visible and one
 /// press reaches any of it.
 ///
-/// A new turn arrives **on the line it joins** — at the level the line
+/// A new point arrives **on the line it joins** — at the level the line
 /// already stands at, in the widest gap — so gaining a handle changes the
 /// shape by nothing, and it is dragged deliberately rather than recovered
 /// from.
+///
+/// They read `Straight`, `1 turn`, `2 turns`… until the owner said what was
+/// wrong with that: *"the term 'turns' is not correct in this case I think?
+/// more like just points on a curve."* Ten points on a straight line has no
+/// turns in it at all, so the label was a claim about shape from a control
+/// that only sets a number of handles. `POINTS` above supplies the noun —
+/// which is the engine's own word ([`crate::vibe::ContourPoint`]) and every
+/// envelope editor's word for the same thing.
 fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let current = vibe.contour.points();
     column![
@@ -111,68 +113,99 @@ fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
             (crate::vibe::Contour::MIN_POINTS..=crate::vibe::Contour::MAX_POINTS)
                 .map(|count| {
                     chip(
-                        POINT_LABELS[count - crate::vibe::Contour::MIN_POINTS],
+                        &count.to_string(),
                         count == current,
                         Message::ContourPoints(count),
                     )
                 })
                 .collect(),
-            5,
+            9,
         ),
     ]
     .spacing(theme::GAP_XS)
     .into()
 }
 
-/// The counts, as words rather than as bare digits — a turn is the thing a
-/// listener is actually adding, and `2 3 4 5 6 7 8 9 10` beside every other
-/// worded chip on the page would be two kinds of thing in one anatomy.
-const POINT_LABELS: [&str; 9] = [
-    "Straight", "1 turn", "2 turns", "3 turns", "4 turns", "5 turns", "6 turns", "7 turns",
-    "8 turns",
-];
-
-/// **One drawn line**, with the cloud behind it, the words at its ends and the
-/// result over it.
+/// **The tabs over the graph** — all five, or one of them.
 ///
-/// `named` is `None` while this is the blend — the listener is not asked to
-/// know the word *energy*, let alone *spectral flatness* — and carries the
-/// dimension's own name once the lines have been pulled apart, at which point
-/// naming them is the entire reason they are open.
-fn line<'a>(
-    vibe: &'a crate::vibe::State,
-    index: usize,
-    points: &'a [crate::vibe::ContourPoint],
-    named: Option<crate::vibe::Dimension>,
-) -> Element<'a, Message> {
+/// The share rides on the tab because it is a property of the line, and the
+/// order is the order of the shares, so the row itself says which of them
+/// moves the result most without anybody reading a number. Nothing here is a
+/// mode: pressing a tab changes what you can drag and nothing about the
+/// request, which is what makes them free to press.
+fn tabs(vibe: &crate::vibe::State) -> Element<'_, Message> {
+    let mut all = vec![chip(
+        "All five",
+        vibe.shown.is_none(),
+        Message::VibeLine(None),
+    )];
+    for (index, lane) in vibe.contour.lanes.iter().enumerate() {
+        all.push(chip(
+            &format!("{} · {}%", lane.dimension.label(), lane.dimension.share()),
+            vibe.shown == Some(index),
+            Message::VibeLine(Some(index)),
+        ));
+    }
+    wrap_chips(all, 6)
+}
+
+/// **The one graph**, with the cloud behind it, the words at its ends, the
+/// result over it and the lines you are not editing faint underneath.
+fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let room = theme::active();
+    let shown = vibe.shown;
+    let named = shown
+        .and_then(|lane| vibe.contour.lane(lane))
+        .map(|lane| lane.dimension);
+    let index = shown.unwrap_or(0);
+    let points = vibe
+        .contour
+        .lane(index)
+        .map_or(&[][..], |lane| lane.points.as_slice());
     // **The axis in words, not in a legend.** Three words at each end while
-    // this is the blend, because the blend is several things at once and a
-    // single word for it would be a claim about which one dominates.
+    // all five are shown, because that is several things at once and a single
+    // word for it would be a claim about which one dominates.
     let (low, high) = named.map_or(("quiet, slow, sparse", "loud, fast, busy"), |dimension| {
         dimension.ends()
     });
-    let mut block = column![].spacing(theme::GAP_XS);
+    // The four you are not editing. On *all five* there is nothing to ghost:
+    // every line is the line, and drawing four copies of it under itself
+    // would only thicken it.
+    let ghosts: Vec<&[crate::vibe::ContourPoint]> = shown.map_or_else(Vec::new, |lane| {
+        vibe.contour
+            .lanes
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != lane)
+            .map(|(_, other)| other.points.as_slice())
+            .collect()
+    });
+    // **The axis words sit above and below the line, not in a gutter beside
+    // it.** Three words do not fit a 48 px lane, and the first attempt put
+    // *quiet, slow, sparse* straight through *first song*. Above and below
+    // there is the whole measure for them, and no legend anywhere.
+    let canvas = crate::contour::Contour::new(points, room, theme::CONTOUR_H)
+        .ghosts(ghosts)
+        .field(cloud(vibe, shown))
+        .result(dots(vibe, shown))
+        .highlight(vibe.selected_row.or(vibe.hovered_row))
+        .on_drag(move |point, at, level| Message::ContourDragged(index, point, at, level))
+        .on_release(Message::ContourReleased);
+    let foot = row![
+        views::axis_word("first song"),
+        Space::new().width(Length::Fill),
+        views::axis_word("last song"),
+    ]
+    .align_y(iced::Alignment::Center);
+    let mut block = column![views::axis_word(high), canvas, views::axis_word(low), foot,]
+        .spacing(theme::GAP_XS);
     if let Some(dimension) = named {
-        // Opened, each line says what it *measures*. That is the whole reason
-        // to open them: a listener who asks for `Brightness` is asking for
+        // **What this line measures**, which is the whole reason to look at
+        // one on its own: somebody who asks for `Brightness` is asking for
         // spectral centroid, rolloff and zero crossings, and is entitled to
-        // know it — none of these is a mood and none of them pretends to be.
-        // **What it measures, and how much it counts.** The five lines do not
-        // influence a result equally — energy is dominant — so a line that
-        // says only what it measures leaves the listener to discover by
-        // experiment that dragging texture moves the list a quarter as far as
-        // dragging energy does.
-        //
-        // *Of the decision*, not *of the blend*: a share has to be a share of
-        // something the reader can name, and nothing on this page ever said
-        // what a blend was.
+        // know it. None of these is a mood and none of them pretends to be.
         block = block
-            .push(views::caption_word(&format!(
-                "{} · {}% OF THE DECISION",
-                dimension.label().to_uppercase(),
-                dimension.share()
-            )))
+            .push(Space::new().height(theme::GAP_XS))
             .push(views::hint(dimension.measured_from()));
         // **And where the collection has nothing to say on it, say so.** A
         // rank axis spreads whatever it is given across the whole scale by
@@ -187,29 +220,15 @@ fn line<'a>(
                 dimension.label().to_lowercase()
             )));
         }
+        if !vibe.contour.is_one_line() {
+            block = block.push(chip(
+                "Put every line back on one shape",
+                false,
+                Message::VibeGatherLines,
+            ));
+        }
     }
-    // **The axis words sit above and below the line, not in a gutter beside
-    // it.** Three words do not fit a 48 px lane, and the first attempt put
-    // *quiet, slow, sparse* straight through *first song*. Above and below
-    // there is the whole measure for them, and no legend anywhere.
-    let canvas = crate::contour::Contour::new(points, room, theme::CONTOUR_H)
-        .field(cloud(vibe, named.map(|_| index)))
-        .result(dots(vibe, named.map(|_| index)))
-        .highlight(vibe.selected_row.or(vibe.hovered_row))
-        .on_drag(move |point, at, level| Message::ContourDragged(index, point, at, level))
-        .on_release(Message::ContourReleased);
-    let foot = row![
-        views::axis_word("first song"),
-        Space::new().width(Length::Fill),
-        views::axis_word("last song"),
-    ]
-    .align_y(iced::Alignment::Center);
-    block
-        .push(views::axis_word(high))
-        .push(canvas)
-        .push(views::axis_word(low))
-        .push(foot)
-        .into()
+    block.into()
 }
 
 /// **The eligible songs, drawn behind the line** — design 21 §6's second
@@ -270,34 +289,4 @@ fn dots(vibe: &crate::vibe::State, lane: Option<usize>) -> Vec<(f32, f32)> {
             (at, *level)
         })
         .collect()
-}
-
-/// **A labelled control, not a bare triangle.** Design 21 §5's seventh item:
-/// the expander says what it opens, and what it opens is already holding this
-/// line's own points.
-fn expander(vibe: &crate::vibe::State) -> Element<'_, Message> {
-    let open = vibe.expanded;
-    let label = if open {
-        "Back to one line"
-    } else {
-        "Shape each thing Baz listens for separately"
-    };
-    // A chip rather than a bare word, and a sentence saying what it *does*.
-    // The owner had to ask for per-dimension curves after they shipped —
-    // which is what a control nobody can find looks like — and then said the
-    // control *"isn't clear how it influences things"*, which the old copy
-    // earned by describing itself instead of its effect.
-    column![
-        chip(label, open, Message::ContourExpander),
-        views::hint(if open {
-            "Drag energy and the list gets louder or quieter where you drew it; drag \
-             brightness and it gets darker or crisper there instead."
-        } else {
-            "One line moves all five things Baz listens for together. Open this to make \
-             the list climb in energy while it steadies in tempo, or any other \
-             combination."
-        }),
-    ]
-    .spacing(theme::GAP_XS)
-    .into()
 }

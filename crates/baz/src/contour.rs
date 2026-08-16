@@ -75,6 +75,7 @@ type OnDrag<'a, Message> = Box<dyn Fn(usize, f32, f32) -> Message + 'a>;
 /// A contour over its two axes, optionally pointer-driven.
 pub(crate) struct Contour<'a, Message> {
     points: &'a [ContourPoint],
+    ghosts: Vec<&'a [ContourPoint]>,
     field: &'a [f32],
     result: Vec<(f32, f32)>,
     highlight: Option<usize>,
@@ -121,6 +122,7 @@ impl<'a, Message> Contour<'a, Message> {
     ) -> Self {
         Self {
             points,
+            ghosts: Vec::new(),
             field: &[],
             result: Vec::new(),
             highlight: None,
@@ -130,6 +132,22 @@ impl<'a, Message> Contour<'a, Message> {
             on_drag: None,
             on_release: None,
         }
+    }
+
+    /// **The other lines, drawn faintly behind this one.**
+    ///
+    /// The five lines share one canvas, so the four you are not editing stay
+    /// on it: where they diverge from the one you are, that gap is the
+    /// disagreement the shares are settling, and it is the only place in the
+    /// feature where that is visible rather than described.
+    ///
+    /// Drawn under the field's own bands and under the drawn line, and never
+    /// interactive: a ghost you could grab would be four invisible controls
+    /// lying over one real one.
+    #[must_use]
+    pub(crate) fn ghosts(mut self, ghosts: Vec<&'a [ContourPoint]>) -> Self {
+        self.ghosts = ghosts;
+        self
     }
 
     /// The library's own distribution over the up axis, lowest bucket first,
@@ -485,6 +503,32 @@ where
             theme::contour_axis(room),
             0.0,
         );
+
+        // 3b. **The lines you are not editing**, under everything the drawn
+        //     line uses so they can never be mistaken for it. Stroked only —
+        //     four filled bands would be a fog rather than four readings.
+        for ghost in &self.ghosts {
+            if ghost.is_empty() {
+                continue;
+            }
+            let mut x = field.x;
+            while x < field.x + field.width {
+                let width = theme::CONTOUR_STEP.min(field.x + field.width - x);
+                let at = Self::at_of(field, x + width / 2.0);
+                let y = Self::y_of(field, level_at(ghost, at));
+                quad(
+                    Rectangle {
+                        x,
+                        y: y - theme::CONTOUR_LINE / 2.0,
+                        width,
+                        height: theme::CONTOUR_LINE,
+                    },
+                    theme::contour_ghost(room),
+                    0.0,
+                );
+                x += width;
+            }
+        }
 
         // 4. **The line, as a band filled to the floor.** A column per step:
         //    diagonals are not a quad's shape, and an energy profile filled

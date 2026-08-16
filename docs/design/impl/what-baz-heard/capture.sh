@@ -108,11 +108,11 @@ sleep 4
 move 1400 940
 shot "04-drew-rather-than-matched"
 
-# **The axes this collection cannot answer.** A tone at one frequency has
-# nothing to say about brightness or texture, and the opened lines say so.
-# The advanced depth opens all five on arrival — the owner's *"make advanced
-# mode open up the multiple curves"* — so the tab is the whole gesture.
-click 377 158
+# **One line on its own, and the axis this collection cannot answer.** The
+# tabs over the graph pick which of the five you are shaping; the other four
+# stay behind it as ghosts. A tone at one frequency has nothing to say about
+# brightness, and picking that line says so.
+click 595 342
 sleep 3
 move 1400 940
 shot "05-flat-axes-admit-it"

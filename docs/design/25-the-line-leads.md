@@ -64,7 +64,7 @@ by ear beats one that cannot.
 
 ## 3a. What the owner asked for once he could see it
 
-Four corrections, the same day, and each of them follows from the line being
+Five corrections, the same day, and each of them follows from the line being
 the page's subject rather than a setting on it:
 
 1. **Ten points, not two.** *"Can we just make the line default to having
@@ -128,6 +128,35 @@ the page's subject rather than a setting on it:
    What was missing was the sentence saying so, and without it a working
    control looked like a failing one.
 
+5. **One graph, with tabs, and the points stopped being turns.** *"I like the
+   idea of all lines being on the same graph and a way to kinda toggle between
+   all and individual… then selecting each individually to be able to
+   configure that line."*
+
+   Five stacked canvases — 1 100 px of them — became one, with a row of tabs
+   over it: `All five`, then each line beside its share. Picking one makes it
+   the line you drag, drops what it measures and any flat-axis warning
+   underneath it, and leaves the other four **on the same canvas as ghosts**.
+   That last part is the point: where the ghosts part from the line in front,
+   that gap is the disagreement the shares are settling, and it is the only
+   place in the feature where that is visible rather than described.
+
+   A tab is a **view**, not a mode: pressing one changes what you can drag and
+   nothing about the request, which is what makes them free to press. Coming
+   back to one shape is its own act now, named for what it does, rather than
+   the side effect of closing an expander.
+
+   On `All five` a drag moves every line **by what the pointer moved** rather
+   than setting them all to where it landed. The difference only shows once
+   the lines have been pulled apart — which is exactly when the old behaviour
+   would have silently thrown that work away.
+
+   And the point count reads `2 3 4 … 10` under `POINTS`, not `Straight`,
+   `1 turn`, `2 turns`. *"The term 'turns' is not correct in this case I
+   think? more like just points on a curve."* Ten points on a straight line
+   has no turns in it at all, so the label was a claim about shape made by a
+   control that only sets a number of handles.
+
 And one thing that fell out rather than being asked for: **the match count
 moved to both depths.** It was advanced-only when the words were the request
 and the readouts were the query builder's own. *What did my filter catch* is
@@ -146,6 +175,20 @@ reach, which is the opposite of what hiding it there assumed.
 - **The door.** Its six moods still set words, shape and length together,
   which is what a preset is. A mood is not a filter, and the door is not this
   page.
+
+## 4a. Simple and Advanced is now a mode over one row of chips
+
+Worth stating plainly, because it is the consequence of §3a item 5 and it is
+his call rather than this note's. The advanced depth used to gate the
+per-dimension lines, the vocabulary and the readouts. The lines moved onto the
+graph's own tabs, where they are a view rather than a depth. The match count
+went to both depths, because *what did my filter catch* is not an advanced
+question — and the depth that opens five curves was the one where it had been
+hardest to reach.
+
+What is left behind the tab is **one row of six words**. A mode is a promise
+that there are two pages to learn; this one now promises that for a chip row,
+which is a disclosure at most.
 
 ## 5. What still needs the owner
 

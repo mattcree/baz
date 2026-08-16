@@ -36,6 +36,16 @@ Every release is built from a tag by CI, gated on the full test suite — see
   real measurements and you can check it by ear; the description is a model's
   guess that, for two of six measured test phrases, was no better than
   picking at random. The page led with the guess.
+- **One graph for all five lines, with tabs to pick between them.** The five
+  things baz listens for used to be five charts stacked down the page. They
+  share one now: `All five` draws the shape you are asking every line for,
+  and picking a line — `Energy · 40%`, `Texture · 10%` — makes that one the
+  line you drag, tells you what it measures, and leaves the other four faint
+  behind it. Where they part from each other is the disagreement the shares
+  are settling, which used to be a sentence and is now a picture.
+- **The point count says points.** It said `Straight`, `1 turn`, `2 turns`,
+  which is a claim about shape from a control that only sets how many handles
+  the line has — ten points on a straight line has no turns in it at all.
 - **The five things baz listens for say how much each one counts, and what
   they count towards.** Open the lines and each says *40% of the decision*
   rather than *40% of the blend* — a share of something you can name — and the

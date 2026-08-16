@@ -452,8 +452,14 @@ pub(crate) enum Depth {
     /// The line, a length, some words to narrow with, and the press.
     #[default]
     Simple,
-    /// …and the vocabulary, the line's per-dimension curves, and the readouts
-    /// that say what the engine did.
+    /// …and the vocabulary.
+    ///
+    /// **That is now all it adds**, and the entry is left honest about it:
+    /// the five lines moved onto the graph's own tabs where they belong, and
+    /// the match count went to both depths because *what did my filter catch*
+    /// is not an advanced question. A mode that gates one row of chips is a
+    /// mode that should probably not exist — the owner's call, not this
+    /// file's.
     Advanced,
 }
 
@@ -473,8 +479,8 @@ impl Depth {
         match self {
             Self::Simple => "Draw the shape, pick a length, and press.",
             Self::Advanced => {
-                "One line for each thing Baz listens for, a vocabulary to narrow with, and what \
-                 Baz did with it."
+                "Adds a vocabulary of words Baz measurably hears \u{2014} instruments and \
+                 texture."
             }
         }
     }
@@ -1249,7 +1255,16 @@ pub(crate) struct State {
     /// state: it is what the expander shows the moment it is pressed, and it
     /// is the whole of design 21 §5's claim that the lines were already the
     /// blend.
-    pub(crate) expanded: bool,
+    /// **Which of the five lines is being edited**, or `None` for all of them
+    /// at once.
+    ///
+    /// The owner: *"I like the idea of all lines being on the same graph and
+    /// a way to kinda toggle between all and individual… then selecting each
+    /// individually to be able to configure that line."* So there is one
+    /// canvas and a row of tabs, rather than one canvas per dimension stacked
+    /// down the page. `None` is the tab that says *all five*: every line
+    /// holds the shape and a drag moves them together.
+    pub(crate) shown: Option<usize>,
     /// Whether the listener has set the shape themselves. A mood sets the
     /// shape only until this is true.
     shape_touched: bool,
@@ -1319,7 +1334,7 @@ impl Default for State {
             count_due: None,
             choosing: false,
             depth: Depth::Simple,
-            expanded: false,
+            shown: None,
             shape_touched: false,
             length_touched: false,
             features: HashMap::new(),
@@ -1385,7 +1400,7 @@ impl State {
     pub(crate) fn query(&self) -> String {
         let shape = if self.contour.lanes.is_empty() {
             "In no particular shape".to_owned()
-        } else if self.expanded && !self.contour.is_one_line() {
+        } else if !self.contour.is_one_line() {
             // **Name what each line asks for**, rather than counting them.
             // The owner: *"the 'shape each thing' bit isn't clear how it
             // influences things."* Saying *shaped separately across 5 of the
@@ -1578,21 +1593,28 @@ impl State {
         self.open = true;
     }
 
-    /// **Open or close the per-dimension lines.**
+    /// **Show one line, or all five.**
     ///
-    /// Closing puts every line back on the first one's curve, which is the
-    /// only way back to one line once they have been pulled apart — and it is
-    /// lossy, which is why it says *back to one line* rather than *close*.
-    pub(crate) fn toggle_expander(&mut self) {
-        self.expanded = !self.expanded;
-        if !self.expanded {
-            let Some(points) = self.contour.lane(0).map(|lane| lane.points.clone()) else {
-                return;
-            };
-            for lane in &mut self.contour.lanes {
-                lane.points.clone_from(&points);
-            }
+    /// A view, and only a view: nothing about the request changes, which is
+    /// what lets the tabs be pressed freely. The old control was an expander
+    /// whose closing put every line back on the first one's curve — lossy,
+    /// and a surprising thing for a *close* to do. Bringing the lines back
+    /// together is its own act now ([`Self::gather_lines`]), named for what
+    /// it does.
+    pub(crate) fn show_line(&mut self, lane: Option<usize>) {
+        self.shown = lane.filter(|lane| *lane < self.contour.lanes.len());
+    }
+
+    /// **Put every line back on one curve.** Lossy on purpose and by
+    /// request: the only way back from five lines to one.
+    pub(crate) fn gather_lines(&mut self) {
+        let Some(points) = self.contour.lane(0).map(|lane| lane.points.clone()) else {
+            return;
+        };
+        for lane in &mut self.contour.lanes {
+            lane.points.clone_from(&points);
         }
+        self.shape_touched = true;
     }
 
     /// Which recipe the request currently matches, if any — so the row can
@@ -1640,36 +1662,42 @@ impl State {
         }
     }
 
-    /// **Choosing a depth opens or closes the per-dimension lines.**
-    ///
-    /// The owner: *"can you make advanced mode open up the multiple curves."*
-    /// It is also what stops the two controls contradicting each other — the
-    /// expander chip is the advanced depth's own (design note 25), so a page
-    /// left expanded and switched to simple used to draw five lines with no
-    /// way to collapse them.
-    ///
-    /// The chip still works inside advanced: opening the door on arrival is
-    /// not the same as nailing it open.
-    pub(crate) fn set_depth(&mut self, depth: Depth) {
-        self.depth = depth;
-        self.expanded = depth == Depth::Advanced;
-    }
-
     /// Move one point of one line, by the widget's raw geometry.
     ///
     /// **A drag is what makes the shape the listener's.** From here on a mood
     /// press changes the words and leaves the line alone.
     pub(crate) fn drag_contour(&mut self, lane: usize, index: usize, at: f32, level: f32) {
         self.shape_touched = true;
-        if self.expanded {
-            self.contour.drag(lane, index, at, level);
+        if let Some(shown) = self.shown {
+            self.contour.drag(shown, index, at, level);
             return;
         }
-        // While it is one line, it is five lanes holding one curve, and
-        // dragging it drags all of them — otherwise the blend would silently
-        // stop being a blend at the first gesture.
+        // **All five, by the same amount.** On the *all five* tab the handles
+        // belong to every line at once, so a drag moves each of them by what
+        // the pointer moved rather than setting them all to where it landed.
+        //
+        // The difference only shows once the lines have been pulled apart —
+        // which is exactly when setting them all to one place would silently
+        // throw that work away. While they sit together, which is nearly
+        // always, this is the same gesture it has always been.
+        let Some(from) = self
+            .contour
+            .lane(lane)
+            .and_then(|held| held.points.get(index).copied())
+        else {
+            return;
+        };
+        let (moved_at, moved_level) = (at - from.at, level - from.level);
         for held in 0..self.contour.lanes.len() {
-            self.contour.drag(held, index, at, level);
+            let Some(point) = self
+                .contour
+                .lane(held)
+                .and_then(|line| line.points.get(index).copied())
+            else {
+                continue;
+            };
+            self.contour
+                .drag(held, index, point.at + moved_at, point.level + moved_level);
         }
     }
 
@@ -2775,12 +2803,19 @@ mod tests {
     /// it means.
     #[test]
     fn a_drag_cannot_make_a_shape_a_playlist_could_not_have() {
+        /// Near enough for a level that has been through an addition.
+        const STEP: f32 = 1e-4;
         let mut state = State::default();
         state.set_shape(Shape::DEFAULT);
         // The ends hold their positions however far the pointer wanders.
+        //
+        // Levels are compared to a rounding step rather than to
+        // `f32::EPSILON`: a drag on the *all five* tab moves every line by
+        // what the pointer moved, so where a point lands is the sum of where
+        // it was and how far it went, and −1.6 + 2.1 is 0.49999988.
         state.drag_contour(0, 0, 0.9, 0.5);
         assert!((points(&state)[0].at - 0.0).abs() < f32::EPSILON);
-        assert!((points(&state)[0].level - 0.5).abs() < f32::EPSILON);
+        assert!((points(&state)[0].level - 0.5).abs() < STEP);
         let last = points(&state).len() - 1;
         state.drag_contour(0, last, 0.1, -0.5);
         assert!((points(&state)[last].at - 1.0).abs() < f32::EPSILON);
@@ -2788,9 +2823,9 @@ mod tests {
         // Levels clamp to the collection's own ends rather than running off
         // the top of the box.
         state.drag_contour(0, 0, 0.0, 9.0);
-        assert!((points(&state)[0].level - LEVEL_LIMIT).abs() < f32::EPSILON);
+        assert!((points(&state)[0].level - LEVEL_LIMIT).abs() < STEP);
         state.drag_contour(0, 0, 0.0, -9.0);
-        assert!((points(&state)[0].level + LEVEL_LIMIT).abs() < f32::EPSILON);
+        assert!((points(&state)[0].level + LEVEL_LIMIT).abs() < STEP);
 
         // An interior turn stays between its neighbours, with a gap either
         // side: two points at one position would ask for two levels at once.

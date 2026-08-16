@@ -289,10 +289,15 @@ pub(crate) fn depth_tabs(current: crate::vibe::Depth) -> Element<'static, Messag
 /// A pressable word in the chip anatomy the whole page uses: the starting
 /// points, the vocabulary and the shape presets are the same kind of thing —
 /// *press this instead of doing it by hand* — so they are the same control.
-pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'_, Message> {
+pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'static, Message> {
     let room = theme::active();
     iced::widget::button(
-        iced::widget::text(label)
+        // Owned rather than borrowed. Half the chips on this page are
+        // assembled rather than constant — the point counts, and each line's
+        // name beside its share — and a chip that could only carry a borrow
+        // would quietly forbid exactly the labels that say something about
+        // this request.
+        iced::widget::text(label.to_owned())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             // The face carries the state too, so the reading survives being
