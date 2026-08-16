@@ -38,10 +38,61 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
             block = block.push(line(vibe, 0, &lane.points, None));
         }
     }
-    block = block.push(presets(vibe));
+    // **One shape row, not two.** The named presets and the point count were
+    // the same control twice — a preset *is* a shape plus a number of points,
+    // so `Slow build` and `Straight` lit at once and said the same thing in
+    // two vocabularies. The count wins because it is the finer-grained of the
+    // two, which is what the owner asked for: any shape a preset could make
+    // is a count plus dragging, and the sentence above names what you drew in
+    // the words the presets used to supply.
+    block = block.push(points(vibe));
     block = block.push(expander(vibe));
     block.into()
 }
+
+/// **How many points the line carries** — the control that was missing.
+///
+/// The owner: *"the graph/curve does not allow any users to adjust the curve?
+/// maybe add a point count?"* The points were always draggable; what could
+/// not be changed was **how many there are**, so a two-point preset could be
+/// tilted and nothing else, and the only route to a turn was picking a preset
+/// that happened to have one.
+///
+/// A count rather than the `−`/`+` stepper design 21 §5 deleted, and it is
+/// deleted for a good reason: two marks that add and remove say nothing about
+/// where you are in a range or that a range exists. These are the page's own
+/// pills, lit at the current number, so the whole range is visible and one
+/// press reaches any of it.
+///
+/// A new turn arrives **on the line it joins** — at the level the line
+/// already stands at, in the widest gap — so gaining a handle changes the
+/// shape by nothing, and it is dragged deliberately rather than recovered
+/// from.
+fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
+    let current = vibe.contour.points();
+    column![
+        views::caption_word("POINTS"),
+        wrap_chips(
+            (crate::vibe::Contour::MIN_POINTS..=crate::vibe::Contour::MAX_POINTS)
+                .map(|count| {
+                    chip(
+                        POINT_LABELS[count - crate::vibe::Contour::MIN_POINTS],
+                        count == current,
+                        Message::ContourPoints(count),
+                    )
+                })
+                .collect(),
+            5,
+        ),
+    ]
+    .spacing(theme::GAP_XS)
+    .into()
+}
+
+/// The counts, as words rather than as bare digits: a row reading `2 3 4 5 6`
+/// beside a row reading `Any Steady Slow build` would be two kinds of thing
+/// in one anatomy.
+const POINT_LABELS: [&str; 5] = ["Straight", "1 turn", "2 turns", "3 turns", "4 turns"];
 
 /// **One drawn line**, with the cloud behind it, the words at its ends and the
 /// result over it.
@@ -69,8 +120,17 @@ fn line<'a>(
         // to open them: a listener who asks for `Brightness` is asking for
         // spectral centroid, rolloff and zero crossings, and is entitled to
         // know it — none of these is a mood and none of them pretends to be.
+        // **What it measures, and how much it counts.** The five lines do not
+        // influence a result equally — the blend is weighted with energy
+        // dominant — so a line that says only what it measures leaves the
+        // listener to discover by experiment that dragging texture moves the
+        // list a quarter as far as dragging energy does.
         block = block
-            .push(views::caption_word(&dimension.label().to_uppercase()))
+            .push(views::caption_word(&format!(
+                "{} · {}% OF THE BLEND",
+                dimension.label().to_uppercase(),
+                dimension.share()
+            )))
             .push(views::hint(dimension.measured_from()));
     }
     // **The axis words sit above and below the line, not in a gutter beside
@@ -157,33 +217,6 @@ fn dots(vibe: &crate::vibe::State, lane: Option<usize>) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// **The presets, underneath rather than above** — because they are the
-/// press-instead-of-drag route to the same outcome, and under
-/// [`theme::COMPOSE_SHORT_H`] they are the only route. Chips rather than
-/// thumbnails: a 104 px picture of a straight line teaches nothing the word
-/// *steady* does not.
-fn presets(vibe: &crate::vibe::State) -> Element<'_, Message> {
-    let points: Vec<Vec<crate::vibe::ContourPoint>> = crate::vibe::Shape::ALL
-        .iter()
-        .map(|shape| shape.points())
-        .collect();
-    wrap_chips(
-        crate::vibe::Shape::ALL
-            .iter()
-            .enumerate()
-            .map(|(index, shape)| {
-                let lit = vibe
-                    .contour
-                    .lane(0)
-                    .is_some_and(|lane| lane.points == points[index])
-                    || (points[index].is_empty() && vibe.contour.lanes.is_empty());
-                chip(shape.label, lit, Message::ContourShape(index))
-            })
-            .collect(),
-        3,
-    )
-}
-
 /// **A labelled control, not a bare triangle.** Design 21 §5's seventh item:
 /// the expander says what it opens, and what it opens is already holding this
 /// line's own points.
@@ -194,17 +227,22 @@ fn expander(vibe: &crate::vibe::State) -> Element<'_, Message> {
     } else {
         "Shape each thing Baz listens for separately"
     };
-    // A chip rather than a bare word, and a sentence saying what is behind
-    // it. The owner had to ask for per-dimension curves *after* they shipped,
-    // which is the whole of what a control nobody can find looks like.
+    // A chip rather than a bare word, and a sentence saying what it *does*.
+    // The owner had to ask for per-dimension curves after they shipped —
+    // which is what a control nobody can find looks like — and then said the
+    // control *"isn't clear how it influences things"*, which the old copy
+    // earned by describing itself instead of its effect.
     column![
         chip(label, open, Message::ContourExpander),
         views::hint(if open {
-            "Energy, tempo, brightness, dynamics and texture, each on its own line. \
-             Every one is a stated combination of measurements — never a mood."
+            "One line each. Drag energy and the list gets louder or quieter where you \
+             drew it; drag brightness and it gets darker or crisper there instead. They \
+             do not count equally — the share beside each name is how much it moves the \
+             result."
         } else {
-            "Energy, tempo, brightness, dynamics and texture can each take a different \
-             shape. They are all on this one line until you open them."
+            "One line moves all five things Baz listens for together. Open this to make \
+             the list climb in energy while it steadies in tempo, or any other \
+             combination."
         }),
     ]
     .spacing(theme::GAP_XS)

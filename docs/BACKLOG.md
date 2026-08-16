@@ -474,6 +474,46 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **Listening produces numbers, not tags — and the two are one short step
+  apart.** *(The owner, 2026-08-16: "should we show tags on the tracks? does
+  that exist in terms of our 'listen to my music' step? does it allow us to
+  tag the music?")*
+
+  What the listening step actually produces, per track, is two things and
+  neither is a tag: bliss' conventional measurements (tempo in BPM, loudness,
+  how much the loudness moves, spectral centroid, rolloff, zero crossings,
+  flatness) and a 512-dimension CLAP embedding — a point in a space shared
+  with text. Nothing anywhere is a word.
+
+  **The first derived tags shipped on 2026-08-16 and are not stored.** A
+  smart playlist's rows read `loud · fast · swinging`, computed live from the
+  measurements against the collection's own range. They exist to prove the
+  feature works rather than to describe the library, and they vanish with the
+  page.
+
+  Two things could follow, and they are very different in cost and risk:
+
+  1. **Zero-shot tags from the embedding.** Score each track against a fixed
+     vocabulary of text labels and keep what clears a threshold — the same
+     tower, no new model, no network. There is evidence it would work for
+     *instruments*: `docs/design/impl/vibe-eligibility/` measured *piano*,
+     *synthesizers* and *strings* concentrating the matching genre 3.5–4.1×.
+     There is evidence it would **not** work for moods: that sweep is exactly
+     why six mood words were cut from the vocabulary, and a tag that says
+     *dreamy* on the strength of a number that near zero would be the
+     interface inventing a fact about somebody's record.
+  2. **Writing tags into the files.** A different feature entirely — item 67,
+     tag editing — and the risky one: it rewrites the listener's own files.
+     Derived tags must not be written into files silently under any
+     circumstances, and probably should never be written without being marked
+     as machine-guessed.
+
+  **Wanted first, and cheaply:** the derived reading beside a track outside a
+  smart playlist — on the record page, in search, in the queue — so the
+  analysis is worth something to somebody who never composes. That needs the
+  measurements to be reachable outside `vibe::State`, which today they are
+  not.
+
 - **A song whose drive is not mounted looks exactly like one that plays.**
   *(The owner, 2026-08-16: "we need to show beside songs when they are not
   available due to the drive not being loaded or being removed.")*

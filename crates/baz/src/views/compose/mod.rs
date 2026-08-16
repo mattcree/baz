@@ -145,16 +145,20 @@ pub(crate) fn view<'a>(
 
     let ask = ask::view(shelf, stage, layout);
     let mut answer = column![].spacing(theme::GAP_LG).width(Length::Fill);
-    // **What all these controls are actually building**, in one line, at the
-    // head of the answer.
-    //
-    // The owner: *"the fact that there are a ton of options which are just
-    // query builders… seems like we should make that more clear."* They are,
-    // and no single place said so — the words were in one band, the shape in
-    // another, the length on the commitment. This is the query they add up
-    // to, assembled from the controls rather than stored, so it cannot drift
-    // from them. It stands in **both** depths, because it is the thing simple
-    // mode is hiding the machinery *of*.
+    // **The model, in one line, once.** The owner: *"there's a mix of curves,
+    // clickable selections, text input. it's just honestly not explained
+    // well."* Three kinds of control were on screen and nothing said what
+    // each was for, so the page read as a pile of settings rather than as
+    // three questions. This is design 21 §3's table as a sentence, and it is
+    // the only place the machinery is explained at all.
+    answer = answer.push(views::hint(
+        "Your words pick which songs are eligible · the line picks where each one \
+         goes · the length picks how many.",
+    ));
+    // And beneath it, the request those three things currently add up to —
+    // assembled from the controls rather than stored, so it cannot drift from
+    // them. It stands in **both** depths, because it is the thing simple mode
+    // is hiding the machinery *of*.
     answer = answer.push(
         container(
             column![

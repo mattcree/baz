@@ -671,8 +671,10 @@ pub(crate) enum Message {
     /// length, all of which stay editable. The owner: *"as part of the wizard
     /// we should be asking users if they want to make a preset one."*
     VibeRecipe(usize),
-    /// Load one of the drawn shapes over the current line.
-    ContourShape(usize),
+    /// **How many points the line carries** — two for a straight line, up to
+    /// six. Replaces the deleted `−`/`+` stepper with a control that says
+    /// where in the range you are.
+    ContourPoints(usize),
     /// **Open or close the per-dimension lines** — design 21 §5's labelled
     /// expander. Closing puts every line back on the first one's curve, which
     /// is why it says *back to one line* rather than *close*.
@@ -4061,6 +4063,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_length(*length);
                 }
+                self.recompose();
                 Some(Task::none())
             }
             // **A word from the vocabulary**, appended with a comma. Design 21
@@ -4103,6 +4106,9 @@ impl App {
                         .vibe
                         .accept_embedding(prompt, embedding, albums, chosen);
                 }
+                // The words have settled and been counted, which is the
+                // moment they are worth composing from.
+                self.recompose();
                 Some(Task::none())
             }
             // **A row explains itself.** Selecting one marks its dot, drops a
@@ -4124,7 +4130,14 @@ impl App {
             // already where it was dragged to, and the list is composed when
             // the listener asks for it. It exists so the widget has one
             // message to publish on release rather than a silent edge.
-            Message::ContourReleased => Some(Task::none()),
+            // **The gesture's end is when the line is worth composing from.**
+            // Not during it: design 21 §6's refusal stands, because a list
+            // that changed under a dragging hand could not be read and you
+            // would be tuning against a moving target.
+            Message::ContourReleased => {
+                self.recompose();
+                Some(Task::none())
+            }
             Message::PlaylistImageChoose(id) => Some(pick_playlist_image(*id)),
             Message::PlaylistImagePicked(id, choice) => {
                 let (id, choice) = (*id, choice.clone());
@@ -4226,12 +4239,11 @@ impl App {
                 }
                 Some(Task::none())
             }
-            Message::ContourShape(index) => {
-                if let Screen::Shelf(state) = &mut self.screen
-                    && let Some(shape) = crate::vibe::Shape::ALL.get(*index)
-                {
-                    state.vibe.set_shape(*shape);
+            Message::ContourPoints(count) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.set_points(*count);
                 }
+                self.recompose();
                 Some(Task::none())
             }
             Message::ContourExpander => {
@@ -5424,6 +5436,33 @@ impl App {
             return self.note_place_left(from);
         }
         Task::none()
+    }
+
+    /// **Keep the list in step with the request**, when a control settles.
+    ///
+    /// The owner: *"it seems like we should just create a playlist
+    /// immediately and change it based on how they change the options."* So a
+    /// changed option composes, and there is always a list to look at.
+    ///
+    /// **Deterministically**, which is what makes this bearable rather than
+    /// dizzying: this recomposes at the seed the request already stands at,
+    /// so the same request gives the same list and only what changed shows up
+    /// as a change. Pressing *Compose* is still the thing that draws a
+    /// *different* one.
+    ///
+    /// It is called from the settling of a control, never from the middle of
+    /// a gesture — design 21 §6's one deliberate refusal, which this does not
+    /// touch: a result that changed under a dragging hand could not be read,
+    /// so the curve recomposes on release.
+    fn recompose(&mut self) {
+        if let Screen::Shelf(state) = &mut self.screen
+            && state.vibe.has_features()
+            && !state.vibe.preparing
+            && state.vibe.open
+        {
+            let (albums, chosen) = (&state.albums, &state.edition_choice);
+            state.vibe.recompose(albums, chosen);
+        }
     }
 
     /// **Begin listening to whatever has not been heard**, or do nothing if

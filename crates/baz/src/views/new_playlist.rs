@@ -113,6 +113,7 @@ fn manual_form<'a>(shelf: &'a Shelf, playlists: &'a Playlists, width: f32) -> El
                 width,
                 draft.hovered_row == Some(index),
                 None,
+                &[],
                 &DraftEdits {
                     shift: &|row, delta| Message::PlaylistCreationShift(row, delta),
                     remove: &Message::PlaylistCreationRemove,
@@ -162,6 +163,7 @@ pub(crate) fn draft_row<'a>(
     width: f32,
     hovered: bool,
     ticks: Option<u8>,
+    qualities: &[&'static str],
     edits: &DraftEdits<'_>,
 ) -> Element<'a, Message> {
     let (shift, remove) = (edits.shift, edits.remove);
@@ -197,6 +199,7 @@ pub(crate) fn draft_row<'a>(
     });
     let row = row![
         track,
+        qualities_lane(qualities),
         match_ticks(ticks),
         views::page::favourite_slot(&item.path, is_favourite(shelf, &item.path)),
         views::page::icon_slot(
@@ -226,6 +229,38 @@ pub(crate) fn draft_row<'a>(
     // The card reaches the row's editing controls rather than stopping at the
     // body, so a lit row is lit all the way across (item 53).
     views::page::row_card(hovered, false, false, row)
+}
+
+/// **What this song actually is**, in the axis words — *loud · fast ·
+/// swinging*.
+///
+/// The owner, on what the feature has to make visible: *"one track represents
+/// a combination of the different points on that curve. e.g. loud, fast,
+/// dynamic? or quiet, slow, compressed… we have to be able to prove that this
+/// system is working."*
+///
+/// This is that proof, and it is the cheapest possible form of it: draw a
+/// rising line, read the list downward, and watch the words travel from
+/// *quiet · slow · clean* to *loud · fast · noisy*. Nobody has to understand
+/// an embedding, or trust a dot on a graph, or take a percentage on faith —
+/// the list says what it is and you can hear whether it is right.
+///
+/// Only the axes a song is actually notable on appear, so a middling track
+/// says less and a distinctive one says more. That is deliberate: a reading
+/// that named all five every time would be five words of noise, and it would
+/// claim a song was *dark* for sitting a hair below the middle.
+fn qualities_lane(words: &[&'static str]) -> Element<'static, Message> {
+    let room = theme::active();
+    container(
+        text(words.join(" · "))
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Length::Fixed(theme::QUALITIES_W))
+    .align_y(alignment::Vertical::Center)
+    .into()
 }
 
 /// **Three ticks of match strength**, filled by how well the words answered.

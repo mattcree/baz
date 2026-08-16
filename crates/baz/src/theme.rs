@@ -5130,6 +5130,14 @@ pub const COMPOSE_BREAKPOINT: f32 = COMPOSE_ASK_W + GAP_XL + COMPOSE_RESULT_MIN 
 /// in 90 px is not a control.
 pub const COMPOSE_SHORT_H: f32 = 700.0;
 
+/// **The lane a result row's own words stand in** — *loud · fast · swinging*.
+///
+/// Fixed, and reserved whether or not a row has anything to say, so a list
+/// whose middle tracks are unremarkable does not ripple as it scrolls. 132
+/// holds three words of the longest set (`swinging · bright · noisy`) at the
+/// caption size.
+pub const QUALITIES_W: f32 = 132.0;
+
 /// The three match ticks on a result row: the drawn mark, and the lane that
 /// holds all three with their gaps.
 pub const TICK_W: f32 = 3.0;

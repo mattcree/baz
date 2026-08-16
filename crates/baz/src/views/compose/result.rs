@@ -206,6 +206,7 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
                     .get(position)
                     .filter(|_| advanced)
                     .map(|found| found.ticks),
+                &vibe.row_is_briefly(position, 3),
                 &super::super::new_playlist::DraftEdits {
                     shift: &|row, delta| Message::VibePreviewShift(row, delta),
                     remove: &Message::VibePreviewRemove,

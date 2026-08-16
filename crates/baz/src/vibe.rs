@@ -78,6 +78,48 @@ impl Dimension {
         }
     }
 
+    /// **What a song at one end of this axis simply *is*** — plain adjectives
+    /// rather than the comparatives [`Self::ends`] labels the axis with.
+    ///
+    /// The owner, on what the whole feature has to make visible: *"one track
+    /// represents a combination of the different points on that curve. e.g.
+    /// loud, fast, dynamic? or quiet, slow, compressed."* These are those
+    /// words. `ends` says which way the line goes — *louder* — and this says
+    /// what the song there is — *loud* — because a row is describing itself,
+    /// not comparing itself to the row above.
+    pub(crate) const fn plain_ends(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Energy => ("quiet", "loud"),
+            Self::Tempo => ("slow", "fast"),
+            Self::Brightness => ("dark", "bright"),
+            Self::Dynamics => ("steady", "swinging"),
+            Self::Texture => ("clean", "noisy"),
+        }
+    }
+
+    /// **How much this line counts against the others**, as a percentage.
+    ///
+    /// The blend is weighted with energy dominant, so the five lines do not
+    /// influence a result equally — dragging texture moves a list a quarter
+    /// as far as dragging energy does. That is a surprise worth removing
+    /// rather than a detail: it is exactly the *"isn't clear how it
+    /// influences things"* the owner met.
+    pub(crate) fn share(self) -> u8 {
+        let weight = Self::ALL
+            .iter()
+            .position(|held| *held == self)
+            .and_then(|index| Contour::BLEND.get(index).copied())
+            .unwrap_or(0.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a weight in the unit interval times one hundred"
+        )]
+        {
+            (weight * 100.0).round() as u8
+        }
+    }
+
     /// What it is measured from, plainly enough to put on screen.
     pub(crate) const fn measured_from(self) -> &'static str {
         match self {
@@ -129,6 +171,16 @@ impl Contour {
     /// Two points at one position would ask for two levels at once.
     const MIN_GAP: f32 = 0.06;
 
+    /// **How many points a line may carry**, and the range the count control
+    /// offers.
+    ///
+    /// Two is a straight line between the first song and the last — the
+    /// fewest a line can have and still be one. Six is four turns, which is
+    /// more shape than a playlist of tens of songs can express: past that the
+    /// points are closer together than the songs that fill them.
+    pub(crate) const MIN_POINTS: usize = 2;
+    pub(crate) const MAX_POINTS: usize = 6;
+
     /// **The weights of the blended line**, in [`Dimension::ALL`] order,
     /// energy dominant, summing to one. Mirrors `baz_vibe::Contour::BLEND`;
     /// the two are pinned together by `the_drawn_line_is_the_scored_line`.
@@ -172,6 +224,52 @@ impl Contour {
             return true;
         };
         lanes.all(|lane| lane.points == first.points)
+    }
+
+    /// **Give every line exactly `count` points**, adding turns where there is
+    /// most room for one and taking them off the end.
+    ///
+    /// A new turn lands **on the line it joins** — at the level the line
+    /// already stands at, in the widest gap — so gaining a handle changes the
+    /// shape by nothing and the listener drags it deliberately rather than
+    /// recovering from a jump.
+    ///
+    /// The `−`/`+` stepper this replaces was deleted with design 21 §5, and
+    /// it should have been: it was two marks that said nothing about where
+    /// you were in a range. What it took with it was the *capability* — with
+    /// a two-point preset you could tilt a line and nothing else, which is
+    /// the owner's *"the graph/curve does not allow any users to adjust the
+    /// curve? maybe add a point count?"* A count says how many there are and
+    /// how many there could be, in the same pills as everything else on the
+    /// page.
+    pub(crate) fn set_points(&mut self, count: usize) {
+        let count = count.clamp(Self::MIN_POINTS, Self::MAX_POINTS);
+        for lane in &mut self.lanes {
+            while lane.points.len() > count {
+                let index = lane.points.len() - 2;
+                lane.points.remove(index);
+            }
+            while lane.points.len() < count {
+                let Some((index, at)) = lane
+                    .points
+                    .windows(2)
+                    .enumerate()
+                    .max_by(|left, right| {
+                        (left.1[1].at - left.1[0].at).total_cmp(&(right.1[1].at - right.1[0].at))
+                    })
+                    .map(|(index, pair)| (index, f32::midpoint(pair[0].at, pair[1].at)))
+                else {
+                    break;
+                };
+                let level = level_at(&lane.points, at).unwrap_or(0.0);
+                lane.points.insert(index + 1, ContourPoint { at, level });
+            }
+        }
+    }
+
+    /// How many points the drawn line carries.
+    pub(crate) fn points(&self) -> usize {
+        self.lane(0).map_or(0, |lane| lane.points.len())
     }
 
     pub(crate) fn lane(&self, index: usize) -> Option<&Lane> {
@@ -370,7 +468,7 @@ impl Chip {
     /// that movement words should steer the **curve** — press *driving*, get a
     /// shape — rather than be appended to a sentence that then means something
     /// else.
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self {
             row: "made of",
             word: "acoustic guitar",
@@ -395,34 +493,10 @@ impl Chip {
             row: "made of",
             word: "female vocals",
         },
-        Self {
-            row: "feels like",
-            word: "hopeful",
-        },
-        Self {
-            row: "feels like",
-            word: "warm",
-        },
-        Self {
-            row: "feels like",
-            word: "dark",
-        },
-        Self {
-            row: "feels like",
-            word: "melancholy",
-        },
-        Self {
-            row: "feels like",
-            word: "dreamy",
-        },
-        Self {
-            row: "feels like",
-            word: "tense",
-        },
     ];
 
     /// The rows, in the order the band draws them.
-    pub(crate) const ROWS: [&'static str; 2] = ["made of", "feels like"];
+    pub(crate) const ROWS: [&'static str; 1] = ["made of"];
 }
 
 /// **A recipe: a mood you can start from.**
@@ -610,6 +684,52 @@ pub(crate) fn shape_words(contour: &Contour) -> &'static str {
         "turning on the way through and ending where it started"
     } else {
         "holding one level the whole way"
+    }
+}
+
+/// **What one level says about a song on one axis**, or `None` where it sits
+/// too near the middle to say anything.
+///
+/// The threshold is the point of it. A song in the middle of the collection's
+/// range on brightness is not *dark* and not *bright*, and calling it either
+/// would be the interface inventing a fact — so it says nothing about that
+/// axis and the reading is shorter. Which is also why a row's words are worth
+/// reading: they are only ever the things that are actually true of it.
+pub(crate) fn axis_reading(dimension: Dimension, level: f32) -> Option<&'static str> {
+    /// How far from the middle a song must sit before the axis is worth
+    /// naming: rather more than a third of the way to an end.
+    const NOTABLE: f32 = 0.7;
+    let (low, high) = dimension.plain_ends();
+    if level >= NOTABLE {
+        Some(high)
+    } else if level <= -NOTABLE {
+        Some(low)
+    } else {
+        None
+    }
+}
+
+/// **One line's shape as a single verb**, for a sentence that has to name
+/// several at once. [`shape_words`] is the long form for one line.
+pub(crate) fn shape_verb(points: &[ContourPoint]) -> &'static str {
+    let Some(opening) = level_at(points, 0.0) else {
+        return "is unconstrained";
+    };
+    let landing = level_at(points, 1.0).unwrap_or(opening);
+    let peak = (0_u8..=10)
+        .filter_map(|step| level_at(points, f32::from(step) / 10.0))
+        .fold(f32::MIN, f32::max);
+    let rise = landing - opening;
+    if points.len() > 2 && peak > opening.max(landing) + 0.4 {
+        "peaks partway"
+    } else if rise > 0.6 {
+        "climbs"
+    } else if rise < -0.6 {
+        "winds down"
+    } else if points.len() > 2 {
+        "turns and returns"
+    } else {
+        "holds level"
     }
 }
 
@@ -1029,10 +1149,24 @@ impl State {
         let where_it_goes = if self.contour.lanes.is_empty() {
             "in no particular shape".to_owned()
         } else if self.expanded && !self.contour.is_one_line() {
-            format!(
-                "shaped separately across {} of the things Baz listens for",
-                self.contour.lanes.len()
-            )
+            // **Name what each line asks for**, rather than counting them.
+            // The owner: *"the 'shape each thing' bit isn't clear how it
+            // influences things."* Saying *shaped separately across 5 of the
+            // things Baz listens for* described the control; this describes
+            // the request, which is what the listener is trying to read.
+            let each: Vec<String> = self
+                .contour
+                .lanes
+                .iter()
+                .map(|lane| {
+                    format!(
+                        "{} {}",
+                        lane.dimension.label().to_lowercase(),
+                        shape_verb(&lane.points)
+                    )
+                })
+                .collect();
+            format!("with {}", each.join(", "))
         } else {
             shape_words(&self.contour).to_owned()
         };
@@ -1040,6 +1174,82 @@ impl State {
             "{which}, {where_it_goes}, for about {}.",
             spoken(self.length)
         )
+    }
+
+    /// **What the song at `row` actually is**, in the axis words — *loud,
+    /// fast, swinging*.
+    ///
+    /// This is the feature proving itself. A listener who draws a rising line
+    /// and then reads the list from top to bottom should watch these words
+    /// travel from *quiet, slow, clean* to *loud, fast, noisy*, and needs to
+    /// understand nothing about embeddings to see that it worked. It is read
+    /// straight off the levels the engine returned for each drawn line, so it
+    /// is the result speaking rather than a second opinion about it.
+    pub(crate) fn row_is(&self, row: usize) -> Vec<&'static str> {
+        self.readings(row)
+            .into_iter()
+            .map(|(_, word)| word)
+            .collect()
+    }
+
+    /// **The same reading, cut to the `most` strongest axes**, in axis order.
+    ///
+    /// A row's own lane has room for three words, and three is also as many
+    /// as anybody reads at a glance while scrolling. The ones kept are the
+    /// axes the song is *furthest* from the middle on — the things most worth
+    /// saying about it — and they stay in [`Dimension::ALL`] order so the
+    /// column reads down consistently rather than reshuffling per row.
+    pub(crate) fn row_is_briefly(&self, row: usize, most: usize) -> Vec<&'static str> {
+        let mut readings = self.readings(row);
+        readings.sort_by(|left, right| right.0.abs().total_cmp(&left.0.abs()));
+        readings.truncate(most);
+        let order: Vec<&'static str> = self.readings(row).into_iter().map(|(_, w)| w).collect();
+        let kept: Vec<&'static str> = readings.into_iter().map(|(_, word)| word).collect();
+        order
+            .into_iter()
+            .filter(|word| kept.contains(word))
+            .collect()
+    }
+
+    /// Every axis this song is notable on, as `(level, word)`.
+    fn readings(&self, row: usize) -> Vec<(f32, &'static str)> {
+        let Some(preview) = self.preview.as_ref() else {
+            return Vec::new();
+        };
+        self.contour
+            .lanes
+            .iter()
+            .enumerate()
+            .filter_map(|(lane, held)| {
+                let level = preview.levels.get(lane)?.get(row).copied()?;
+                Some((level, axis_reading(held.dimension, level)?))
+            })
+            .collect()
+    }
+
+    /// **What the line asked for at `row`'s position**, in the same words.
+    ///
+    /// The other half of the proof: *asked for loud, fast and swinging* beside
+    /// *this song is loud, fast and steady* is a claim anybody can check, and
+    /// it says plainly where the collection could not answer.
+    pub(crate) fn row_asked(&self, row: usize) -> Vec<&'static str> {
+        let Some(preview) = self.preview.as_ref() else {
+            return Vec::new();
+        };
+        let last = preview.items.len().saturating_sub(1).max(1);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a playlist is bounded at PLAYLIST_CAP"
+        )]
+        let at = row as f32 / last as f32;
+        self.contour
+            .lanes
+            .iter()
+            .filter_map(|lane| {
+                let level = level_at(&lane.points, at)?;
+                axis_reading(lane.dimension, level)
+            })
+            .collect()
     }
 
     /// **Why this song is here**, in the two halves design 21 §3 promises an
@@ -1054,34 +1264,46 @@ impl State {
         if row >= preview.items.len() {
             return None;
         }
+        let list = |words: &[&str]| match words {
+            [] => "nothing in particular".to_owned(),
+            [one] => (*one).to_owned(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        };
+        let asked = self.row_asked(row);
+        let is = self.row_is(row);
         let placed = format!("{} of {}", row + 1, preview.items.len());
-        // With no line drawn there is no height to report, and the honest
-        // sentence is the shorter one rather than an invented percentile.
-        let where_it_went = preview.blended.get(row).copied().map_or_else(
-            || format!("You drew no line, so the order is continuity alone; it is {placed}."),
-            |level| {
-                // A level is a rank stretched onto −2…+2, so this is the rank
-                // back.
-                let percentile = ((level + 2.0) / 4.0 * 100.0).clamp(0.0, 100.0).round();
-                format!(
-                    "Your line put it {placed} — louder, faster and busier than \
-                     {percentile:.0}% of this request's songs."
-                )
-            },
-        );
+
+        // **Asked against got, in the same words** — the claim a listener can
+        // check by ear. Where they differ the collection could not answer,
+        // and saying so is worth more than a number: it is the difference
+        // between *this is what you asked for* and *this is the nearest your
+        // music has*.
+        let shape = if self.contour.lanes.is_empty() {
+            format!("You drew no line, so nothing asked for a particular sound at {placed}.")
+        } else if asked == is {
+            format!(
+                "At {placed} your line asked for {} — and this song is.",
+                list(&asked)
+            )
+        } else {
+            format!(
+                "At {placed} your line asked for {}. This song is {}.",
+                list(&asked),
+                list(&is)
+            )
+        };
         let Some(found) = preview.matches.get(row) else {
             return Some(format!(
-                "You asked for no words, so every song Baz has heard was eligible. \
-                 {where_it_went}"
+                "You asked for no words, so every song Baz has heard was eligible. {shape}"
             ));
         };
         let strength = match found.ticks {
             3 => "one of the strongest matches",
             2 => "a fair match",
-            _ => "a weak match — your line asked for something your words did not have much of",
+            _ => "a weak match — the line asked for something your words did not have much of",
         };
         Some(format!(
-            "Your words let it in: {strength} of the {} eligible. {where_it_went}",
+            "Your words let it in: {strength} of the {} eligible. {shape}",
             preview.eligible_tracks
         ))
     }
@@ -1523,6 +1745,25 @@ impl State {
     pub(crate) fn set_length(&mut self, length: MixLength) {
         self.length_touched = true;
         self.length = length;
+    }
+
+    /// **Give the line a number of points**, and mark the shape as the
+    /// listener's — the same rule dragging one follows.
+    pub(crate) fn set_points(&mut self, count: usize) {
+        self.shape_touched = true;
+        self.contour.set_points(count);
+    }
+
+    /// **Bring the list back into step with a request that changed**, at the
+    /// seed it already stands at.
+    ///
+    /// The difference from [`Self::compose`] is the whole of what makes an
+    /// always-live list bearable: this does **not** advance the seed, so a
+    /// changed length or a moved line changes only what that change implies,
+    /// and the diff's sentence names it. Pressing *Compose* is what draws a
+    /// different one.
+    pub(crate) fn recompose(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+        self.create(albums, chosen);
     }
 
     /// **Compose: a new list every press.**
@@ -2479,40 +2720,96 @@ mod tests {
         assert!(sentence.contains("a new draw"), "{sentence}");
     }
 
-    /// **A row explains itself as a rank, never a score** — the quorum's R9.
+    /// **The result proves itself in the axis words** — which is the whole of
+    /// what the owner asked the feature to be able to do: *"one track
+    /// represents a combination of the different points on that curve. e.g.
+    /// loud, fast, dynamic? or quiet, slow, compressed… we have to be able to
+    /// prove that this system is working."*
+    ///
+    /// A rising line over two songs: the first should read as the quiet, slow
+    /// end and the last as the loud, fast end, in words a listener can check
+    /// by ear without understanding anything underneath.
     #[test]
-    fn a_selected_row_explains_itself_without_a_number_nobody_asked_for() {
+    fn a_row_says_what_it_is_in_the_words_the_line_is_drawn_in() {
+        let song = |title: &str| QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            album: None,
+            album_artist: None,
+            duration: None,
+            path: PathBuf::from(format!("/{title}.flac")),
+        };
         let mut state = State {
             preview: Some(Generated {
-                items: vec![QueueItemVm {
-                    title: "One".to_owned(),
-                    artist: None,
-                    album: None,
-                    album_artist: None,
-                    duration: None,
-                    path: PathBuf::from("/one.flac"),
-                }],
-                blended: vec![1.12],
-                matches: vec![Match {
-                    similarity: 0.41,
-                    ticks: 3,
-                }],
+                items: vec![song("first"), song("last")],
+                // One row per lane in `Dimension::ALL` order, each holding a
+                // level per song: the opener at the low end of every axis, the
+                // closer at the high end.
+                levels: vec![vec![-1.8, 1.8]; Dimension::ALL.len()],
+                blended: vec![-1.8, 1.8],
+                matches: vec![
+                    Match {
+                        similarity: 0.4,
+                        ticks: 3,
+                    },
+                    Match {
+                        similarity: 0.3,
+                        ticks: 2,
+                    },
+                ],
                 eligible_tracks: 260,
                 ..Generated::default()
             }),
             ..State::default()
         };
+        state.set_shape(Shape::DEFAULT);
+
+        assert_eq!(
+            state.row_is(0),
+            ["quiet", "slow", "dark", "steady", "clean"],
+            "the opening song reads as the low end of every axis"
+        );
+        assert_eq!(
+            state.row_is(1),
+            ["loud", "fast", "bright", "swinging", "noisy"],
+            "and the closing song as the high end"
+        );
+
+        // The line was drawn rising, so what it *asked* for travels the same
+        // way — and that is the claim a listener can check.
+        assert_eq!(
+            state.row_asked(0),
+            ["quiet", "slow", "dark", "steady", "clean"]
+        );
+        assert_eq!(
+            state.row_asked(1),
+            ["loud", "fast", "bright", "swinging", "noisy"]
+        );
+
         let why = state.why(0).expect("a selected row explains itself");
         assert!(why.contains("Your words let it in"), "{why}");
         assert!(why.contains("260 eligible"), "{why}");
-        assert!(why.contains("78%"), "{why}");
-        assert!(!why.contains("0.41"), "a rank, never a score: {why}");
+        assert!(
+            why.contains("asked for quiet, slow, dark, steady and clean"),
+            "{why}"
+        );
+        // Asked and got agree here, so it says so in one clause rather than
+        // repeating the same five words twice.
+        assert!(why.contains("and this song is."), "{why}");
+        assert!(!why.contains("0.4"), "a reading, never a score: {why}");
 
-        // Selecting the same row again puts the explanation away.
-        state.select_row(0);
-        assert_eq!(state.selected_row, Some(0));
-        state.select_row(0);
-        assert_eq!(state.selected_row, None);
+        // **A song in the middle of every axis says nothing**, rather than
+        // being called dark for sitting a hair below the middle.
+        let middling = State {
+            preview: Some(Generated {
+                items: vec![song("one")],
+                levels: vec![vec![0.2]; Dimension::ALL.len()],
+                blended: vec![0.2],
+                ..Generated::default()
+            }),
+            ..State::default()
+        };
+        assert!(middling.row_is(0).is_empty(), "{:?}", middling.row_is(0));
     }
 
     /// **A chip appends; it never replaces.** Design 21 §4's rules table.
