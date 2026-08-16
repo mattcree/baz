@@ -57,14 +57,20 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     // 1. The one primary control, and the sentence saying what it is.
     let mut asked = column![
         heading("What do you want to hear?"),
-        text_input("warm hypnotic music for driving at night", &vibe.prompt)
-            .on_input(Message::VibePrompt)
-            .on_submit(Message::VibeCreate)
-            .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .style(move |_theme, status| theme::input(room, status)),
+        text_input(
+            vibe.profile
+                .example
+                .as_deref()
+                .unwrap_or("warm hypnotic music for driving at night"),
+            &vibe.prompt,
+        )
+        .on_input(Message::VibePrompt)
+        .on_submit(Message::VibeCreate)
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .style(move |_theme, status| theme::input(room, status)),
         quiet("This is exactly what Baz searches for."),
     ]
     .spacing(TIGHT);
@@ -142,10 +148,17 @@ fn quiet(line: &str) -> Element<'static, Message> {
 /// readout with this plan's addition beside it.
 ///
 /// The count is the eligible set the words draw, by the same rule a compose
-/// will apply, so *"211 of 5 076 songs match"* is a promise rather than a
-/// description. The three titles are the cheapest possible answer to *does Baz
-/// understand my phrase*: type *slow sparse piano*, see a death-metal track
-/// first, and you know before spending a compose.
+/// will apply, so it is a promise rather than a description — **of what Baz
+/// will choose from, and of nothing else**. It does not say those songs are
+/// what was asked for, because two of the six requests measured in
+/// `docs/design/impl/vibe-eligibility/` were at or below chance and a
+/// readout that said *match* would be asserting otherwise.
+///
+/// The three titles are the cheapest possible answer to *does Baz understand
+/// my phrase*: type *slow sparse piano*, see a death-metal track first, and
+/// you know before spending a compose. They are the only part of this readout
+/// that can be graded, which is why they carry the instruction to grade
+/// them.
 ///
 /// It was four body lines of equal weight, which is a good part of what made
 /// this pane a wall. It is a count in the pane's own voice with its evidence
@@ -167,7 +180,18 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let head = if live.prompt.is_empty() {
         format!("All {} songs Baz has heard", live.analysed)
     } else {
-        format!("{} of {} songs match", live.eligible, live.analysed)
+        // **Not "match".** The sweep in `docs/design/impl/vibe-eligibility/`
+        // put two of six test requests at or below chance against their own
+        // genre, so a sentence reading *211 of 5 076 songs match* claims a
+        // precision the retrieval does not have — and design note 23 §4 calls
+        // that the worst failing available here, because it is a dishonesty
+        // rather than a limitation. *Drew … to choose from* is the same
+        // arithmetic without the claim: it says what Baz did, and leaves
+        // whether it was right to the three titles underneath.
+        format!(
+            "Baz drew {} of {} to choose from",
+            live.eligible, live.analysed
+        )
     };
     let mut note = column![
         text(head)
@@ -177,8 +201,19 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
             .color(room.paper_dim),
     ]
     .spacing(0.0);
-    if !live.closest.is_empty() {
-        note = note.push(quiet(&format!("Closest: {}", live.closest.join(" · "))));
+    // And the evidence, with the grading asked for out loud. These three are
+    // the cheapest way to find out that a phrase is not landing, and they are
+    // only useful if somebody looks at them.
+    if live.closest.is_empty() {
+        if !live.prompt.is_empty() {
+            note = note.push(quiet("Its best reading of your words, not a filter."));
+        }
+    } else {
+        note = note.push(quiet(&format!(
+            "Nearest your words: {} — if these are not what you meant, it has not \
+             understood the phrase.",
+            live.closest.join(" · ")
+        )));
     }
     note.into()
 }

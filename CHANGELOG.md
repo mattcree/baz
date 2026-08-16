@@ -40,6 +40,12 @@ Every release is built from a tag by CI, gated on the full test suite — see
   happens in two stages: the words draw a pool, and the line orders it. Moving
   the line reorders the same songs — which is what the page has always claimed
   and can now be believed about.
+- **The count under the description no longer says your songs *match*.** It
+  says what baz did — *drew 211 of 5 076 to choose from* — because for two of
+  six measured test requests the pool it draws is no better than picking at
+  random, and a sentence claiming otherwise was the interface overstating its
+  own confidence. The three nearest songs sit under it and ask to be graded:
+  if they are not what you meant, it has not understood the phrase.
 - **Composing twice with the same request gives you the same list.** A hidden
   freshness penalty used to push away songs baz had recently offered, and the
   variation seed advanced on every press. Both are gone. Variation is a
@@ -61,6 +67,22 @@ Every release is built from a tag by CI, gated on the full test suite — see
 - **The first run says what it will cost and offers to start** — *24 tracks, a
   minute or two* — from a measured rate rather than a guess, and the
   description is fully usable while baz is listening.
+- **What baz heard, said back to you.** Once it has listened, the smart
+  playlist door names the quietest, loudest, slowest and fastest records in
+  your library, gives the tempo range in beats per minute, and says how many
+  of them you have never played. Not a summary — **a set of claims you can
+  check**. If it calls an ambient record the loudest thing you own, you know
+  in one second that something is wrong, which an average could never tell
+  you. Nothing leaves the machine, and none of it is about you: it ranks the
+  music, not the listener.
+- **The controls admit what your collection cannot do.** Open the per-thing
+  lines and one over a dimension your music barely varies in says so, because
+  a line there would be followed perfectly by the songs while nothing about
+  them changed. The threshold is measured against a real library rather than
+  picked.
+- **The description's example is made of your own music** — *warm shoegaze,
+  slow and sparse*, using the genre you actually own most of, instead of a
+  sentence about nobody's library.
 
 ### Known, and not known
 

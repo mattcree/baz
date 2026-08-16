@@ -734,6 +734,20 @@ pub(crate) fn place_pad() -> iced::Padding {
     }
 }
 
+/// **Several things, named as a sentence would name them** — `energy`,
+/// `energy and tempo`, `energy, tempo and texture`.
+///
+/// Here rather than in one view because a joined list is prose, and prose in
+/// this product is written once. No serial comma, which is the house
+/// spelling everywhere else in the copy.
+pub(crate) fn list_words(words: &[String]) -> String {
+    match words {
+        [] => String::new(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// **One quiet line**: a statement about a flow rather than a control.
 ///
 /// Shared rather than copied per view because the composing page and the
@@ -977,6 +991,25 @@ fn density_mark(
 
 #[cfg(test)]
 mod tests {
+    /// A joined list is prose, and prose gets a test.
+    #[test]
+    fn several_things_are_named_the_way_a_sentence_names_them() {
+        let words = |all: &[&str]| {
+            super::list_words(
+                &all.iter()
+                    .map(|word| (*word).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(words(&[]), "");
+        assert_eq!(words(&["energy"]), "energy");
+        assert_eq!(words(&["energy", "tempo"]), "energy and tempo");
+        assert_eq!(
+            words(&["energy", "tempo", "texture"]),
+            "energy, tempo and texture"
+        );
+    }
+
     /// **The frame is the frame in every place**, which this file claims in
     /// prose and did not hold for about a month.
     ///

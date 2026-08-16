@@ -301,6 +301,9 @@ impl Contour {
 }
 
 /// A library track decorated only with the identity needed for diversity.
+///
+/// `from_parts` exists for probes that read a store directly rather than
+/// through `prepare`; nothing in the application uses it.
 #[derive(Debug, Clone)]
 pub struct Candidate {
     /// Exact path and stable join back to Baz's library projection.
@@ -395,7 +398,46 @@ pub struct Selection {
     pub matches: Vec<Match>,
 }
 
+impl Candidate {
+    /// Build one from raw stored blobs — for the measurement bins only.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the blobs are not the stored float encoding.
+    #[must_use]
+    pub fn from_parts(
+        path: PathBuf,
+        album: u64,
+        artist: String,
+        values: &[u8],
+        semantic: &[u8],
+    ) -> Self {
+        Self {
+            path,
+            album,
+            artist,
+            features: Features {
+                values: decode_values(values).expect("stored feature blob"),
+                semantic: decode_semantic(semantic).expect("stored semantic blob"),
+            },
+        }
+    }
+}
+
 impl Features {
+    /// Build one from an already-normalized vector, in the same spirit as
+    /// [`Candidate::from_parts`]: for the measurement bins, and for the
+    /// shell's own tests, which need a track with a known tempo and cannot
+    /// produce one without an audio file to analyse.
+    ///
+    /// `values` is indexed by bliss' `AnalysisIndex`; a shorter vector will
+    /// panic when a dimension past its end is read, which is the honest
+    /// failure for a caller that has hand-built one.
+    #[must_use]
+    pub fn from_values(values: Vec<f32>, semantic: Vec<f32>) -> Self {
+        Self { values, semantic }
+    }
+
     /// Estimated beats per minute, derived from bliss' documented 0–206 BPM
     /// normalization.
     #[must_use]

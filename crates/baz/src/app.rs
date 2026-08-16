@@ -616,6 +616,11 @@ pub(crate) enum Message {
     /// A settled phrase came back from the local text tower, beside the phrase
     /// it was asked about so a stale answer can be discarded.
     VibeEmbedded(String, Result<Vec<f32>, String>),
+    /// **One mood of the door, surveyed against this library** — the recipe's
+    /// index and the embedding of its phrase. Six of these run once, when a
+    /// scan settles, so the door can say which of its own tiles this
+    /// collection can actually answer.
+    VibeMoodSurveyed(usize, Result<Vec<f32>, String>),
     /// Select a row of the result so it explains itself, or put the
     /// explanation away.
     VibePreviewSelected(usize),
@@ -4021,15 +4026,34 @@ impl App {
             Message::VibePrepared(result) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_preparation(result.clone());
+                    // **What listening learned**, from whatever the index
+                    // already held. Cheap enough to run on a partial store,
+                    // and doing it here means a returning listener sees the
+                    // reading without waiting for a scan they already paid
+                    // for.
+                    state.vibe.rebuild_profile(
+                        &state.albums,
+                        &state.edition_choice,
+                        state.history.as_ref(),
+                    );
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
                         state.vibe.compose(&state.albums, &state.edition_choice);
                     }
                 }
-                Some(self.next_vibe_job())
+                Some(Task::batch([self.next_vibe_job(), self.survey_moods()]))
             }
             Message::VibeAnalyzed(result) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_analysis(result.clone());
+                    // Once, when the scan settles — not per track, which
+                    // would sort the whole library a few thousand times.
+                    if !state.vibe.analyzing {
+                        state.vibe.rebuild_profile(
+                            &state.albums,
+                            &state.edition_choice,
+                            state.history.as_ref(),
+                        );
+                    }
                     if !state.vibe.analyzing
                         && state.vibe.failed > 0
                         && let Some(detail) = state.vibe.failure_note()
@@ -4044,7 +4068,13 @@ impl App {
                         state.vibe.compose(&state.albums, &state.edition_choice);
                     }
                 }
-                Some(self.next_vibe_job())
+                let settled = !matches!(&self.screen, Screen::Shelf(state) if state.vibe.analyzing);
+                let survey = if settled {
+                    self.survey_moods()
+                } else {
+                    Task::none()
+                };
+                Some(Task::batch([self.next_vibe_job(), survey]))
             }
             Message::VibeAnalysisCancel => {
                 if let Screen::Shelf(state) = &mut self.screen {
@@ -4098,6 +4128,12 @@ impl App {
                         Message::VibeEmbedded(prompt, result)
                     })
                 }))
+            }
+            Message::VibeMoodSurveyed(index, embedding) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.accept_mood_survey(*index, embedding);
+                }
+                Some(Task::none())
             }
             Message::VibeEmbedded(prompt, embedding) => {
                 if let Screen::Shelf(state) = &mut self.screen {
@@ -4310,6 +4346,27 @@ impl App {
                 crate::vibe::analyze(index.clone(), run, path),
                 Message::VibeAnalyzed,
             )
+        }))
+    }
+
+    /// **Ask the door's own moods what this library can answer.**
+    ///
+    /// Six embeddings, once, when a scan settles — and never on the typing
+    /// path, which has its own debounce. Sequential rather than batched
+    /// across threads on purpose: they share one text tower behind a mutex
+    /// (`baz_vibe::semantic`), so six at once would queue anyway while
+    /// costing six live tasks.
+    ///
+    /// Silent about failure. An unsurveyed mood simply says nothing extra on
+    /// its tile, which is where it started.
+    fn survey_moods(&mut self) -> Task<Message> {
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        Task::batch(state.vibe.mood_survey().into_iter().map(|(index, prompt)| {
+            Task::perform(crate::vibe::embed(prompt), move |(_, result)| {
+                Message::VibeMoodSurveyed(index, result)
+            })
         }))
     }
 
@@ -9261,6 +9318,11 @@ impl Shelf {
         // what.
         self.collection = vm::Collection::count(&self.albums, self.library.len());
         (self.artist_facts, self.artist_also_on) = vm::artist_inventory(&self.albums);
+        // **The compose field's example, made of their music.** One pass, on
+        // the same schedule and for the same reason as the two counts above:
+        // it is derived from the tracks that were just rebuilt, and this is
+        // the one place they are known to be settled.
+        self.vibe.rebuild_example(&self.albums);
         // Rebuilding changes the album behind every virtual position even
         // though app-bar search itself no longer changes the wall.
         self.forget_requested();

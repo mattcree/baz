@@ -34,7 +34,11 @@ const TILE: f32 = 176.0;
 /// run to one, two or three lines depending on the mood, and a grid whose
 /// tiles each stood at their own content's height would be a ragged edge
 /// pretending to be a wall.
-const TILE_H: f32 = 96.0;
+///
+/// Room for **four** caption lines rather than three, because a surveyed mood
+/// can add one saying what it has to draw from, and a tile that clipped that
+/// line would hide the one thing on it the listener did not already know.
+const TILE_H: f32 = 116.0;
 
 /// The listening step's own measure. It is a paragraph and a press, not a
 /// banner: at the full width of a wide window its button would be a metre of
@@ -68,6 +72,20 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     let unheard = library.saturating_sub(heard);
     page = page.push(step(vibe, stage, heard, library, unheard));
 
+    // **What the hour bought**, where the hour was paid for. Design note 24:
+    // an hour of listening currently buys the *ability* to compose and shows
+    // nothing for itself, and the most valuable thing it could show is not a
+    // summary but a claim about a record the listener already knows — because
+    // an aggregate cannot be graded and a named record can.
+    if let Some(reading) = heard_reading(&vibe.profile) {
+        page = page.push(reading);
+    }
+    // **A thin pool is only worth saying when it is a fact about the mood.**
+    // On a library smaller than a playlist every tile would carry the same
+    // number, which says nothing about any of them — and the block above has
+    // already said how much has been heard.
+    let survey_worth_it = heard >= THIN;
+
     page = page
         .push(Space::new().height(theme::GAP_SM))
         .push(views::caption_word("PICK ONE"));
@@ -83,6 +101,9 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         line = line.push(tile(
             recipe.label,
             recipe.prompt,
+            survey_worth_it
+                .then(|| vibe.mood_pool.get(index).copied().flatten())
+                .flatten(),
             Message::VibeRecipe(index),
         ));
         in_line += 1;
@@ -97,6 +118,7 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     line = line.push(tile(
         "Your own words",
         "Describe the music yourself, and shape how it moves.",
+        None,
         Message::VibeStartBlank,
     ));
     grid = grid.push(line);
@@ -200,34 +222,168 @@ fn step(
         .into()
 }
 
+/// **What Baz heard**, in a few lines — design note 24 §5's *a few lines, not
+/// a dashboard*, on a page that has been called overwhelming once already.
+///
+/// Everything in it is measurement, and every item is either checkable
+/// (a named record) or actionable (the never-played count). Nothing is a
+/// score, and nothing is about the listener: the standing Now Playing rule is
+/// *rank the music, not the listener*, and it holds here.
+///
+/// Absent entirely until there is something to say, because a heading over
+/// four dashes is worse than no heading.
+fn heard_reading(profile: &crate::vibe::Profile) -> Option<Element<'static, Message>> {
+    let room = theme::active();
+    if profile.heard == 0 {
+        return None;
+    }
+    let mut lines = column![views::caption_word("WHAT BAZ HEARD")].spacing(theme::GAP_XS);
+
+    // The named extremes first: the part that can be graded in a second.
+    for (label, title, artist) in &profile.extremes {
+        lines = lines.push(
+            row![
+                container(
+                    text((*label).to_owned())
+                        .size(theme::SIZE_CAPTION)
+                        .line_height(theme::LEADING_CAPTION)
+                        .color(room.paper_faint)
+                )
+                .width(Length::Fixed(EXTREME_LABEL_W)),
+                // Title first, then who made it — the order the result's own
+                // rows and the field's three nearest already use. Two
+                // readouts about records, a pane apart, spelling a record
+                // two different ways is the sort of thing that makes a page
+                // feel assembled rather than designed.
+                text(format!("{title} — {artist}"))
+                    .size(theme::SIZE_CAPTION)
+                    .line_height(theme::LEADING_CAPTION)
+                    .color(room.paper)
+                    .width(Length::Fill)
+                    .wrapping(text::Wrapping::Word),
+            ]
+            .spacing(theme::GAP_SM),
+        );
+    }
+
+    // Then the sentences, in the order they are worth reading: the one unit a
+    // listener already owns, the shelf they forgot about, and the admission.
+    let mut sentences: Vec<String> = Vec::new();
+    if let (Some((low, high)), Some(middle)) = (profile.tempo_range, profile.tempo_median) {
+        sentences.push(format!(
+            "Tempo runs {low} to {high} BPM, centred on {middle}."
+        ));
+    }
+    if let Some(never) = profile.never_played
+        && never > 0
+    {
+        sentences.push(format!("You have never played {never} of these."));
+    }
+    // **One sentence for the flat axes, not one each.** Two lines that differ
+    // by a single noun read as a list of complaints; the fact is one fact
+    // about the collection and belongs in one sentence.
+    if !profile.flat_axes.is_empty() {
+        let named: Vec<String> = profile
+            .flat_axes
+            .iter()
+            .map(|dimension| dimension.label().to_lowercase())
+            .collect();
+        let plural = named.len() > 1;
+        sentences.push(format!(
+            "Your music barely varies in {}, so shaping {} will not do much.",
+            views::list_words(&named),
+            if plural { "those lines" } else { "that line" }
+        ));
+    }
+    if profile.extremes.is_empty() && sentences.is_empty() {
+        return None;
+    }
+    if !profile.extremes.is_empty() {
+        sentences.push(
+            "These are measurements, not verdicts — if one looks wrong, it is worth a \
+             listen to the file."
+                .to_owned(),
+        );
+    }
+    for sentence in sentences {
+        lines = lines.push(views::hint(&sentence));
+    }
+
+    Some(
+        container(lines)
+            .padding(theme::GAP_MD)
+            .max_width(STEP_W)
+            .style(move |_theme| theme::segmented(room))
+            .into(),
+    )
+}
+
+/// **Below this, a mood has nothing to choose from.**
+///
+/// An hour is around eighteen tracks, so a pool of twenty-five means the walk
+/// takes nearly all of it and the same records arrive every time — which is
+/// the disappointment the note is about, and it happens well before the pool
+/// reaches zero. Relative to what a playlist needs rather than to the library,
+/// because a small collection can be perfectly capable of answering a mood.
+const THIN: usize = 25;
+
+/// The measure the extreme labels take, so *Quietest* and *Fastest* start
+/// their records at the same place and the four read as a column rather than
+/// as four sentences.
+const EXTREME_LABEL_W: f32 = 72.0;
+
 /// One mood, as a pressable card: its name, and the words it will actually
 /// send — because a tile whose name is the whole of the information is a tile
 /// you have to press to understand.
-fn tile<'a>(name: &'a str, words: &'a str, press: Message) -> Element<'a, Message> {
+fn tile<'a>(
+    name: &'a str,
+    words: &'a str,
+    pool: Option<usize>,
+    press: Message,
+) -> Element<'a, Message> {
     let room = theme::active();
-    iced::widget::button(
-        column![
-            text(name)
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .font(theme::MEDIUM)
-                .color(room.paper),
-            text(words)
-                .size(theme::SIZE_CAPTION)
-                .line_height(theme::LEADING_CAPTION)
-                .color(room.paper_faint)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::Word),
-        ]
-        .spacing(theme::GAP_XS)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .clip(true),
-    )
-    .width(Length::Fixed(TILE))
-    .height(Length::Fixed(TILE_H))
-    .padding(theme::GAP_MD)
-    .style(move |_theme, status| theme::pill(room, room.wall, status, false))
-    .on_press(press)
-    .into()
+    let mut face = column![
+        text(name)
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .font(theme::MEDIUM)
+            .color(room.paper),
+        text(words)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .color(room.paper_faint)
+            .width(Length::Fill)
+            .wrapping(text::Wrapping::Word),
+    ]
+    .spacing(theme::GAP_XS)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .clip(true);
+    // **What this library can actually answer with**, when the answer is
+    // thin. Design note 24 §7: *`Party` on a collection of solo piano is a
+    // button that produces a disappointment.* Still pressable — a thin pool
+    // is a fact about the collection, not a permission — but no longer a
+    // promise made in ignorance.
+    if let Some(pool) = pool.filter(|pool| *pool < THIN) {
+        face = face.push(
+            text(if pool == 0 {
+                "Nothing here sounds like this".to_owned()
+            } else {
+                format!("Only {pool} songs to draw from")
+            })
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim)
+            .width(Length::Fill)
+            .wrapping(text::Wrapping::Word),
+        );
+    }
+    iced::widget::button(face)
+        .width(Length::Fixed(TILE))
+        .height(Length::Fixed(TILE_H))
+        .padding(theme::GAP_MD)
+        .style(move |_theme, status| theme::pill(room, room.wall, status, false))
+        .on_press(press)
+        .into()
 }

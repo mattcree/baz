@@ -474,7 +474,9 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
-- **A library's own spread is measured, known, and never shown.** *(The owner,
+- **A library's own spread is measured, known, and never shown.** **Shipped
+  2026-08-16** — both wanted forms, evidence in
+  `docs/design/impl/what-baz-heard/`. *(The owner,
   2026-08-16: "so we're sort of making a determination based on my music pool?
   that there are certain signals that stand out way more than others? is there
   a way to make that available to users on a per-library basis?")*
@@ -510,23 +512,29 @@ Newest first. Each was asked for in conversation and is now in the product.
   tempo curve over a library with one tempo and the dots follow the line
   perfectly while the music does not change. Nothing on screen could tell you.
 
-  **Wanted:** a per-library reading, computed once after listening and kept
-  with the analysis. Two honest forms, in order of confidence:
+  **Both wanted forms are built**, per `docs/design/24-what-baz-heard.md`:
 
-  1. **Name the degenerate axes.** Where a library's spread on a dimension is
-     genuinely tiny, say so beside that line — *your music barely varies in
-     tempo, so this line will not change much*. Defensible with no
-     cross-dimension comparison at all.
-  2. **A "what Baz heard" reading** after the listening step: the tempo range
-     in BPM, how varied the collection is, what it is mostly made of. This
-     also gives the listening step a **reward** rather than only a cost, which
-     is the other thing the owner has pushed on — an hour of analysis
-     currently buys the *ability* to compose and shows nothing for itself.
+  1. **The degenerate axes are named.** Opened, a line whose dimension this
+     collection barely varies in says so in the alert voice —
+     *your music barely varies in brightness — this line will move the list
+     very little.* The threshold is measured rather than judged:
+     `cargo run -p baz-vibe --bin vibe-spread` puts the narrowest
+     genuinely-varying axis of a real 5 076-track library at 0.392, and
+     `FLAT_AXIS` is 0.12.
+  2. **A "what Baz heard" reading** stands on the door, where the hour was
+     paid for: the quietest, loudest, slowest and fastest records **by name**,
+     the tempo range in BPM, and how many of them have never been played. Not
+     a dashboard — a few lines, and every one of them either checkable against
+     a record the listener knows or actionable.
 
-  Related and unresolved: `docs/design/23-the-three-dimensions.md` asks
-  whether the semantic step earns its place at all. If it does not, a
-  per-library profile becomes *more* valuable rather than less, because it is
-  the honest half.
+  What is deliberately **not** there is the cross-dimension comparison this
+  entry's own table warns about: *most varied in texture, least in
+  brightness* is arithmetic over incommensurable units, and it stayed out.
+
+  Related: `docs/design/23-the-three-dimensions.md` asks whether the semantic
+  step earns its place at all. If it does not, this becomes the main evidence
+  that the listening step did anything — which is the argument for having
+  built it first.
 
 - **Listening produces numbers, not tags — and the two are one short step
   apart.** *(The owner, 2026-08-16: "should we show tags on the tracks? does

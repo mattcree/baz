@@ -1,5 +1,16 @@
 # 24 — What Baz heard
 
+> **Built, 2026-08-16.** §2's named extremes, §3's never-played count, §4's
+> degenerate-axis flag and §7's items 2 and 3 are all shipping; the receipts
+> are in `docs/design/impl/what-baz-heard/`. §7 item 1 — a vocabulary
+> computed from the listener's own library — was **attempted three times and
+> abandoned**, and the negative result is recorded in
+> `crates/baz-vibe/src/bin/word-probe.rs` rather than hidden: CLAP's
+> text-audio similarities are not comparable across prompts, so no ranking of
+> candidate words against one library survives contact with the library's
+> actual contents. The note below stands as written; this is what became of
+> it.
+
 An hour of listening currently buys the *ability* to compose and shows nothing
 for itself. This note is about whether it should show something, what would
 keep that from becoming a nightmare — and, by §7, why a local player can be

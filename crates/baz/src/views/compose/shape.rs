@@ -132,6 +132,19 @@ fn line<'a>(
                 dimension.share()
             )))
             .push(views::hint(dimension.measured_from()));
+        // **And where the collection has nothing to say on it, say so.** A
+        // rank axis spreads whatever it is given across the whole scale by
+        // construction, so a line drawn over a dimension this library barely
+        // varies in will be followed perfectly by dots while nothing about
+        // the music changes — a control that looks like it is working and is
+        // not. Design note 24 §4.
+        if vibe.profile.flat_axes.contains(&dimension) {
+            block = block.push(views::alert(&format!(
+                "Your music barely varies in {} — this line will move the list very \
+                 little.",
+                dimension.label().to_lowercase()
+            )));
+        }
     }
     // **The axis words sit above and below the line, not in a gutter beside
     // it.** Three words do not fit a 48 px lane, and the first attempt put

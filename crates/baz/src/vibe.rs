@@ -325,6 +325,29 @@ pub(crate) fn level_at(points: &[ContourPoint], fraction: f32) -> Option<f32> {
     Some(pair[0].level + (pair[1].level - pair[0].level) * mix)
 }
 
+/// **Below this p05–p95 span, an axis has nothing to say about a
+/// collection.**
+///
+/// **Measured, not guessed** — `cargo run -p baz-vibe --bin vibe-spread` over
+/// a real 5 076-track library, 2026-08-16:
+///
+/// ```text
+///                p05      p50      p95     span
+/// Energy       0.260    0.505    0.674    0.413
+/// Tempo       -0.118    0.235    0.625    0.743
+/// Brightness  -0.900   -0.730   -0.508    0.392
+/// Dynamics     0.285    0.641    0.785    0.499
+/// Texture     -0.938   -0.558   -0.168    0.771
+/// ```
+///
+/// The narrowest axis a varied collection produces spans 0.39, so 0.12 is a
+/// third of that and is reached only by a library that genuinely does not
+/// move — a set of takes of one piece, a DJ set at one tempo. Deliberately
+/// conservative: a false *"this line will not do much"* is worse than a
+/// missing one, because it would talk somebody out of a control that works.
+#[cfg(feature = "vibe-analysis")]
+const FLAT_AXIS: f32 = 0.12;
+
 /// The furthest a contour may reach on either axis: the collection's own
 /// extremes, which is what the engine clamps its targets to.
 const LEVEL_LIMIT: f32 = 2.0;
@@ -687,6 +710,83 @@ pub(crate) fn shape_words(contour: &Contour) -> &'static str {
     }
 }
 
+/// **What listening actually learned about this collection** — the reading the
+/// door shows once a library has been heard.
+///
+/// Everything here is **measurement**, deliberately: tempo in BPM, the
+/// loudest and quietest records by name, how many songs have never been
+/// played. Nothing is inference, so nothing on it can be quietly wrong in the
+/// way `docs/design/23-the-three-dimensions.md` describes the semantic half
+/// as being.
+///
+/// Its job is **audit, not admiration** — *here is what I heard, check me* —
+/// which is why the useful items are named records rather than summaries. If
+/// baz calls an ambient piece the loudest thing in a library, its owner knows
+/// in one second that something is wrong; an aggregate cannot be graded that
+/// way.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Profile {
+    /// How many tracks the reading is over.
+    pub(crate) heard: usize,
+    /// The 5th and 95th percentile tempo, in beats per minute — the one
+    /// measurement with a unit a listener already owns.
+    pub(crate) tempo_range: Option<(u32, u32)>,
+    /// The median tempo, likewise.
+    pub(crate) tempo_median: Option<u32>,
+    /// **Named records at the extremes**: the label a listener can grade, one
+    /// per axis, as `(what it is an extreme of, title, artist)`.
+    pub(crate) extremes: Vec<(&'static str, String, String)>,
+    /// **Axes this collection barely varies on**, where drawing a line will
+    /// not do much — because a rank axis spreads whatever it is given across
+    /// the whole scale and would otherwise look equally responsive.
+    pub(crate) flat_axes: Vec<Dimension>,
+    /// How many of the heard tracks have never been played.
+    pub(crate) never_played: Option<usize>,
+    /// **An example phrase built from music they own**, for the field's
+    /// placeholder — see [`State::rebuild_example`]. Survives a
+    /// [`State::rebuild_profile`], because it comes from the library rather
+    /// than from the analysis and is known long before anything is heard.
+    pub(crate) example: Option<String>,
+}
+
+/// **The library's own commonest genre**, phrased as a request.
+///
+/// Separated from [`State`] so it can be tested without one, and because the
+/// judgement in it is all in the details: a tag holding several genres is
+/// read as its first, casing is the listener's own lowered (a placeholder is
+/// not a title), and a tag too long to read as an example is declined rather
+/// than truncated into nonsense. `None` where the library has no genre tags
+/// at all, and the caller keeps its constant.
+fn library_example(albums: &[AlbumVm]) -> Option<String> {
+    /// Beyond this a "genre" is somebody's freeform note and would read as
+    /// gibberish in a field that is meant to be teaching by example.
+    const READABLE: usize = 24;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for album in albums {
+        let Some(genre) = album.genre.as_deref() else {
+            continue;
+        };
+        // A multi-valued tag — `Rock; Alternative`, `Jazz / Funk` — is read
+        // as its first value, which is the one the tagger led with.
+        let word = genre
+            .split([';', '/', ','])
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase();
+        if word.is_empty() || word.chars().count() > READABLE {
+            continue;
+        }
+        *counts.entry(word).or_default() += 1;
+    }
+    // Ties break on the word itself rather than on hash order, so the same
+    // library always offers the same example.
+    let (word, _) = counts
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))?;
+    Some(format!("warm {word}, slow and sparse"))
+}
+
 /// **What one level says about a song on one axis**, or `None` where it sits
 /// too near the middle to say anything.
 ///
@@ -981,6 +1081,14 @@ pub(crate) struct State {
     /// Whether *another version* is what produced the compose being run, so
     /// the diff can name the right cause.
     varied: bool,
+    /// **What listening learned about this collection** — the door's reading,
+    /// rebuilt whenever a scan settles.
+    pub(crate) profile: Profile,
+    /// **How much each of the door's moods can actually draw from**, in the
+    /// order [`Recipe::ALL`] offers them. `None` where it has not been
+    /// surveyed — before a library has been heard, and in the light build,
+    /// which has no tower to ask.
+    pub(crate) mood_pool: [Option<usize>; Recipe::ALL.len()],
     /// When the words have been still long enough to be worth embedding.
     /// `None` means there is nothing waiting.
     count_due: Option<std::time::Instant>,
@@ -1080,6 +1188,8 @@ impl Default for State {
             live: None,
             counting: false,
             varied: false,
+            profile: Profile::default(),
+            mood_pool: [None; Recipe::ALL.len()],
             count_due: None,
             choosing: false,
             depth: Depth::Simple,
@@ -1402,6 +1512,204 @@ impl State {
         for held in 0..self.contour.lanes.len() {
             self.contour.drag(held, index, at, level);
         }
+    }
+
+    /// **What one surveyed mood can draw from.**
+    ///
+    /// Design note 24 §7: *a mood should not be offered if the library cannot
+    /// answer it* — `Party` on a collection of solo piano is a button that
+    /// produces a disappointment. It is one embedding per mood, once, so it
+    /// is affordable exactly when the analysis has just settled and never on
+    /// the typing path.
+    ///
+    /// A failed embedding leaves the mood unsurveyed rather than recording a
+    /// zero: *the tower did not answer* and *your library has nothing like
+    /// this* are different facts, and only the second is worth printing on a
+    /// tile.
+    #[cfg(feature = "vibe-analysis")]
+    pub(crate) fn accept_mood_survey(
+        &mut self,
+        index: usize,
+        embedding: &Result<Vec<f32>, String>,
+    ) {
+        let (Some(slot), Ok(embedding)) = (self.mood_pool.get_mut(index), embedding) else {
+            return;
+        };
+        let mut ranked: Vec<f32> = self
+            .features
+            .values()
+            .map(|features| features.similarity(embedding))
+            .collect();
+        ranked.sort_by(|left, right| right.total_cmp(left));
+        *slot = Some(baz_vibe::eligible_count(&ranked));
+    }
+
+    /// The light build has no tower, so nothing is ever surveyed.
+    #[cfg(not(feature = "vibe-analysis"))]
+    pub(crate) fn accept_mood_survey(
+        &mut self,
+        _index: usize,
+        _embedding: &Result<Vec<f32>, String>,
+    ) {
+    }
+
+    /// **The phrases to survey**, once a library has been heard — empty when
+    /// there is nothing to survey against, so a cold library costs nothing.
+    pub(crate) fn mood_survey(&self) -> Vec<(usize, String)> {
+        if self.features.is_empty() {
+            return Vec::new();
+        }
+        Recipe::ALL
+            .iter()
+            .enumerate()
+            .map(|(index, recipe)| (index, recipe.prompt.to_owned()))
+            .collect()
+    }
+
+    /// **An example made of music they own.**
+    ///
+    /// The field's placeholder was `warm hypnotic music for driving at night`
+    /// — a good sentence about nobody's library. Design note 24 §7: *no
+    /// generic content anywhere; every example drawn from what the listener
+    /// actually owns*, and this is the cheapest instance of it. The frame is
+    /// fixed and only the noun is theirs, which is the shape that note argues
+    /// for: a surface that differs per library is one nobody can screenshot
+    /// or support, so the rows stay put and their contents are the
+    /// listener's.
+    ///
+    /// It teaches two things at once — that a genre word is a fine start, and
+    /// that qualities are what sharpen it — and it does so with a word the
+    /// library can actually answer.
+    ///
+    /// Costs one pass over the albums, on the schedule the shelves are
+    /// rebuilt on. Needs no analysis, so it is right in the light build and
+    /// right before a single track has been heard.
+    pub(crate) fn rebuild_example(&mut self, albums: &[AlbumVm]) {
+        self.profile.example = library_example(albums);
+    }
+
+    /// **Read what listening learned**, once, when a scan settles.
+    ///
+    /// Pure measurement over features already in memory, so it costs a pass
+    /// over a few thousand floats and needs no model, no network and no
+    /// second analysis. Recomputed rather than accumulated for the same
+    /// reason the field is: every arrival can move the collection's extremes.
+    #[cfg(feature = "vibe-analysis")]
+    pub(crate) fn rebuild_profile(
+        &mut self,
+        albums: &[AlbumVm],
+        chosen: &HashMap<u64, EditionKey>,
+        history: Option<&baz_core::history::History>,
+    ) {
+        if self.features.is_empty() {
+            self.profile = Profile {
+                example: self.profile.example.take(),
+                ..Profile::default()
+            };
+            return;
+        }
+        let named = |wanted: &Path| -> Option<(String, String)> {
+            albums.iter().find_map(|album| {
+                let edition = vm::selected_edition(album, chosen.get(&album.id).copied())?;
+                let track = edition.tracks.iter().find(|track| track.path == wanted)?;
+                Some((track.title.clone(), album.artist.label().to_owned()))
+            })
+        };
+        let mut profile = Profile {
+            heard: self.features.len(),
+            // Not measured here and not lost here: it is about the library,
+            // not about the analysis.
+            example: self.profile.example.clone(),
+            ..Profile::default()
+        };
+
+        // Tempo, in the one unit a listener already has.
+        let mut tempos: Vec<f32> = self
+            .features
+            .values()
+            .map(baz_vibe::Features::tempo_bpm)
+            .collect();
+        tempos.sort_by(f32::total_cmp);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a bounded quantile of a library count, into whole BPM"
+        )]
+        let at = |fraction: f32| {
+            // Rounded rather than truncated: truncation is lopsided on a
+            // short list — over three tracks the 95th percentile would land
+            // on the middle one while the 5th landed on the first — and this
+            // reading is a sentence about the ends, so it should reach them.
+            let index = ((tempos.len() - 1) as f32).mul_add(fraction, 0.5) as usize;
+            tempos[index.min(tempos.len() - 1)].round().max(0.0) as u32
+        };
+        profile.tempo_range = Some((at(0.05), at(0.95)));
+        profile.tempo_median = Some(at(0.50));
+
+        // **The named extremes**, which are the part a listener can grade.
+        for (dimension, low_word, high_word) in [
+            (Dimension::Energy, "Quietest", "Loudest"),
+            (Dimension::Tempo, "Slowest", "Fastest"),
+        ] {
+            let engine = engine_dimension(dimension);
+            let mut ranked: Vec<(f32, &PathBuf)> = self
+                .features
+                .iter()
+                .map(|(path, features)| (features.value(engine), path))
+                .collect();
+            ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
+            for (word, end) in [(low_word, ranked.first()), (high_word, ranked.last())] {
+                if let Some((_, path)) = end
+                    && let Some((title, artist)) = named(path)
+                {
+                    profile.extremes.push((word, title, artist));
+                }
+            }
+        }
+
+        // **Axes this collection has nothing to say on.** A rank axis spreads
+        // whatever it is given across the whole scale, so a line over a
+        // dimension with no real variation tracks perfectly while the music
+        // does not change — and nothing else on screen would say so.
+        for dimension in Dimension::ALL {
+            let engine = engine_dimension(dimension);
+            let mut values: Vec<f32> = self
+                .features
+                .values()
+                .map(|features| features.value(engine))
+                .collect();
+            values.sort_by(f32::total_cmp);
+            let span = values[values.len() * 95 / 100] - values[values.len() * 5 / 100];
+            if span < FLAT_AXIS {
+                profile.flat_axes.push(dimension);
+            }
+        }
+        // **The shelf you forgot about.** Design note 24 §3: the one line
+        // here that leads somewhere, and the one that changes as you listen,
+        // so the reading is worth coming back to. A missing ledger is not
+        // zero — it is *no answer*, and saying "you have never played all of
+        // them" to somebody whose history could not be read would be a lie
+        // told confidently.
+        if let Some(history) = history {
+            profile.never_played = Some(
+                self.features
+                    .keys()
+                    .filter(|path| history.track(path).plays == 0)
+                    .count(),
+            );
+        }
+        self.profile = profile;
+    }
+
+    /// The light build has no analyser and so nothing to read.
+    #[cfg(not(feature = "vibe-analysis"))]
+    pub(crate) fn rebuild_profile(
+        &mut self,
+        _albums: &[AlbumVm],
+        _chosen: &HashMap<u64, EditionKey>,
+        _history: Option<&baz_core::history::History>,
+    ) {
     }
 
     /// **Rebuild the library's own distribution** behind the line, from
@@ -2530,6 +2838,156 @@ mod tests {
         // Nothing analysed is nothing drawn, rather than a flat band that
         // would claim the collection is evenly spread.
         assert!(field_of(std::iter::empty()).is_empty());
+    }
+
+    /// **What Baz heard, from features it did hear.**
+    ///
+    /// Design note 24 §2: the valuable items are falsifiable claims about
+    /// specific records, so the test that matters is that the named extremes
+    /// are the right records. If baz calls the ambient piece the loudest
+    /// thing in a library, its owner knows in one second that something is
+    /// broken — and so does this.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn the_reading_names_the_records_a_listener_can_grade() {
+        /// One hand-built track: tempo, loudness and loudness variance are
+        /// what energy is made of, and the rest is held still so the axes
+        /// that are supposed to be flat are unambiguously flat.
+        fn heard(tempo: f32, loudness: f32) -> SonicFeatures {
+            let mut values = vec![0.0_f32; 30];
+            values[bliss_index::TEMPO] = tempo;
+            values[bliss_index::MEAN_LOUDNESS] = loudness;
+            values[bliss_index::STD_LOUDNESS] = loudness;
+            SonicFeatures::from_values(values, vec![0.0; 512])
+        }
+        let named = |number: u32, title: &str| TrackVm {
+            disc: None,
+            number: Some(number),
+            title: title.to_owned(),
+            artist: None,
+            duration: None,
+            path: PathBuf::from(format!("/m/{title}.flac")),
+            bytes: None,
+        };
+        let mut album = album();
+        album.editions[0].tracks =
+            vec![named(1, "Still"), named(2, "Middling"), named(3, "Racing")];
+
+        let mut state = State {
+            features: [
+                (PathBuf::from("/m/Still.flac"), heard(-0.9, -0.9)),
+                (PathBuf::from("/m/Middling.flac"), heard(0.0, 0.0)),
+                (PathBuf::from("/m/Racing.flac"), heard(0.9, 0.9)),
+            ]
+            .into_iter()
+            .collect(),
+            ..State::default()
+        };
+        state.rebuild_profile(&[album], &HashMap::new(), None);
+        let profile = &state.profile;
+
+        assert_eq!(profile.heard, 3);
+        // The four named ends, each a claim about a record rather than a
+        // summary — and each the *right* record.
+        let ends: Vec<(&str, &str)> = profile
+            .extremes
+            .iter()
+            .map(|(label, title, _)| (*label, title.as_str()))
+            .collect();
+        assert_eq!(
+            ends,
+            [
+                ("Quietest", "Still"),
+                ("Loudest", "Racing"),
+                ("Slowest", "Still"),
+                ("Fastest", "Racing"),
+            ]
+        );
+        assert_eq!(
+            profile.extremes[0].2, "Artist",
+            "an extreme names who made it, or it cannot be recognised"
+        );
+
+        // Tempo in the one unit a listener already owns, and in order.
+        let (low, high) = profile.tempo_range.expect("a tempo range");
+        let middle = profile.tempo_median.expect("a median tempo");
+        assert!(low <= middle && middle <= high, "{low} {middle} {high}");
+        // bliss normalizes tempo over 0–206 BPM, so the middle track's 0.0 is
+        // 103 — the conversion, checked in the unit a listener reads.
+        assert_eq!(middle, 103);
+        // The ends are the 5th and 95th percentile rather than the minimum
+        // and maximum, so a single mastering artefact cannot set the range a
+        // whole library is described by — which over three tracks is the same
+        // as the ends: 0.9 normalized is 196 BPM, and −0.9 is 10.
+        assert_eq!((low, high), (10, 196));
+
+        // **The axes this collection cannot answer**, and only those. Tempo,
+        // loudness and its variance were given a spread, so the three
+        // dimensions made of them move; brightness and texture were handed
+        // one value each and would otherwise draw a line the dots followed
+        // perfectly while the music did not change.
+        for moving in [Dimension::Tempo, Dimension::Energy, Dimension::Dynamics] {
+            assert!(!profile.flat_axes.contains(&moving), "{moving:?}");
+        }
+        for still in [Dimension::Brightness, Dimension::Texture] {
+            assert!(profile.flat_axes.contains(&still), "{still:?}");
+        }
+
+        // No ledger is not "you have never played any of them": the count is
+        // absent rather than confidently wrong.
+        assert_eq!(profile.never_played, None);
+
+        // And a library that has been heard about, then forgotten, keeps
+        // nothing it can no longer support.
+        state.features.clear();
+        state.rebuild_profile(&[], &HashMap::new(), None);
+        assert_eq!(state.profile, Profile::default());
+    }
+
+    /// The three feature slots the test above actually sets, spelled out
+    /// rather than reached through `bliss_audio` — this crate does not depend
+    /// on it, and the numbers are part of the stored format anyway.
+    #[cfg(feature = "vibe-analysis")]
+    mod bliss_index {
+        pub(super) const TEMPO: usize = 0;
+        pub(super) const MEAN_LOUDNESS: usize = 8;
+        pub(super) const STD_LOUDNESS: usize = 9;
+    }
+
+    /// **The field's example is made of their music**, and declines rather
+    /// than embarrasses itself when it cannot be.
+    #[test]
+    fn the_placeholder_is_built_from_the_commonest_genre_they_own() {
+        let tagged = |id: u64, genre: Option<&str>| AlbumVm {
+            id,
+            genre: genre.map(str::to_owned),
+            ..album()
+        };
+        assert_eq!(
+            library_example(&[
+                tagged(1, Some("Shoegaze")),
+                tagged(2, Some("shoegaze")),
+                tagged(3, Some("Doom Metal")),
+            ]),
+            Some("warm shoegaze, slow and sparse".to_owned()),
+            "the listener's own spelling, lowered, and the one they own most of"
+        );
+        // A multi-valued tag is read as the value the tagger led with.
+        assert_eq!(
+            library_example(&[tagged(1, Some("Jazz / Funk"))]),
+            Some("warm jazz, slow and sparse".to_owned())
+        );
+        // Freeform notes in a genre field are declined, not truncated into
+        // nonsense — and so is a library with no genres at all.
+        assert_eq!(
+            library_example(&[tagged(
+                1,
+                Some("recorded live at the Barrowlands, second night")
+            )]),
+            None
+        );
+        assert_eq!(library_example(&[tagged(1, None)]), None);
+        assert_eq!(library_example(&[]), None);
     }
 
     #[test]
