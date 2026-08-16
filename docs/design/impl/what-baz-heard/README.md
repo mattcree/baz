@@ -47,7 +47,28 @@ about the library and nothing about any mood — and the block above has
 already said how much has been heard. It appears when the pool is thin
 against a collection that is not.
 
-## 03 · The example is their music
+## 03 · Composing from what you forgot
+
+The never-played count is a **press**, not a sentence. Design note 24 §3
+argues that a profile of measurements is a one-time curio while a never-played
+count changes as you listen and is a route back into your own collection —
+so it is the one item here that leads somewhere, and it leads somewhere by
+being pressable.
+
+It leaves the door with the filter already on, and the request sentence says
+so: **`Any song you have never played, starting quiet and climbing the whole
+way, for about an hour.`** The chip beside the words carries the same state
+and the same number, because they are one control seen twice.
+
+It is a **filter, not a lean** (`docs/WORK.md` item 76, Marcus's reading). A
+filter is a fact a listener can check against their own memory; a weighting
+that quietly *preferred* unplayed songs would be one more thing happening for
+reasons nobody could read. The restriction is applied before anything is
+scored, so the ranks and the eligibility knee are computed within the pool
+that was asked for rather than within the library and then filtered — which
+would put a "loud" song at the quiet end of its own list.
+
+## 04 · The example is their music
 
 The field's placeholder reads **`warm electronic, slow and sparse`**, built
 from the commonest genre the library actually carries. The frame is fixed and
@@ -55,7 +76,7 @@ only the noun is theirs, which is design note 24 §7's own recommendation: a
 surface that differs per library is one nobody can screenshot or support, so
 the rows stay put and their contents are the listener's.
 
-## 04 · Drew, rather than matched
+## 05 · Drew, rather than matched
 
 The count under the field used to read *N of M songs match*. Two of the six
 requests measured in `docs/design/impl/vibe-eligibility/` were at or below
@@ -63,13 +84,15 @@ chance against their own genre, so that sentence claimed a precision the
 retrieval does not have — design note 23 §4's charge, and the worst kind
 available, because it is a dishonesty rather than a limitation.
 
-It now reads **`Baz drew 24 of 24 to choose from`**, which is the same
+It now reads **`Baz drew 22 of 24 to choose from`** — the numerator carries
+the request's restrictions and the denominator stays the library, so the
+sentence says how much was set aside as well as how much was kept. Same
 arithmetic with the claim removed, and the three nearest carry the grading
 out loud: *if these are not what you meant, it has not understood the
 phrase.* The titles are the only part of that readout anybody can check,
 which is why they are the part that asks to be checked.
 
-## 05 · The flat axes admit it
+## 06 · The flat axes admit it
 
 Opened, `ENERGY` and `TEMPO` carry no warning — the fixture genuinely varies
 in both — and `BRIGHTNESS` says *your music barely varies in brightness —

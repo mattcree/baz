@@ -1696,12 +1696,27 @@ or not."*
     if a pass is running, if the library is empty, or if every track has
     already been heard.
 
-76. **Not started — lean towards what you haven't played.** *(From the quorum,
-    Q3.)* baz keeps a play ledger, so it can answer *"something I haven't
-    played in a while"*, which is the request people actually make of a large
-    library. Not a seventh mood: a toggle beside the words that composes with
-    every mood. Ines proposed it, Marcus reframed it as a filter, Toby said he
-    would press it every time. Needs the owner's word before it is designed.
+76. **Shipped 2026-08-16 — compose from what you haven't played.** *(From the
+    quorum, Q3.)* baz keeps a play ledger, so it can answer *"something I
+    haven't played in a while"*, which is the request people actually make of
+    a large library. Ines proposed it, Marcus reframed it as a filter, Toby
+    said he would press it every time.
+
+    **Marcus's reading won**, and the reason is the one design note 23 spends
+    its length on: a filter is a *fact* — these are songs the ledger holds no
+    play of, and a listener can check any row against their own memory —
+    while a lean is one more thing happening for reasons nobody can read, on
+    a feature whose credibility already rests on the half that is
+    measurement.
+
+    A chip beside the words, not a seventh mood, so it composes with every
+    one of them; and the never-played count on the door is a press that
+    leaves the door with it already on, which is what design note 24 §3 asks
+    of that line — *the one item on the reading that leads somewhere*. The
+    restriction is applied before anything is scored, so the ranks and the
+    eligibility knee are computed within the pool that was asked for. Absent
+    entirely where the ledger cannot answer, because a toggle that silently
+    does nothing is worse than one that is not there.
 
 77. **Half done 2026-08-15 — one control style for quiet acts.** *"the general
     idea isn't wrong around some of the controls. I think we could tackle that

@@ -695,6 +695,12 @@ pub(crate) enum Message {
     NewPlaylistOpen,
     /// Leave the door with an empty request, to write your own words.
     VibeStartBlank,
+    /// **Compose only from songs the ledger has never seen a play of**, or
+    /// stop doing so.
+    VibeUnplayedOnly(bool),
+    /// Leave the door straight into that request, which is what makes the
+    /// never-played count a door rather than a fact.
+    VibeStartUnplayed,
     /// **The smart playlist's own door.** Lands on the moods rather than on
     /// the form, and on a library Baz has never heard it lands on the one
     /// step that has to come first.
@@ -2383,6 +2389,13 @@ impl App {
             Message::VibeStartBlank => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.choosing = false;
+                }
+                Task::none()
+            }
+            Message::VibeStartUnplayed => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.choosing = false;
+                    state.vibe.set_unplayed_only(true);
                 }
                 Task::none()
             }
@@ -4112,6 +4125,14 @@ impl App {
             // **The words have been still for 400 ms.** Embed once, off this
             // thread; the count and the closest three are computed against
             // vectors already in memory when it comes back.
+            Message::VibeUnplayedOnly(only) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.vibe.set_unplayed_only(*only);
+                }
+                // The eligible set just changed, so everything describing it
+                // is describing the old one. Same path the words take.
+                Some(Task::none())
+            }
             Message::VibeDepth(depth) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.depth = *depth;
@@ -5965,6 +5986,12 @@ impl App {
                     Event::PlayRecorded { .. } => {
                         if let Screen::Shelf(state) = &mut self.screen {
                             state.history = read_history();
+                            // **A play changes what has never been played.**
+                            // The count and the filter are both readings of
+                            // the ledger, so they are re-read when it moves
+                            // rather than measured once after a scan and left
+                            // to go quietly wrong.
+                            state.vibe.rebuild_unplayed(state.history.as_ref());
                         }
                     }
                     _ => {}

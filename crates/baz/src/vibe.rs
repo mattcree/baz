@@ -1084,6 +1084,18 @@ pub(crate) struct State {
     /// **What listening learned about this collection** — the door's reading,
     /// rebuilt whenever a scan settles.
     pub(crate) profile: Profile,
+    /// **Compose only from songs the ledger has never seen a play of.**
+    ///
+    /// A filter rather than a lean, which is the whole of why it can be on
+    /// the page at all: *these are songs you have never played* is a fact,
+    /// and a listener can check it. A weighting that quietly *preferred*
+    /// unplayed songs would be one more thing happening for reasons nobody
+    /// could read, on a feature whose credibility already rests on the half
+    /// that is measurement.
+    pub(crate) unplayed_only: bool,
+    /// The heard songs the ledger holds no play of, kept as a set because it
+    /// is asked once per candidate on every compose.
+    pub(crate) never_played: HashSet<PathBuf>,
     /// **How much each of the door's moods can actually draw from**, in the
     /// order [`Recipe::ALL`] offers them. `None` where it has not been
     /// surveyed — before a library has been heard, and in the light build,
@@ -1189,6 +1201,8 @@ impl Default for State {
             counting: false,
             varied: false,
             profile: Profile::default(),
+            unplayed_only: false,
+            never_played: HashSet::new(),
             mood_pool: [None; Recipe::ALL.len()],
             count_due: None,
             choosing: false,
@@ -1251,10 +1265,11 @@ impl State {
     /// **how many** there are.
     pub(crate) fn query(&self) -> String {
         let words = self.effective_request();
-        let which = if words.is_empty() {
-            "Any song Baz has heard".to_owned()
-        } else {
-            format!("Songs like “{words}”")
+        let which = match (words.is_empty(), self.drawn_from().is_some()) {
+            (true, false) => "Any song Baz has heard".to_owned(),
+            (true, true) => "Any song you have never played".to_owned(),
+            (false, false) => format!("Songs like “{words}”"),
+            (false, true) => format!("Songs like “{words}” that you have never played"),
         };
         let where_it_goes = if self.contour.lanes.is_empty() {
             "in no particular shape".to_owned()
@@ -1685,21 +1700,48 @@ impl State {
                 profile.flat_axes.push(dimension);
             }
         }
-        // **The shelf you forgot about.** Design note 24 §3: the one line
-        // here that leads somewhere, and the one that changes as you listen,
-        // so the reading is worth coming back to. A missing ledger is not
-        // zero — it is *no answer*, and saying "you have never played all of
-        // them" to somebody whose history could not be read would be a lie
-        // told confidently.
-        if let Some(history) = history {
-            profile.never_played = Some(
-                self.features
-                    .keys()
-                    .filter(|path| history.track(path).plays == 0)
-                    .count(),
-            );
-        }
         self.profile = profile;
+        self.rebuild_unplayed(history);
+    }
+
+    /// **The shelf you forgot about**, as a set and as a count.
+    ///
+    /// Design note 24 §3: the one line on the reading that leads somewhere,
+    /// and the one that changes as you listen — which is why it is rebuilt on
+    /// every recorded play as well as after a scan, rather than measured once
+    /// and left to rot.
+    ///
+    /// A missing ledger is not zero. *You have never played all of them* said
+    /// to somebody whose history could not be read would be a lie told
+    /// confidently, so the count is absent and the filter has nothing to
+    /// offer.
+    #[cfg(feature = "vibe-analysis")]
+    pub(crate) fn rebuild_unplayed(&mut self, history: Option<&baz_core::history::History>) {
+        let Some(history) = history else {
+            self.never_played.clear();
+            self.profile.never_played = None;
+            return;
+        };
+        self.never_played = self
+            .features
+            .keys()
+            .filter(|path| history.track(path).plays == 0)
+            .cloned()
+            .collect();
+        self.profile.never_played = Some(self.never_played.len());
+    }
+
+    /// The light build hears nothing, so it has nothing to have not played.
+    #[cfg(not(feature = "vibe-analysis"))]
+    pub(crate) fn rebuild_unplayed(&mut self, _history: Option<&baz_core::history::History>) {}
+
+    /// **The songs a compose may draw from**, or `None` for all of them —
+    /// the one place the filter is applied, so the live count, the cloud
+    /// behind the line and the list itself cannot disagree about it.
+    fn drawn_from(&self) -> Option<&HashSet<PathBuf>> {
+        // A filter with nothing in it would compose an empty list and read as
+        // a broken toggle. Off until the ledger has something to say.
+        (self.unplayed_only && !self.never_played.is_empty()).then_some(&self.never_played)
     }
 
     /// The light build has no analyser and so nothing to read.
@@ -1888,6 +1930,17 @@ impl State {
         self.prompt = prompt;
     }
 
+    /// **Turn the never-played filter on or off**, and recount, because
+    /// everything on screen describing the eligible set has just stopped
+    /// being true of it.
+    pub(crate) fn set_unplayed_only(&mut self, only: bool) {
+        if only == self.unplayed_only {
+            return;
+        }
+        self.unplayed_only = only;
+        self.words_changed();
+    }
+
     /// **Appending a word from the vocabulary**, with a comma — design 21 §4's
     /// rule, and the one thing a chip does.
     pub(crate) fn append_word(&mut self, word: &str) {
@@ -1929,9 +1982,10 @@ impl State {
             // No words is not a narrow request, it is no request: everything
             // baz has heard is eligible, and it can be said without a model.
             self.counting = false;
+            let drawn = self.drawn_from().map_or(self.features.len(), HashSet::len);
             self.live = Some(Live {
                 prompt,
-                eligible: self.features.len(),
+                eligible: drawn,
                 analysed: self.features.len(),
                 closest: Vec::new(),
                 // With no words the eligible set is the library, and the
@@ -1967,9 +2021,20 @@ impl State {
         // Borrowed, never cloned: this runs once per settled phrase and the
         // whole point of the readout is that it costs a scan of vectors that
         // are already resident.
+        // The same restriction the compose will apply, so the count above the
+        // field is a promise about the list that is coming rather than about
+        // a library the request has excluded half of.
+        let drawn_from = self.drawn_from();
         let mut scored: Vec<(f32, &Path)> = Vec::with_capacity(self.features.len());
         for (path, features) in &self.features {
+            if drawn_from.is_some_and(|allowed| !allowed.contains(path)) {
+                continue;
+            }
             scored.push((features.similarity(embedding), path.as_path()));
+        }
+        if scored.is_empty() {
+            self.live = None;
+            return;
         }
         scored.sort_by(|left, right| right.0.total_cmp(&left.0));
         let ranked: Vec<f32> = scored.iter().map(|(value, _)| *value).collect();
@@ -1984,7 +2049,11 @@ impl State {
         self.live = Some(Live {
             prompt: prompt.to_owned(),
             eligible,
-            analysed: scored.len(),
+            // **What Baz has heard**, not what this request left standing.
+            // The restriction is already in the numerator; putting it in the
+            // denominator too would read *drew 22 of 22* and say nothing
+            // about how much of the library the request set aside.
+            analysed: self.features.len(),
             closest: scored
                 .iter()
                 .take(3)
@@ -2103,9 +2172,12 @@ impl State {
             &self.contour,
             self.length,
             self.variation,
-            &self.features,
-            albums,
-            chosen,
+            Drawn {
+                features: &self.features,
+                allowed: self.drawn_from(),
+                albums,
+                chosen,
+            },
         );
         let mut preview = match generated {
             Ok(preview) => {
@@ -2403,10 +2475,14 @@ fn generate(
     contour: &Contour,
     length: MixLength,
     variation: u64,
-    features: &HashMap<PathBuf, SonicFeatures>,
-    albums: &[AlbumVm],
-    chosen: &HashMap<u64, EditionKey>,
+    from: Drawn<'_>,
 ) -> Result<Option<Generated>, String> {
+    let Drawn {
+        features,
+        allowed,
+        albums,
+        chosen,
+    } = from;
     let mut candidates = Vec::new();
     let mut items = HashMap::new();
     let mut seen_paths = HashSet::new();
@@ -2422,6 +2498,14 @@ fn generate(
             let Some(feature) = features.get(&track.path) else {
                 continue;
             };
+            // **The restriction is applied before anything is scored**, so
+            // the ranks, the ends of every axis and the eligibility knee are
+            // all computed within the pool the listener actually asked for
+            // rather than within the library and then filtered — which would
+            // put a "loud" song at the quiet end of its own list.
+            if allowed.is_some_and(|allowed| !allowed.contains(&track.path)) {
+                continue;
+            }
             candidates.push(baz_vibe::Candidate {
                 path: track.path.clone(),
                 album: album.id,
@@ -2580,11 +2664,38 @@ fn generate(
     _contour: &Contour,
     _length: MixLength,
     _variation: u64,
-    _features: &HashMap<PathBuf, SonicFeatures>,
-    _albums: &[AlbumVm],
-    _chosen: &HashMap<u64, EditionKey>,
+    _from: Drawn<'_>,
 ) -> Result<Option<Generated>, String> {
     Ok(None)
+}
+
+/// **Everything a compose draws from**, so the request and the library it is
+/// asked of are two arguments rather than seven.
+///
+/// The grouping is not cosmetic: these four travel together everywhere and
+/// have to agree with each other. `drawn_from` restricts `features`, and both
+/// are indexed by paths that only mean anything against `albums` under
+/// `chosen`, so a caller that assembled three of them from one place and the
+/// fourth from another would be composing a list about two libraries.
+#[derive(Clone, Copy)]
+// The light build's `generate` is a stub that reads none of these. The struct
+// still has to exist, because the call site that builds it does.
+#[cfg_attr(
+    not(feature = "vibe-analysis"),
+    expect(
+        dead_code,
+        reason = "assembled by the caller, read only by the full build"
+    )
+)]
+struct Drawn<'a> {
+    /// What listening learned, per path.
+    features: &'a HashMap<PathBuf, SonicFeatures>,
+    /// The paths a compose may use, or `None` for all of them.
+    allowed: Option<&'a HashSet<PathBuf>>,
+    /// The library as the shelf currently arranges it.
+    albums: &'a [AlbumVm],
+    /// Which edition of each record is the one that plays.
+    chosen: &'a HashMap<u64, EditionKey>,
 }
 
 /// Name shown for the current seed without exposing a full path in Home.
@@ -2952,6 +3063,94 @@ mod tests {
         pub(super) const TEMPO: usize = 0;
         pub(super) const MEAN_LOUDNESS: usize = 8;
         pub(super) const STD_LOUDNESS: usize = 9;
+    }
+
+    /// **The shelf you forgot about, as a filter.**
+    ///
+    /// A filter and not a lean, so this test can exist: what comes back is
+    /// exactly the songs the ledger holds no play of, and a listener can
+    /// check any row of it against their own memory. A weighting would have
+    /// nothing to assert here beyond *probably fewer of the played ones*.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn composing_from_what_was_never_played_draws_only_from_those() {
+        let mut state = State {
+            features: (0..4)
+                .map(|index| {
+                    (
+                        PathBuf::from(format!("/m/{index}.flac")),
+                        #[expect(
+                            clippy::cast_precision_loss,
+                            reason = "four hand-built tracks, spread apart"
+                        )]
+                        SonicFeatures::from_values(vec![0.1 * index as f32; 30], vec![0.0; 512]),
+                    )
+                })
+                .collect(),
+            never_played: [PathBuf::from("/m/1.flac"), PathBuf::from("/m/3.flac")]
+                .into_iter()
+                .collect(),
+            ..State::default()
+        };
+
+        // Off, the pool is the library and the sentence says nothing about
+        // plays.
+        assert!(state.drawn_from().is_none());
+        assert!(state.query().starts_with("Any song Baz has heard"));
+
+        state.set_unplayed_only(true);
+        assert_eq!(state.drawn_from().map(HashSet::len), Some(2));
+        assert!(
+            state.query().starts_with("Any song you have never played"),
+            "{}",
+            state.query()
+        );
+        state.set_prompt("warm brass");
+        assert!(
+            state
+                .query()
+                .starts_with("Songs like “warm brass” that you have never played"),
+            "{}",
+            state.query()
+        );
+
+        // **A filter with nothing in it is off, not empty.** A library whose
+        // every song has been played, or one with no readable ledger, would
+        // otherwise compose an empty list and read as a broken toggle.
+        state.never_played.clear();
+        assert!(state.drawn_from().is_none());
+        assert!(state.unplayed_only, "the listener's choice is not revoked");
+    }
+
+    /// **The count and the set are one reading of one ledger**, so nothing on
+    /// screen can claim a number the filter would not honour.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn the_never_played_reading_is_rebuilt_from_the_ledger_not_remembered() {
+        use baz_core::history::History;
+
+        let mut state = State {
+            features: (0..3)
+                .map(|index| {
+                    (
+                        PathBuf::from(format!("/m/{index}.flac")),
+                        SonicFeatures::from_values(vec![0.0; 30], vec![0.0; 512]),
+                    )
+                })
+                .collect(),
+            ..State::default()
+        };
+
+        // No ledger is *no answer*, not "you have never played any of them".
+        state.rebuild_unplayed(None);
+        assert_eq!(state.profile.never_played, None);
+        assert!(state.never_played.is_empty());
+
+        let ledger = "# baz play history.\n\
+             2026-08-01T20:00:00Z\tplayed\t24000\t24000\t/m/1.flac\n";
+        state.rebuild_unplayed(Some(&History::from_reader(ledger.as_bytes())));
+        assert_eq!(state.profile.never_played, Some(2));
+        assert!(!state.never_played.contains(Path::new("/m/1.flac")));
     }
 
     /// **The field's example is made of their music**, and declines rather

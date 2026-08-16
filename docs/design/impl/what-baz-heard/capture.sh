@@ -108,13 +108,27 @@ sleep 12
 move 1400 940
 shot "02-what-baz-heard"
 
+# **The count is a door.** The never-played line is the one item on the
+# reading that leads somewhere, so it is a press: it leaves the door with the
+# filter already on. The coordinate is the chip at the foot of the block.
+click 415 475
+sleep 3
+move 1400 940
+shot "03-composing-from-what-you-forgot"
+
+# Back to the door, and out again by the seventh way in, so the next two
+# shots start from an untouched request.
+click 32 81
+click 327 515
+sleep 2
+
 # **The field's example, made of their music** — and the count that no longer
 # says *match*. Through the door's own seventh way in, which is the route to
 # the page with nothing filled in.
 click 359 858
 sleep 3
 move 1400 940
-shot "03-the-example-is-their-music"
+shot "04-the-example-is-their-music"
 
 # The advanced depth is where the readout under the field lives. The tabs sit
 # at the head of the ask pane and the field directly under its question, so
@@ -125,14 +139,14 @@ click 470 256
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940
-shot "04-drew-rather-than-matched"
+shot "05-drew-rather-than-matched"
 
 # **The axes this collection cannot answer.** A tone at one frequency has
 # nothing to say about brightness or texture, and the opened lines say so.
 click 822 582
 sleep 3
 move 1400 940
-shot "05-flat-axes-admit-it"
+shot "06-flat-axes-admit-it"
 
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
 kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null

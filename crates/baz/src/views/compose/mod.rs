@@ -248,10 +248,14 @@ pub(crate) fn depth_tabs(current: crate::vibe::Depth) -> Element<'static, Messag
 /// A pressable word in the chip anatomy the whole page uses: the starting
 /// points, the vocabulary and the shape presets are the same kind of thing —
 /// *press this instead of doing it by hand* — so they are the same control.
-pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'_, Message> {
+pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'static, Message> {
     let room = theme::active();
     iced::widget::button(
-        iced::widget::text(label)
+        // Owned rather than borrowed: several of these are assembled from
+        // what the library holds — *only the 3 412 I've never played* — and
+        // a chip that could only carry a `&'static str` would quietly forbid
+        // exactly the labels this page is trying to make personal.
+        iced::widget::text(label.to_owned())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             // The face carries the state too, so the reading survives being
