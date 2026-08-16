@@ -44,11 +44,11 @@ by ear beats one that cannot.
 1. **The line is the page's question.** `How should it move?` is the one
    emphasis-weight heading, first in the reading order, and it stands at
    **both** depths. Simple mode has a curve now; it never did.
-2. **The wide column holds the line, the sentence, and the list**, in that
-   order — a picture, its caption, its result, never more than an eye-movement
-   apart. This keeps design 21 §8's *"the curve sits over it"* pairing and
-   inverts the hierarchy at the same time, which is why the panes swapped
-   sides rather than the blocks swapping panes.
+2. **The columns are what you set and what you will get** — the line and what
+   narrows it on the left, the request in a sentence, the length, `Compose`
+   and the list on the right. (This landed in two steps: the first arrangement
+   put the line, the sentence and the list in one column, which read well and
+   cost the list its permanent place. §3a item 3 is the correction.)
 3. **The words are a filter column**, `NARROW IT DOWN`, at caption weight,
    with *"Optional. Leave it empty and Baz draws from everything it has
    heard."* under the field. The optionality is not a concession; it is the
