@@ -36,6 +36,14 @@ Every release is built from a tag by CI, gated on the full test suite — see
   real measurements and you can check it by ear; the description is a model's
   guess that, for two of six measured test phrases, was no better than
   picking at random. The page led with the guess.
+- **The line starts with ten points, and the playlist stays on the right.**
+  Two points was a line you could only tilt. Ten is one you can draw with, and
+  the shape presets load at the same resolution without changing shape. On a
+  wide enough window the list now sits in its own column and stays there while
+  you tune, with the request in one sentence and `Compose` directly above it —
+  what you set on the left, what you will get on the right. **Advanced** opens
+  all five lines on arrival rather than making you find the control for them,
+  and the match count under the description no longer waits for that tab.
 - **Making a playlist from a mood is a place now, not a form.** It asks two
   questions in the words you would use — *what do you want to hear?* and *how
   should it move?* — with the description on the left and the list on the

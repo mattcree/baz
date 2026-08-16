@@ -5089,15 +5089,16 @@ pub const PLAYLIST_ALBUM_W: f32 = 160.0;
 /// body's full measure.
 pub const PLAYLIST_BREAKPOINT: f32 = 1032.0;
 
-/// **The ask pane's measure**, on the composing page: 400.
+/// **The narrowest the request column may be**, on the composing page: 440.
 ///
-/// Design 21 §8 asks for the ask *"on the left at a bounded width"*. Bounded
-/// rather than proportional because everything in it is a paragraph, a field
-/// or a row of chips — text, in other words, and text has a comfortable
-/// measure that a wide window does not improve. 400 holds the longest starting
-/// point (`Late-night drive`) and a chip beside it without wrapping, and it
-/// leaves [`LIST_MEASURE`] 880 for the result at the breakpoint below.
-pub const COMPOSE_ASK_W: f32 = 400.0;
+/// It was 400 and fixed, when it held only text — a field, a paragraph and
+/// rows of chips, which have a comfortable measure a wide window does not
+/// improve. Design note 25 put the **drawn line** at the head of it, and a
+/// line is the one thing here that does get better with room, so the column
+/// grows with the window now and this is only its floor. 440 holds the
+/// longest starting point (`Late-night drive`) beside a chip, and a curve
+/// wide enough that ten points are not shoulder to shoulder.
+pub const COMPOSE_REQUEST_MIN: f32 = 440.0;
 
 /// **The narrowest a result pane may be and still be a list**: 600.
 ///
@@ -5108,8 +5109,8 @@ pub const COMPOSE_ASK_W: f32 = 400.0;
 /// worse side by side than stacked, which is exactly what a breakpoint is for.
 pub const COMPOSE_RESULT_MIN: f32 = 600.0;
 
-/// **Where the composing page stops being two panes**: the ask's own measure,
-/// the gutter, the narrowest useful result and the place's two hangs.
+/// **Where the composing page stops being two panes**: the request column's
+/// floor, the gutter, the narrowest useful result and the place's two hangs.
 ///
 /// Derived rather than remembered, like [`PLAYLIST_BREAKPOINT`], so that
 /// widening either pane moves the point instead of quietly crushing one of
@@ -5120,7 +5121,7 @@ pub const COMPOSE_RESULT_MIN: f32 = 600.0;
 /// the first render of this page made. The returns lane is 232 px wide, so a
 /// 1 600 px window has 1 368 px of body, and a breakpoint derived from
 /// [`LIST_MEASURE`] silently stacked a page that had ample room to split.
-pub const COMPOSE_BREAKPOINT: f32 = COMPOSE_ASK_W + GAP_XL + COMPOSE_RESULT_MIN + 2.0 * HANG;
+pub const COMPOSE_BREAKPOINT: f32 = COMPOSE_REQUEST_MIN + GAP_XL + COMPOSE_RESULT_MIN + 2.0 * HANG;
 
 /// **Where the curve collapses to its sentence and its presets.**
 ///

@@ -62,6 +62,51 @@ by ear beats one that cannot.
    vocabulary chips and the readouts. The line is no longer what you unlock;
    the query builder is.
 
+## 3a. What the owner asked for once he could see it
+
+Three corrections, the same day, and each of them follows from the line being
+the page's subject rather than a setting on it:
+
+1. **Ten points, not two.** *"Can we just make the line default to having
+   let's say 10 points?"* Two points is a control you can tilt; ten is one you
+   can draw with. It is deliberately past the point where every segment holds
+   a song — an hour is around eighteen tracks — and that is his to spend: the
+   cost of a line finer than the list is that the last of the detail cannot be
+   expressed, not that anything breaks.
+
+   Presets arrive at the same resolution, **without changing shape**. Every
+   point a preset states is kept and the new handles are shared among the gaps
+   in proportion to their width, so an inserted point always lands on a
+   straight segment and reading the level anywhere gives the same answer. The
+   first attempt sampled a plain even grid and `Waves` — which turns at 0.25
+   and 0.5 — arrived visibly flattened.
+
+2. **Advanced opens the five lines.** *"Can you make advanced mode open up the
+   multiple curves."* It also closes the hole that came with putting the
+   expander in the advanced depth: a page left expanded and switched to simple
+   drew five lines with no control to collapse them.
+
+3. **The list stands on the right at all times.** *"Show the playlist at the
+   right at all times when the screen is wide enough."* So the columns are
+   **what you set** and **what you will get**: the line and what narrows it on
+   the left, and the request in one sentence, the length, `Compose` and the
+   list on the right. The sentence sitting immediately above the button says
+   exactly what pressing it will do, and both stay at the top of the page
+   however tall the left column grows — five opened lines are 1 100 px, and
+   the quorum's R11 asks for the commitment to be in *reach*, not merely
+   present.
+
+   Both columns now grow from their own floors rather than one being pinned,
+   because the drawn line is the one thing on this page that is better for
+   room.
+
+And one thing that fell out rather than being asked for: **the match count
+moved to both depths.** It was advanced-only when the words were the request
+and the readouts were the query builder's own. *What did my filter catch* is
+the plainest question a filter can be asked — and since advanced now opens
+five curves above it, advanced was the depth where the answer was hardest to
+reach, which is the opposite of what hiding it there assumed.
+
 ## 4. What did not move, deliberately
 
 - **Prose was not deleted, and the moods were not narrowed to instruments.**

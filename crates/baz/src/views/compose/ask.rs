@@ -50,7 +50,7 @@ use iced::widget::{Space, column, container, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
-use crate::views::compose::{Layout, Stage, chip, wrap_chips};
+use crate::views::compose::{Stage, chip, wrap_chips};
 use crate::{theme, views};
 
 /// Space **within** a group.
@@ -58,7 +58,7 @@ const TIGHT: f32 = theme::GAP_XS;
 /// Space **between** groups — six times [`TIGHT`], which is the grouping.
 const APART: f32 = theme::GAP_XL;
 
-pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, Message> {
+pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
     let advanced = vibe.depth == crate::vibe::Depth::Advanced;
@@ -83,9 +83,14 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         quiet("Optional. Leave it empty and Baz draws from everything it has heard."),
     ]
     .spacing(TIGHT);
-    if advanced {
-        asked = asked.push(matches_note(vibe));
-    }
+    // **The count belongs with the field at any depth.** It was advanced-only
+    // when the words were the request and the readouts were the query
+    // builder's own. They are a filter now (design note 25), and *what did my
+    // filter catch* is the plainest question a filter can be asked — and
+    // since the advanced depth opens five curves above this, it is the depth
+    // where the answer is *hardest* to reach, which is the opposite of what
+    // hiding it behind that depth assumed.
+    asked = asked.push(matches_note(vibe));
 
     // 2. The two ways of writing it.
     let current = vibe.recipe();
@@ -127,7 +132,7 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         }
     }
 
-    container(column![asked, ways, commitment(shelf, stage, layout)].spacing(APART))
+    container(column![asked, ways].spacing(APART))
         .width(Length::Fill)
         .into()
 }
@@ -231,7 +236,7 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
 /// heard it says so, and the offer to listen is the one accent-weight control
 /// on screen, in the other pane; while it is listening it says how much it can
 /// already compose from, which is true at every point of the bar.
-fn commitment(shelf: &Shelf, stage: Stage, _layout: Layout) -> Element<'_, Message> {
+pub(crate) fn commitment(shelf: &Shelf, stage: Stage) -> Element<'_, Message> {
     let vibe = &shelf.vibe;
     let ready = vibe.done.saturating_sub(vibe.failed);
     let (label, live) = match stage {

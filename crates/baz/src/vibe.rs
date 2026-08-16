@@ -175,11 +175,36 @@ impl Contour {
     /// offers.
     ///
     /// Two is a straight line between the first song and the last — the
-    /// fewest a line can have and still be one. Six is four turns, which is
-    /// more shape than a playlist of tens of songs can express: past that the
-    /// points are closer together than the songs that fill them.
+    /// fewest a line can have and still be one.
+    ///
+    /// Ten is the owner's number, and it is deliberately past the point where
+    /// every segment holds a song: an hour is around eighteen tracks, so ten
+    /// points is a handle every two songs, and half an hour has fewer songs
+    /// than handles. **That is a real limit and it is his to spend** — the
+    /// cost of a line finer than the list is that the last of the detail
+    /// cannot be expressed, not that anything breaks. The gain is that the
+    /// control the page is now built around can actually be drawn on rather
+    /// than only tilted.
     pub(crate) const MIN_POINTS: usize = 2;
-    pub(crate) const MAX_POINTS: usize = 6;
+    pub(crate) const MAX_POINTS: usize = 10;
+
+    /// **What a fresh line carries.** Two points is a control you can tilt;
+    /// ten is one you can draw with, which is what the line being the page's
+    /// first question asks of it (design note 25).
+    pub(crate) const DEFAULT_POINTS: usize = 10;
+
+    /// The opening line: the given arc, at the default resolution, **evenly
+    /// spaced**.
+    ///
+    /// Not [`Self::set_points`], which grows a line by halving its widest gap
+    /// — the rule that lets a listener add a handle without their drawing
+    /// moving, and the rule that turns two points into 1/8ths and a stray
+    /// 1/16th on the way to ten. Nothing here is anybody's drawing yet, so
+    /// the line can be sampled instead, and a row of evenly spaced handles is
+    /// the only honest picture of *you may drag any part of this*.
+    pub(crate) fn opening(points: &[ContourPoint]) -> Self {
+        Self::blended(&resampled(points, Self::DEFAULT_POINTS))
+    }
 
     /// **The weights of the blended line**, in [`Dimension::ALL`] order,
     /// energy dominant, summing to one. Mirrors `baz_vibe::Contour::BLEND`;
@@ -711,6 +736,100 @@ pub(crate) fn shape_words(contour: &Contour) -> &'static str {
     }
 }
 
+/// **One line, given `count` handles, without changing the line.**
+///
+/// **Every original point is kept**, and the new ones are shared out among
+/// the gaps in proportion to how wide they are. That is what makes this
+/// exact rather than approximate: an inserted point lands on a straight
+/// segment, so reading the level anywhere gives the same answer it did
+/// before. Sampling on a plain even grid was the first attempt and it is
+/// wrong — `Waves` turns at 0.25 and 0.5, an even tenth grid misses both, and
+/// the preset arrived visibly flattened.
+///
+/// Even spacing falls out anyway for the case that matters most: a two-point
+/// line has one gap, so ten handles land on the ninths.
+fn resampled(points: &[ContourPoint], count: usize) -> Vec<ContourPoint> {
+    if points.len() < 2 || count <= points.len() {
+        return points.to_vec();
+    }
+    let spare = count - points.len();
+    let widths: Vec<f32> = points
+        .windows(2)
+        .map(|pair| (pair[1].at - pair[0].at).max(0.0))
+        .collect();
+    let total: f32 = widths.iter().sum();
+    if total <= f32::EPSILON {
+        return points.to_vec();
+    }
+    // Largest-remainder, so the handles add up to exactly what was asked for
+    // rather than to whatever the rounding happened to leave.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a handful of points over a unit interval"
+    )]
+    let mut shares: Vec<usize> = widths
+        .iter()
+        .map(|width| (width / total * spare as f32) as usize)
+        .collect();
+    let mut left = spare - shares.iter().sum::<usize>();
+    while left > 0 {
+        let Some((index, _)) = widths
+            .iter()
+            .enumerate()
+            .max_by(|left, right| {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a handful of points over a unit interval"
+                )]
+                let per = |(index, width): (usize, &f32)| *width / (shares[index] + 1) as f32;
+                per(*left).total_cmp(&per(*right))
+            })
+            .map(|(index, width)| (index, *width))
+        else {
+            break;
+        };
+        shares[index] += 1;
+        left -= 1;
+    }
+    let mut drawn = Vec::with_capacity(count);
+    for (index, pair) in points.windows(2).enumerate() {
+        drawn.push(pair[0]);
+        let steps = shares[index] + 1;
+        for step in 1..steps {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a handful of points over a unit interval"
+            )]
+            let fraction = step as f32 / steps as f32;
+            let at = pair[0].at + (pair[1].at - pair[0].at) * fraction;
+            drawn.push(ContourPoint {
+                at,
+                level: level_at(points, at).unwrap_or(pair[0].level),
+            });
+        }
+    }
+    drawn.push(*points.last().expect("two points at least"));
+    drawn
+}
+
+/// **Whether two lines are the same line**, whatever points they are drawn
+/// with — read at twenty-one places across the measure, which is finer than
+/// any drawing this page can produce.
+fn same_line(left: &[ContourPoint], right: &[ContourPoint]) -> bool {
+    if left.is_empty() || right.is_empty() {
+        return left.is_empty() && right.is_empty();
+    }
+    (0_u8..=20).all(|step| {
+        let at = f32::from(step) / 20.0;
+        match (level_at(left, at), level_at(right, at)) {
+            (Some(one), Some(other)) => (one - other).abs() < 0.001,
+            (none, other) => none.is_none() && other.is_none(),
+        }
+    })
+}
+
 /// A sentence's first letter, where the sentence was written as a clause.
 ///
 /// The shape phrases are all lower-case gerunds — *starting quiet and
@@ -1189,7 +1308,7 @@ impl Default for State {
             current: None,
             error: None,
             preview: None,
-            contour: Contour::blended(&Shape::DEFAULT.points()),
+            contour: Contour::opening(&Shape::DEFAULT.points()),
             field: HashMap::new(),
             hovered_row: None,
             selected_row: None,
@@ -1483,10 +1602,15 @@ impl State {
         Recipe::ALL.iter().position(|recipe| {
             self.prompt == recipe.prompt
                 && self.length == recipe.length
+                // **The same line, not the same points.** A preset is stored
+                // as the fewest points that state its arc and loaded at the
+                // working resolution, and the point count is a control of its
+                // own — so comparing vertices would have a recipe stop
+                // recognising itself the moment it was loaded.
                 && self
                     .contour
                     .lane(0)
-                    .is_some_and(|lane| lane.points == recipe.shape().points())
+                    .is_some_and(|lane| same_line(&lane.points, &recipe.shape().points()))
         })
     }
 
@@ -1501,6 +1625,12 @@ impl State {
             self.contour.lanes.clear();
             return;
         }
+        // **A preset arrives at the working resolution, not its own.** The
+        // shapes are written as two or three points because that is the
+        // fewest that states the arc; handing those straight to the listener
+        // would take away eight of the ten handles they had a moment ago.
+        // Sampling the arc keeps it and only changes the grip.
+        let points = resampled(&points, Contour::DEFAULT_POINTS);
         if self.contour.lanes.is_empty() {
             self.contour = Contour::blended(&points);
             return;
@@ -1508,6 +1638,21 @@ impl State {
         for lane in &mut self.contour.lanes {
             lane.points.clone_from(&points);
         }
+    }
+
+    /// **Choosing a depth opens or closes the per-dimension lines.**
+    ///
+    /// The owner: *"can you make advanced mode open up the multiple curves."*
+    /// It is also what stops the two controls contradicting each other — the
+    /// expander chip is the advanced depth's own (design note 25), so a page
+    /// left expanded and switched to simple used to draw five lines with no
+    /// way to collapse them.
+    ///
+    /// The chip still works inside advanced: opening the door on arrival is
+    /// not the same as nailing it open.
+    pub(crate) fn set_depth(&mut self, depth: Depth) {
+        self.depth = depth;
+        self.expanded = depth == Depth::Advanced;
     }
 
     /// Move one point of one line, by the widget's raw geometry.
@@ -2649,9 +2794,10 @@ mod tests {
 
         // An interior turn stays between its neighbours, with a gap either
         // side: two points at one position would ask for two levels at once.
-        // The turn comes from a preset now rather than from a stepper.
+        // The turn comes from a preset now rather than from a stepper, and a
+        // preset arrives at the working resolution rather than its own.
         state.set_shape(Shape::ALL[3]);
-        assert_eq!(points(&state).len(), 3);
+        assert_eq!(points(&state).len(), Contour::DEFAULT_POINTS);
         state.drag_contour(0, 1, 5.0, 0.0);
         assert!(points(&state)[1].at <= 1.0 - Contour::MIN_GAP);
         state.drag_contour(0, 1, -5.0, 0.0);
@@ -2675,10 +2821,32 @@ mod tests {
         for (index, shape) in Shape::ALL.iter().enumerate() {
             state.set_shape(*shape);
             let drawn = points(&state);
-            assert_eq!(drawn, shape.points(), "{} did not load", shape.label);
             if index == 0 {
                 assert!(drawn.is_empty(), "Any is no line at all");
                 continue;
+            }
+            // **The arc loads, at the working resolution.** A preset is
+            // written as the fewest points that state it and arrives
+            // resampled to `DEFAULT_POINTS`, so what has to hold is that the
+            // line is the same line — its ends, and its level wherever you
+            // read it — not that the points are the ones in the constant.
+            assert_eq!(
+                drawn.len(),
+                Contour::DEFAULT_POINTS,
+                "{} did not load at the working resolution",
+                shape.label
+            );
+            for step in 0_u8..=20 {
+                let at = f32::from(step) / 20.0;
+                let (was, is) = (
+                    level_at(&shape.points(), at).expect("a preset level"),
+                    level_at(&drawn, at).expect("a drawn level"),
+                );
+                assert!(
+                    (was - is).abs() < 0.001,
+                    "{} changed shape at {at}: {was} became {is}",
+                    shape.label
+                );
             }
             assert!(drawn.len() >= 2, "{} needs two ends", shape.label);
             assert!(
@@ -2740,7 +2908,13 @@ mod tests {
             state.start_from(*recipe);
             assert_eq!(state.prompt, recipe.prompt);
             assert_eq!(state.length, recipe.length);
-            assert_eq!(points(&state), recipe.shape().points());
+            assert_eq!(points(&state).len(), Contour::DEFAULT_POINTS);
+            assert_eq!(
+                points(&state).first().map(|point| point.level),
+                recipe.shape().points().first().map(|point| point.level),
+                "{} does not open where its shape does",
+                recipe.label
+            );
             assert_eq!(
                 state.recipe(),
                 Some(index),
@@ -3148,7 +3322,7 @@ mod tests {
             items: list(titles),
             eligible_tracks: eligible,
             target_minutes: minutes,
-            contour: Contour::blended(&Shape::DEFAULT.points()),
+            contour: Contour::opening(&Shape::DEFAULT.points()),
             ..Generated::default()
         };
 

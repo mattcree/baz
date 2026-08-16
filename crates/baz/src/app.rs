@@ -4099,7 +4099,7 @@ impl App {
             // vectors already in memory when it comes back.
             Message::VibeDepth(depth) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.depth = *depth;
+                    state.vibe.set_depth(*depth);
                 }
                 Some(Task::none())
             }

@@ -94,17 +94,15 @@ shot "02-what-baz-heard"
 # **The field's example, made of their music** — and the count that no longer
 # says *match*. Through the door's own seventh way in, which is the route to
 # the page with nothing filled in.
-click 359 858
+click 359 786
 sleep 3
 move 1400 940
 shot "03-the-example-is-their-music"
 
-# The advanced depth is where the readout under the field lives. The depth
-# tabs head the page — they govern the line's per-dimension curves as well as
-# the vocabulary — and the field heads the filter column on the right.
-click 377 158
-sleep 1
-click 1348 184
+# **The count under the field**, which no longer says *match* and no longer
+# waits for the advanced depth. The field sits under the line, in the request
+# column, because the line is the question and the words narrow its answer.
+click 588 624
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940
@@ -112,8 +110,9 @@ shot "04-drew-rather-than-matched"
 
 # **The axes this collection cannot answer.** A tone at one frequency has
 # nothing to say about brightness or texture, and the opened lines say so.
-# The expander is the advanced depth's own control, at the foot of the line.
-click 398 562
+# The advanced depth opens all five on arrival — the owner's *"make advanced
+# mode open up the multiple curves"* — so the tab is the whole gesture.
+click 377 158
 sleep 3
 move 1400 940
 shot "05-flat-axes-admit-it"

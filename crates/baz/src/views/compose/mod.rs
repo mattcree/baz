@@ -8,13 +8,22 @@
 //! wide and narrow layouts."* Everything below follows from taking that
 //! literally.
 //!
-//! **Two panes** (§8), and design note 25 swapped what they hold. The line
-//! and its result share the wide column — the curve directly over the list it
-//! produced, a request and its answer as one picture — and the controls that
-//! narrow it stand in a [`theme::COMPOSE_ASK_W`] column beside them. Below
-//! [`theme::COMPOSE_BREAKPOINT`] the same three blocks stack, line–filter–
-//! list. Nothing is hidden behind a tab at any width: somebody who learns
-//! this page on a laptop should not have to learn it again on a desktop.
+//! **Two panes** (§8): **the request on the left, the answer on the right.**
+//! The owner: *"show the playlist at the right at all times when the screen
+//! is wide enough."* So the left column is everything you set — the line
+//! first (design note 25), then what narrows it — and the right column is the
+//! request in one sentence, the press, and the list it produced. The list is
+//! on screen the whole time you are tuning, which is what design 21 §8 wanted
+//! and what the first arrangement of this page delivered by accident and the
+//! second lost.
+//!
+//! Both columns grow with the window from their own floors
+//! ([`theme::COMPOSE_REQUEST_MIN`], [`theme::COMPOSE_RESULT_MIN`]) rather than
+//! one being pinned: the drawn line is the one thing on this page that gets
+//! better with room. Below [`theme::COMPOSE_BREAKPOINT`] they stack in the
+//! same order. Nothing is hidden behind a tab at any width: somebody who
+//! learns this page on a laptop should not have to learn it again on a
+//! desktop.
 //!
 //! **The line is the question the page asks** (design note 25). The owner:
 //! *"if we treat words as just a kind of filter… the curves make more sense
@@ -90,24 +99,39 @@ pub(crate) struct Layout {
     /// Whether the curve is drawn, or has collapsed to its sentence and its
     /// presets.
     pub(crate) draw_curve: bool,
-    /// The measure the result's rows take.
+    /// The measure the result's rows take, and the width of the column they
+    /// stand in.
     pub(crate) measure: f32,
+    /// The width of the request column beside it — the drawn line's measure.
+    pub(crate) request: f32,
 }
 
 impl Layout {
     pub(crate) fn of(size: Size) -> Self {
         let side_by_side = size.width >= theme::COMPOSE_BREAKPOINT;
+        // **An even split, and then the result yields.** Halving is the right
+        // default — neither column is subordinate — and the clamp is what
+        // keeps a row's furniture from crushing its title at the breakpoint
+        // and what stops the list sprawling past [`theme::LIST_MEASURE`] on a
+        // very wide screen. Whatever the result does not take, the line does,
+        // because the line is the one thing here that is better for room.
+        let body = size.width - 2.0 * theme::HANG;
+        let measure = if side_by_side {
+            ((body - theme::GAP_XL) / 2.0).clamp(theme::COMPOSE_RESULT_MIN, theme::LIST_MEASURE)
+        } else {
+            // The row lane takes a maximum measure rather than the window
+            // — design note 20 §1's product-wide rule, and this page is
+            // one of its five customers.
+            body.min(theme::LIST_MEASURE)
+        };
         Self {
             side_by_side,
             draw_curve: size.height >= theme::COMPOSE_SHORT_H,
-            measure: if side_by_side {
-                (size.width - theme::COMPOSE_ASK_W - theme::GAP_XL - 2.0 * theme::HANG)
-                    .clamp(theme::COMPOSE_RESULT_MIN, theme::LIST_MEASURE)
+            measure,
+            request: if side_by_side {
+                (body - theme::GAP_XL - measure).max(theme::COMPOSE_REQUEST_MIN)
             } else {
-                // The row lane takes a maximum measure rather than the window
-                // — design note 20 §1's product-wide rule, and this page is
-                // one of its five customers.
-                (size.width - 2.0 * theme::HANG).min(theme::LIST_MEASURE)
+                measure
             },
         }
     }
@@ -145,7 +169,7 @@ pub(crate) fn view<'a>(
             .into();
     }
 
-    let ask = ask::view(shelf, stage, layout);
+    let ask = ask::view(shelf);
     // **The model, in one line, once.** The owner: *"there's a mix of curves,
     // clickable selections, text input. it's just honestly not explained
     // well."* Three kinds of control were on screen and nothing said what
@@ -181,33 +205,41 @@ pub(crate) fn view<'a>(
     .width(Length::Fill)
     .style(move |_theme| theme::segmented(room));
     let shape = shape::view(vibe, layout);
+    let commitment = ask::commitment(shelf, stage);
     let result = result::view(shelf, playlists, stage, layout);
 
     let body: Element<'a, Message> = if layout.side_by_side {
-        // **The line, the sentence it adds up to, and the list** take the wide
-        // column, in that order: a picture, its caption and its result, never
-        // more than an eye-movement apart. What narrows them stands beside
-        // it. The two used to be the other way round, which put a text field
-        // where the page's one provable control belongs.
+        // **What you set on the left; what you will get on the right.**
+        //
+        // The sentence and the press head the answer column rather than
+        // trailing the request column, and that is the placement doing work
+        // rather than tidiness: *"Starting quiet and climbing the whole way,
+        // for about an hour, drawn from songs like …"* immediately above
+        // `Compose` says exactly what pressing it will do, and both stay at
+        // the top of the page however tall the request column grows —
+        // five opened lines are 1 100 px, and the quorum's R11 asks for the
+        // commitment to be in reach, not merely present.
         row![
-            container(column![depth, model, shape, stated, result].spacing(theme::GAP_LG))
-                .width(Length::Fill),
-            container(ask).width(Length::Fixed(theme::COMPOSE_ASK_W)),
+            container(column![depth, model, shape, ask].spacing(theme::GAP_LG))
+                .width(Length::Fixed(layout.request)),
+            container(column![stated, commitment, result].spacing(theme::GAP_LG))
+                .width(Length::Fixed(layout.measure)),
         ]
         .spacing(theme::GAP_XL)
         .into()
     } else {
-        // Narrow: the same blocks, in the same order — line, filter, list —
-        // with the commitment pinned at the foot of the filter so it is
-        // always in reach (the quorum's R11). Nothing moves to a tab and
-        // nothing is dropped.
+        // Narrow: the same blocks in the same reading order, stacked, with
+        // the commitment still directly under the sentence that describes
+        // what it will do. Nothing moves to a tab and nothing is dropped.
         //
         // Bounded to the row lane's own measure rather than to the window: a
         // stacked page whose chips ran the full width of a wide-but-short
         // window would be a worse reading than the split it just lost.
-        container(column![depth, model, shape, ask, stated, result].spacing(theme::GAP_LG))
-            .max_width(theme::LIST_MEASURE)
-            .into()
+        container(
+            column![depth, model, shape, ask, stated, commitment, result].spacing(theme::GAP_LG),
+        )
+        .max_width(theme::LIST_MEASURE)
+        .into()
     };
 
     scrollable(container(body).padding(views::place_pad()))
@@ -275,7 +307,7 @@ pub(crate) fn chip(label: &str, lit: bool, message: Message) -> Element<'_, Mess
 }
 
 /// Chips laid out in rows of at most `per_row`, because twelve words at
-/// [`theme::COMPOSE_ASK_W`] do not fit on one line and a horizontal scroll for
+/// [`theme::COMPOSE_REQUEST_MIN`] do not fit on one line and a horizontal scroll for
 /// six words would be absurd.
 pub(crate) fn wrap_chips(
     mut chips: Vec<Element<'_, Message>>,

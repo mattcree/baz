@@ -103,10 +103,13 @@ fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
     .into()
 }
 
-/// The counts, as words rather than as bare digits: a row reading `2 3 4 5 6`
-/// beside a row reading `Any Steady Slow build` would be two kinds of thing
-/// in one anatomy.
-const POINT_LABELS: [&str; 5] = ["Straight", "1 turn", "2 turns", "3 turns", "4 turns"];
+/// The counts, as words rather than as bare digits — a turn is the thing a
+/// listener is actually adding, and `2 3 4 5 6 7 8 9 10` beside every other
+/// worded chip on the page would be two kinds of thing in one anatomy.
+const POINT_LABELS: [&str; 9] = [
+    "Straight", "1 turn", "2 turns", "3 turns", "4 turns", "5 turns", "6 turns", "7 turns",
+    "8 turns",
+];
 
 /// **One drawn line**, with the cloud behind it, the words at its ends and the
 /// result over it.
