@@ -907,11 +907,16 @@ mod tests {
             include_str!("compose/result.rs"),
         ]
         .join("\n");
+        // `What do you want to hear?` retired with design note 25: the words
+        // are a filter now and wear a caption, and the page's one question is
+        // the line's. The assertion follows the change rather than being
+        // deleted, because what it guards is that the composer still asks
+        // something and still takes words.
         for required in [
             "VibePrompt",
             "Compose",
             "Save playlist",
-            "What do you want to hear?",
+            "NARROW IT DOWN",
             "How should it move?",
         ] {
             assert!(

@@ -424,11 +424,11 @@ impl Shape {
 /// **How much of the query builder the page is showing.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Depth {
-    /// Words, a mood, a length, and the press.
+    /// The line, a length, some words to narrow with, and the press.
     #[default]
     Simple,
-    /// …and the vocabulary, the drawn line, its per-dimension curves, and the
-    /// readouts that say what the engine did.
+    /// …and the vocabulary, the line's per-dimension curves, and the readouts
+    /// that say what the engine did.
     Advanced,
 }
 
@@ -446,9 +446,10 @@ impl Depth {
     /// it — because a mode nobody can explain is a mode nobody switches.
     pub(crate) const fn detail(self) -> &'static str {
         match self {
-            Self::Simple => "Describe it, pick a length, and press.",
+            Self::Simple => "Draw the shape, pick a length, and press.",
             Self::Advanced => {
-                "The whole query: a vocabulary, a line to shape it, and what Baz did with it."
+                "One line for each thing Baz listens for, a vocabulary to narrow with, and what \
+                 Baz did with it."
             }
         }
     }
@@ -708,6 +709,20 @@ pub(crate) fn shape_words(contour: &Contour) -> &'static str {
     } else {
         "holding one level the whole way"
     }
+}
+
+/// A sentence's first letter, where the sentence was written as a clause.
+///
+/// The shape phrases are all lower-case gerunds — *starting quiet and
+/// climbing the whole way* — because they were written to sit in the middle
+/// of a line. Now that one of them opens it, one of them has to be a capital,
+/// and rewriting five constants to be capitals would break the four other
+/// places they are quoted mid-sentence.
+fn capitalised(clause: &str) -> String {
+    let mut characters = clause.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + characters.as_str()
+    })
 }
 
 /// **What listening actually learned about this collection** — the reading the
@@ -1255,18 +1270,18 @@ impl State {
     ///
     /// This is that statement. It is assembled from the controls rather than
     /// stored, so it cannot drift from them, and it is the same three clauses
-    /// design 21 §3's table names: **which** songs, **where** each goes, and
-    /// **how many** there are.
+    /// design 21 §3's table names: **where** each song goes, **how many**
+    /// there are, and **which** songs they are drawn from.
+    ///
+    /// **The shape leads the sentence** (design note 25). It used to open
+    /// with the words — *songs like “warm brass”, starting quiet and climbing
+    /// the whole way, for about an hour* — which put the half that is
+    /// sometimes no better than chance at the head of the one line stating
+    /// what the page is doing. The clauses are the same; the order now says
+    /// which of them the request is actually built on.
     pub(crate) fn query(&self) -> String {
-        let words = self.effective_request();
-        let which = match (words.is_empty(), self.drawn_from().is_some()) {
-            (true, false) => "Any song Baz has heard".to_owned(),
-            (true, true) => "Any song you have never played".to_owned(),
-            (false, false) => format!("Songs like “{words}”"),
-            (false, true) => format!("Songs like “{words}” that you have never played"),
-        };
-        let where_it_goes = if self.contour.lanes.is_empty() {
-            "in no particular shape".to_owned()
+        let shape = if self.contour.lanes.is_empty() {
+            "In no particular shape".to_owned()
         } else if self.expanded && !self.contour.is_one_line() {
             // **Name what each line asks for**, rather than counting them.
             // The owner: *"the 'shape each thing' bit isn't clear how it
@@ -1285,12 +1300,19 @@ impl State {
                     )
                 })
                 .collect();
-            format!("with {}", each.join(", "))
+            capitalised(&each.join(", "))
         } else {
-            shape_words(&self.contour).to_owned()
+            capitalised(shape_words(&self.contour))
+        };
+        let words = self.effective_request();
+        let drawn_from = match (words.is_empty(), self.drawn_from().is_some()) {
+            (true, false) => "any song Baz has heard".to_owned(),
+            (true, true) => "any song you have never played".to_owned(),
+            (false, false) => format!("songs like “{words}”"),
+            (false, true) => format!("songs like “{words}” you have never played"),
         };
         format!(
-            "{which}, {where_it_goes}, for about {}.",
+            "{shape}, for about {}, drawn from {drawn_from}.",
             spoken(self.length)
         )
     }
@@ -3038,12 +3060,18 @@ mod tests {
         // Off, the pool is the library and the sentence says nothing about
         // plays.
         assert!(state.drawn_from().is_none());
-        assert!(state.query().starts_with("Any song Baz has heard"));
+        assert!(
+            state
+                .query()
+                .ends_with("drawn from any song Baz has heard.")
+        );
 
         state.set_unplayed_only(true);
         assert_eq!(state.drawn_from().map(HashSet::len), Some(2));
         assert!(
-            state.query().starts_with("Any song you have never played"),
+            state
+                .query()
+                .ends_with("drawn from any song you have never played."),
             "{}",
             state.query()
         );
@@ -3051,7 +3079,15 @@ mod tests {
         assert!(
             state
                 .query()
-                .starts_with("Songs like “warm brass” that you have never played"),
+                .ends_with("drawn from songs like “warm brass” you have never played."),
+            "{}",
+            state.query()
+        );
+        // **And the shape opens it**, whatever the words say.
+        assert!(
+            state
+                .query()
+                .starts_with("Starting quiet and climbing the whole way"),
             "{}",
             state.query()
         );

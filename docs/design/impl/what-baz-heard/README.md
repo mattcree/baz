@@ -87,6 +87,11 @@ would put a "loud" song at the quiet end of its own list.
 
 ## 04 · The example is their music
 
+> These last three shots also show the page after
+> `docs/design/25-the-line-leads.md`: the line is the question, first and at
+> both depths, and the words are the filter column on the right. Shot 04 is
+> the simple depth, which had **no curve at all** before that note.
+
 The field's placeholder reads **`warm electronic, slow and sparse`**, built
 from the commonest genre the library actually carries. The frame is fixed and
 only the noun is theirs, which is design note 24 §7's own recommendation: a

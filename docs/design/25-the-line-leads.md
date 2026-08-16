@@ -1,0 +1,89 @@
+# 25 — The line leads, and the words are a filter
+
+The owner, 2026-08-16, having read note 23's evidence:
+
+> *"if we treat words as just a kind of filter… the curves make more sense up
+> front I think"*
+
+That is the decision note 23 §8 refused to make on its own, and it is the
+right one. This note records what moved and why, so the next person to open
+this page does not have to reconstruct the argument from a diff.
+
+## 1. What was wrong
+
+Note 23 §5 stated it and did not act on it:
+
+| | rests on | can it be wrong? | where the page put it |
+|---|---|---|---|
+| **the words** | a neural model's opinion about a phrase | **yes, and silently** | at the head, in the only body-size control, in **both** depths |
+| **the line** | tempo, loudness, loudness variance, spectral centroid, rolloff, zero crossings, flatness | no — these are measurements | in the middle of the answer column, **advanced depth only** |
+
+So the default page had **no curve on it at all**, and led with the control
+that for two of six tested requests retrieved no better than chance
+(`docs/design/impl/vibe-eligibility/`).
+
+Nobody decided this. It followed from design 21 §2's *"there is one request,
+and it is a sentence about sound"* — a good answer to a **different** problem
+(mood and words reading as two separate inputs) that quietly became a claim
+about importance.
+
+## 2. What "a filter" means, precisely
+
+It is what the engine has done since plan 22: **two stages**. The words draw a
+pool; the line orders it. Moving the line reorders the same songs.
+
+So this note changes **no engine behaviour whatsoever**. It changes the page
+to describe the engine it already has. That is the whole reason it is safe to
+do without waiting for the blind ballot: the disputed question — *how good is
+the retrieval* — is untouched. What is settled is the question of **which
+control the page should be built around**, and a control that can be checked
+by ear beats one that cannot.
+
+## 3. What moved
+
+1. **The line is the page's question.** `How should it move?` is the one
+   emphasis-weight heading, first in the reading order, and it stands at
+   **both** depths. Simple mode has a curve now; it never did.
+2. **The wide column holds the line, the sentence, and the list**, in that
+   order — a picture, its caption, its result, never more than an eye-movement
+   apart. This keeps design 21 §8's *"the curve sits over it"* pairing and
+   inverts the hierarchy at the same time, which is why the panes swapped
+   sides rather than the blocks swapping panes.
+3. **The words are a filter column**, `NARROW IT DOWN`, at caption weight,
+   with *"Optional. Leave it empty and Baz draws from everything it has
+   heard."* under the field. The optionality is not a concession; it is the
+   accurate description of a two-stage engine whose first stage may be empty.
+4. **The stated request leads with the shape**: *Starting quiet and climbing
+   the whole way, for about an hour, drawn from songs like "a slow warm
+   pulse".* Same three clauses as before, in the order that says which of them
+   the request is built on.
+5. **The depths mean something different now.** Simple is *the line, a length,
+   some words to narrow with*. Advanced adds the per-dimension lines, the
+   vocabulary chips and the readouts. The line is no longer what you unlock;
+   the query builder is.
+
+## 4. What did not move, deliberately
+
+- **Prose was not deleted, and the moods were not narrowed to instruments.**
+  Note 23 §6's options B and C go further than the evidence: §7a showed a tag
+  filter cannot reproduce what the model does, and half the committed requests
+  have no genre word to filter on at all. Demoting prose is supported; deleting
+  it is not.
+- **Nothing about eligibility, ranking or the walk.** See §2.
+- **The door.** Its six moods still set words, shape and length together,
+  which is what a preset is. A mood is not a filter, and the door is not this
+  page.
+
+## 5. What still needs the owner
+
+The blind ballot (note 23 §7 experiment 1, plan 22 §0.1). The harness, the
+consented 72-track corpus, the diversity-matched random control and 36
+anonymous candidate lists are all in the tree with the ratings unfilled. It
+answers the one question no measurement here can: whether the model's idea of
+*warm hypnotic music for driving at night* is anybody's.
+
+This note makes that question **less expensive to get wrong**, because the
+page no longer rests on the answer. If the retrieval turns out to be poor, the
+feature degrades to *draw a shape over your whole library*, which is a real
+thing that works. Before this note it would have degraded to a text box that
+lies.

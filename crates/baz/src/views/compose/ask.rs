@@ -1,5 +1,12 @@
-//! **What do you want to hear?** — one band, one request, and the readouts
-//! that say what it means.
+//! **Narrowing it down** — the filter column, and the readouts that say what
+//! it caught.
+//!
+//! This band led the page until design note 25. The owner: *"if we treat
+//! words as just a kind of filter… the curves make more sense up front."*
+//! Everything here still writes into the one request; what changed is that it
+//! no longer claims to *be* the request. The heading is a caption rather than
+//! a question, the field says it is optional, and the page's one
+//! emphasis-weight question is now the line's.
 //!
 //! # Hierarchy, after the owner looked at it
 //!
@@ -14,9 +21,10 @@
 //!    as from the block above it. Within a group is [`TIGHT`] and between
 //!    groups is [`APART`] — a six-fold step, which is what lets proximity do
 //!    the grouping without a single rule or box.
-//! 2. **Hierarchy by de-emphasis.** There is one primary control on this pane
-//!    — the field — and it is the only thing at body size. Everything else
-//!    steps *down* rather than the field stepping up.
+//! 2. **Hierarchy by de-emphasis.** The field is the only thing here at body
+//!    size, because it is the only thing here you type into — but the pane no
+//!    longer opens with a heading, so nothing on it competes with the line's
+//!    question for the page's primary voice.
 //! 3. **Labels are usually optional.** Four all-caps labels — `A PLACE TO
 //!    START`, `MADE OF`, `FEELS LIKE`, `HOW LONG` — competed with the content
 //!    they named and with each other. Two survive: the length's is carried by
@@ -28,20 +36,21 @@
 //!
 //! # The model
 //!
-//! Design 21 §4. The **field is at the head**, with one sentence underneath —
-//! *this is exactly what Baz searches for* — because that sentence is what
-//! says there is no hidden state and that what you can read is what will
-//! happen. Beneath it, two ways of writing it: **starting points** replace the
-//! line, **the vocabulary** appends with a comma. Neither is a second input;
-//! there is one line, so there is no way to have two of anything, and a
-//! starting point stops being lit the moment the words change — not a mode
-//! switching off, a label ceasing to be true.
+//! Design 21 §4, as amended by note 25. The field has one sentence underneath
+//! — *leave it empty and Baz draws from everything it has heard* — because
+//! that is both what says there is no hidden state and what makes the
+//! optionality true rather than merely tolerated. Beneath it, two ways of
+//! writing it: **starting points** replace the line, **the vocabulary**
+//! appends with a comma. Neither is a second input; there is one line, so
+//! there is no way to have two of anything, and a starting point stops being
+//! lit the moment the words change — not a mode switching off, a label
+//! ceasing to be true.
 
 use iced::widget::{Space, column, container, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
-use crate::views::compose::{Layout, Stage, chip, depth_tabs, heading, wrap_chips};
+use crate::views::compose::{Layout, Stage, chip, wrap_chips};
 use crate::{theme, views};
 
 /// Space **within** a group.
@@ -54,9 +63,9 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     let vibe = &shelf.vibe;
     let advanced = vibe.depth == crate::vibe::Depth::Advanced;
 
-    // 1. The one primary control, and the sentence saying what it is.
+    // 1. The filter, and the sentence saying it is one.
     let mut asked = column![
-        heading("What do you want to hear?"),
+        views::caption_word("NARROW IT DOWN"),
         text_input(
             vibe.profile
                 .example
@@ -71,7 +80,7 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .style(move |_theme, status| theme::input(room, status)),
-        quiet("This is exactly what Baz searches for."),
+        quiet("Optional. Leave it empty and Baz draws from everything it has heard."),
     ]
     .spacing(TIGHT);
     // **The shelf you forgot about, as a filter on the request.** It sits
@@ -133,17 +142,9 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         }
     }
 
-    container(
-        column![
-            depth_tabs(vibe.depth),
-            asked,
-            ways,
-            commitment(shelf, stage, layout),
-        ]
-        .spacing(APART),
-    )
-    .width(Length::Fill)
-    .into()
+    container(column![asked, ways, commitment(shelf, stage, layout)].spacing(APART))
+        .width(Length::Fill)
+        .into()
 }
 
 /// The quietest voice on the pane: a caption, for something you glance at

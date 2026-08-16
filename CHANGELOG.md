@@ -26,6 +26,16 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **The line comes first, and your words are a filter.** The curve — how the
+  playlist rises, falls or holds — is what the page asks you for, it is the
+  first thing on it, and it is there whether you are in Simple or Advanced.
+  It used to be hidden behind the Advanced tab, so the ordinary page had no
+  curve on it at all. The description is a *narrow it down* box beside it now,
+  and it says out loud that it is optional: leave it empty and baz draws from
+  everything it has heard. The reason is not taste. The line is a shape over
+  real measurements and you can check it by ear; the description is a model's
+  guess that, for two of six measured test phrases, was no better than
+  picking at random. The page led with the guess.
 - **Making a playlist from a mood is a place now, not a form.** It asks two
   questions in the words you would use — *what do you want to hear?* and *how
   should it move?* — with the description on the left and the list on the

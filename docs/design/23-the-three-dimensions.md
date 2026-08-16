@@ -211,6 +211,22 @@ cheapest alternative demonstrably does not do its job, and the job is half of
 what the feature is for. What remains true is §4's charge: the *count*
 overclaims, and that is fixable today without waiting for anybody's ears.
 
+## 7b. Resolved — the hierarchy, 2026-08-16
+
+§5's charge was acted on the day this note was read. The owner: *"if we treat
+words as just a kind of filter… the curves make more sense up front I think."*
+The line is the page's question now and stands at both depths; the words are a
+filter column that says it is optional. See
+`docs/design/25-the-line-leads.md`, which also records what this note's
+evidence does **not** support: prose was demoted, not deleted, because §7a
+ruled out the cheapest replacement and half the committed requests have no
+genre word to filter on.
+
+§4's other charge — the count overclaiming — was fixed the same day; the
+readout says *drew … to choose from* and no longer says *match*.
+
+What remains open is §7 experiment 1, the blind ballot, which needs ears.
+
 ## 8. What this note does not do
 
 It does not choose. The evidence supports *narrowing* the first step and

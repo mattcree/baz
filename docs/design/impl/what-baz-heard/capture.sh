@@ -130,12 +130,12 @@ sleep 3
 move 1400 940
 shot "04-the-example-is-their-music"
 
-# The advanced depth is where the readout under the field lives. The tabs sit
-# at the head of the ask pane and the field directly under its question, so
-# both coordinates are the pane's own and not the page's.
+# The advanced depth is where the readout under the field lives. The depth
+# tabs head the page — they govern the line's per-dimension curves as well as
+# the vocabulary — and the field heads the filter column on the right.
 click 377 158
 sleep 1
-click 470 256
+click 1348 184
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940
@@ -143,7 +143,8 @@ shot "05-drew-rather-than-matched"
 
 # **The axes this collection cannot answer.** A tone at one frequency has
 # nothing to say about brightness or texture, and the opened lines say so.
-click 822 582
+# The expander is the advanced depth's own control, at the foot of the line.
+click 398 562
 sleep 3
 move 1400 940
 shot "06-flat-axes-admit-it"

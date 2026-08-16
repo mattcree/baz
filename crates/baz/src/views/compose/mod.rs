@@ -8,22 +8,24 @@
 //! wide and narrow layouts."* Everything below follows from taking that
 //! literally.
 //!
-//! **Two panes** (§8). The ask on the left at [`theme::COMPOSE_ASK_W`], the
-//! result on the right, so the list is on screen the whole time you are tuning
-//! and the curve sits over it — a line and its result as one picture rather
-//! than two screens apart. Below [`theme::COMPOSE_BREAKPOINT`] the same three
-//! blocks stack, ask–curve–list, with the commitment pinned to the foot of the
-//! ask so it is always in reach. Nothing is hidden behind a tab at any width:
-//! somebody who learns this page on a laptop should not have to learn it again
-//! on a desktop.
+//! **Two panes** (§8), and design note 25 swapped what they hold. The line
+//! and its result share the wide column — the curve directly over the list it
+//! produced, a request and its answer as one picture — and the controls that
+//! narrow it stand in a [`theme::COMPOSE_ASK_W`] column beside them. Below
+//! [`theme::COMPOSE_BREAKPOINT`] the same three blocks stack, line–filter–
+//! list. Nothing is hidden behind a tab at any width: somebody who learns
+//! this page on a laptop should not have to learn it again on a desktop.
 //!
-//! **Two questions, in the listener's own words** (§2). *What do you want to
-//! hear?* and *how should it move?* — and nothing on the surface says vibe,
-//! contour, dimension or recipe. There is **one request**, and it is a
-//! sentence about sound; a mood is not a second input beside it but a shortcut
-//! that writes into the only input there is. That is the model defect the
-//! owner found on the drawings, and the reason [`ask`] is one band with the
-//! field at its head.
+//! **The line is the question the page asks** (design note 25). The owner:
+//! *"if we treat words as just a kind of filter… the curves make more sense
+//! up front."* He is right, and the reason is measured rather than aesthetic:
+//! the line is a contour over ranked measurements and can be checked by ear,
+//! while the words are a neural model's opinion that was no better than
+//! chance for two of six tested requests
+//! (`docs/design/23-the-three-dimensions.md`). The page led with the second
+//! and hid the first behind a depth tab. Now the curve is the first thing and
+//! stands at both depths, and the words are a **filter** — optional, and said
+//! to be optional.
 //!
 //! **Four readouts** (§6), each a rendering of an engine fact rather than a
 //! second opinion computed here: the live match count and its closest three
@@ -144,59 +146,66 @@ pub(crate) fn view<'a>(
     }
 
     let ask = ask::view(shelf, stage, layout);
-    let mut answer = column![].spacing(theme::GAP_LG).width(Length::Fill);
     // **The model, in one line, once.** The owner: *"there's a mix of curves,
     // clickable selections, text input. it's just honestly not explained
     // well."* Three kinds of control were on screen and nothing said what
     // each was for, so the page read as a pile of settings rather than as
-    // three questions. This is design 21 §3's table as a sentence, and it is
-    // the only place the machinery is explained at all.
-    answer = answer.push(views::hint(
-        "Your words pick which songs are eligible · the line picks where each one \
-         goes · the length picks how many.",
-    ));
-    // And beneath it, the request those three things currently add up to —
-    // assembled from the controls rather than stored, so it cannot drift from
-    // them. It stands in **both** depths, because it is the thing simple mode
-    // is hiding the machinery *of*.
-    answer = answer.push(
-        container(
-            column![
-                views::caption_word("BAZ WILL LOOK FOR"),
-                iced::widget::text(vibe.query())
-                    .size(theme::SIZE_EMPHASIS)
-                    .line_height(theme::LEADING_EMPHASIS)
-                    .color(room.paper)
-                    .width(Length::Fill)
-                    .wrapping(iced::widget::text::Wrapping::Word),
-            ]
-            .spacing(theme::GAP_XS),
-        )
-        .padding(theme::pad(theme::GAP_MD, theme::GAP_MD))
-        .width(Length::Fill)
-        .style(move |_theme| theme::segmented(room)),
+    // three questions. This is design 21 §3's table as a sentence — in the
+    // order design note 25 put the controls in.
+    // **The depth belongs to the page, not to one column of it.** It governs
+    // the line's per-dimension expander as much as the filter's vocabulary,
+    // and it stood at the head of the filter — which since design note 25 is
+    // the second block a reader meets, so a mode control was sitting below
+    // half of what it modes.
+    let depth = depth_tabs(vibe.depth);
+    let model = views::hint(
+        "The line picks how the playlist moves · the length picks how many songs · \
+         your words narrow which ones it may use.",
     );
-    if vibe.depth == crate::vibe::Depth::Advanced {
-        answer = answer.push(shape::view(vibe, layout));
-    }
-    let answer = answer.push(result::view(shelf, playlists, stage, layout));
+    // The request those controls add up to, assembled from them rather than
+    // stored, so it cannot drift from them. It stands at **both** depths,
+    // because it is the thing simple mode is hiding the machinery *of*.
+    let stated = container(
+        column![
+            views::caption_word("BAZ WILL LOOK FOR"),
+            iced::widget::text(vibe.query())
+                .size(theme::SIZE_EMPHASIS)
+                .line_height(theme::LEADING_EMPHASIS)
+                .color(room.paper)
+                .width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::Word),
+        ]
+        .spacing(theme::GAP_XS),
+    )
+    .padding(theme::pad(theme::GAP_MD, theme::GAP_MD))
+    .width(Length::Fill)
+    .style(move |_theme| theme::segmented(room));
+    let shape = shape::view(vibe, layout);
+    let result = result::view(shelf, playlists, stage, layout);
 
     let body: Element<'a, Message> = if layout.side_by_side {
+        // **The line, the sentence it adds up to, and the list** take the wide
+        // column, in that order: a picture, its caption and its result, never
+        // more than an eye-movement apart. What narrows them stands beside
+        // it. The two used to be the other way round, which put a text field
+        // where the page's one provable control belongs.
         row![
+            container(column![depth, model, shape, stated, result].spacing(theme::GAP_LG))
+                .width(Length::Fill),
             container(ask).width(Length::Fixed(theme::COMPOSE_ASK_W)),
-            container(answer).width(Length::Fill),
         ]
         .spacing(theme::GAP_XL)
         .into()
     } else {
-        // Narrow: the same three blocks, in the same order, with the
-        // commitment pinned at the foot of the ask so it is always in reach
-        // (the quorum's R11). Nothing moves to a tab and nothing is dropped.
+        // Narrow: the same blocks, in the same order — line, filter, list —
+        // with the commitment pinned at the foot of the filter so it is
+        // always in reach (the quorum's R11). Nothing moves to a tab and
+        // nothing is dropped.
         //
         // Bounded to the row lane's own measure rather than to the window: a
         // stacked page whose chips ran the full width of a wide-but-short
         // window would be a worse reading than the split it just lost.
-        container(column![ask, answer].spacing(theme::GAP_LG))
+        container(column![depth, model, shape, ask, stated, result].spacing(theme::GAP_LG))
             .max_width(theme::LIST_MEASURE)
             .into()
     };

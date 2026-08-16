@@ -18,6 +18,12 @@
 //! the shape, presets as chips underneath, and — under
 //! [`theme::COMPOSE_SHORT_H`] of window height — the sentence and the presets
 //! alone, which is the control's accessible form anyway.
+//!
+//! **It is the first thing on the page now** (design note 25). It used to
+//! stand in the middle of the answer column and only at the advanced depth,
+//! so the default page had no curve on it at all — the one control here whose
+//! effect a listener can check by ear, filed behind a tab, under a text field
+//! whose retrieval was no better than chance for two of six tested requests.
 
 use iced::widget::{Space, column, row};
 use iced::{Element, Length};
@@ -46,7 +52,15 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
     // is a count plus dragging, and the sentence above names what you drew in
     // the words the presets used to supply.
     block = block.push(points(vibe));
-    block = block.push(expander(vibe));
+    // **The line stands at both depths; opening it into five does not.**
+    // Design note 25 moved the curve to the front of the page, which means
+    // simple mode has one now — and one line is the whole of what simple
+    // mode should have. Five of them, each with its share of the blend and
+    // what it measures, is the query builder admitting to being one, which is
+    // exactly what the other depth is for.
+    if vibe.depth == crate::vibe::Depth::Advanced {
+        block = block.push(expander(vibe));
+    }
     block.into()
 }
 
