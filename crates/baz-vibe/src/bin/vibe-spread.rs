@@ -19,6 +19,14 @@
 //! vibe-spread ~/.local/share/baz/vibe.db
 //! ```
 //!
+//! Given further arguments it also **embeds each of them and reports what the
+//! eligibility policy keeps**, which answers a different question that came
+//! up while building design note 24 §7 item 2 — *can a mood say when this
+//! library cannot answer it?* The pool size is the only candidate signal, and
+//! [`baz_vibe::eligible_count`] is floored at `KNEE_FLOOR`, so this is how
+//! you find out whether an unanswerable request is distinguishable from an
+//! answerable one at all.
+//!
 //! Reads only. It opens the store read-only and writes nothing anywhere.
 
 use std::error::Error;
@@ -36,11 +44,11 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let arguments: Vec<_> = std::env::args_os().collect();
-    if arguments.len() != 2 {
-        return Err("usage: vibe-spread STORE".into());
+    if arguments.len() < 2 {
+        return Err("usage: vibe-spread STORE [REQUEST...]".into());
     }
     let store = Path::new(&arguments[1]);
-    let tracks = read(store)?;
+    let (tracks, semantics) = read(store)?;
     println!("{} tracks in {}", tracks.len(), store.display());
     println!();
     println!(
@@ -73,26 +81,56 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!();
     println!("narrowest span: {narrowest:.3}");
     println!("a threshold below this flags nothing in this library, which is the point");
+
+    if arguments.len() > 2 {
+        println!();
+        println!("{:<40} {:>8} {:>8}", "request", "pool", "top cos");
+        for request in arguments.iter().skip(2) {
+            let words = request.to_string_lossy();
+            let embedding = baz_vibe::embed_request(&words)?;
+            let mut ranked: Vec<f32> = semantics
+                .iter()
+                .map(|features| features.similarity(&embedding))
+                .collect();
+            ranked.sort_by(|left, right| right.total_cmp(left));
+            let pool = baz_vibe::eligible_count(&ranked);
+            println!("{words:<40} {pool:>8} {:>8.3}", ranked[0]);
+        }
+    }
     Ok(())
 }
 
-fn read(store: &Path) -> Result<Vec<Features>, Box<dyn Error>> {
+/// Every track twice: once for the drawn dimensions, and — where the store
+/// holds one — once carrying its semantic vector, which is what a request is
+/// scored against.
+fn read(store: &Path) -> Result<(Vec<Features>, Vec<Features>), Box<dyn Error>> {
     let connection = Connection::open_with_flags(store, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let mut statement = connection.prepare("SELECT values_blob FROM features")?;
-    let rows = statement.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
-    let mut tracks = Vec::new();
-    for row in rows {
-        let values: Vec<f32> = row?
-            .chunks_exact(4)
+    let mut statement = connection.prepare("SELECT values_blob, semantic_blob FROM features")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Option<Vec<u8>>>(1)?))
+    })?;
+    let floats = |blob: &[u8]| -> Vec<f32> {
+        blob.chunks_exact(4)
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-            .collect();
+            .collect()
+    };
+    let (mut tracks, mut semantics) = (Vec::new(), Vec::new());
+    for row in rows {
+        let (values, semantic) = row?;
+        let values = floats(&values);
         if values.len() < 12 {
             continue;
+        }
+        if let Some(semantic) = semantic {
+            let semantic = floats(&semantic);
+            if !semantic.is_empty() {
+                semantics.push(Features::from_values(values.clone(), semantic));
+            }
         }
         tracks.push(Features::from_values(values, Vec::new()));
     }
     if tracks.is_empty() {
         return Err("the store holds no feature vectors".into());
     }
-    Ok(tracks)
+    Ok((tracks, semantics))
 }

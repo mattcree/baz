@@ -1096,11 +1096,6 @@ pub(crate) struct State {
     /// The heard songs the ledger holds no play of, kept as a set because it
     /// is asked once per candidate on every compose.
     pub(crate) never_played: HashSet<PathBuf>,
-    /// **How much each of the door's moods can actually draw from**, in the
-    /// order [`Recipe::ALL`] offers them. `None` where it has not been
-    /// surveyed — before a library has been heard, and in the light build,
-    /// which has no tower to ask.
-    pub(crate) mood_pool: [Option<usize>; Recipe::ALL.len()],
     /// When the words have been still long enough to be worth embedding.
     /// `None` means there is nothing waiting.
     count_due: Option<std::time::Instant>,
@@ -1203,7 +1198,6 @@ impl Default for State {
             profile: Profile::default(),
             unplayed_only: false,
             never_played: HashSet::new(),
-            mood_pool: [None; Recipe::ALL.len()],
             count_due: None,
             choosing: false,
             depth: Depth::Simple,
@@ -1527,58 +1521,6 @@ impl State {
         for held in 0..self.contour.lanes.len() {
             self.contour.drag(held, index, at, level);
         }
-    }
-
-    /// **What one surveyed mood can draw from.**
-    ///
-    /// Design note 24 §7: *a mood should not be offered if the library cannot
-    /// answer it* — `Party` on a collection of solo piano is a button that
-    /// produces a disappointment. It is one embedding per mood, once, so it
-    /// is affordable exactly when the analysis has just settled and never on
-    /// the typing path.
-    ///
-    /// A failed embedding leaves the mood unsurveyed rather than recording a
-    /// zero: *the tower did not answer* and *your library has nothing like
-    /// this* are different facts, and only the second is worth printing on a
-    /// tile.
-    #[cfg(feature = "vibe-analysis")]
-    pub(crate) fn accept_mood_survey(
-        &mut self,
-        index: usize,
-        embedding: &Result<Vec<f32>, String>,
-    ) {
-        let (Some(slot), Ok(embedding)) = (self.mood_pool.get_mut(index), embedding) else {
-            return;
-        };
-        let mut ranked: Vec<f32> = self
-            .features
-            .values()
-            .map(|features| features.similarity(embedding))
-            .collect();
-        ranked.sort_by(|left, right| right.total_cmp(left));
-        *slot = Some(baz_vibe::eligible_count(&ranked));
-    }
-
-    /// The light build has no tower, so nothing is ever surveyed.
-    #[cfg(not(feature = "vibe-analysis"))]
-    pub(crate) fn accept_mood_survey(
-        &mut self,
-        _index: usize,
-        _embedding: &Result<Vec<f32>, String>,
-    ) {
-    }
-
-    /// **The phrases to survey**, once a library has been heard — empty when
-    /// there is nothing to survey against, so a cold library costs nothing.
-    pub(crate) fn mood_survey(&self) -> Vec<(usize, String)> {
-        if self.features.is_empty() {
-            return Vec::new();
-        }
-        Recipe::ALL
-            .iter()
-            .enumerate()
-            .map(|(index, recipe)| (index, recipe.prompt.to_owned()))
-            .collect()
     }
 
     /// **An example made of music they own.**

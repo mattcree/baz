@@ -34,11 +34,7 @@ const TILE: f32 = 176.0;
 /// run to one, two or three lines depending on the mood, and a grid whose
 /// tiles each stood at their own content's height would be a ragged edge
 /// pretending to be a wall.
-///
-/// Room for **four** caption lines rather than three, because a surveyed mood
-/// can add one saying what it has to draw from, and a tile that clipped that
-/// line would hide the one thing on it the listener did not already know.
-const TILE_H: f32 = 116.0;
+const TILE_H: f32 = 96.0;
 
 /// The listening step's own measure. It is a paragraph and a press, not a
 /// banner: at the full width of a wide window its button would be a metre of
@@ -80,11 +76,6 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     if let Some(reading) = heard_reading(&vibe.profile) {
         page = page.push(reading);
     }
-    // **A thin pool is only worth saying when it is a fact about the mood.**
-    // On a library smaller than a playlist every tile would carry the same
-    // number, which says nothing about any of them — and the block above has
-    // already said how much has been heard.
-    let survey_worth_it = heard >= THIN;
 
     page = page
         .push(Space::new().height(theme::GAP_SM))
@@ -101,9 +92,6 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
         line = line.push(tile(
             recipe.label,
             recipe.prompt,
-            survey_worth_it
-                .then(|| vibe.mood_pool.get(index).copied().flatten())
-                .flatten(),
             Message::VibeRecipe(index),
         ));
         in_line += 1;
@@ -118,7 +106,6 @@ pub(crate) fn view(shelf: &Shelf, stage: Stage, layout: Layout) -> Element<'_, M
     line = line.push(tile(
         "Your own words",
         "Describe the music yourself, and shape how it moves.",
-        None,
         Message::VibeStartBlank,
     ));
     grid = grid.push(line);
@@ -329,15 +316,6 @@ fn heard_reading(profile: &crate::vibe::Profile) -> Option<Element<'static, Mess
     )
 }
 
-/// **Below this, a mood has nothing to choose from.**
-///
-/// An hour is around eighteen tracks, so a pool of twenty-five means the walk
-/// takes nearly all of it and the same records arrive every time — which is
-/// the disappointment the note is about, and it happens well before the pool
-/// reaches zero. Relative to what a playlist needs rather than to the library,
-/// because a small collection can be perfectly capable of answering a mood.
-const THIN: usize = 25;
-
 /// The measure the extreme labels take, so *Quietest* and *Fastest* start
 /// their records at the same place and the four read as a column rather than
 /// as four sentences.
@@ -346,14 +324,9 @@ const EXTREME_LABEL_W: f32 = 72.0;
 /// One mood, as a pressable card: its name, and the words it will actually
 /// send — because a tile whose name is the whole of the information is a tile
 /// you have to press to understand.
-fn tile<'a>(
-    name: &'a str,
-    words: &'a str,
-    pool: Option<usize>,
-    press: Message,
-) -> Element<'a, Message> {
+fn tile<'a>(name: &'a str, words: &'a str, press: Message) -> Element<'a, Message> {
     let room = theme::active();
-    let mut face = column![
+    let face = column![
         text(name)
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
@@ -370,26 +343,6 @@ fn tile<'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .clip(true);
-    // **What this library can actually answer with**, when the answer is
-    // thin. Design note 24 §7: *`Party` on a collection of solo piano is a
-    // button that produces a disappointment.* Still pressable — a thin pool
-    // is a fact about the collection, not a permission — but no longer a
-    // promise made in ignorance.
-    if let Some(pool) = pool.filter(|pool| *pool < THIN) {
-        face = face.push(
-            text(if pool == 0 {
-                "Nothing here sounds like this".to_owned()
-            } else {
-                format!("Only {pool} songs to draw from")
-            })
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim)
-            .width(Length::Fill)
-            .wrapping(text::Wrapping::Word),
-        );
-    }
     iced::widget::button(face)
         .width(Length::Fixed(TILE))
         .height(Length::Fixed(TILE_H))

@@ -531,6 +531,17 @@ Newest first. Each was asked for in conversation and is now in the product.
   entry's own table warns about: *most varied in texture, least in
   brightness* is arithmetic over incommensurable units, and it stayed out.
 
+  **Also not there, and this one was built first and then measured out.** A
+  mood that a library cannot answer saying so on its own tile is the obvious
+  sibling of the flat-axis flag, and it does not work: on a library holding
+  no gregorian chant, no bagpipes and no gamelan, those requests draw pools
+  of 175, 246 and 187 against the six real moods' 157–252, and `gregorian
+  chant` returns the highest similarity of the lot. CLAP text-audio
+  similarities are not comparable across prompts — the same wall
+  `crates/baz-vibe/src/bin/word-probe.rs` hit three times — and *does this
+  library contain X* is exactly a cross-prompt question. Reproduce with
+  `vibe-spread STORE "gregorian chant" ...`.
+
   Related: `docs/design/23-the-three-dimensions.md` asks whether the semantic
   step earns its place at all. If it does not, this becomes the main evidence
   that the listening step did anything — which is the argument for having

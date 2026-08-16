@@ -40,12 +40,29 @@ threshold under it is measured rather than guessed: `vibe-spread` over a real
 5 076-track library puts the narrowest genuinely-varying axis at 0.392, and
 `FLAT_AXIS` is 0.12, a third of it.
 
-What these shots cannot show is the mood survey's own line, *Only N songs to
-draw from*. It is suppressed here on purpose: a library smaller than a
-playlist would put the same number on all six tiles, which says something
-about the library and nothing about any mood — and the block above has
-already said how much has been heard. It appears when the pool is thin
-against a collection that is not.
+### What is not on this door, and why
+
+*"Only N songs to draw from"* on a mood the library cannot answer was built,
+measured, and taken back out the same day. Design note 24 §7 item 2 assumed
+the eligible count answers *can this collection do `Party`?*, and it does not:
+
+```text
+request                                      pool  top cos
+warm hypnotic music for driving at night      211    0.555
+calm instrumental music without vocals        157    0.620
+upbeat energetic danceable music              196    0.620
+gregorian chant                               175    0.697
+bagpipe marching band                         246    0.489
+traditional javanese gamelan                  187    0.589
+throat singing from mongolia                  221    0.603
+```
+
+Four requests a 5 076-track library holds nothing for, drawing pools inside
+the range the six real moods draw — and `gregorian chant` returning the
+highest similarity of them all. The cause is the one `word-probe.rs` already
+recorded: **CLAP text-audio similarities are not comparable across prompts**,
+and *does this library contain X* is exactly a cross-prompt question. A
+control that fires at random is worse than no control, so there is no control.
 
 ## 03 · Composing from what you forgot
 
@@ -117,9 +134,10 @@ toolbox run -c baz-dev docs/design/impl/contour/mkfixture-varied.sh /tmp/baz-var
 toolbox run -c baz-dev docs/design/impl/what-baz-heard/capture.sh
 ```
 
-And the threshold behind the flat-axis flag, against any real store:
+And the threshold behind the flat-axis flag, against any real store — plus,
+with requests after it, the pool measurement that ruled the mood survey out:
 
 ```sh
 toolbox run -c baz-dev cargo run --release -p baz-vibe --bin vibe-spread -- \
-  ~/.local/share/baz/vibe.db
+  ~/.local/share/baz/vibe.db "gregorian chant" "bagpipe marching band"
 ```

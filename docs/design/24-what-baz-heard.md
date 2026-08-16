@@ -193,6 +193,39 @@ The instances, in order of how ready they are:
    after listening — so a mood could be quiet, or absent, or say what it can
    actually draw from.
 
+   > **Built, measured, and removed the same day.** *"The eligible count
+   > already answers this"* is the sentence that was wrong, and it was wrong
+   > for the same reason item 1 above was. `vibe-spread` against the owner's
+   > 5 076-track library, which contains no gregorian chant, no bagpipes, no
+   > gamelan and no Mongolian throat singing:
+   >
+   > ```text
+   > request                                      pool  top cos
+   > warm hypnotic music for driving at night      211    0.555
+   > calm instrumental music without vocals        157    0.620
+   > upbeat energetic danceable music              196    0.620
+   > gregorian chant                               175    0.697
+   > bagpipe marching band                         246    0.489
+   > traditional javanese gamelan                  187    0.589
+   > throat singing from mongolia                  221    0.603
+   > ```
+   >
+   > The four things the library does not contain draw pools of 175–246,
+   > squarely inside the range the six real moods draw (157–252), and
+   > `gregorian chant` returns the **highest** top similarity of the lot.
+   > Neither the pool size nor the similarity level distinguishes a request a
+   > library can answer from one it cannot, and the ranking is floored at
+   > `KNEE_FLOOR` anyway, so *"only 24 songs to draw from"* was very nearly
+   > unreachable as well as meaningless.
+   >
+   > There is no honest signal here on the evidence available. **CLAP
+   > text-audio similarities are not comparable across prompts** — the same
+   > wall item 1 hit three times — and *does this library contain X* is
+   > exactly a cross-prompt question. It could be answered by tags for the
+   > moods that have a genre word, but half of them do not
+   > (`docs/design/23-the-three-dimensions.md` §7a), so that would be a
+   > control that worked on three tiles and not the other three.
+
 3. **The field's placeholder should name their own music**, not
    `warm hypnotic music for driving at night`. An example built from a record
    the listener owns teaches the same thing and proves the library is
