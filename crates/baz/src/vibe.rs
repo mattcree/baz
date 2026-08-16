@@ -1560,21 +1560,37 @@ impl State {
         self.open = true;
     }
 
-    /// **Show one line, or all five.**
+    /// **Show one line, or put every line back on one shape.**
     ///
-    /// A view, and only a view: nothing about the request changes, which is
-    /// what lets the tabs be pressed freely. The old control was an expander
-    /// whose closing put every line back on the first one's curve — lossy,
-    /// and a surprising thing for a *close* to do. Bringing the lines back
-    /// together is its own act now ([`Self::gather_lines`]), named for what
-    /// it does.
+    /// The owner, three times, each time more plainly: *"if I've edited any
+    /// of the individual lines and then go back to all five, it does not snap
+    /// the previously edited lines to the 'all five' line."*
+    ///
+    /// It does now, and the reason it did not is that this was built as a
+    /// **view** — press a tab, change what you can drag, change nothing about
+    /// the request. That is a defensible thing to build and it is not what
+    /// *all five* means to somebody using it. **All five is one shape**, and
+    /// choosing it is choosing to have one, so every line returns to it.
+    ///
+    /// Which shape? The one the tab was already drawing — the first line's,
+    /// which is what a listener last drew there. Lossy by construction, and
+    /// deliberately so: the alternative is what he kept finding, where a tab
+    /// called *all five* quietly presided over five different shapes. The
+    /// chip says what it will do before it is pressed.
     pub(crate) fn show_line(&mut self, lane: Option<usize>) {
         self.shown = lane.filter(|lane| *lane < self.contour.lanes.len());
+        if self.shown.is_none() {
+            self.gather_lines();
+        }
     }
 
-    /// **Put every line back on one curve.** Lossy on purpose and by
-    /// request: the only way back from five lines to one.
-    pub(crate) fn gather_lines(&mut self) {
+    /// **Put every line back on the first one's curve.** Private to
+    /// [`Self::show_line`]: bringing the lines together is what choosing
+    /// *all five together* means, and there is no second control for it.
+    fn gather_lines(&mut self) {
+        if self.contour.is_one_line() {
+            return;
+        }
         let Some(points) = self.contour.lane(0).map(|lane| lane.points.clone()) else {
             return;
         };
@@ -3102,16 +3118,12 @@ mod tests {
         pub(super) const STD_LOUDNESS: usize = 9;
     }
 
-    /// **All five together means all five**, including after they have been
-    /// pulled apart.
+    /// **All five together is one shape**, and choosing it makes it one.
     ///
-    /// The owner: *"if you go back to all five mode it should start to
-    /// control all lines."* It does, and this is the part worth pinning: a
-    /// drag on that tab moves every line **by what the pointer moved**, so
-    /// the spread somebody built by shaping one line on its own survives
-    /// being nudged from the tab that owns all of them. Setting them all to
-    /// where the pointer landed would be the other, lossy, reading of the
-    /// same sentence.
+    /// The owner had to say this three times, which is three more than it
+    /// should have taken: shaping a line on its own and then returning to
+    /// *all five* must leave five lines holding one curve, not a tab
+    /// presiding over five different ones.
     #[test]
     fn the_all_five_tab_moves_every_line_and_keeps_what_was_shaped_apart() {
         let mut state = State::default();
@@ -3132,26 +3144,30 @@ mod tests {
             );
         }
 
-        // Back to all five, and a nudge upward.
+        // **Back to all five, and every line is back on one shape.** Not a
+        // view of five shapes: one shape, which is what the tab says.
         state.show_line(None);
-        let before: Vec<f32> = (0..5).map(|lane| level(&state, lane, 0)).collect();
-        state.drag_contour(0, 0, 0.0, before[0] + 0.5);
-        for (lane, was) in before.iter().enumerate() {
-            let moved = level(&state, lane, 0) - was;
+        assert!(
+            state.contour.is_one_line(),
+            "all five did not put the lines back on one shape"
+        );
+        let shared = level(&state, 0, 0);
+        for lane in 1..5 {
+            assert!(
+                (level(&state, lane, 0) - shared).abs() < 1e-4,
+                "line {lane}"
+            );
+        }
+
+        // …and a drag there moves every one of them.
+        state.drag_contour(0, 0, 0.0, shared + 0.5);
+        for lane in 0..5 {
+            let moved = level(&state, lane, 0) - shared;
             assert!(
                 (moved - 0.5).abs() < 1e-4,
                 "line {lane} moved by {moved}, not by what the pointer moved"
             );
         }
-        // …and the shape somebody built is still there.
-        assert!(
-            ((level(&state, 2, 0) - level(&state, 0, 0)) - apart).abs() < 1e-4,
-            "the spread was flattened by a drag on all five"
-        );
-
-        // And it can be given up deliberately, which is the only way back.
-        state.gather_lines();
-        assert!(state.contour.is_one_line());
     }
 
     /// **The shape opens the sentence, and the words close it.**

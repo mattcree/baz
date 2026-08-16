@@ -679,8 +679,6 @@ pub(crate) enum Message {
     /// is why it says *back to one line* rather than *close*.
     /// **Show one of the five lines, or all of them.** A view, not a request.
     VibeLine(Option<usize>),
-    /// Put every line back on one shape.
-    VibeGatherLines,
     /// Edit the in-memory preview without touching music or playlist files.
     VibePreviewRemove(usize),
     VibePreviewShift(usize, i32),
@@ -4266,12 +4264,6 @@ impl App {
             Message::VibeLine(lane) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.show_line(*lane);
-                }
-                Some(Task::none())
-            }
-            Message::VibeGatherLines => {
-                if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.gather_lines();
                 }
                 Some(Task::none())
             }

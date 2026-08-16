@@ -140,19 +140,31 @@ the page's subject rather than a setting on it:
    that gap is the disagreement the shares are settling, and it is the only
    place in the feature where that is visible rather than described.
 
-   A tab is a **view**, not a mode: pressing one changes what you can drag and
-   nothing about the request, which is what makes them free to press. Coming
-   back to one shape is its own act now, named for what it does, rather than
-   the side effect of closing an expander.
+   **`All five together` took three tellings, and the first two answers were
+   both wrong for the same reason.** The owner: *"if you go back to all five
+   mode it should start to control all lines"*, then *"basically the all thing
+   should be controlling all lines"*, then — plainly — *"if I've edited any of
+   the individual lines and then go back to all five, it does not snap the
+   previously edited lines to the 'all five' line."*
 
-   **`All five together` had to be told twice**, and both times the behaviour
-   was already right and the picture was wrong. *"If you go back to all five
-   mode it should start to control all lines… basically the all thing should
-   be controlling all lines."* It did — a drag there moves every line — but
-   the canvas drew one solid line over four faint ones, which says you have
-   hold of the solid one. On that tab the other four are drawn at **full
-   strength** now, because they are being held too; faint is for the other
-   case, where one line is selected and the rest are context.
+   The first answer made the drag move every line by the pointer's delta,
+   preserving whatever spread had been built. The second drew all five at full
+   strength on that tab so it looked like all five were held. Both were
+   defensible; both were built on the same wrong premise, which was that a tab
+   is a **view** — press it, change what you can drag, change nothing about
+   the request.
+
+   **It is not a view. `All five together` is a shape**, and choosing it is
+   choosing to have one, so every line returns to it. That is lossy, and it
+   should be: the alternative is what he kept running into, where a control
+   labelled *all five* quietly presided over five different curves. The chip
+   says what it will do before it is pressed, and there is no second control
+   for gathering the lines because the tab is it.
+
+   The lesson is worth keeping past this page. Twice I answered *what should
+   this control do* by making the existing behaviour more visible, when the
+   complaint was that the behaviour was wrong. A user saying the same thing
+   three times is not failing to see the picture.
 
    And the row says which of the two you are in. Six chips in a line read as
    six peers, one of them lit; the *all* chip stands on its own row with the

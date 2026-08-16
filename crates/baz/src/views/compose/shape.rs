@@ -148,9 +148,11 @@ fn tabs(vibe: &crate::vibe::State) -> Element<'_, Message> {
     let head = row![
         chip("All five together", together, Message::VibeLine(None)),
         joining(if together {
-            "— drag the line and all five move"
-        } else {
+            "— one shape, and every line follows it"
+        } else if vibe.contour.is_one_line() {
             "or"
+        } else {
+            "or — it will put every line back on one shape"
         }),
     ]
     .spacing(theme::GAP_SM)
@@ -246,21 +248,23 @@ fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
     // The four you are not editing. On *all five* there is nothing to ghost:
     // every line is the line, and drawing four copies of it under itself
     // would only thicken it.
-    let ghosts: Vec<(&[crate::vibe::ContourPoint], usize)> = vibe
-        .contour
-        .lanes
-        .iter()
-        .enumerate()
-        .filter(|(other, _)| *other != index)
-        .map(|(other, lane)| (lane.points.as_slice(), other))
-        .collect();
+    // On *all five together* there is nothing to ghost: choosing that tab
+    // puts every line on one shape, so the other four are exactly this one.
+    let ghosts: Vec<(&[crate::vibe::ContourPoint], usize)> = shown.map_or_else(Vec::new, |lane| {
+        vibe.contour
+            .lanes
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != lane)
+            .map(|(other, other_lane)| (other_lane.points.as_slice(), other))
+            .collect()
+    });
     // **The axis words sit above and below the line, not in a gutter beside
     // it.** Three words do not fit a 48 px lane, and the first attempt put
     // *quiet, slow, sparse* straight through *first song*. Above and below
     // there is the whole measure for them, and no legend anywhere.
     let canvas = crate::contour::Contour::new(points, room, theme::CONTOUR_H)
         .ghosts(ghosts)
-        .ghosts_held(shown.is_none())
         .series(shown)
         .field(cloud(vibe, shown))
         .result(dots(vibe, shown))
@@ -302,22 +306,14 @@ fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
             )));
         }
     }
-    // **The way back, wherever you notice you want it.** It appeared only
-    // while a single line was selected, which is the one place you are *not*
-    // looking at all five drifting apart.
-    if !vibe.contour.is_one_line() {
-        block = block
-            .push(views::hint(if vibe.shown.is_some() {
-                "The faint lines behind are the four you are not holding."
-            } else {
-                "All five are drawn because you are holding all five: dragging moves \
-                 every one of them and keeps the shapes you gave them."
-            }))
-            .push(chip(
-                "Put all five back on one shape",
-                false,
-                Message::VibeGatherLines,
-            ));
+    // **The way back is the tab**, so there is no second control for it. The
+    // faint lines say what they are while one is being shaped, and nothing
+    // needs saying on *all five*, where they are all this one.
+    if vibe.shown.is_some() && !vibe.contour.is_one_line() {
+        block = block.push(views::hint(
+            "The faint lines are the other four. All five together puts them all back \
+             on one shape.",
+        ));
     }
     block.into()
 }
