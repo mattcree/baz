@@ -1676,11 +1676,25 @@ or not."*
     keeps a two-hour state from reading as broken. Every duration comes from
     one function reading one measured rate, so no copy can drift away from it.
 
-    **The consent question was answered as proposed: no.** baz does not listen
-    to a library before it is asked to. The offer is on the page with its cost
-    beside it, which makes it a decision rather than something that happened
-    to somebody. If the owner would rather it were opt-in-at-first-launch,
-    that is a change to one press and its copy, not to any of this.
+    **The consent question was answered as proposed: no** — and then sharpened
+    on 2026-08-16, when the owner asked *"what's the point of me having to
+    make the system listen to my music? surely it already knows/can know it
+    needs to?"*
+
+    He is right about the press, and the sharpening is where the consent
+    actually lives. Listening **unasked at first launch** is a real consent
+    question — hours of CPU and a laptop's battery spent on something nobody
+    asked for — and the answer to that is still *no*: nothing runs for anybody
+    who never opens the smart-playlist door. But listening **because you just
+    opened that door** is not a second decision. You have asked for the one
+    feature that cannot work without it, and baz already knows exactly which
+    tracks it has not heard; asking again is a toll on a choice already made.
+
+    So arriving at the door starts it — visibly, with a count, and with a
+    press that stops it. `App::start_listening` is the one path both the
+    arrival and the explicit press take, and it is idempotent: it does nothing
+    if a pass is running, if the library is empty, or if every track has
+    already been heard.
 
 76. **Not started — lean towards what you haven't played.** *(From the quorum,
     Q3.)* baz keeps a play ledger, so it can answer *"something I haven't

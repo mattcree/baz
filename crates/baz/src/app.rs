@@ -2379,11 +2379,33 @@ impl App {
                 }
                 Task::none()
             }
+            // **Opening this door is the request.**
+            //
+            // The owner: *"what's the point of me having to make the system
+            // listen to my music? surely it already knows/can know it needs
+            // to?"* He is right about the press, and the distinction is where
+            // the consent actually lives:
+            //
+            // - Listening **unasked, at first launch**, is a real consent
+            //   question — hours of CPU and a laptop's battery spent on
+            //   something nobody asked for. Design 21 §11 decision 1 answered
+            //   *no*, and that answer still stands: nothing below runs until
+            //   somebody opens this door.
+            // - Listening **because you just opened the smart-playlist
+            //   door** is not a second decision. You have asked for the one
+            //   feature that cannot work without it, and baz already knows
+            //   exactly which tracks it has not heard. Asking again is a toll
+            //   on a choice already made.
+            //
+            // So arriving here starts it, visibly and stoppably. The door
+            // shows what it is doing and offers to stop; nothing is hidden,
+            // and nothing runs for anybody who never comes here.
             Message::NewSmartPlaylistOpen => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.begin_choosing();
                 }
-                self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe))
+                let open = self.open_playlist_creation(Some(crate::playlists::CreationMode::Vibe));
+                Task::batch([open, self.start_listening()])
             }
             Message::PlaylistCreationName(name) => {
                 self.playlists.creation.name = name.chars().take(96).collect();
@@ -3993,26 +4015,7 @@ impl App {
                     Message::VibePrepared,
                 ))
             }
-            Message::VibeAnalyze => {
-                let Some(index) = config::vibe_db_file() else {
-                    if let Screen::Shelf(state) = &mut self.screen {
-                        state.vibe.error = Some(
-                            "This system offers no data folder for the local analysis index."
-                                .to_owned(),
-                        );
-                    }
-                    return Some(Task::none());
-                };
-                let Screen::Shelf(state) = &mut self.screen else {
-                    return Some(Task::none());
-                };
-                let paths = crate::vibe::library_paths(&state.albums, &state.edition_choice);
-                state.vibe.start_preparing();
-                Some(Task::perform(
-                    crate::vibe::prepare(index, paths),
-                    Message::VibePrepared,
-                ))
-            }
+            Message::VibeAnalyze => Some(self.start_listening()),
             Message::VibePrepared(result) => {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.accept_preparation(result.clone());
@@ -5421,6 +5424,39 @@ impl App {
             return self.note_place_left(from);
         }
         Task::none()
+    }
+
+    /// **Begin listening to whatever has not been heard**, or do nothing if
+    /// there is nothing to hear or a pass is already running.
+    ///
+    /// One path for both callers: the explicit press on the door, and the
+    /// door's own arrival. Idempotent by construction, so opening the place
+    /// twice does not start two scans.
+    fn start_listening(&mut self) -> Task<Message> {
+        let Some(index) = config::vibe_db_file() else {
+            if let Screen::Shelf(state) = &mut self.screen {
+                state.vibe.error = Some(
+                    "This system offers no data folder for the local analysis index.".to_owned(),
+                );
+            }
+            return Task::none();
+        };
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        // Already working: an arrival must not restart a pass in flight.
+        if state.vibe.preparing || state.vibe.analyzing {
+            return Task::none();
+        }
+        let paths = crate::vibe::library_paths(&state.albums, &state.edition_choice);
+        // Nothing to hear — an empty library, or one baz has heard entirely.
+        // Preparing anyway would flicker a progress reading over a finished
+        // job, which is worse than silence.
+        if paths.is_empty() || state.vibe.analysed() >= paths.len() {
+            return Task::none();
+        }
+        state.vibe.start_preparing();
+        Task::perform(crate::vibe::prepare(index, paths), Message::VibePrepared)
     }
 
     fn open_playlist_creation(

@@ -474,6 +474,41 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **A song whose drive is not mounted looks exactly like one that plays.**
+  *(The owner, 2026-08-16: "we need to show beside songs when they are not
+  available due to the drive not being loaded or being removed.")*
+
+  baz keeps a row for every track it has scanned, and it is right to: an
+  unplugged disk or an unmounted share is a **temporary** absence, and the
+  scanner's four positive-evidence gates exist precisely so that a missing
+  root never prunes the index. But the library says nothing about it. Every
+  row looks playable, search returns them, a playlist containing them looks
+  whole, and the only way to find out is to press one and meet a decode
+  failure in the health log — which is the wrong end of the interaction.
+
+  It matters more here than in most players because the owner's own library
+  lives on an SMB share reached through gvfs: *every* track is one unmount
+  away from this state, and the same is true of anyone with an external drive.
+
+  **Wanted:** a per-row reading — beside the row rather than instead of it,
+  and carrying its meaning in more than a colour — that says this file is not
+  reachable right now. Plus the honest consequences: an unavailable track is
+  not queued by *Play album*, a playlist says how many of its songs are
+  currently reachable, and the reading clears itself when the drive comes
+  back.
+
+  **The hard part is not the badge, it is knowing.** Answering it per row per
+  frame means a `stat` per visible track, which is exactly the kind of
+  per-frame filesystem work the wall must never do — and on a network mount a
+  `stat` on a dead share can block for seconds. So this needs a *root-level*
+  answer (is this root reachable, once, on a schedule) that rows read for
+  free, with the five-minute rescan that already exists as the natural clock.
+  Design that first; the mark is easy once the fact is cheap.
+
+  Related, and deliberately separate: `Library::forget_paths` and the Settings
+  prune flow already handle the **permanent** case, and must not be reached by
+  this one — a share that is merely unmounted has not been deleted.
+
 - **Nothing in baz can be reached by keyboard except the search well.**
   *(WORK.md item 78, opened 2026-08-15.)* There is no focus traversal at all:
   `text_input` and — since the composing page — `crate::contour` are the only

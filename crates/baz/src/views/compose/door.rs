@@ -127,10 +127,12 @@ fn step(
         Stage::Listening => {
             let done = vibe.done.saturating_sub(vibe.failed);
             (
-                format!("Listening — {done} of {} songs", vibe.total),
+                format!("Listening to your music — {done} of {}", vibe.total),
                 format!(
-                    "About {} left. Pick a mood whenever you like; it composes from what \
-                     Baz has heard so far.",
+                    "Baz reads each track once so it can compose from sound rather than \
+                     tags. About {} left, nothing is uploaded, and you can stop at any \
+                     time — pick a mood whenever you like and it composes from what has \
+                     been heard so far.",
                     crate::vibe::listening_estimate(
                         vibe.total
                             .saturating_sub(vibe.done.saturating_add(vibe.failed))
