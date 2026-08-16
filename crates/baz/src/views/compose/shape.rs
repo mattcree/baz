@@ -25,7 +25,7 @@
 //! effect a listener can check by ear, filed behind a tab, under a text field
 //! whose retrieval was no better than chance for two of six tested requests.
 
-use iced::widget::{Space, column, row};
+use iced::widget::{Space, column, container, row};
 use iced::{Element, Length};
 
 use crate::app::Message;
@@ -48,13 +48,11 @@ pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Mes
     // so turns a control that looks broken into one that is behaving
     // visibly.
     block = block.push(views::hint(if vibe.shown.is_some() {
-        "A song cannot be in five places at once, so where the lines disagree the \
-         shares settle it. That is why the dots track a 40% line closely and a 10% \
-         line loosely."
+        "A song can only be in one place at a time, so the bigger a line's share, the \
+         more closely the songs follow it."
     } else {
-        "One shape, asked of five things at once: energy counts most, then tempo, then \
-         brightness and dynamics, and texture least. Pick one below to shape it on its \
-         own."
+        "Your line asks all five of these at once. Energy matters most, texture least. \
+         Pick one to shape it on its own."
     }));
     // **One graph, and a row of tabs over it.** The owner: *"I like the idea
     // of all lines being on the same graph and a way to kinda toggle between
@@ -128,26 +126,78 @@ fn points(vibe: &crate::vibe::State) -> Element<'_, Message> {
 
 /// **The tabs over the graph** — all five, or one of them.
 ///
+/// Each carries the ink *and the dash* of the line it selects, so the tab and
+/// the line match by two marks rather than one. The owner asked for colour;
+/// his own standing rule is that no reading in baz may rest on separating two
+/// hues, so the dash is the cue that has to work and the colour is the one
+/// that helps.
+///
 /// The share rides on the tab because it is a property of the line, and the
-/// order is the order of the shares, so the row itself says which of them
+/// order is the order of the shares — so the row itself says which of them
 /// moves the result most without anybody reading a number. Nothing here is a
 /// mode: pressing a tab changes what you can drag and nothing about the
-/// request, which is what makes them free to press.
+/// request.
 fn tabs(vibe: &crate::vibe::State) -> Element<'_, Message> {
+    let room = theme::active();
     let mut all = vec![chip(
         "All five",
         vibe.shown.is_none(),
         Message::VibeLine(None),
     )];
     for (index, lane) in vibe.contour.lanes.iter().enumerate() {
-        all.push(chip(
-            &format!("{} · {}%", lane.dimension.label(), lane.dimension.share()),
-            vibe.shown == Some(index),
-            Message::VibeLine(Some(index)),
-        ));
+        let lit = vibe.shown == Some(index);
+        let label = format!("{} · {}%", lane.dimension.label(), lane.dimension.share());
+        all.push(
+            iced::widget::button(
+                row![
+                    swatch(index),
+                    iced::widget::text(label)
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .font(if lit { theme::MEDIUM } else { theme::SANS }),
+                ]
+                .spacing(theme::GAP_XS)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+            .style(move |_theme, status| theme::pill(room, room.wall, status, lit))
+            .on_press(Message::VibeLine(Some(index)))
+            .into(),
+        );
     }
-    wrap_chips(all, 6)
+    wrap_chips(all, 3)
 }
+
+/// **A sample of one line**, drawn as that line's own dash in that line's own
+/// ink — the thing the eye matches against the graph.
+fn swatch(series: usize) -> Element<'static, Message> {
+    let room = theme::active();
+    let ink = theme::contour_series(room, series);
+    let mut sample = row![].spacing(0.0).align_y(iced::Alignment::Center);
+    let dash = theme::contour_dash(series);
+    let mut along = 0.0_f32;
+    while along < SWATCH_W {
+        let step = 1.0_f32.min(SWATCH_W - along);
+        let inked = theme::dash_inked(dash, along);
+        sample = sample.push(
+            container(
+                Space::new()
+                    .width(Length::Fixed(step))
+                    .height(Length::Fixed(theme::CONTOUR_LINE)),
+            )
+            .style(move |_theme| iced::widget::container::Style {
+                background: inked.then(|| ink.into()),
+                ..iced::widget::container::Style::default()
+            }),
+        );
+        along += step;
+    }
+    sample.into()
+}
+
+/// The swatch's measure: long enough for the longest dash pattern to state
+/// itself twice over, short enough to sit inside a chip.
+const SWATCH_W: f32 = 20.0;
 
 /// **The one graph**, with the cloud behind it, the words at its ends, the
 /// result over it and the lines you are not editing faint underneath.
@@ -171,34 +221,39 @@ fn line(vibe: &crate::vibe::State) -> Element<'_, Message> {
     // The four you are not editing. On *all five* there is nothing to ghost:
     // every line is the line, and drawing four copies of it under itself
     // would only thicken it.
-    let ghosts: Vec<&[crate::vibe::ContourPoint]> = shown.map_or_else(Vec::new, |lane| {
-        vibe.contour
-            .lanes
-            .iter()
-            .enumerate()
-            .filter(|(other, _)| *other != lane)
-            .map(|(_, other)| other.points.as_slice())
-            .collect()
-    });
+    let ghosts: Vec<(&[crate::vibe::ContourPoint], usize)> = vibe
+        .contour
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(other, _)| *other != index)
+        .map(|(other, lane)| (lane.points.as_slice(), other))
+        .collect();
     // **The axis words sit above and below the line, not in a gutter beside
     // it.** Three words do not fit a 48 px lane, and the first attempt put
     // *quiet, slow, sparse* straight through *first song*. Above and below
     // there is the whole measure for them, and no legend anywhere.
     let canvas = crate::contour::Contour::new(points, room, theme::CONTOUR_H)
         .ghosts(ghosts)
+        .series(shown)
         .field(cloud(vibe, shown))
         .result(dots(vibe, shown))
         .highlight(vibe.selected_row.or(vibe.hovered_row))
         .on_drag(move |point, at, level| Message::ContourDragged(index, point, at, level))
         .on_release(Message::ContourReleased);
-    let foot = row![
-        views::axis_word("first song"),
+    // **Three rows of labels became two**, without either axis losing its
+    // meaning. The scale's two ends stay where they belong — the top word
+    // above the box and the bottom word below it — and the across-axis, which
+    // had a row of its own for two words at opposite corners, is one phrase
+    // in the corner the reading ends at.
+    let over = views::axis_word(high);
+    let under = row![
+        views::axis_word(low),
         Space::new().width(Length::Fill),
-        views::axis_word("last song"),
+        views::axis_word("first song → last song"),
     ]
     .align_y(iced::Alignment::Center);
-    let mut block = column![views::axis_word(high), canvas, views::axis_word(low), foot,]
-        .spacing(theme::GAP_XS);
+    let mut block = column![over, canvas, under].spacing(theme::GAP_XS);
     if let Some(dimension) = named {
         // **What this line measures**, which is the whole reason to look at
         // one on its own: somebody who asks for `Brightness` is asking for

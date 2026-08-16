@@ -8,14 +8,12 @@
 //! wide and narrow layouts."* Everything below follows from taking that
 //! literally.
 //!
-//! **Two panes** (§8): **the request on the left, the answer on the right.**
-//! The owner: *"show the playlist at the right at all times when the screen
-//! is wide enough."* So the left column is everything you set — the line
-//! first (design note 25), then what narrows it — and the right column is the
-//! request in one sentence, the press, and the list it produced. The list is
-//! on screen the whole time you are tuning, which is what design 21 §8 wanted
-//! and what the first arrangement of this page delivered by accident and the
-//! second lost.
+//! **Two panes** (§8): **everything you set on the left, ending with the
+//! press; the list on the right.** The owner: *"show the playlist at the
+//! right at all times when the screen is wide enough,"* and then *"the
+//! 'compose' button is on the right? it should be on the left."* Both are the
+//! same rule — one column is the request and one is the answer, and the act
+//! that turns the first into the second belongs at the foot of the first.
 //!
 //! Both columns grow with the window from their own floors
 //! ([`theme::COMPOSE_REQUEST_MIN`], [`theme::COMPOSE_RESULT_MIN`]) rather than
@@ -170,76 +168,35 @@ pub(crate) fn view<'a>(
     }
 
     let ask = ask::view(shelf);
-    // **The model, in one line, once.** The owner: *"there's a mix of curves,
-    // clickable selections, text input. it's just honestly not explained
-    // well."* Three kinds of control were on screen and nothing said what
-    // each was for, so the page read as a pile of settings rather than as
-    // three questions. This is design 21 §3's table as a sentence — in the
-    // order design note 25 put the controls in.
-    // **The depth belongs to the page, not to one column of it.** It governs
-    // the line's per-dimension expander as much as the filter's vocabulary,
-    // and it stood at the head of the filter — which since design note 25 is
-    // the second block a reader meets, so a mode control was sitting below
-    // half of what it modes.
-    let depth = depth_tabs(vibe.depth);
-    let model = views::hint(
-        "The line picks how the playlist moves · the length picks how many songs · \
-         your words narrow which ones it may use.",
-    );
-    // The request those controls add up to, assembled from them rather than
-    // stored, so it cannot drift from them. It stands at **both** depths,
-    // because it is the thing simple mode is hiding the machinery *of*.
-    let stated = container(
-        column![
-            views::caption_word("BAZ WILL LOOK FOR"),
-            iced::widget::text(vibe.query())
-                .size(theme::SIZE_EMPHASIS)
-                .line_height(theme::LEADING_EMPHASIS)
-                .color(room.paper)
-                .width(Length::Fill)
-                .wrapping(iced::widget::text::Wrapping::Word),
-        ]
-        .spacing(theme::GAP_XS),
-    )
-    .padding(theme::pad(theme::GAP_MD, theme::GAP_MD))
-    .width(Length::Fill)
-    .style(move |_theme| theme::segmented(room));
+    // **The request in one line, under the press that will spend it.**
+    //
+    // It stood in a titled block of its own, which made three tellings of one
+    // story: the controls, then a sentence explaining the controls, then this
+    // saying what they added up to. One telling now, in the quietest voice,
+    // where it does the most work — you read what you are about to ask for
+    // and then press the thing that asks it.
+    let stated = views::hint(&vibe.query());
     let shape = shape::view(vibe, layout);
     let commitment = ask::commitment(shelf, stage);
     let result = result::view(shelf, playlists, stage, layout);
+    let request = column![shape, ask::length(vibe), ask, commitment, stated].spacing(theme::GAP_LG);
 
     let body: Element<'a, Message> = if layout.side_by_side {
-        // **What you set on the left; what you will get on the right.**
-        //
-        // The sentence and the press head the answer column rather than
-        // trailing the request column, and that is the placement doing work
-        // rather than tidiness: *"Starting quiet and climbing the whole way,
-        // for about an hour, drawn from songs like …"* immediately above
-        // `Compose` says exactly what pressing it will do, and both stay at
-        // the top of the page however tall the request column grows —
-        // five opened lines are 1 100 px, and the quorum's R11 asks for the
-        // commitment to be in reach, not merely present.
         row![
-            container(column![depth, model, shape, ask].spacing(theme::GAP_LG))
-                .width(Length::Fixed(layout.request)),
-            container(column![stated, commitment, result].spacing(theme::GAP_LG))
-                .width(Length::Fixed(layout.measure)),
+            container(request).width(Length::Fixed(layout.request)),
+            container(result).width(Length::Fixed(layout.measure)),
         ]
         .spacing(theme::GAP_XL)
         .into()
     } else {
-        // Narrow: the same blocks in the same reading order, stacked, with
-        // the commitment still directly under the sentence that describes
-        // what it will do. Nothing moves to a tab and nothing is dropped.
+        // Narrow: the same blocks in the same reading order, stacked.
         //
         // Bounded to the row lane's own measure rather than to the window: a
         // stacked page whose chips ran the full width of a wide-but-short
         // window would be a worse reading than the split it just lost.
-        container(
-            column![depth, model, shape, ask, stated, commitment, result].spacing(theme::GAP_LG),
-        )
-        .max_width(theme::LIST_MEASURE)
-        .into()
+        container(column![request, result].spacing(theme::GAP_LG))
+            .max_width(theme::LIST_MEASURE)
+            .into()
     };
 
     scrollable(container(body).padding(views::place_pad()))
@@ -258,31 +215,6 @@ pub(crate) fn heading(words: &str) -> Element<'static, Message> {
         .line_height(theme::LEADING_EMPHASIS)
         .font(theme::MEDIUM)
         .color(room.paper)
-        .into()
-}
-
-/// **The two depths, as a real pair of tabs** — one lit, one not, side by
-/// side in a well, so it reads as *there are two of these and you are on
-/// this one* rather than as two words that happen to be near each other.
-pub(crate) fn depth_tabs(current: crate::vibe::Depth) -> Element<'static, Message> {
-    let room = theme::active();
-    let mut tabs = row![].spacing(theme::GAP_XS);
-    for depth in crate::vibe::Depth::ALL {
-        let lit = depth == current;
-        tabs = tabs.push(
-            iced::widget::button(
-                iced::widget::text(depth.label())
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .font(if lit { theme::MEDIUM } else { theme::SANS }),
-            )
-            .padding(theme::pad(theme::GAP_XS, theme::GAP_MD))
-            .style(move |_theme, status| theme::pill(room, room.wall, status, lit))
-            .on_press(Message::VibeDepth(depth)),
-        );
-    }
-    column![tabs, views::hint(current.detail())]
-        .spacing(theme::GAP_XS)
         .into()
 }
 

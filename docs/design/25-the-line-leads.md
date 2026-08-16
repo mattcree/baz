@@ -43,7 +43,8 @@ by ear beats one that cannot.
 
 1. **The line is the page's question.** `How should it move?` is the one
    emphasis-weight heading, first in the reading order, and it stands at
-   **both** depths. Simple mode has a curve now; it never did.
+   every listener, at every depth there then was. The default page had no
+   curve on it at all before this.
 2. **The columns are what you set and what you will get** — the line and what
    narrows it on the left, the request in a sentence, the length, `Compose`
    and the list on the right. (This landed in two steps: the first arrangement
@@ -57,10 +58,8 @@ by ear beats one that cannot.
    the whole way, for about an hour, drawn from songs like "a slow warm
    pulse".* Same three clauses as before, in the order that says which of them
    the request is built on.
-5. **The depths mean something different now.** Simple is *the line, a length,
-   some words to narrow with*. Advanced adds the per-dimension lines, the
-   vocabulary chips and the readouts. The line is no longer what you unlock;
-   the query builder is.
+5. **The depths meant something different, and then stopped meaning enough to
+   keep.** See §4a: the mode is gone and the words fold away instead.
 
 ## 3a. What the owner asked for once he could see it
 
@@ -112,8 +111,8 @@ the page's subject rather than a setting on it:
    once, at the head of it:
 
    > *One line asking for five things at once: energy counts most, then tempo,
-   > then brightness and dynamics, and texture least. Advanced shapes each of
-   > them on its own.*
+   > then brightness and dynamics, and texture least. Pick one to shape it on
+   > its own.*
 
    > *One line each — and a song cannot be in five places at once, so where
    > the lines disagree the shares below settle it. That is why the dots track
@@ -176,19 +175,57 @@ reach, which is the opposite of what hiding it there assumed.
   which is what a preset is. A mood is not a filter, and the door is not this
   page.
 
-## 4a. Simple and Advanced is now a mode over one row of chips
+## 4a. Simple and Advanced is gone
 
-Worth stating plainly, because it is the consequence of §3a item 5 and it is
-his call rather than this note's. The advanced depth used to gate the
-per-dimension lines, the vocabulary and the readouts. The lines moved onto the
-graph's own tabs, where they are a view rather than a depth. The match count
-went to both depths, because *what did my filter catch* is not an advanced
-question — and the depth that opens five curves was the one where it had been
-hardest to reach.
+It was a mode over one row of chips by the end, which is not a mode. The
+advanced depth used to gate the per-dimension lines, the vocabulary and the
+readouts; the lines moved onto the graph's own tabs where they are a view, and
+the match count went to both depths because *what did my filter catch* is not
+an advanced question. That left six words behind a tab, and a mode is a
+promise that there are two pages to learn.
 
-What is left behind the tab is **one row of six words**. A mode is a promise
-that there are two pages to learn; this one now promises that for a chip row,
-which is a disclosure at most.
+**What replaced it is a disclosure, which is the honest shape of the same
+idea.** `Only certain songs` folds the whole words band away — the field, the
+count, the moods and the vocabulary — and unfolds it when pressed or when a
+request arrives with words already in it. Folded, it is one chip and one line
+of explanation; unfolded it is everything the advanced depth used to hold.
+
+The difference is not cosmetic. A mode says *there is another page*. A
+disclosure says *there is more of this one*, and it is reversible in the place
+you are standing.
+
+## 4b. The economy pass, and where the press went
+
+The owner, testing it: *"the information architecture and where buttons are
+etc. is not good e.g. the 'compose' button is on the right? it should be on
+the left… please be more economical with space etc. and make sure we tune the
+copy for the lowest common denominator."*
+
+He is right about the button, and it was §3a item 3's fault: the sentence and
+the press went to the answer column to stay above five stacked curves. The
+curves are one canvas now, so the reason has expired. **One column is the
+request and one is the answer, and the act that turns the first into the
+second belongs at the foot of the first.**
+
+What the space came from, in order of how much:
+
+| removed | rows |
+|---|---|
+| the Simple / Advanced tabs and their explanation | 2 |
+| the model sentence — *the line picks… the length picks…* | 1 |
+| the `BAZ WILL LOOK FOR` block, folded to one quiet line under `Compose` | 3 |
+| the words band, folded away until asked for | 5 |
+| the third row of axis labels | 1 |
+
+`Compose` sits a little over halfway down a 980 px window with the words
+folded, where it used to be off the bottom of it.
+
+**And the copy came down a reading age.** *"Spectral centroid, rolloff and
+zero crossings"* is now *"How bright or dark a song sounds."* *"Baz drew 24 of
+24 to choose from"* is *"Using 24 of your 24 songs."* *"Nearest your words: …
+— if these are not what you meant, it has not understood the phrase"* is
+*"Closest: … If these look wrong, try different words."* Nothing became less
+true; several things stopped needing a second reading.
 
 ## 5. What still needs the owner
 

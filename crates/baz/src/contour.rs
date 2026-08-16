@@ -75,7 +75,8 @@ type OnDrag<'a, Message> = Box<dyn Fn(usize, f32, f32) -> Message + 'a>;
 /// A contour over its two axes, optionally pointer-driven.
 pub(crate) struct Contour<'a, Message> {
     points: &'a [ContourPoint],
-    ghosts: Vec<&'a [ContourPoint]>,
+    ghosts: Vec<(&'a [ContourPoint], usize)>,
+    series: Option<usize>,
     field: &'a [f32],
     result: Vec<(f32, f32)>,
     highlight: Option<usize>,
@@ -123,6 +124,7 @@ impl<'a, Message> Contour<'a, Message> {
         Self {
             points,
             ghosts: Vec::new(),
+            series: None,
             field: &[],
             result: Vec::new(),
             highlight: None,
@@ -145,8 +147,17 @@ impl<'a, Message> Contour<'a, Message> {
     /// interactive: a ghost you could grab would be four invisible controls
     /// lying over one real one.
     #[must_use]
-    pub(crate) fn ghosts(mut self, ghosts: Vec<&'a [ContourPoint]>) -> Self {
+    pub(crate) fn ghosts(mut self, ghosts: Vec<(&'a [ContourPoint], usize)>) -> Self {
         self.ghosts = ghosts;
+        self
+    }
+
+    /// **Which of the five this line is**, so it wears that line's ink and
+    /// dash and matches the tab that selected it. `None` is the plain line
+    /// ink, for a contour that is not one of a set.
+    #[must_use]
+    pub(crate) fn series(mut self, series: Option<usize>) -> Self {
+        self.series = series;
         self
     }
 
@@ -507,25 +518,29 @@ where
         // 3b. **The lines you are not editing**, under everything the drawn
         //     line uses so they can never be mistaken for it. Stroked only —
         //     four filled bands would be a fog rather than four readings.
-        for ghost in &self.ghosts {
+        for (ghost, series) in &self.ghosts {
             if ghost.is_empty() {
                 continue;
             }
+            let dash = theme::contour_dash(*series);
+            let ink = theme::alpha(theme::contour_series(room, *series), 0.55);
             let mut x = field.x;
             while x < field.x + field.width {
                 let width = theme::CONTOUR_STEP.min(field.x + field.width - x);
-                let at = Self::at_of(field, x + width / 2.0);
-                let y = Self::y_of(field, level_at(ghost, at));
-                quad(
-                    Rectangle {
-                        x,
-                        y: y - theme::CONTOUR_LINE / 2.0,
-                        width,
-                        height: theme::CONTOUR_LINE,
-                    },
-                    theme::contour_ghost(room),
-                    0.0,
-                );
+                if theme::dash_inked(dash, x - field.x) {
+                    let at = Self::at_of(field, x + width / 2.0);
+                    let y = Self::y_of(field, level_at(ghost, at));
+                    quad(
+                        Rectangle {
+                            x,
+                            y: y - theme::CONTOUR_LINE / 2.0,
+                            width,
+                            height: theme::CONTOUR_LINE,
+                        },
+                        ink,
+                        0.0,
+                    );
+                }
                 x += width;
             }
         }
@@ -535,6 +550,14 @@ where
         //    to its baseline is the spectrum's own reading of loudness rather
         //    than a compromise (module docs).
         if !self.points.is_empty() {
+            // The band under the line stays neutral whatever line this is:
+            // it is the shape as a mass, and five tinted masses would be five
+            // washes of colour rather than five readings.
+            let dash = self.series.map_or(&[1.0, 0.0][..], theme::contour_dash);
+            let ink = self.series.map_or_else(
+                || theme::contour_line(room),
+                |series| theme::contour_series(room, series),
+            );
             let mut x = field.x;
             while x < field.x + field.width {
                 let width = theme::CONTOUR_STEP.min(field.x + field.width - x);
@@ -550,16 +573,18 @@ where
                     theme::contour_band(room),
                     0.0,
                 );
-                quad(
-                    Rectangle {
-                        x,
-                        y: y - theme::CONTOUR_LINE / 2.0,
-                        width,
-                        height: theme::CONTOUR_LINE,
-                    },
-                    theme::contour_line(room),
-                    0.0,
-                );
+                if theme::dash_inked(dash, x - field.x) {
+                    quad(
+                        Rectangle {
+                            x,
+                            y: y - theme::CONTOUR_LINE / 2.0,
+                            width,
+                            height: theme::CONTOUR_LINE,
+                        },
+                        ink,
+                        0.0,
+                    );
+                }
                 x += width;
             }
         }

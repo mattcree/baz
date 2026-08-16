@@ -36,6 +36,19 @@ Every release is built from a tag by CI, gated on the full test suite — see
   real measurements and you can check it by ear; the description is a model's
   guess that, for two of six measured test phrases, was no better than
   picking at random. The page led with the guess.
+- **Compose is where you have been setting things, and there is less to set.**
+  The button sits at the foot of the column you were working in, not across
+  the page. Simple/Advanced is gone — it had come down to hiding one row of
+  words, so those words fold away under **Only certain songs** instead, along
+  with the description box, the moods and the count. Folded, the shape, the
+  length and the press all fit on screen together. The wording throughout is
+  plainer: *how bright or dark a song sounds* rather than *spectral centroid,
+  rolloff and zero crossings*.
+- **Each of the five lines has its own dash and colour**, matching the button
+  that selects it, so you can tell which is which on the shared graph. The
+  dash is the part that has to work — nothing in baz asks you to tell two
+  colours apart — and the colours are the set chosen to stay separable for
+  colour-blind readers.
 - **One graph for all five lines, with tabs to pick between them.** The five
   things baz listens for used to be five charts stacked down the page. They
   share one now: `All five` draws the shape you are asking every line for,

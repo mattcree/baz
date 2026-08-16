@@ -111,7 +111,6 @@ fn listening(vibe: &crate::vibe::State) -> Element<'_, Message> {
 fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Element<'a, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
-    let advanced = vibe.depth == crate::vibe::Depth::Advanced;
     let draft = &playlists.creation;
     let Some(preview) = &vibe.preview else {
         return column![
@@ -145,10 +144,10 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
     // and an ink, and the rows below stand clear of both.
     .spacing(theme::GAP_MD);
 
-    // **The diff first**, because it teaches the most. It is the query
-    // builder explaining what it just did, so it belongs to the depth that
-    // admits to being one.
-    if let Some(diff) = preview.diff.as_ref().filter(|_| advanced) {
+    // **The diff first**, because it teaches the most: it is the page saying
+    // what the last change actually did. It used to wait for the advanced
+    // depth; there is no depth now, and it was never an advanced question.
+    if let Some(diff) = preview.diff.as_ref() {
         block = block.push(
             container(
                 column![
@@ -201,11 +200,7 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
                 preview.items.len(),
                 layout.measure,
                 vibe.hovered_row == Some(position) || selected,
-                preview
-                    .matches
-                    .get(position)
-                    .filter(|_| advanced)
-                    .map(|found| found.ticks),
+                preview.matches.get(position).map(|found| found.ticks),
                 &vibe.row_is_briefly(position, 3),
                 &super::super::new_playlist::DraftEdits {
                     shift: &|row, delta| Message::VibePreviewShift(row, delta),
@@ -218,10 +213,7 @@ fn list<'a>(shelf: &'a Shelf, playlists: &'a Playlists, layout: Layout) -> Eleme
         );
         // **The why-line**, under the row it explains, as a rank and never a
         // score: *your words let it in; your line put it fourth.*
-        if selected
-            && advanced
-            && let Some(why) = vibe.why(position)
-        {
+        if selected && let Some(why) = vibe.why(position) {
             block = block.push(
                 container(
                     text(why)

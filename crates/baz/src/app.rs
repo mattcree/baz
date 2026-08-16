@@ -607,9 +607,8 @@ pub(crate) enum Message {
     VibeLength(crate::vibe::MixLength),
     /// Append one word of the vocabulary to the request, with a comma.
     VibeWord(usize),
-    /// Show the four controls that make a playlist, or the whole query
-    /// builder behind them.
-    VibeDepth(crate::vibe::Depth),
+    /// Show or hide the words that narrow the request.
+    VibeWords(bool),
     /// The debounce clock: ask whether the words have been still long enough
     /// to be worth a text embedding.
     VibeCountTick,
@@ -4100,9 +4099,9 @@ impl App {
             // **The words have been still for 400 ms.** Embed once, off this
             // thread; the count and the closest three are computed against
             // vectors already in memory when it comes back.
-            Message::VibeDepth(depth) => {
+            Message::VibeWords(open) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.depth = *depth;
+                    state.vibe.words_open = *open;
                 }
                 Some(Task::none())
             }

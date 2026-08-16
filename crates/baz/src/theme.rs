@@ -616,7 +616,7 @@ impl Palette {
 
 /// `color` at `opacity`, spelled out field by field so it is usable in a
 /// `const fn`.
-const fn alpha(color: Color, opacity: f32) -> Color {
+pub(crate) const fn alpha(color: Color, opacity: f32) -> Color {
     Color {
         r: color.r,
         g: color.g,
@@ -2021,15 +2021,76 @@ pub fn contour_line(p: &Palette) -> Color {
     p.paper_dim
 }
 
-/// **A line you are not editing**, behind the one you are.
+/// **The five lines, told apart** — one ink and one dash each, in
+/// [`crate::vibe::Dimension::ALL`] order.
 ///
-/// Faint enough to sit under the drawn line and the field's own bands without
-/// competing, present enough that four of them still read as lines rather
-/// than as smudges — because where they part from the line in front is the
-/// whole reason they are drawn.
+/// The owner: *"can we make sure to use different colours for the little
+/// selectors for the graph and the lines so you can match."* Yes — and not by
+/// colour alone, which is his own standing rule and the reason this product
+/// has no reading anywhere that rests on separating two hues. **The dash is
+/// the primary cue and the ink is the second**, so the graph survives being
+/// printed, dimmed, or read by somebody who cannot tell orange from green;
+/// the tab beside it carries the same two marks, which is what makes them
+/// match.
+///
+/// The inks are Okabe–Ito — the standard set chosen to stay distinguishable
+/// under the common colour blindnesses — pulled toward this room: the two
+/// darkest of the eight are lifted, because a hue that reads on white is a
+/// smudge on [`Palette::plinth`].
+const CONTOUR_SERIES: [Color; 5] = [
+    Color::from_rgb(0.902, 0.624, 0.000), // orange
+    Color::from_rgb(0.337, 0.706, 0.914), // sky blue
+    Color::from_rgb(0.851, 0.808, 0.361), // yellow, softened
+    Color::from_rgb(0.208, 0.706, 0.561), // bluish green, lifted
+    Color::from_rgb(0.773, 0.545, 0.706), // reddish purple, lifted
+];
+
+/// One line's ink. Out of range is the plain line ink, which is what a sixth
+/// dimension would deserve until somebody chose an ink for it.
 #[must_use]
-pub fn contour_ghost(p: &Palette) -> Color {
-    alpha(p.paper_muted, 0.55)
+pub fn contour_series(p: &Palette, index: usize) -> Color {
+    CONTOUR_SERIES.get(index).copied().unwrap_or(p.paper_dim)
+}
+
+/// **The dashes**, as alternating on/off runs in logical pixels.
+///
+/// Five patterns that stay apart at a glance and at a hairline: solid, long
+/// dash, dot, dash-dot, short dash. Ordered so the heaviest share gets the
+/// solid line — the one that is easiest to follow is the one that moves the
+/// result most.
+const CONTOUR_DASHES: [&[f32]; 5] = [
+    &[1.0, 0.0],
+    &[12.0, 6.0],
+    &[2.0, 5.0],
+    &[10.0, 4.0, 2.0, 4.0],
+    &[5.0, 5.0],
+];
+
+/// One line's dash. Out of range is solid.
+#[must_use]
+pub fn contour_dash(index: usize) -> &'static [f32] {
+    CONTOUR_DASHES.get(index).copied().unwrap_or(&[1.0, 0.0])
+}
+
+/// **Whether a dash pattern is inked at `distance` along the line.**
+///
+/// Walked rather than measured: the contour is drawn as a column per step, so
+/// each column asks this once and the pattern is a property of where the
+/// column is rather than of any path the renderer has to keep.
+#[must_use]
+pub fn dash_inked(pattern: &[f32], distance: f32) -> bool {
+    let period: f32 = pattern.iter().sum();
+    if period <= f32::EPSILON {
+        return true;
+    }
+    let mut along = distance.rem_euclid(period);
+    for (index, run) in pattern.iter().enumerate() {
+        if along < *run {
+            return index % 2 == 0;
+        }
+        along -= run;
+    }
+    true
 }
 
 /// A point on the line, brighter under the hand.

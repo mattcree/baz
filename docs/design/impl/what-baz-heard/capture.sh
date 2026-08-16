@@ -102,7 +102,10 @@ shot "03-the-example-is-their-music"
 # **The count under the field**, which no longer says *match* and no longer
 # waits for the advanced depth. The field sits under the line, in the request
 # column, because the line is the question and the words narrow its answer.
-click 588 664
+# The words are folded away until asked for, so the disclosure comes first.
+click 334 602
+sleep 1
+click 588 636
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"
 sleep 4
 move 1400 940
@@ -112,7 +115,7 @@ shot "04-drew-rather-than-matched"
 # tabs over the graph pick which of the five you are shaping; the other four
 # stay behind it as ghosts. A tone at one frequency has nothing to say about
 # brightness, and picking that line says so.
-click 595 342
+click 337 262
 sleep 3
 move 1400 940
 shot "05-flat-axes-admit-it"

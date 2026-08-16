@@ -907,16 +907,18 @@ mod tests {
             include_str!("compose/result.rs"),
         ]
         .join("\n");
-        // `What do you want to hear?` retired with design note 25: the words
-        // are a filter now and wear a caption, and the page's one question is
-        // the line's. The assertion follows the change rather than being
-        // deleted, because what it guards is that the composer still asks
-        // something and still takes words.
+        // The words' own heading has moved twice under design note 25 — from
+        // `What do you want to hear?` to `NARROW IT DOWN` to a disclosure
+        // that says `Only certain songs` — because they went from being the
+        // request to being an optional filter on it. The assertion follows
+        // rather than being deleted: what it guards is that the composer
+        // still asks its question, still takes words, and is still the only
+        // place that does.
         for required in [
             "VibePrompt",
             "Compose",
             "Save playlist",
-            "NARROW IT DOWN",
+            "Only certain songs",
             "How should it move?",
         ] {
             assert!(

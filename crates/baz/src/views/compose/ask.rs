@@ -18,9 +18,9 @@
 //!
 //! 1. **Space between groups must beat space within them.** Everything here
 //!    was [`theme::GAP_SM`] apart, so `MADE OF` sat as far from its own chips
-//!    as from the block above it. Within a group is [`TIGHT`] and between
-//!    groups is [`APART`] — a six-fold step, which is what lets proximity do
-//!    the grouping without a single rule or box.
+//!    as from the block above it. Within a group is [`TIGHT`]; between groups
+//!    is the page's own [`theme::GAP_LG`], set where the column is assembled
+//!    — which is what lets proximity do the grouping without a rule or a box.
 //! 2. **Hierarchy by de-emphasis.** The field is the only thing here at body
 //!    size, because it is the only thing here you type into — but the pane no
 //!    longer opens with a heading, so nothing on it competes with the line's
@@ -46,7 +46,7 @@
 //! lit the moment the words change — not a mode switching off, a label
 //! ceasing to be true.
 
-use iced::widget::{Space, column, container, text, text_input};
+use iced::widget::{Space, column, row, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Shelf};
@@ -55,86 +55,109 @@ use crate::{theme, views};
 
 /// Space **within** a group.
 const TIGHT: f32 = theme::GAP_XS;
-/// Space **between** groups — six times [`TIGHT`], which is the grouping.
-const APART: f32 = theme::GAP_XL;
 
 pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
-    let advanced = vibe.depth == crate::vibe::Depth::Advanced;
-
-    // 1. The filter, and the sentence saying it is one.
-    let mut asked = column![
-        views::caption_word("NARROW IT DOWN"),
-        text_input(
-            vibe.profile
-                .example
-                .as_deref()
-                .unwrap_or("warm hypnotic music for driving at night"),
-            &vibe.prompt,
-        )
-        .on_input(Message::VibePrompt)
-        .on_submit(Message::VibeCreate)
-        .width(Length::Fill)
-        .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .style(move |_theme, status| theme::input(room, status)),
-        quiet("Optional. Leave it empty and Baz draws from everything it has heard."),
+    // **Folded away until asked for.** The words are the optional half, and
+    // the untrustworthy half, and unfolded they are five rows — which is the
+    // difference between `Compose` sitting above the fold and below it. A
+    // request that arrived with words already in it opens itself.
+    let open = vibe.words_open || !vibe.prompt.trim().is_empty();
+    let mut band = column![
+        row![
+            chip("Only certain songs", open, Message::VibeWords(!open)),
+            Space::new().width(Length::Fill),
+            quiet(if open {
+                "Optional"
+            } else {
+                "Baz will use every song it has heard"
+            }),
+        ]
+        .align_y(iced::Alignment::Center)
     ]
     .spacing(TIGHT);
-    // **The count belongs with the field at any depth.** It was advanced-only
-    // when the words were the request and the readouts were the query
-    // builder's own. They are a filter now (design note 25), and *what did my
-    // filter catch* is the plainest question a filter can be asked — and
-    // since the advanced depth opens five curves above this, it is the depth
-    // where the answer is *hardest* to reach, which is the opposite of what
-    // hiding it behind that depth assumed.
-    asked = asked.push(matches_note(vibe));
+    if !open {
+        return band.into();
+    }
 
-    // 2. The two ways of writing it.
+    band = band
+        .push(
+            text_input(
+                vibe.profile
+                    .example
+                    .as_deref()
+                    .unwrap_or("warm hypnotic music for driving at night"),
+                &vibe.prompt,
+            )
+            .on_input(Message::VibePrompt)
+            .on_submit(Message::VibeCreate)
+            .width(Length::Fill)
+            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .style(move |_theme, status| theme::input(room, status)),
+        )
+        .push(matches_note(vibe));
+
+    // The two ways of writing it, under one label rather than two.
     let current = vibe.recipe();
-    let mut ways = column![
-        views::caption_word("START FROM"),
-        wrap_chips(
-            crate::vibe::Recipe::ALL
+    // Two labels rather than one, because these are two different acts: a
+    // mood **replaces** the words, a vocabulary word **adds** to them.
+    let mut ways = column![views::caption_word("OR PICK A MOOD")].spacing(TIGHT);
+    ways = ways.push(wrap_chips(
+        crate::vibe::Recipe::ALL
+            .iter()
+            .enumerate()
+            .map(|(index, recipe)| {
+                chip(
+                    recipe.label,
+                    current == Some(index),
+                    Message::VibeRecipe(index),
+                )
+            })
+            .collect(),
+        3,
+    ));
+    ways = ways
+        .push(Space::new().height(theme::GAP_SM))
+        .push(views::caption_word("OR ADD A WORD"));
+    for name in crate::vibe::Chip::ROWS {
+        ways = ways.push(wrap_chips(
+            crate::vibe::Chip::ALL
                 .iter()
                 .enumerate()
-                .map(|(index, recipe)| {
+                .filter(|(_, chip)| chip.row == name)
+                .map(|(index, held)| chip(held.word, false, Message::VibeWord(index)))
+                .collect(),
+            3,
+        ));
+    }
+
+    column![band, ways].spacing(theme::GAP_MD).into()
+}
+
+/// **How long**, as its own small block, so the length is not something you
+/// find on a button after you have already decided to press it.
+pub(crate) fn length(vibe: &crate::vibe::State) -> Element<'static, Message> {
+    column![
+        views::caption_word("HOW LONG"),
+        wrap_chips(
+            crate::vibe::MixLength::ALL
+                .iter()
+                .map(|length| {
                     chip(
-                        recipe.label,
-                        current == Some(index),
-                        Message::VibeRecipe(index),
+                        crate::vibe::spoken(*length),
+                        vibe.length == *length,
+                        Message::VibeLength(*length),
                     )
                 })
                 .collect(),
-            3,
+            4,
         ),
     ]
-    .spacing(TIGHT);
-    // The vocabulary is the query builder's own, so it belongs to the depth
-    // that admits to being one — and it is **one** group under one label,
-    // rather than two labels competing over six words each.
-    if advanced {
-        ways = ways
-            .push(Space::new().height(theme::GAP_MD))
-            .push(views::caption_word("OR ADD A WORD"));
-        for name in crate::vibe::Chip::ROWS {
-            ways = ways.push(wrap_chips(
-                crate::vibe::Chip::ALL
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, chip)| chip.row == name)
-                    .map(|(index, held)| chip(held.word, false, Message::VibeWord(index)))
-                    .collect(),
-                3,
-            ));
-        }
-    }
-
-    container(column![asked, ways].spacing(APART))
-        .width(Length::Fill)
-        .into()
+    .spacing(TIGHT)
+    .into()
 }
 
 /// The quietest voice on the pane: a caption, for something you glance at
@@ -181,10 +204,10 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
     // the arithmetic is honest and the sentence is nonsense — *matches 0 songs
     // of the 0 Baz has heard* — so the readout says what is actually true.
     if live.analysed == 0 {
-        return quiet("Baz has not heard anything yet — the count arrives as it listens.");
+        return quiet("Baz has not listened yet. The count appears as it does.");
     }
     let head = if live.prompt.is_empty() {
-        format!("All {} songs Baz has heard", live.analysed)
+        format!("Using all {} of your songs", live.analysed)
     } else {
         // **Not "match".** The sweep in `docs/design/impl/vibe-eligibility/`
         // put two of six test requests at or below chance against their own
@@ -194,10 +217,7 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
         // rather than a limitation. *Drew … to choose from* is the same
         // arithmetic without the claim: it says what Baz did, and leaves
         // whether it was right to the three titles underneath.
-        format!(
-            "Baz drew {} of {} to choose from",
-            live.eligible, live.analysed
-        )
+        format!("Using {} of your {} songs", live.eligible, live.analysed)
     };
     let mut note = column![
         text(head)
@@ -212,12 +232,13 @@ fn matches_note(vibe: &crate::vibe::State) -> Element<'_, Message> {
     // only useful if somebody looks at them.
     if live.closest.is_empty() {
         if !live.prompt.is_empty() {
-            note = note.push(quiet("Its best reading of your words, not a filter."));
+            note = note.push(quiet(
+                "Baz is guessing at your words, not filtering on them.",
+            ));
         }
     } else {
         note = note.push(quiet(&format!(
-            "Nearest your words: {} — if these are not what you meant, it has not \
-             understood the phrase.",
+            "Closest: {}. If these look wrong, try different words.",
             live.closest.join(" · ")
         )));
     }
@@ -242,7 +263,7 @@ pub(crate) fn commitment(shelf: &Shelf, stage: Stage) -> Element<'_, Message> {
     let (label, live) = match stage {
         // At most one commitment on screen: on a cold library the act on offer
         // is *Listen to my music*, in the result pane with its cost stated.
-        Stage::Cold => ("Compose · needs listening first".to_owned(), false),
+        Stage::Cold => ("Compose · Baz needs to listen first".to_owned(), false),
         Stage::Listening if vibe.has_features() => (format!("Compose from {ready} so far"), true),
         Stage::Listening => ("Compose · listening…".to_owned(), false),
         Stage::Ready => (
@@ -251,20 +272,6 @@ pub(crate) fn commitment(shelf: &Shelf, stage: Stage) -> Element<'_, Message> {
         ),
     };
     column![
-        wrap_chips(
-            crate::vibe::MixLength::ALL
-                .iter()
-                .map(|length| {
-                    chip(
-                        crate::vibe::spoken(*length),
-                        vibe.length == *length,
-                        Message::VibeLength(*length),
-                    )
-                })
-                .collect(),
-            4,
-        ),
-        Space::new().height(theme::GAP_SM),
         views::page::commitment_marked(
             crate::icon::Glyph::Queue,
             label.into(),
@@ -272,11 +279,7 @@ pub(crate) fn commitment(shelf: &Shelf, stage: Stage) -> Element<'_, Message> {
             Message::VibeCreate,
         ),
         // What pressing it again will do, said rather than discovered.
-        quiet(if vibe.preview.is_some() {
-            "Press again for a different list from the same request."
-        } else {
-            "Every press composes a different list from the same request."
-        }),
+        quiet("Press again for a different list."),
     ]
     .spacing(TIGHT)
     .into()

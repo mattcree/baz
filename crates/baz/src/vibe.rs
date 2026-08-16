@@ -123,11 +123,11 @@ impl Dimension {
     /// What it is measured from, plainly enough to put on screen.
     pub(crate) const fn measured_from(self) -> &'static str {
         match self {
-            Self::Energy => "tempo, loudness, and how much the loudness moves",
-            Self::Tempo => "beats per minute",
-            Self::Brightness => "spectral centroid, rolloff and zero crossings",
-            Self::Dynamics => "how much the loudness moves within a track",
-            Self::Texture => "spectral flatness — tonal against noisy",
+            Self::Energy => "How loud and how fast a song is.",
+            Self::Tempo => "How fast the beat is.",
+            Self::Brightness => "How bright or dark a song sounds.",
+            Self::Dynamics => "How much the loudness moves inside a song.",
+            Self::Texture => "How clean or noisy a song sounds.",
         }
     }
 }
@@ -443,46 +443,6 @@ impl Shape {
             .iter()
             .map(|&(at, level)| ContourPoint { at, level })
             .collect()
-    }
-}
-
-/// **How much of the query builder the page is showing.**
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Depth {
-    /// The line, a length, some words to narrow with, and the press.
-    #[default]
-    Simple,
-    /// …and the vocabulary.
-    ///
-    /// **That is now all it adds**, and the entry is left honest about it:
-    /// the five lines moved onto the graph's own tabs where they belong, and
-    /// the match count went to both depths because *what did my filter catch*
-    /// is not an advanced question. A mode that gates one row of chips is a
-    /// mode that should probably not exist — the owner's call, not this
-    /// file's.
-    Advanced,
-}
-
-impl Depth {
-    pub(crate) const ALL: [Self; 2] = [Self::Simple, Self::Advanced];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Simple => "Simple",
-            Self::Advanced => "Advanced",
-        }
-    }
-
-    /// One line saying what this depth is for, under the control that picks
-    /// it — because a mode nobody can explain is a mode nobody switches.
-    pub(crate) const fn detail(self) -> &'static str {
-        match self {
-            Self::Simple => "Draw the shape, pick a length, and press.",
-            Self::Advanced => {
-                "Adds a vocabulary of words Baz measurably hears \u{2014} instruments and \
-                 texture."
-            }
-        }
     }
 }
 
@@ -1249,7 +1209,14 @@ pub(crate) struct State {
     /// **Advanced** adds the query builder proper — the vocabulary, the drawn
     /// line and its per-dimension curves, and the readouts that explain what
     /// the engine did.
-    pub(crate) depth: Depth,
+    /// **Whether the words are on show.**
+    ///
+    /// They are the optional half and the untrustworthy half, so they are
+    /// folded away until asked for — which is what buys the line, the length
+    /// and the press room to sit above the fold together. A request that
+    /// arrived with words already in it opens itself: hiding what somebody
+    /// just chose would be a worse economy than the one it bought.
+    pub(crate) words_open: bool,
     /// **Whether the per-dimension lines are open.** Kept rather than derived
     /// from whether the curves differ, because *open and identical* is a real
     /// state: it is what the expander shows the moment it is pressed, and it
@@ -1333,7 +1300,7 @@ impl Default for State {
             profile: Profile::default(),
             count_due: None,
             choosing: false,
-            depth: Depth::Simple,
+            words_open: false,
             shown: None,
             shape_touched: false,
             length_touched: false,
@@ -3272,7 +3239,6 @@ mod tests {
         state.set_prompt("warm brass after midnight");
         state.set_length(MixLength::TwoHours);
         state.set_shape(Shape::ALL[4]);
-        state.depth = Depth::Advanced;
         let shape = state.contour.clone();
 
         state.leave_page();
@@ -3292,7 +3258,6 @@ mod tests {
         assert_eq!(state.prompt, "warm brass after midnight");
         assert_eq!(state.length, MixLength::TwoHours);
         assert_eq!(state.contour, shape);
-        assert_eq!(state.depth, Depth::Advanced);
     }
 
     #[test]
