@@ -119,6 +119,15 @@ Every release is built from a tag by CI, gated on the full test suite — see
   changed and why: *your words narrowed what is eligible, from 340 to 291 —
   changed 6 of 18*.
 
+### Fixed
+
+- **Compose works with the description left empty.** It refused a request that
+  had no words in it — which was right while the words *were* the request, and
+  became a button that silently did nothing once the line took over and **All
+  songs** became the standing choice. The result pane had been promising the
+  opposite in writing the whole time: *the shape on its own is a perfectly
+  good request.*
+
 ### Added
 
 - **A live count under the description**, with the three closest songs beneath

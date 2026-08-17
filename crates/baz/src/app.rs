@@ -3984,7 +3984,16 @@ impl App {
                 if !self.playlists.available() {
                     return Some(Task::none());
                 }
-                if state.vibe.prompt.trim().is_empty() || state.vibe.preparing {
+                // **A shape on its own is a request.** This required a
+                // non-empty description, which was right while the words
+                // *were* the request and became a press that silently did
+                // nothing the moment design note 25 made them optional — and
+                // then the default, once `All songs` shipped as the standing
+                // choice. The result pane has promised the opposite in
+                // writing the whole time: *the shape on its own is a
+                // perfectly good request. Compose, and the songs appear
+                // here.*
+                if state.vibe.preparing {
                     return Some(Task::none());
                 }
                 state.vibe.begin_request();
@@ -12700,6 +12709,16 @@ mod tests {
             drawn.contains("state.vibe.start_preparing()")
                 && drawn.contains("crate::vibe::prepare"),
             "the compose arm no longer reads the library on a cold index"
+        );
+        // **And it never refuses a request that has no words in it.** The
+        // line is the request since design note 25 and `All songs` is the
+        // standing choice, so a guard on an empty prompt is a press that does
+        // nothing on the page's own default — which is exactly how it was
+        // found: *"seems to not calculate a playlist until I change the
+        // playlist length option."*
+        assert!(
+            !drawn.contains("prompt.trim().is_empty()"),
+            "Compose is refusing a shape-only request again"
         );
     }
 

@@ -13,7 +13,9 @@
 #     dynamics must not, because a tone at one frequency is exactly a library
 #     with nothing to say on those two axes;
 #   * the field's example must read `warm electronic, slow and sparse`,
-#     because that is the genre the fixture carries.
+#     because that is the genre the fixture carries;
+#   * and `Compose` must produce a list with the description left empty,
+#     because the line is the request.
 #
 # Headless, on a private Xvfb, with all six XDG redirections from
 # docs/DEVELOPMENT.md; the run's `[mpris] no session bus` line is the receipt
@@ -96,8 +98,14 @@ shot "02-what-baz-heard"
 # the page with nothing filled in.
 click 359 786
 sleep 3
+
+# **A shape on its own is a request.** `All songs` is the standing choice, so
+# this is the press a first-timer makes, and for a while it silently did
+# nothing — the arm still required a description.
+click 588 674
+sleep 5
 move 1400 940
-shot "03-the-example-is-their-music"
+shot "03-the-shape-alone-composes"
 
 # **The count under the field**, which no longer says *match* and no longer
 # waits for the advanced depth. The field sits under the line, in the request
