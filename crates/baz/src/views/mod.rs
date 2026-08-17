@@ -155,6 +155,18 @@ pub(crate) struct Fitted<'a> {
 }
 
 /// Draw a [`Fitted`].
+///
+/// **The measure is a ceiling, not a width.** A line that fits is as wide as
+/// its own words; only a line that has to be cut spends the whole lane, and
+/// then it spends it because that is what it was cut to.
+///
+/// This was a fixed `measure` in every state until 2026-08-17, which made the
+/// bottom bar's block the full lane whatever it held — and the owner, twice:
+/// *"the now playing bottom bar area still does not seem to have a min size
+/// that makes sense which should only grow up to a max based on the content of
+/// the artist name and song title etc. — this avoids the heart icons being out
+/// in the middle of nowhere."* The heart is the block's sibling, so a block
+/// that was always lane-wide put it lane-wide away from a three-word title.
 pub(crate) fn fitted_line(line: &Fitted<'_>) -> Element<'static, Message> {
     let (fitted, truncated) = fit(line.content, line.face, line.size, line.measure);
     let set = |content: String, width: Length, align| {
@@ -176,7 +188,8 @@ pub(crate) fn fitted_line(line: &Fitted<'_>) -> Element<'static, Message> {
         if truncated {
             Length::Fixed(line.measure - theme::ELLIPSIS_SLOT_W)
         } else {
-            Length::Fill
+            // Its own words. `Fill` here is what made every line lane-wide.
+            Length::Shrink
         },
         alignment::Horizontal::Left,
     );
@@ -191,7 +204,11 @@ pub(crate) fn fitted_line(line: &Fitted<'_>) -> Element<'static, Message> {
         Space::new().width(Length::Fixed(0.0)).into()
     };
     container(row![prefix, ending])
-        .width(Length::Fixed(line.measure))
+        .width(if truncated {
+            Length::Fixed(line.measure)
+        } else {
+            Length::Shrink
+        })
         .height(Length::Fixed(line.line_height))
         .clip(true)
         .into()

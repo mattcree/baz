@@ -313,11 +313,39 @@ fn now_playing_block<'a>(
     // [`theme::bar_title_lane_w`] has already subtracted it from the name's
     // measure. That is the bar's own law: starting a track, muting, crossing
     // the hour mark and now hearting a song all change ink and never geometry.
+    // **The block is as wide as what it holds**, between
+    // [`theme::BAR_TITLE_MIN_W`] and the lane — so the heart sits beside the
+    // words rather than at the far end of a lane the words did not fill. It
+    // was `Fill`, which is the whole of what the owner reported twice.
     row![
-        container(back_to_source(player, cover, source, window_w))
-            .width(Length::Fill)
-            .clip(true),
-        crate::views::page::favourite_slot_maybe(favourite),
+        container(column![
+            // The floor, as a rule of the column's own width. iced 0.14 has no
+            // `min_width`; a `Column` is as wide as its widest child, so a
+            // spacer of no height is the whole of it.
+            Space::new()
+                .width(Length::Fixed(theme::BAR_TITLE_MIN_W))
+                .height(Length::Fixed(0.0)),
+            back_to_source(player, cover, source, window_w),
+        ])
+        .width(Length::Shrink)
+        .clip(true),
+        // **No subject, no heart** (the owner, 2026-08-17: *"don't show the
+        // heart icon if we are not playing anything"*). The reserved slot is
+        // for a track baz is holding but cannot favourite — one that is not a
+        // library row — which is a real state with something to say. Nothing
+        // playing is not that: there is no track for the control to be about,
+        // and a heart beside the words `Nothing playing` is a control offered
+        // over nothing.
+        //
+        // This is the one place the bar's never-move-geometry law yields, and
+        // it yields to the same instruction that asked the block to size
+        // itself: a bar that is empty is already a different shape from a bar
+        // that is playing.
+        if player.now_playing().is_some() {
+            crate::views::page::favourite_slot_maybe(favourite)
+        } else {
+            Space::new().width(Length::Fixed(0.0)).into()
+        },
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
@@ -403,7 +431,7 @@ fn back_to_source(
                     .into(),
                 Cover::Placeholder(id) => crate::views::gradient_block(id, theme::BAR_COVER, 1.0),
             };
-            row![artwork, container(lines).width(Length::Fill).clip(true),]
+            row![artwork, container(lines).width(Length::Shrink).clip(true),]
                 .spacing(theme::GAP_MD)
                 .align_y(iced::Alignment::Center)
                 .into()
@@ -422,7 +450,7 @@ fn back_to_source(
     crate::menu::area(
         tooltip(
             button(lines)
-                .width(Length::Fill)
+                .width(Length::Shrink)
                 .padding(0)
                 .style(move |_theme, status| theme::now_playing_text(room, status))
                 .on_press(source),
@@ -1428,6 +1456,30 @@ mod tests {
         assert!(
             block.contains("crate::views::page::favourite_slot_maybe(favourite)"),
             "the bar draws its own heart instead of item 32's shared action"
+        );
+        // **The block is content-sized between a floor and the lane**, which
+        // is what puts the heart beside the words. The owner reported this
+        // twice; the second telling is what says the shape was wrong rather
+        // than the explanation.
+        assert!(
+            !block.contains(".width(Length::Fill)"),
+            "the now-playing block fills its zone again, so the heart is back \
+             at the far end of a lane the words did not fill"
+        );
+        assert!(
+            block.contains("theme::BAR_TITLE_MIN_W"),
+            "the block lost its floor, so a short title collapses it"
+        );
+        // **And no heart when there is no track to be about.**
+        assert!(
+            block.contains("if player.now_playing().is_some()"),
+            "the heart is offered over nothing again"
+        );
+        // The reserved slot is still there for the state it is *for*: a track
+        // baz holds that has no library row.
+        assert!(
+            block.contains("favourite_slot_maybe"),
+            "the not-in-your-library heart went with the empty one"
         );
         assert!(
             !block.contains("button("),

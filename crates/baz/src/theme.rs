@@ -3098,6 +3098,20 @@ pub const BAR_TRAILING_W: f32 = SIGNAL_W
     + GAP_LG
     + VOLUME_BLOCK_W;
 
+/// **The floor under the bar's now-playing block.**
+///
+/// The block is content-sized between this and [`bar_title_lane_w`] (the
+/// owner, 2026-08-17: *"should only grow up to a max based on the content"*),
+/// and a floor is the half of that sentence the word *min* is doing. Without
+/// one, `Ochre` by `Kx` would draw a block sixty pixels wide and put the heart
+/// under the sleeve — and the block would visibly jump on every track change,
+/// which is the bar's own law being broken for nothing.
+///
+/// It is [`ALBUM_ASIDE_W`]'s half, which is a round number in the lattice and
+/// wide enough for a four-word title at [`SIZE_BODY`]; the point is that the
+/// heart lands in one of a small number of places rather than anywhere.
+pub const BAR_TITLE_MIN_W: f32 = 160.0;
+
 /// **The measure left to the sounding track's name** at a window width — what
 /// `bottom_bar`'s identity zone actually has, after the bar's two edges, the
 /// trailing cluster and its seam, and the sounding sleeve and its seam.
