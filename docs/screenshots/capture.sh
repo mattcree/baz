@@ -17,7 +17,14 @@
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb \
 #     cargo build --release -p baz
-#   toolbox run -c baz-dev docs/screenshots/capture.sh
+#   toolbox run -c baz-dev docs/screenshots/capture.sh          # the fixture
+#   REAL=1 toolbox run -c baz-dev docs/screenshots/capture.sh   # his library
+#
+# **`REAL=1` is what ships.** The owner asked twice for real music, and a
+# generated wall reads as generated however good its sleeves are. It costs
+# publishing his record titles, his artists and their cover art on a store
+# page; the fixture path stays for anyone who cannot spend that, and for
+# regenerating a clean-room set if Flathub ever asks.
 #
 # # Headless, and isolated six ways
 #
@@ -87,6 +94,32 @@ W=1600; H=900
 
 mkdir -p "$OUT"
 
+# ---------------------------------------------------------------- real mode
+# **`REAL=1` photographs the owner's own library instead of the fixture.**
+#
+# He asked for it twice — *"ideally the screenshots could use my library and/or
+# look realistic at least"*, then *"it doesn't seem like you've used my real
+# library or at least real music"* — and a fixture that reads as a fixture is
+# what the second one is about. The flag is his call to spend, and it publishes
+# real record titles, real artists and real cover art on a store page, which is
+# the cost and is why it is a flag rather than the default.
+#
+# **Nothing is written to his data.** The library index, the analysis store,
+# the art cache and the playlists are *copied* into this run's scratch
+# `XDG_DATA_HOME`; the config is written into the scratch `XDG_CONFIG_HOME`
+# with his own `music_dirs` read out of his. The copies also make the run fast
+# and faithful at once: no scan, no re-analysis, and every sleeve already
+# rendered.
+REAL=${REAL:-}
+if [[ -n $REAL ]]; then
+  HIS_DATA=${HIS_DATA:-$HOME/.local/share/baz}
+  HIS_CACHE=${HIS_CACHE:-$HOME/.cache/baz}
+  HIS_CONFIG=${HIS_CONFIG:-$HOME/.config/baz/config.toml}
+  for needed in "$HIS_DATA/library.db" "$HIS_CONFIG"; do
+    [[ -e $needed ]] || { echo "REAL=1 but $needed is not there"; exit 1; }
+  done
+fi
+
 # ------------------------------------------------------------------ fixture
 # Rebuilt unless $FIX already holds one **from this generator** — regenerating
 # costs a minute and the sleeves are deterministic, so a re-run re-photographs
@@ -98,7 +131,9 @@ mkdir -p "$OUT"
 # directory that exists satisfied a guard that meant to ask whether it was
 # *current*.
 STAMP=$(sha256sum "$REPO/docs/design/composition/tools/mkfixture.sh" | cut -c1-16)
-if [[ ! -d $FIX || $(cat "$FIX/.generator" 2>/dev/null) != "$STAMP" ]]; then
+if [[ -n $REAL ]]; then
+  : # his own music is the fixture, and it is already on disk
+elif [[ ! -d $FIX || $(cat "$FIX/.generator" 2>/dev/null) != "$STAMP" ]]; then
   rm -rf "$FIX"
   # **The one title that exists to be too long, made ordinary.** Album 4's
   # name is a clipping test the composition audit needs and a store page does
@@ -124,7 +159,7 @@ cat > "$S/home/.asoundrc" <<'EOF'
 pcm.!default { type null }
 ctl.!default { type null }
 EOF
-mkdir -p "$S/config/baz"
+mkdir -p "$S/config/baz" "$S/data/baz" "$S/cache/baz"
 # **Both of these were chosen by photographing the alternatives**, and both are
 # about one thing: the picture has to contain a *collection*, because that is
 # what baz is for.
@@ -150,6 +185,30 @@ mkdir -p "$S/config/baz"
 # the page is a shelf anyone recognises. `added` fills the wall too and was
 # rejected: every record in a fresh fixture arrives at once, so the whole wall
 # sits under one heading reading `THIS EVENING`.
+if [[ -n $REAL ]]; then
+  # **His library, copied in.** The index and the analysis store make the run
+  # need no scan and no listening pass; the art cache makes every sleeve
+  # render on the first frame instead of over the following minute; the
+  # playlists give the playlists place something real to show. All copies —
+  # this run writes only inside `$S`.
+  cp "$HIS_DATA/library.db" "$S/data/baz/library.db"
+  [[ -e $HIS_DATA/vibe.db ]] && cp "$HIS_DATA/vibe.db" "$S/data/baz/vibe.db"
+  [[ -d $HIS_DATA/playlists ]] && cp -r "$HIS_DATA/playlists" "$S/data/baz/playlists"
+  [[ -d $HIS_CACHE/art-v1 ]] && cp -r "$HIS_CACHE/art-v1" "$S/cache/baz/art-v1"
+  # His own roots, and this script's own arrangement: `year` and `compact` are
+  # chosen for what a *wall* photographs like (see above) and that reasoning
+  # does not change because the records are real.
+  {
+    sed -n '/^music_dirs = \[/,/^\]/p' "$HIS_CONFIG"
+    # **`alphabet`, where the fixture takes `year`.** The fixture was built
+    # with a year on every record; a real collection has rips and bootlegs
+    # that never carried one, and `year` opens the wall on a shelf headed
+    # `NO YEAR`, which is honest and a poor first impression.
+    echo 'group_key = "alphabet"'
+    echo 'density = "compact"'
+    echo 'sidebar_open = true'
+  } > "$S/config/baz/config.toml"
+else
 cat > "$S/config/baz/config.toml" <<EOF
 music_dirs = [
     "$FIX",
@@ -158,6 +217,7 @@ group_key = "year"
 density = "compact"
 sidebar_open = true
 EOF
+fi
 
 # ------------------------------------------------------------------ display
 Xvfb "$DISP" -screen 0 ${W}x${H}x24 -nolisten tcp >/dev/null 2>&1 &
@@ -218,7 +278,15 @@ rest()  { xdotool mousemove "$1" "$2"; sleep 1.5; }
 # its `RECENTLY ADDED` row, and open background on Now Playing. (1400, 780)
 # looked safe and was not — it sits inside Home's recently-added row and
 # raised that tile's four choices in the frame.
-park()  { xdotool mousemove 1400 430; sleep 0.5; xdotool mousemove 1402 432; sleep 0.9; }
+# **Somewhere with nothing under it.** Parking the pointer is how a frame is
+# taken without a hover veil in it — so where it parks has to be empty, and
+# (1400, 430) is empty over the fixture's four-tile rows and is *on a tile*
+# over his five-tile ones, which is how the first real-mode frame came back
+# with a veil open over Frank Zappa. The arrangement strip's right end has
+# nothing under it on either wall.
+PARK_X=1400; PARK_Y=430
+[[ -n ${REAL:-} ]] && { PARK_X=1200; PARK_Y=78; }
+park()  { xdotool mousemove $PARK_X $PARK_Y; sleep 0.5; xdotool mousemove $((PARK_X + 2)) $((PARK_Y + 2)); sleep 0.9; }
 
 # ------------------------------------------------------------- the geometry
 # Every number below was read off a frame of *this* build at 1600 × 900 with
@@ -250,6 +318,10 @@ park()  { xdotool mousemove 1400 430; sleep 0.5; xdotool mousemove 1402 432; sle
 ADD_TO_1=302; ADD_TO_2=635; PLAY_1=198; OPEN_1=354
 
 # ------------------------------------------------------------ the playlist
+# **Not in real mode**, where he already has playlists and they were copied in
+# above. Building one here would mean four presses derived from a fixture's
+# wall, on a wall that is not it.
+if [[ -z $REAL ]]; then
 # Four records into one list, each through its own tile's `Add to…`. The first
 # press opens the panel with nowhere to put anything, which is the honest empty
 # state and also the door: `New playlist` takes a name and the list exists.
@@ -280,15 +352,21 @@ sleep 1.2
 # succeeded while building nothing: every press missed, the frames were taken
 # anyway, and the shipped picture of the playlists place was honest and empty.
 # A capture that cannot tell those apart is not a verification.
+fi
 made="$S/data/baz/playlists/Sunday Morning.m3u8"
+[[ -n $REAL ]] && made=$(ls -S "$S/data/baz/playlists/"*.m3u8 2>/dev/null | head -1)
 if [[ ! -s $made ]]; then
   echo "THE PLAYLIST WAS NEVER MADE — the picture would be of an empty place."
   echo "Re-derive the coordinates above from a frame; see docs/WORK.md item 71."
   exit 1
 fi
-tracks=$(grep -c '\.flac$' "$made" || true)
+tracks=$(grep -cE '\.(flac|mp3|m4a|wav)$' "$made" || true)
 echo "== playlist: $tracks tracks in $(basename "$made")"
-[[ $tracks -ge 20 ]] || { echo "only $tracks tracks — expected four records"; exit 1; }
+# The fixture run builds a four-record list and must get one. Real mode shows
+# a list the owner already made, and how long it is is his business.
+if [[ -z $REAL ]]; then
+  [[ $tracks -ge 20 ]] || { echo "only $tracks tracks — expected four records"; exit 1; }
+fi
 
 # --------------------------------------------------------------- the frames
 # Put a record on. Resting on a tile raises its own four choices — `Play`,
@@ -296,8 +374,19 @@ echo "== playlist: $tracks tracks in $(basename "$made")"
 # the overlay: point at the record, press play. That is the sentence the store
 # page makes ("click one and it plays front to back"), performed rather than
 # asserted, and it is why all four frames below are of a player that is playing.
-rest 648 255
-click 596 $PLAY_1
+if [[ -n $REAL ]]; then
+  # **Real mode's own coordinates**, read off `$S/probe-wall.png` — which this
+  # writes on every run, into the scratch rather than beside the receipts,
+  # because re-reading a frame is the only way this file has ever been
+  # correct and none of those frames is a receipt. His wall hangs five tiles to a row rather than the
+  # fixture's four, so the columns are elsewhere: 370, 615, 860, 1104, 1349.
+  park; magick import -window root "$S/probe-wall.png"
+  rest 370 270
+  click 370 $PLAY_1
+else
+  rest 648 255
+  click 596 $PLAY_1
+fi
 
 # 1 · the wall, with that record playing: its tile lit, the band in the lane's
 #     `RECENT`, and the bottom bar a live readout rather than `Nothing playing`.
@@ -356,8 +445,15 @@ shot playlist
 #     it: the caption selects, and `Open` on the sleeve's own veil goes in.
 click 105 133
 park
-rest 648 255                            # the veil over `Werkbund`
-click 596 $OPEN_1
+if [[ -n $REAL ]]; then
+  # The `#` shelf's single tile, which is unambiguous on his wall whatever
+  # else is in it: hover it, and press `Open` on its veil.
+  rest 377 290
+  click 377 368
+else
+  rest 648 255                          # the veil over `Werkbund`
+  click 596 $OPEN_1
+fi
 park
 shot album
 
@@ -365,7 +461,13 @@ shot album
 #     than pasted: the count beside the field is live, and a paste would
 #     photograph it mid-debounce.
 click 200 24
-xdotool type --clearmodifiers --delay 55 "hain"
+# A word that finds something in the library being photographed. `hain` is
+# `Studio Hain`, who exists only in the fixture.
+if [[ -n $REAL ]]; then
+  xdotool type --clearmodifiers --delay 55 "arvo"
+else
+  xdotool type --clearmodifiers --delay 55 "hain"
+fi
 sleep 1.8
 park
 shot search
@@ -391,12 +493,22 @@ APID=""
 sleep 1
 
 VARIED=${VARIED:-/tmp/baz-varied}
-[[ -d $VARIED ]] || "$REPO/docs/design/impl/contour/mkfixture-varied.sh" "$VARIED"
+[[ -n $REAL ]] || [[ -d $VARIED ]] || "$REPO/docs/design/impl/contour/mkfixture-varied.sh" "$VARIED"
 V=$S/vibe
-rm -rf "$V"; mkdir -p "$V"/{home,data,config,cache,run}; chmod 700 "$V/run"
+rm -rf "$V"; mkdir -p "$V"/{home,data/baz,config/baz,cache/baz,run}; chmod 700 "$V/run"
 cp "$S/home/.asoundrc" "$V/home/.asoundrc"
-mkdir -p "$V/config/baz"
-printf 'music_dirs = ["%s"]\ngroup_key = "alphabet"\n' "$VARIED" > "$V/config/baz/config.toml"
+if [[ -n $REAL ]]; then
+  # **His library, already listened to.** The analysis store is the expensive
+  # half of this feature — an hour of CPU over five thousand tracks — and he
+  # has already paid it, so copying it in is what makes a real-library frame
+  # of this page possible at all inside a capture.
+  cp "$S/config/baz/config.toml" "$V/config/baz/config.toml"
+  cp "$HIS_DATA/library.db" "$V/data/baz/library.db"
+  cp "$HIS_DATA/vibe.db" "$V/data/baz/vibe.db"
+  [[ -d $HIS_CACHE/art-v1 ]] && cp -r "$HIS_CACHE/art-v1" "$V/cache/baz/art-v1"
+else
+  printf 'music_dirs = ["%s"]\ngroup_key = "alphabet"\n' "$VARIED" > "$V/config/baz/config.toml"
+fi
 env -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS DISPLAY="$DISP" \
     WINIT_UNIX_BACKEND=x11 HOME="$V/home" XDG_DATA_HOME="$V/data" \
     XDG_CONFIG_HOME="$V/config" XDG_CACHE_HOME="$V/cache" \
@@ -415,24 +527,55 @@ xdotool windowmove "$WID" 0 0; xdotool windowsize "$WID" $W $H
 xdotool windowfocus --sync "$WID"
 sleep 6
 
-click 105 81                            # Home
-click 327 515                           # `New smart playlist`
-sleep 2
-click 1120 626                          # `Listen to my music` — the one step first
-# Wait by watching the store stop growing, rather than by guessing.
-DB="$V/data/baz/vibe.db"
-last=-1; still=0
-for _ in $(seq 1 120); do
-  sleep 5
-  size=$(stat -c %s "$DB" 2>/dev/null || echo 0)
-  if [[ "$size" == "$last" && "$size" != "0" ]]; then
-    still=$((still + 1)); [[ $still -ge 3 ]] && break
-  else still=0; fi
-  last=$size
-done
-sleep 6
-click 359 786                           # `Your own words` — into the page itself
+click 105 185                           # Playlists
+sleep 1.5
+click 614 274                           # `New smart playlist`
 sleep 3
+if [[ -z $REAL ]]; then
+  click 1120 626                        # `Listen to my music` — the one step first
+  # Wait by watching the store stop growing, rather than by guessing.
+  DB="$V/data/baz/vibe.db"
+  last=-1; still=0
+  for _ in $(seq 1 120); do
+    sleep 5
+    size=$(stat -c %s "$DB" 2>/dev/null || echo 0)
+    if [[ "$size" == "$last" && "$size" != "0" ]]; then
+      still=$((still + 1)); [[ $still -ge 3 ]] && break
+    else still=0; fi
+    last=$size
+  done
+  sleep 6
+else
+  # Already listened to — the door reads what it heard and offers the moods.
+  sleep 4
+fi
+if [[ -n $REAL ]]; then
+  # **A mood, not a blank request.** On his library the door carries what it
+  # heard as well as the six moods, so `Your own words` is below the fold —
+  # and a mood is the better frame anyway: it fills the request and composes
+  # in one press, which is the feature doing its thing rather than waiting.
+  # **Scroll to `Your own words`, and take the words-free route.** A mood
+  # press composes and then composes again when its words settle, and the
+  # second one arrives with a diff banner over the list. The door is taller
+  # here than on a fixture — it carries what Baz heard as well as the moods —
+  # so the seventh tile needs a scroll to reach.
+  xdotool mousemove 600 600
+  for _ in 1 2 3 4; do xdotool click 5; done
+  sleep 1.5
+  magick import -window root "$S/probe-door.png"
+  click 359 700
+  sleep 3
+  click 315 586                         # a length — and this composes, once
+  sleep 8
+  # The door was scrolled to reach that tile and the page inherits the
+  # offset, so the frame would open halfway down its own first control.
+  xdotool mousemove 600 400
+  for _ in 1 2 3 4 5 6; do xdotool click 4; done
+  sleep 1.5
+else
+  click 359 786                         # `Your own words` — into the page itself
+  sleep 3
+fi
 # **One composition, and only one**, because every one after the first carries
 # a diff — *10 new · 9 kept* — which is a good line in the app and clutter in
 # a store frame.
@@ -444,8 +587,10 @@ sleep 3
 # fixture is 48 tracks: an hour is reachable but leaves the list at the edge
 # of what the diversity rules allow, and a shortfall note is the honest thing
 # to say and the wrong thing to photograph.
-click 315 586                           # `half an hour` — and this composes
-sleep 7
+if [[ -z $REAL ]]; then
+  click 315 586                         # `half an hour` — and this composes
+  sleep 7
+fi
 sleep 6
 park
 shot smart-playlist

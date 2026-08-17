@@ -59,14 +59,19 @@ worth looking at, without any of their clouds.
 | ![Now playing](docs/screenshots/now-playing.png) | ![A playlist](docs/screenshots/playlist.png) |
 | **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **A playlist** — thirty-five songs off four records, and one `.m3u8` on disk. |
 | ![A record's page](docs/screenshots/album.png) | ![Search](docs/screenshots/search.png) |
-| **A record** — the sleeve at size, the run in play order, and what the file actually is. | **Search** — app-wide, from any place, reaching tracks as well as records. |
+| **A record** — the sleeve at size, the run in play order, and both editions the library merged. | **Search** — app-wide, from any place, reaching tracks as well as records. |
 
 ![A smart playlist: draw how it should move](docs/screenshots/smart-playlist.png)
 
 **A smart playlist.** Draw how the music should move from the first song to
 the last and baz fills it from your own collection, using what the songs
-actually sound like rather than what their tags say. Every track is analysed on
-your own machine, and none of your audio leaves it.
+actually sound like rather than what their tags say. Read the words beside the
+rows down the list: *quiet · slow · dark* at the top, *loud · fast · noisy* at
+the bottom. Every track is analysed on your own machine, and none of your
+audio leaves it.
+
+> These are real screenshots of a real 4 870-track library, not a mock-up.
+> `docs/screenshots/capture.sh` takes them from the shipping binary.
 
 ![Home](docs/screenshots/home.png)
 
