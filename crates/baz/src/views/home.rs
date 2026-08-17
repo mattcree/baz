@@ -149,14 +149,10 @@ pub(crate) fn view<'a>(
 
     let continuing = continue_band(shelf, player, resume, width);
     let everything = all_songs_tile(shelf, player, hang);
-    let request = cfg!(feature = "vibe-analysis").then(|| vibe_shortcut(collecting.available));
     let added = recently_added(shelf, player, hang, collecting);
     let counted = collection(shelf);
-    let nothing = continuing.is_none()
-        && everything.is_none()
-        && request.is_none()
-        && added.is_none()
-        && counted.is_none();
+    let nothing =
+        continuing.is_none() && everything.is_none() && added.is_none() && counted.is_none();
     if let Some(band) = continuing {
         body = body.push(band);
     }
@@ -165,9 +161,6 @@ pub(crate) fn view<'a>(
     // three offers is *for* rather than about how big they are.
     if let Some(band) = everything {
         body = body.push(band);
-    }
-    if let Some(section) = request {
-        body = body.push(section);
     }
     if let Some(band) = added {
         body = body.push(band);
@@ -197,49 +190,6 @@ pub(crate) fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
-}
-
-/// Home keeps discovery, while the composer itself belongs to New playlist.
-fn vibe_shortcut<'a>(available: bool) -> Element<'a, Message> {
-    let room = theme::active();
-    column![
-        section_rule("Smart playlists"),
-        text("Describe the music you want and Baz composes it from what is on this device.")
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .color(room.paper),
-        // **The same door as the wall's**, rather than a second route with
-        // its own behaviour. Home's shortcut used to skip straight to the
-        // form, which is how the listening step ended up somewhere a new
-        // listener could arrive without meeting it.
-        word_button_maybe(
-            "New smart playlist",
-            available.then_some(Message::NewSmartPlaylistOpen),
-        )
-    ]
-    .spacing(theme::GAP_SM)
-    .into()
-}
-
-fn word_button_maybe<'a>(
-    label: &str,
-    message: Option<Message>,
-) -> iced::widget::Button<'a, Message> {
-    let room = theme::active();
-    button(
-        container(
-            text(label.to_owned())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press_maybe(message)
 }
 
 /// **What the `CONTINUE` band is a placard for**: the track to carry on with
@@ -967,15 +917,19 @@ mod tests {
                 "the machinery's own vocabulary reached the surface: {banned:?}"
             );
         }
-        let home = source
-            .split("fn vibe_shortcut")
-            .nth(1)
-            .expect("Home shortcut")
-            .split("\n}\n")
-            .next()
-            .expect("shortcut body");
-        assert!(home.contains("New smart playlist"));
-        assert!(home.contains("NewSmartPlaylistOpen"));
+        // **And Home offers no smart-playlist door at all** — the owner,
+        // 2026-08-17: *"can we remove smart playlists from the Home screen"*.
+        // It was a heading, a sentence explaining the feature, and a lone
+        // control, on the one page you reach by wanting to listen. The door
+        // is unchanged where it belongs, on Playlists.
+        assert!(
+            !source.contains("fn vibe_shortcut"),
+            "Home grew the smart-playlist band back"
+        );
+        assert!(
+            !drawn.contains("New smart playlist") && !drawn.contains("Smart playlists"),
+            "Home is explaining a feature to somebody who came to listen"
+        );
     }
 
     /// **The band stands on the interrupted run until something sounds**, and
