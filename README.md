@@ -57,7 +57,7 @@ worth looking at, without any of their clouds.
 |  |  |
 |---|---|
 | ![Now playing](docs/screenshots/now-playing.png) | ![A playlist](docs/screenshots/playlist.png) |
-| **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **A playlist** — thirty-five songs off four records, and one `.m3u8` on disk. |
+| **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **Playlists** — the ones you have made, beside Favourites and the way to a new one. Each is an ordinary `.m3u8` on disk. |
 | ![A record's page](docs/screenshots/album.png) | ![Search](docs/screenshots/search.png) |
 | **A record** — the sleeve at size, the run in play order, and both editions the library merged. | **Search** — app-wide, from any place, reaching tracks as well as records. |
 
