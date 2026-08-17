@@ -1844,8 +1844,8 @@ or not."*
        vector, or nothing above it can be reproduced.
     3. **Decide the tempo fold**, above.
 
-80. **Not started — search folds case and nothing else, so `and` never finds
-    `&`.** *(The owner, 2026-08-17: "can we make sure our search treats 'and'
+80. **Done 2026-08-17 — search folds case and nothing else, so `and` never
+    finds `&`.** *(The owner, 2026-08-17: "can we make sure our search treats 'and'
     as & or and… because I searched for a song which used the ampersand which
     wasn't found by searching with the word.")*
 
@@ -1854,32 +1854,47 @@ or not."*
     different strings — and so is every `Simon & Garfunkel` and `Earth, Wind &
     Fire` spelled the way the sleeve does.
 
-    One fold, applied to both sides, treating `&` and `and` as the same
-    **token** — a substring replace turns `Sand` into `S&` and `R&B` into
-    `Rand B`. The same fold is the natural home for the two neighbours the
-    index's own module docs already admit to: punctuation between words
-    (`R.E.M.` against `REM`) and accents (`Beyoncé` against `Beyonce`).
+    **`Index::search_fold` is the one fold now**, applied to a haystack when
+    it is built and to a query when it arrives: case, and `&` written out as
+    `and`. In that direction rather than the other, because folding `and` *to*
+    `&` would make `Sand` into `S&` and take a real word off the shelf. It
+    runs on the haystack and never on the sort keys built from the same
+    lowercased text a line above — what a record is *called* must not change
+    because of how it is *found*.
 
-81. **Not started — right-clicking in a playlist resets the scroll position.**
+    **The two neighbours are deliberately not done**: punctuation between
+    words (`R.E.M.` against `REM`) and accents (`Beyoncé` against `Beyonce`).
+    Each widens what matches, and each wants its own measurement of what it
+    lets in.
+
+81. **Done 2026-08-17 — right-clicking in a playlist resets the scroll
+    position.**
     *(The owner, 2026-08-17.)*
 
-    Not reproduced yet. The suspicion is that opening the context menu
-    rebuilds the list and the scrollable returns at the top rather than at the
-    offset it was holding — the shape the `scroll_offset` fields on other
-    places exist to prevent. Check three moments separately: the menu opening,
-    the menu closing, and an action taken from it.
+    **The scrollable was not scrolled back — it was replaced.** iced diffs the
+    widget tree by position, and the context menu was stacked over the window
+    only while it was open, so opening it moved every widget beneath one level
+    down and handed each a fresh state. Search and the status panel did the
+    same thing to whatever was under them.
 
-82. **Not started — Now Playing should fit its content, and the heart should
-    belong to it.** *(The owner, 2026-08-17: "can you make the now-playing fit
+    All four floating layers are stacked **always** now, empty at rest, which
+    is the rule the drag ghost already followed — its own note records the
+    ghost freezing at the lift when it did not. `no_floating_layer_comes_and_
+    goes_from_the_tree` pins the shape at the source, because the failure is
+    invisible to a unit test and costs a headless run to see.
+
+82. **Done 2026-08-17 — Now Playing should fit its content, and the heart
+    should belong to it.** *(The owner, 2026-08-17: "can you make the now-playing fit
     the content up to a max width and ensure the heart is snapped to the right
     hand side of that box so it doesn't appear to be off on its own.")*
 
-    The block takes the full measure whatever is in it, so the favourite mark
-    ends up against the window's edge with a stretch of nothing between it and
-    the title it belongs to — it reads as a control of the *page* rather than
-    of *this song*. Size the block to its content up to a maximum and put the
-    heart against the right edge of that box, so proximity says what it is
-    attached to.
+    The placard took its full measure whatever was in it, so a two-word title
+    left the heart stranded a long way to the right of the thing it belongs
+    to — and a control that far from its subject reads as a control of the
+    *page*. It fits its content up to that measure now, so the heart sits
+    beside the title, and a long title still stops where it always did: the
+    title's own box is capped at what is left after the heart's slot and the
+    gap between them.
 
 ## Doing
 

@@ -1733,7 +1733,7 @@ impl Library {
         if query.is_empty() || query.contains('\n') {
             return ranked;
         }
-        let needle = query.to_lowercase();
+        let needle = search_fold(query);
         let corpus = self.index.corpus.as_bytes();
         let mut track = 0usize;
         let mut cursor: Option<Field> = None;
@@ -2999,6 +2999,40 @@ impl Field {
     }
 }
 
+/// **The one fold, applied to both sides** — a haystack when it is built and a
+/// query when it arrives.
+///
+/// Case, and `&` written out. The owner: *"can we make sure our search treats
+/// 'and' as & or and… because I searched for a song which used the ampersand
+/// which wasn't found by searching with the word."* He is right, and it is a
+/// whole class rather than one song: `Day & Night`, `Simon & Garfunkel`,
+/// `Earth, Wind & Fire` and every other record spelled the way its sleeve
+/// spells it was unfindable by the word anybody would type.
+///
+/// **Written out rather than stripped**, and in that direction rather than the
+/// other. Folding `and` *to* `&` would make `Sand` into `S&` and `Iceland`
+/// into `Icel&`; folding `&` to `and` touches only the character that is
+/// actually ambiguous. `R&B` becomes `randb`, which `r&b` also becomes, so
+/// that one still works from the spelling anybody uses for it.
+///
+/// It runs on the haystack and never on the sort keys, which are built from
+/// the same lowercased text a line above: what a record is *called* must not
+/// change because of how it is *found*.
+///
+/// The two neighbours this fold is the natural home for — punctuation between
+/// words (`R.E.M.` against `REM`) and accents (`Beyoncé` against `Beyonce`) —
+/// are `docs/WORK.md` item 80's remainder, deliberately not done here: each
+/// widens what matches, and they want their own measurement of what they let
+/// in.
+fn search_fold(text: &str) -> String {
+    let lowered = text.to_lowercase();
+    if lowered.contains('&') {
+        lowered.replace('&', "and")
+    } else {
+        lowered
+    }
+}
+
 /// How well a match at `start..start + needle_len` fits `field` — the ranking's
 /// first signal, and the whole of the word-boundary rule.
 fn tier_of(field: &str, start: usize, needle_len: usize) -> MatchTier {
@@ -3520,7 +3554,7 @@ impl IndexedTrack {
         let mut haystack = String::new();
         for part in [&artist, &album_artist, &album, &title] {
             if let Some(text) = part {
-                haystack.push_str(text);
+                haystack.push_str(&search_fold(text));
             }
             haystack.push('\n');
         }
@@ -4364,6 +4398,48 @@ mod tests {
         assert!(path.to_str().is_none(), "fixture must not be valid UTF-8");
         let back = path_from_blob(path_to_blob(&path)).expect("decode");
         assert_eq!(back, path);
+    }
+
+    /// **`and` finds `&`, and `&` finds `and`** — one fold, applied to the
+    /// haystack when it is built and to the query when it arrives.
+    ///
+    /// The owner searched for a song whose title uses the ampersand, typed
+    /// the word, and found nothing. It is a class rather than a song: every
+    /// record spelled the way its sleeve spells it was unfindable by the word
+    /// anybody would type for it.
+    #[test]
+    fn an_ampersand_and_the_word_find_each_other() {
+        let track = |artist: &str, title: &str| {
+            IndexedTrack::new(
+                TrackMeta {
+                    artist: Some(artist.to_owned()),
+                    album: Some("A Record".to_owned()),
+                    title: Some(title.to_owned()),
+                    ..bare_meta()
+                },
+                ComputedReplayGain::default(),
+                None,
+                None,
+            )
+            .haystack
+        };
+
+        // Written one way, found the other — in both directions.
+        assert!(track("Thundercat", "Day & Night").contains("day and night"));
+        assert!(track("Simon and Garfunkel", "Bookends").contains("simon and garfunkel"));
+        for query in ["Day and Night", "day & night", "DAY & NIGHT"] {
+            assert_eq!(search_fold(query), "day and night", "{query}");
+        }
+        for query in ["Simon & Garfunkel", "simon and garfunkel"] {
+            assert_eq!(search_fold(query), "simon and garfunkel", "{query}");
+        }
+
+        // **The fold runs one way on purpose.** Turning `and` into `&` would
+        // make `Sand` into `S&` and take a real word off the shelf.
+        assert_eq!(search_fold("Sand in My Shoes"), "sand in my shoes");
+        assert_eq!(search_fold("Iceland"), "iceland");
+        // …and the spelling everybody uses for this one still works.
+        assert_eq!(search_fold("R&B"), search_fold("randb"));
     }
 
     /// A track with nothing but a path, for building fixtures from.

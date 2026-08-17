@@ -121,6 +121,18 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **Searching for `and` finds `&`, and the other way round.** *Day & Night*,
+  *Simon & Garfunkel*, *Earth, Wind & Fire* — every record spelled the way its
+  sleeve spells it was unfindable by the word anybody would type for it. One
+  fold now covers both, applied to what is searched and to what you type.
+- **Right-clicking in a playlist no longer sends it back to the top.** The
+  list was not being scrolled back; it was being rebuilt from scratch, because
+  the menu's layer only joined the window while it was open. Opening search or
+  the status panel did the same to whatever was under them.
+- **Now playing fits what is in it**, so the heart sits beside the title
+  rather than stranded at the far edge of the window with nothing between
+  them.
+
 - **The loudest and fastest records baz names are no longer whichever track
   the analyser got most wrong.** Beat trackers routinely report double the
   real tempo, and those mistakes collect at exactly the top of the list — so

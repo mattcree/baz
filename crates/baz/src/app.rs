@@ -112,6 +112,17 @@ pub(crate) fn search_id() -> iced::widget::Id {
 ///
 /// It is a named constant with a test holding it apart from [`search_id`],
 /// because the entire mechanism is that the two strings differ.
+/// **An empty layer**, so a stack level never has to appear and disappear.
+///
+/// iced diffs the widget tree by position: a level that comes and goes hands
+/// every widget beneath it a fresh state on the frame it changes. A layer
+/// that is always there and sometimes empty costs a zero-sized `Space` that
+/// captures nothing, and costs no widget below it its scroll offset, its
+/// hover, or a gesture in flight.
+fn nothing() -> Element<'static, Message> {
+    iced::widget::Space::new().width(0.0).height(0.0).into()
+}
+
 fn nothing_id() -> iced::widget::Id {
     iced::widget::Id::new("baz-nothing")
 }
@@ -7313,31 +7324,40 @@ impl App {
             ),
         ]
         .into();
-        let whole: Element<'_, Message> = match &self.screen {
-            Screen::Shelf(state) if state.search_open => iced::widget::stack![
-                whole,
-                views::search::layer(
+        // **Every floating layer is stacked always**, empty at rest.
+        //
+        // This is the drag ghost's rule below, applied to the three layers
+        // that predate it — and it is a fix rather than a tidy-up. iced diffs
+        // the widget tree by position, so a stack level that appears only
+        // when a layer opens moves every widget under it one level down at
+        // that moment, and each of them is handed a fresh state. The owner
+        // found it as *"right clicking in a playlist seems to reset scroll
+        // position"* (`docs/WORK.md` item 81): the scrollable was not
+        // scrolled back, it was replaced by a new one that had never been
+        // scrolled at all. Search and the status panel did the same thing to
+        // whatever was under them.
+        let whole: Element<'_, Message> = iced::widget::stack![
+            whole,
+            match &self.screen {
+                Screen::Shelf(state) if state.search_open => views::search::layer(
                     state,
                     &self.player,
                     self.window,
                     matches!(self.place, Place::Playlist(_) | Place::NewPlaylist),
                 ),
-            ]
-            .into(),
-            Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => whole,
-        };
-        let whole: Element<'_, Message> = if self.status_open {
+                Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => nothing(),
+            },
+        ]
+        .into();
+        let whole: Element<'_, Message> = iced::widget::stack![
+            whole,
             match &self.screen {
-                Screen::Shelf(state) => iced::widget::stack![
-                    whole,
+                Screen::Shelf(state) if self.status_open =>
                     views::status::layer(&state.health, self.health_summary(), self.window),
-                ]
-                .into(),
-                Screen::Setup(_) | Screen::Blocked(_) => whole,
-            }
-        } else {
-            whole
-        };
+                Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => nothing(),
+            },
+        ]
+        .into();
         // **The context menu** (doc 09 §5.2), floated at the pointer by the
         // same ADR-0016 mechanics as the panel — but stacked over the *whole
         // window*, bar included, because the bar's own now-playing menu
@@ -7346,12 +7366,15 @@ impl App {
         // it to whatever row is beneath, whose own `menu::area` replaces
         // the menu — one at a time by construction. Wheel travel passes
         // beside both, and nothing reflows by a pixel: layers, not columns.
-        let whole: Element<'_, Message> = match &self.menu {
-            Some(open) if matches!(self.screen, Screen::Shelf(_)) => {
-                iced::widget::stack![whole, views::context_menu::layer(open, self.window)].into()
-            }
-            _ => whole,
-        };
+        let whole: Element<'_, Message> = iced::widget::stack![
+            whole,
+            match &self.menu {
+                Some(open) if matches!(self.screen, Screen::Shelf(_)) =>
+                    views::context_menu::layer(open, self.window),
+                _ => nothing(),
+            },
+        ]
+        .into();
         // **The drag's ghost** — the lifted row's title following the
         // pointer (doc 09 §13 step 8) — on its own topmost layer: it rides
         // over the panel it may be headed for. The layer is all
@@ -7370,7 +7393,7 @@ impl App {
         // ghost froze at the lift point.)
         let ghost: Element<'_, Message> = match &self.drag {
             Some(drag) => views::drag_ghost::layer(drag, self.window),
-            None => iced::widget::Space::new().width(0.0).height(0.0).into(),
+            None => nothing(),
         };
         crate::window_frame::resize_frame(
             iced::widget::stack![whole, ghost],
@@ -12667,6 +12690,52 @@ mod tests {
                 .iter()
                 .skip(1)
                 .all(|choice| choice.minutes.is_some_and(|minutes| minutes > 0)),
+        );
+    }
+
+    /// **A floating layer is stacked always, and empty at rest.**
+    ///
+    /// iced diffs the widget tree by position, so a stack level that appears
+    /// only when its layer opens moves every widget beneath it one level down
+    /// on that frame — and each of them is handed a fresh state. The drag
+    /// ghost learned this the hard way (its own note records the ghost
+    /// freezing at the lift); the menu, search and status layers kept the
+    /// conditional form until the owner found it as *"right clicking in a
+    /// playlist seems to reset scroll position"*. The scrollable was not
+    /// scrolled back — it was replaced by one that had never been scrolled.
+    ///
+    /// Pinned at the source because the failure is invisible in a unit test
+    /// and costs a whole headless run to see: what it forbids is the shape,
+    /// which is exactly what a reader of this file can check.
+    #[test]
+    fn no_floating_layer_comes_and_goes_from_the_tree() {
+        let source = include_str!("app.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a head");
+        let assembly = source
+            .split_once("// **Every floating layer is stacked always**")
+            .expect("the layer assembly")
+            .1;
+        let assembly = &assembly[..assembly
+            .find("crate::window_frame::resize_frame")
+            .expect("the frame the layers go into")];
+        let drawn: String = assembly
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !drawn.contains("=> whole"),
+            "a layer is falling back to the unstacked tree again, which resets \
+             every widget under it"
+        );
+        // Four layers — search, status, the context menu, the drag ghost —
+        // and every one of them has a resting form.
+        assert_eq!(
+            drawn.matches("nothing()").count(),
+            4,
+            "a floating layer has no empty form, or one has been added without one"
         );
     }
 

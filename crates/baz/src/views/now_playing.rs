@@ -841,20 +841,32 @@ fn placard<'a>(
         .font(theme::SEMIBOLD)
         .color(room.paper)
         .wrapping(text::Wrapping::None);
+    // **The placard fits its content, up to `width`.** The owner: *"can you
+    // make the now-playing fit the content up to a max width and ensure the
+    // heart is snapped to the right hand side of that box so it doesn't
+    // appear to be off on its own."*
+    //
+    // It took `width` whatever was in it, so a two-word title left the heart
+    // stranded a long way to the right of the thing it belongs to — and a
+    // control that far from its subject reads as a control of the *page*.
+    // Shrinking the box is what puts them next to each other, and proximity
+    // is the whole of how a listener knows what a control acts on.
+    //
+    // A long title still stops at `width`: the title's own box is capped at
+    // what is left after the heart's slot and the gap between them, so the
+    // ellipsis lands where it always did.
     let title_line: Element<'_, Message> = if let Some((path, selected)) = favourite {
         row![
-            container(title).width(Length::Fill).clip(true),
+            container(title)
+                .max_width(width - theme::STEPPER_HIT - theme::GAP_SM)
+                .clip(true),
             crate::views::page::favourite_slot(path, selected),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center)
-        .width(Length::Fixed(width))
         .into()
     } else {
-        container(title)
-            .width(Length::Fixed(width))
-            .clip(true)
-            .into()
+        container(title).max_width(width).clip(true).into()
     };
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
@@ -869,7 +881,7 @@ fn placard<'a>(
         title_line,
     ]
     .spacing(theme::GAP_XS)
-    .width(Length::Fixed(width));
+    .max_width(width);
     if show_album && let Some(album) = &now.album {
         placard = placard.push(
             text(album.clone())
