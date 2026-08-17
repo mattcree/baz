@@ -119,6 +119,11 @@ pub(crate) static FIT_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
 pub(crate) static FIT_MEDIUM: LazyLock<FontRef<'static>> = LazyLock::new(|| {
     FontRef::try_from_slice(font::SANS_MEDIUM).expect("the bundled medium face is valid")
 });
+/// The bundled `SemiBold` face — Now playing's display title is set in it, and a
+/// line measured against the wrong weight is a line fitted to the wrong width.
+pub(crate) static FIT_SEMIBOLD: LazyLock<FontRef<'static>> = LazyLock::new(|| {
+    FontRef::try_from_slice(font::SANS_SEMIBOLD).expect("the bundled semibold face is valid")
+});
 
 /// One fixed-height line of type, shortened with a **visible** end ellipsis
 /// when it does not fit its measure.

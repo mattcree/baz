@@ -43,11 +43,53 @@ const INK_FLOOR: f32 = 0.10;
 /// The ink a full-scale band reaches, above [`INK_FLOOR`].
 const INK_RANGE: f32 = 0.62;
 
-/// The ink for a level, on the ramp both fields share.
-fn level_ink(level: f32, room: &theme::Palette) -> iced::Color {
+/// **The colours the bars are drawn in**: the record's own three, else the
+/// room's lamp when no cover has yielded a field.
+///
+/// The fallback is one colour, which is what every record used to get. It is
+/// the right answer for a track with no artwork — there is no record's colour
+/// to use, and inventing one would be the field module's cardinal sin — and
+/// the wrong answer for everything else, which is why it is a fallback now
+/// rather than the rule.
+fn inks(field: Option<crate::field::Field>, room: &theme::Palette) -> [iced::Color; 3] {
+    field.map_or([room.lamp; 3], crate::field::Field::inks)
+}
+
+/// `index` as a fraction of `count - 1`, for walking a ramp across a field.
+/// Zero when there is nothing to walk.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "band and history counts are fixed below 256"
+)]
+fn across(index: usize, count: usize) -> f32 {
+    let last = count.saturating_sub(1);
+    if last == 0 {
+        return 0.0;
+    }
+    index as f32 / last as f32
+}
+
+/// The ink for a band at `position` of the way across a field, at `level`.
+///
+/// **The hue walks the record's three colours across the axis** and the alpha
+/// answers the level, so a field is a picture of *this* record moving rather
+/// than one flat colour changing height. Interpolating in sRGB is honest here
+/// for the reason it usually is not: the three ends are the same lightness and
+/// chroma by construction ([`crate::field::INK_L`], [`crate::field::INK_CHROMA`]),
+/// so a straight mix travels between them without the grey sag a mix of
+/// unequal colours would have.
+fn level_ink(level: f32, position: f32, inks: [iced::Color; 3]) -> iced::Color {
+    let position = position.clamp(0.0, 1.0) * 2.0;
+    let (from, to, t) = if position <= 1.0 {
+        (inks[0], inks[1], position)
+    } else {
+        (inks[1], inks[2], position - 1.0)
+    };
     iced::Color {
+        r: (to.r - from.r).mul_add(t, from.r),
+        g: (to.g - from.g).mul_add(t, from.g),
+        b: (to.b - from.b).mul_add(t, from.b),
         a: INK_FLOOR + INK_RANGE * level.clamp(0.0, 1.0),
-        ..room.lamp
     }
 }
 
@@ -420,23 +462,34 @@ pub(crate) fn background(
     history: &History,
     width: f32,
     height: f32,
+    field: Option<crate::field::Field>,
 ) -> Element<'static, Message> {
     match mode {
         Mode::Off => Space::new().width(Length::Fill).height(Length::Fill).into(),
-        Mode::Spectrum => spectrum(audio, width, height),
-        Mode::Waveform => waveform(history, width, height),
-        Mode::Spectrogram => spectrogram(history, width, height),
+        Mode::Spectrum => spectrum(audio, width, height, field),
+        Mode::Waveform => waveform(history, width, height, field),
+        Mode::Spectrogram => spectrogram(history, width, height, field),
     }
 }
 
-fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'static, Message> {
+fn spectrum(
+    audio: &VisualizationFrame,
+    width: f32,
+    height: f32,
+    field: Option<crate::field::Field>,
+) -> Element<'static, Message> {
     let room = theme::active();
+    let inks = inks(field, room);
     let bands = frequency_bands(audio);
+    let bands_len = bands.len();
     let usable_h = height.max(1.0);
     let mut bars = row![].spacing(BAR_GAP).align_y(iced::Alignment::End);
-    for level in bands {
+    for (index, level) in bands.into_iter().enumerate() {
         let bar_h = (usable_h * level).max(2.0);
-        let ink = level_ink(level, room);
+        // Across the frequency axis: the record's first colour at the bass end
+        // and its third at the top, which gives the field a direction as well
+        // as a shape.
+        let ink = level_ink(level, across(index, bands_len), inks);
         let bar = container(
             Space::new()
                 .width(Length::Fill)
@@ -463,13 +516,22 @@ fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'sta
         .into()
 }
 
-fn waveform(history: &History, width: f32, height: f32) -> Element<'static, Message> {
+fn waveform(
+    history: &History,
+    width: f32,
+    height: f32,
+    field: Option<crate::field::Field>,
+) -> Element<'static, Message> {
     let room = theme::active();
+    let inks = inks(field, room);
     let mut trace = row![].spacing(2.0).align_y(iced::Alignment::Center);
     for position in 0..history.len {
         let level = history.amplitude(position);
         let line_h = (height * level * 0.72).max(2.0);
-        let ink = level_ink(level, room);
+        // The waveform's axis is *time*, so the walk is oldest to newest —
+        // the last second of music reads left to right in the record's own
+        // colours.
+        let ink = level_ink(level, across(position, history.len), inks);
         trace = trace.push(
             container(Space::new())
                 .width(Length::FillPortion(1))
@@ -491,17 +553,26 @@ fn waveform(history: &History, width: f32, height: f32) -> Element<'static, Mess
         .into()
 }
 
-fn spectrogram(history: &History, width: f32, height: f32) -> Element<'static, Message> {
+fn spectrogram(
+    history: &History,
+    width: f32,
+    height: f32,
+    field: Option<crate::field::Field>,
+) -> Element<'static, Message> {
     let room = theme::active();
+    let inks = inks(field, room);
     let mut texture = row![].spacing(1.0);
     for position in 0..history.len {
         let mut slice = column![].spacing(1.0);
-        for level in history.spectrum(position).iter().rev() {
+        let slice_bands = history.spectrum(position).len();
+        for (index, level) in history.spectrum(position).iter().rev().enumerate() {
             // The spectrogram is a *texture* — thousands of cells, each one
             // the size of a full-scale bar's tip — so it takes the same ramp
             // at a lower gain. At the fields' own ink a wall of cells would be
             // a solid sheet rather than a picture of the last second.
-            let ink = level_ink(level * 0.45, room);
+            // Top of the slice is the top of the spectrum, so the ramp runs
+            // the same way it does across the bars.
+            let ink = level_ink(level * 0.45, 1.0 - across(index, slice_bands), inks);
             slice = slice.push(
                 container(Space::new())
                     .width(Length::Fill)

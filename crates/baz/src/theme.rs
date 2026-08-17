@@ -1074,6 +1074,31 @@ pub const LINE_HERO: f32 = 32.0;
 /// Leading for [`SIZE_HERO`], derived from [`LINE_HERO`].
 pub const LEADING_HERO: f32 = LINE_HERO / SIZE_HERO;
 
+/// **Display: the sounding track's title on Now playing, and nothing else**
+/// (40 px).
+///
+/// The owner, twice — *"the alignment and general styling of the song title
+/// area of the now playing view is poor"*, then *"it still looks a bit
+/// poor… it really needs to pop"* — which by the repeated-ask rule means the
+/// size was the problem and not the arrangement.
+///
+/// It stood at [`SIZE_HERO`] 28, which is the size the *first-run question*
+/// takes and the size a **record page** gives an album's title inside a dense
+/// two-column layout. Now playing is neither: it is one work, alone, on a
+/// surface with no rows, no table and nothing else asking to be read. A title
+/// at the same size as a heading on a crowded page is not a presentation of
+/// the work, it is a caption for it.
+///
+/// **A new rung rather than a bigger hero**, because `SIZE_HERO` has other
+/// tenants that must not grow with it — the first-run question is a sentence
+/// and would become shouting.
+pub const SIZE_DISPLAY: f32 = 40.0;
+/// Line box of [`SIZE_DISPLAY`]: **44** on the 4 px lattice, tighter in ratio
+/// than [`LINE_HERO`] because a display line is set once and never stacked.
+pub const LINE_DISPLAY: f32 = 44.0;
+/// Leading for [`SIZE_DISPLAY`], derived from [`LINE_DISPLAY`].
+pub const LEADING_DISPLAY: f32 = LINE_DISPLAY / SIZE_DISPLAY;
+
 /// The UI face at Regular: baz's default font, and the family every weight
 /// below is a member of.
 ///

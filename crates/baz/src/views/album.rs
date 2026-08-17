@@ -125,6 +125,13 @@ pub(crate) fn view<'a>(
             } else {
                 Vec::new()
             },
+            // Only a genuinely multi-format album gets a control; a
+            // single-format album must look exactly as it always did.
+            aside_held: if album.editions.len() > 1 {
+                vec![edition_selector(album, edition)]
+            } else {
+                Vec::new()
+            },
             aside_tail: aside_tail(album, edition),
             identity: identity(album, edition),
             rows: track_rows(shelf, album, edition, player, collecting, hovered_row),
@@ -234,8 +241,11 @@ fn sleeve<'a>(
         .into()
 }
 
-/// What a *record's* aside carries below its acts: the edition selector, where
-/// there is a choice to make, and then the condition report.
+/// What a *record's* aside carries below its acts: the condition report.
+///
+/// The edition selector used to lead this list and is now held above the
+/// scroller with the commitment ([`page::Page::aside_held`]) — it chooses what
+/// the page is showing, where `Details` describes it.
 ///
 /// This is the slot a playlist fills with its rename field, and the difference
 /// is not drift: a record is a found thing whose facts were read off its files,
@@ -245,11 +255,6 @@ fn aside_tail<'a>(
     edition: Option<&'a vm::EditionVm>,
 ) -> Vec<Element<'a, Message>> {
     let mut tail: Vec<Element<'a, Message>> = Vec::new();
-    // Only a genuinely multi-format album gets a control; a single-format
-    // album must look exactly as it always did.
-    if album.editions.len() > 1 {
-        tail.push(edition_selector(album, edition));
-    }
     if let Some(block) = details(album, edition) {
         tail.push(block);
     }

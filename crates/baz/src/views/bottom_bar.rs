@@ -413,9 +413,20 @@ fn back_to_source<'a>(
 ) -> Element<'a, Message> {
     let room = theme::active();
     let lines = now_playing_line(player, theme::bar_title_lane_w(window_w), standing);
-    let Some(source) = source else {
-        return lines;
-    };
+    // **The sleeve is drawn for the track, not for the door.**
+    //
+    // This used to return here when there was no `source`, and the artwork was
+    // composed *after* that line — so a block with nothing to navigate to had
+    // no cover either. It never showed while a track was sounding, because a
+    // sounding track always had a source, and it showed up the moment the bar
+    // started naming the **standing** track: that track has no source (nothing
+    // is playing, so there is no run to go back to) and the owner met it on
+    // the first launch after the change — *"the album art for the now playing
+    // after start the app is not there"*.
+    //
+    // The two facts are independent and are now drawn independently: the cover
+    // says *what this is*, and the button says *and you can go there*. The
+    // second is allowed to be absent.
     // **The sounding record's sleeve, inside the block's own hit box.** One
     // object: the cover and the type are the same control and go to the same
     // place, which is why the image is a child of the button rather than a
@@ -440,6 +451,10 @@ fn back_to_source<'a>(
                 .align_y(iced::Alignment::Center)
                 .into()
         }
+    };
+    // No door, but the record is still on screen.
+    let Some(source) = source else {
+        return lines;
     };
     // There is no lit state: this block names the playing track, while its
     // destination may be either a playlist or an album. Lighting it for either
@@ -1461,6 +1476,21 @@ mod tests {
             "the title is set raw again, so a long name stops mid-glyph with \
              nothing to say it continues"
         );
+    }
+
+    /// **The block's own anatomy**: whose heart it is, how wide it is, and
+    /// what it names when nothing sounds.
+    #[test]
+    fn the_now_playing_block_is_content_sized_and_names_the_standing_track() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/bottom_bar.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("this module has a non-test head");
         // **The heart is a sibling of the door, not a child of it.** Nested,
         // it would either steal the block's press or issue it.
         let block = {
@@ -1486,6 +1516,29 @@ mod tests {
         assert!(
             block.contains("theme::BAR_TITLE_MIN_W"),
             "the block lost its floor, so a short title collapses it"
+        );
+        // **The sleeve is drawn for the track, not for the door.** The
+        // artwork used to be composed after the `source` early return, so a
+        // block with nowhere to navigate to had no cover — invisible while
+        // that only happened with nothing playing, and immediately visible
+        // once the bar started naming the standing track.
+        let door = {
+            let rest = shipped
+                .split_once("fn back_to_source")
+                .expect("the door exists")
+                .1;
+            &rest[..rest.find("\n}\n").expect("a function ends")]
+        };
+        let art = door
+            .find("Cover::Placeholder")
+            .expect("the sleeve is drawn");
+        let bail = door
+            .find("let Some(source) = source else")
+            .expect("the door may be absent");
+        assert!(
+            art < bail,
+            "the cover is composed after the no-source return again, so a \
+             track with nothing to navigate to loses its artwork"
         );
         // **The bar names the last track when nothing sounds** (the owner,
         // 2026-08-17). `Nothing playing` is kept for the state it actually

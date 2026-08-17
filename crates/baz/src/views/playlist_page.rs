@@ -130,6 +130,7 @@ pub(crate) fn view<'a>(
                     .into()
             })),
             acts,
+            aside_held: Vec::new(),
             aside_tail: Vec::new(),
             identity,
             rows,

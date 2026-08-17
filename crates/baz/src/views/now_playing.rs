@@ -159,7 +159,7 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
 /// absent fact reserves a blank slot. The momentary meter remains unbuilt.
 const BELOW: f32 = theme::GAP_XL                                  // work → placard
     + theme::LINE_HEADING + theme::GAP_XS                         // artist
-    + theme::LINE_HERO + theme::GAP_XS                            // title
+    + theme::LINE_DISPLAY + theme::GAP_XS                         // title
     + theme::LINE_BODY; // album
 
 /// The album line and the one inter-child gap that exists only with it.
@@ -341,6 +341,14 @@ pub(crate) fn view<'a>(
             visual.history,
             visual.favourite,
             fact,
+            // The record's colours for the bars, read straight off the hero
+            // rather than by composing a `Work` this branch deliberately does
+            // not pay for. `None` is a record whose cover has not decoded yet
+            // or has no hue worth reading, and the fields fall back to the
+            // room's lamp — the one colour they all used to be.
+            now.album_id
+                .and_then(|id| shelf.hero(id))
+                .and_then(|hero| hero.field),
         );
     }
     // **The source's own pixels**, which is what bounds the work now that
@@ -387,7 +395,14 @@ pub(crate) fn view<'a>(
     // layer; with it on the bars fill the whole place beneath the centred
     // composition instead of replacing the artwork.
     let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
-        crate::visualizer::background(visual.mode, audio, visual.history, width, height)
+        crate::visualizer::background(
+            visual.mode,
+            audio,
+            visual.history,
+            width,
+            height,
+            work.field,
+        )
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
@@ -411,6 +426,7 @@ fn without_album_object<'a>(
     history: &crate::visualizer::History,
     favourite: Option<(&std::path::Path, bool)>,
     fact: Option<&String>,
+    field: Option<field::Field>,
 ) -> Element<'a, Message> {
     let (mask_width, identity_width) = objectless_measures(width);
     let identity = identity(
@@ -429,7 +445,7 @@ fn without_album_object<'a>(
         None => song.into(),
     };
     let spectrum: Element<'static, Message> = if let Some(audio) = audio {
-        crate::visualizer::background(mode, audio, history, width, height)
+        crate::visualizer::background(mode, audio, history, width, height, field)
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
@@ -861,12 +877,36 @@ fn placard<'a>(
     favourite: Option<(&std::path::Path, bool)>,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let title = text(now.title.clone())
-        .size(theme::SIZE_HERO)
-        .line_height(theme::LEADING_HERO)
-        .font(theme::SEMIBOLD)
-        .color(room.paper)
-        .wrapping(text::Wrapping::None);
+    // **The work's title at the display rung, fitted.**
+    //
+    // Two changes and they are one change. The size is the answer to *"it
+    // really needs to pop"* — 28 is what a record page gives an album title
+    // inside a dense two-column layout, and this page is one work alone with
+    // nothing else asking to be read.
+    //
+    // The fitting is what makes that size safe. It was a raw `Wrapping::None`
+    // inside a clipped container, so a long title stopped **mid-glyph with
+    // nothing to say it continues** — the exact defect the owner reported in
+    // the bottom bar and which `crate::views::fitted_line` was lifted out to
+    // answer. At 40 px a title runs out of measure far sooner than at 28, so
+    // raising the size without this would have shipped the same defect on a
+    // bigger surface.
+    let balance = theme::STEPPER_HIT + theme::GAP_SM;
+    let title_measure = if favourite.is_some() {
+        (width - 2.0 * balance).max(1.0)
+    } else {
+        width
+    };
+    let title = crate::views::fitted_line(&crate::views::Fitted {
+        content: now.title.as_str(),
+        face: &crate::views::FIT_SEMIBOLD,
+        size: theme::SIZE_DISPLAY,
+        leading: theme::LEADING_DISPLAY,
+        line_height: theme::LINE_DISPLAY,
+        font: theme::SEMIBOLD,
+        color: room.paper,
+        measure: title_measure,
+    });
     // **The placard fits its content, up to `width`.** The owner: *"can you
     // make the now-playing fit the content up to a max width and ensure the
     // heart is snapped to the right hand side of that box so it doesn't
@@ -896,28 +936,32 @@ fn placard<'a>(
     // nothing, cannot be pressed, and buys the one thing this page is for:
     // the work's title on the work's centre line.
     let title_line: Element<'_, Message> = if let Some((path, selected)) = favourite {
-        let balance = theme::STEPPER_HIT + theme::GAP_SM;
         row![
             Space::new().width(Length::Fixed(balance)),
-            container(title).max_width(width - 2.0 * balance).clip(true),
+            title,
             crate::views::page::favourite_slot(path, selected),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center)
         .into()
     } else {
-        container(title).max_width(width).clip(true).into()
+        title
     };
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall
         // label's own order, at the far field's scale.
+        // **The artist reads as the title's pair, not as a footnote.** It was
+        // `paper_faint`, the quietest ink in the room, under a title three
+        // times its size — so the block had one voice and a whisper rather
+        // than a hierarchy. `paper_dim` is one rung up and is the ink the
+        // record page's own byline takes.
         text(theme::tracked(
             &now.artist_line().unwrap_or_default().to_uppercase()
         ))
         .size(theme::SIZE_HEADING)
         .line_height(theme::LEADING_HEADING)
         .font(theme::MEDIUM)
-        .color(room.paper_faint),
+        .color(room.paper_dim),
         title_line,
     ]
     .spacing(theme::GAP_XS)
@@ -1170,22 +1214,22 @@ mod tests {
         // children, two `GAP_XS` between them, and one `GAP_XL` off the sleeve.
         // If any of those move, this is what
         // catches the reservation not moving with them.
-        const CHILDREN: f32 = theme::LINE_HEADING + theme::LINE_HERO + theme::LINE_BODY;
-        const { assert!(BELOW == 96.0) }
-        // The 128 this recorded was the *old* total — BELOW 96 plus the 32 px
-        // transport that no longer stands on this surface (ADR-0029's first
-        // step). It is pinned with that historical 32 as a literal: the
-        // 2026-08-14 control pass grew the box to 40 without giving this
-        // surface one — the transport is gone, `BELOW` is what `art_edge`
-        // actually reserves, and what must not move is `BELOW` alone.
-        const { assert!(BELOW + 32.0 == 128.0) }
+        const CHILDREN: f32 = theme::LINE_HEADING + theme::LINE_DISPLAY + theme::LINE_BODY;
+        // **108 since 2026-08-17**, and the twelve it grew by is the title's:
+        // the work's name moved from `LINE_HERO` 32 to `LINE_DISPLAY` 44
+        // (*"it really needs to pop"*). The reservation had to move with it or
+        // the sleeve would be sized against a placard shorter than the one
+        // drawn, and the bottom line would fall off the surface — which is the
+        // exact failure this test exists to catch, arriving from the other
+        // direction.
+        const { assert!(BELOW == 108.0) }
         const { assert!(BELOW == theme::GAP_XL + CHILDREN + 2.0 * theme::GAP_XS) }
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the
         // placard.
         let bare = |w: f32, h: f32| art_edge(w, h, 0.0, f32::INFINITY);
         assert!((bare(1184.0, 779.0) - (779.0 - 80.0 - BELOW)).abs() < f32::EPSILON);
-        assert!((bare(1184.0, 779.0) - 603.0).abs() < f32::EPSILON);
+        assert!((bare(1184.0, 779.0) - 591.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1383,8 +1427,8 @@ mod tests {
     /// and 44 px of `below` is what puts a 1920 work over the reference.
     ///
     /// **It is allowed to move because nothing a listener can see moves badly.**
-    /// The work at 1920 is height-bound at 823 px with the run at 440 and still
-    /// 823 px with it at 503 — the run takes width the record structurally
+    /// The work at 1920 is height-bound at 811 px with the run at 440 and still
+    /// 811 px with it at 496 — the run takes width the record structurally
     /// cannot use, which is the property `the_run_costs_the_record_nothing…`
     /// sweeps. What changes is that 32 px of the 323 px hole at that size closes
     /// by measure and the rest closes by centring. Recorded rather than tuned
@@ -1398,10 +1442,11 @@ mod tests {
             // 1280 × 860, lane open — a 603 px work, under the reference, so
             // the scale's floor holds it at exactly the desktop measure.
             (1000.0_f32, 779.0_f32, 1024.0_f32, 440.0_f32),
-            // 1920 × 1080, lane open — an 823 px work, just over. See above.
-            (1640.0, 999.0, 1024.0, 440.0 * (823.0 / 720.0)),
+            // 1920 × 1080, lane open — an 811 px work, just over. See above.
+            // (823 until the display title took 12 px more of the column.)
+            (1640.0, 999.0, 1024.0, 440.0 * (811.0 / 720.0)),
             // 2560 × 1440, lane open — the window the owner was looking at.
-            (2280.0, 1359.0, 1024.0, 440.0 * (1183.0 / 720.0)),
+            (2280.0, 1359.0, 1024.0, 440.0 * (1171.0 / 720.0)),
             // 3840 × 2160, lane collapsed — the scale at its ceiling.
             (3744.0, 2079.0, 3000.0, 440.0 * KIOSK_SCALE_MAX),
         ] {

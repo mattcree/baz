@@ -140,6 +140,20 @@ pub(crate) const CEILING_L: f32 = 0.22;
 /// accent states playback truth and the field must never be mistaken for it.
 pub(crate) const CHROMA: f32 = 0.024;
 
+/// The lightness [`Field::inks`] draws at — bright enough to read as colour
+/// over the room, and short of white so a hue survives at full scale.
+pub(crate) const INK_L: f32 = 0.72;
+
+/// The chroma [`Field::inks`] draws at.
+///
+/// **0.11, and it is a gamut measurement like [`CHROMA`] is.** A binary search
+/// over every hue at [`INK_L`] puts the largest chroma that leaves no channel
+/// clipped at 0.113; this takes a little under it.
+/// `every_hue_survives_the_visualizers_ink` re-derives that rather than
+/// trusting the sentence, for [`CHROMA`]'s reason: a colour that silently
+/// clips is a hue that is no longer the record's.
+pub(crate) const INK_CHROMA: f32 = 0.11;
+
 /// A pixel needs at least this much oklch chroma to have a hue worth reading.
 ///
 /// Below it a pixel is grey, and grey has an *arbitrary* hue angle — the
@@ -319,6 +333,37 @@ impl Field {
                 self.hues[index],
             )
         })
+    }
+
+    /// **The record's own colours, at a strength the wash may not have** —
+    /// what `crate::visualizer` draws its bars in.
+    ///
+    /// The owner, 2026-08-17: *"the visualisations seem to be all the same
+    /// colour? some sort of weird green or something? it should be more
+    /// dynamic and interesting."* They were one colour, and it was the room's
+    /// [`theme::Palette::lamp`] — one amber for every record, every band and
+    /// every frame — so the only thing that ever changed was height, and over
+    /// a green-tinted wash a thin amber reads as neither.
+    ///
+    /// These are the same three hues the wash is built from, so a record's
+    /// bars and its background are demonstrably the same reading of the same
+    /// cover. What differs is **strength**, and the difference is the whole
+    /// point:
+    ///
+    /// - [`CHROMA`] is pinned at 0.024 because the wash is a *ground*, has to
+    ///   survive every hue in every room without clipping, and must never be
+    ///   mistaken for the lamp's playback truth.
+    /// - Bars are neither. They sit over the wash, under a placard that has
+    ///   its own mask, and they state nothing but themselves — so they take
+    ///   [`INK_CHROMA`] and [`INK_L`], which is a colour a person can see.
+    ///
+    /// **The reading is still the height.** Hue carries nothing here — a bar
+    /// means what its length says and would mean it in greyscale — which is
+    /// the standing rule for this product and the reason a hue ramp is
+    /// allowed to be decorative.
+    #[must_use]
+    pub(crate) fn inks(self) -> [Color; 3] {
+        std::array::from_fn(|index| from_oklch(INK_L, INK_CHROMA, self.hues[index]))
     }
 
     /// **The field, as the toolkit draws it**: a three-stop linear wash at
@@ -710,6 +755,39 @@ mod tests {
     /// display could manage, without saying so. Swept at one-degree steps
     /// across the whole ladder in both rooms; the check is that a round trip
     /// through sRGB comes back to the hue that went in.
+    /// **And the visualizer's ink survives too** — the same instrument, at
+    /// [`INK_L`], for [`INK_CHROMA`]. The bars are decoration, but a
+    /// decoration that clips is drawing a hue that is not the record's, which
+    /// is the thing this module exists to refuse.
+    #[test]
+    fn every_hue_survives_the_visualizers_ink() {
+        // The largest chroma that clips nowhere at this lightness, found the
+        // way `CHROMA`'s was, and asserted to be above what we spend.
+        let clips = |chroma: f32| {
+            (0..3600).any(|step| {
+                let hue = f32::from(u16::try_from(step).unwrap_or(u16::MAX)) / 10.0;
+                let color = from_oklch(INK_L, chroma, hue);
+                [color.r, color.g, color.b]
+                    .into_iter()
+                    .any(|channel| !(0.001..=0.999).contains(&channel))
+            })
+        };
+        let (mut lo, mut hi) = (0.0_f32, 0.4_f32);
+        for _ in 0..40 {
+            let mid = f32::midpoint(lo, hi);
+            if clips(mid) { hi = mid } else { lo = mid }
+        }
+        assert!(
+            INK_CHROMA < lo,
+            "the visualizer's ink clips: the largest safe chroma at L {INK_L} \
+             is {lo:.4} and it spends {INK_CHROMA}"
+        );
+        assert!(
+            !clips(INK_CHROMA),
+            "some hue leaves sRGB at the shipped ink"
+        );
+    }
+
     #[test]
     fn every_hue_survives_the_ladder_without_leaving_srgb() {
         for room in [&theme::CLOSING_TIME, &theme::READING_ROOM] {

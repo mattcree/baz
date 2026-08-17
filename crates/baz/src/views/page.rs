@@ -190,6 +190,17 @@ pub(crate) struct Page<'a> {
     pub(crate) commitment: Option<Element<'a, Message>>,
     /// The quieter acts, in one row under the commitment.
     pub(crate) acts: Vec<Element<'a, Message>>,
+    /// **What the aside holds still, under the commitment** — things that
+    /// choose *what the page is showing* rather than describe it.
+    ///
+    /// The record page's edition selector is the one tenant (the owner,
+    /// 2026-08-17: *"move the flac/mp3 toggle out of the scroller as well"*),
+    /// and it belongs here for `Play album`'s reason: it is a control, and a
+    /// control that can be scrolled out of reach is a control that is
+    /// sometimes not there. Picking FLAC over MP3 also changes the rows
+    /// beside it, so scrolling away from it hides the cause of what you are
+    /// looking at.
+    pub(crate) aside_held: Vec<Element<'a, Message>>,
     /// Whatever else the aside carries, in order, below the acts.
     pub(crate) aside_tail: Vec<Element<'a, Message>>,
     /// The identity block that heads the main column.
@@ -252,6 +263,7 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         sleeve,
         commitment,
         acts,
+        aside_held,
         aside_tail,
         identity,
         rows,
@@ -329,6 +341,9 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
         .width(Length::Fixed(theme::ALBUM_ASIDE_W));
     if let Some(commitment) = commitment {
         subject = subject.push(commitment);
+    }
+    for block in aside_held {
+        subject = subject.push(block);
     }
     if !acts.is_empty() {
         // **Two to a line.** The aside is [`theme::ALBUM_ASIDE_W`] wide and
