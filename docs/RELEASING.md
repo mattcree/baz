@@ -207,6 +207,41 @@ of scratch space, and keep it off a tmpfs.
     `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
     `packaging/flatpak/README.md` has the commands.
 
+## v0.3.0 release record
+
+Cut on 2026-08-17 from annotated tag `v0.3.0`, resolving to commit
+`fc2b083`. The first dry run was
+[31985077983](https://github.com/mattcree/baz/actions/runs/31985077983), the
+second [31986292130](https://github.com/mattcree/baz/actions/runs/31986292130),
+and the tagged publish run was
+[31987176065](https://github.com/mattcree/baz/actions/runs/31987176065).
+
+The three archives were downloaded again and **verified against the published
+`SHA256SUMS`** (all three `OK`). The Linux binary reports
+`baz 0.3.0 — a music player for people who own their music`; the macOS
+executable is a two-slice `x86_64`/`arm64` Mach-O inside a `baz.app` whose
+`Info.plist` carries `0.3.0`, and the metainfo in the Linux archive carries the
+`0.3.0` release element.
+
+**The dry run earned its place for the second release running**, and this time
+on a check added since the last one. The macOS bundle step grepped the built
+`.icns` for a leading `TOC ` chunk, on the reasoning that `iconutil` always
+writes one and the committed fallback writer does not. The first release to
+actually run that check failed it — on a 406 KB icon `iconutil` had just built
+and logged building. Reading the shipped file settles it: Apple's tool wrote no
+`TOC ` at all.
+
+```text
+ic12 ic07 ic13 ic08 ic04 ic14 ic09 ic05 ic10 ic11 info
+```
+
+Eleven chunks, the full modern set, and a header whose declared length matches
+the file. The check now reads the line `bundle.sh` prints about which branch it
+took, which is the statement itself rather than a guess about its output.
+
+Publishing the draft is the owner's own step, as it was for `v0.1.0` and
+`v0.2.0`.
+
 ## v0.2.0 release record
 
 Cut on 2026-08-15 from annotated tag `v0.2.0`, resolving to commit
