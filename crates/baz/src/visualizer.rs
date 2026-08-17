@@ -13,6 +13,44 @@ const BANDS: usize = 24;
 const BAR_GAP: f32 = 4.0;
 const HISTORY_FRAMES: usize = 32;
 
+/// **How dark the quietest part of a field is, and how bright its loudest.**
+///
+/// The owner, 2026-08-17: *"colours of the background and visualisations
+/// aren't very striking or dynamic."*
+///
+/// Every field drew at one flat ink — the lamp at `a` 0.18 — so the only thing
+/// that moved was height, and at that ink the movement was barely visible.
+/// Two things are wrong with a flat ink and both are fixed by the same pair of
+/// numbers: **a loud band should be loud to look at**, and the floor should be
+/// low enough that a quiet band recedes instead of sitting there as a bar of
+/// haze.
+///
+/// So the ink is the level's own: [`INK_FLOOR`] at silence, rising to
+/// [`INK_FLOOR`] + [`INK_RANGE`] at full scale. The reading is still the
+/// *height* — which matters, because hue and brightness are exactly what the
+/// owner cannot rely on (`docs/` and this product's standing rule), so the ink
+/// is decoration over a measure that is already carried by length.
+///
+/// **Why it may be this bright at all.** It could not be before: the placard's
+/// words sat straight on these bars, so the field was the ground for type and
+/// had to stay under a contrast floor — swept, the old 0.18 was *already* over
+/// it. `now_playing::placard_mask` now gives the type its own ground in every
+/// state, so the field is background again and is bounded by taste rather than
+/// by legibility. `the_field_may_be_bold_because_the_type_has_its_own_ground`
+/// re-derives that rather than trusting this sentence.
+const INK_FLOOR: f32 = 0.10;
+
+/// The ink a full-scale band reaches, above [`INK_FLOOR`].
+const INK_RANGE: f32 = 0.62;
+
+/// The ink for a level, on the ramp both fields share.
+fn level_ink(level: f32, room: &theme::Palette) -> iced::Color {
+    iced::Color {
+        a: INK_FLOOR + INK_RANGE * level.clamp(0.0, 1.0),
+        ..room.lamp
+    }
+}
+
 /// The record object shown above the current track's identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Foreground {
@@ -398,10 +436,7 @@ fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'sta
     let mut bars = row![].spacing(BAR_GAP).align_y(iced::Alignment::End);
     for level in bands {
         let bar_h = (usable_h * level).max(2.0);
-        let ink = iced::Color {
-            a: 0.18,
-            ..room.lamp
-        };
+        let ink = level_ink(level, room);
         let bar = container(
             Space::new()
                 .width(Length::Fill)
@@ -432,11 +467,9 @@ fn waveform(history: &History, width: f32, height: f32) -> Element<'static, Mess
     let room = theme::active();
     let mut trace = row![].spacing(2.0).align_y(iced::Alignment::Center);
     for position in 0..history.len {
-        let line_h = (height * history.amplitude(position) * 0.72).max(2.0);
-        let ink = iced::Color {
-            a: 0.28,
-            ..room.lamp
-        };
+        let level = history.amplitude(position);
+        let line_h = (height * level * 0.72).max(2.0);
+        let ink = level_ink(level, room);
         trace = trace.push(
             container(Space::new())
                 .width(Length::FillPortion(1))
@@ -464,10 +497,11 @@ fn spectrogram(history: &History, width: f32, height: f32) -> Element<'static, M
     for position in 0..history.len {
         let mut slice = column![].spacing(1.0);
         for level in history.spectrum(position).iter().rev() {
-            let ink = iced::Color {
-                a: 0.04 + 0.34 * level,
-                ..room.lamp
-            };
+            // The spectrogram is a *texture* — thousands of cells, each one
+            // the size of a full-scale bar's tip — so it takes the same ramp
+            // at a lower gain. At the fields' own ink a wall of cells would be
+            // a solid sheet rather than a picture of the last second.
+            let ink = level_ink(level * 0.45, room);
             slice = slice.push(
                 container(Space::new())
                     .width(Length::Fill)
@@ -532,6 +566,92 @@ fn goertzel(samples: &[f32; VISUAL_SAMPLE_COUNT], frequency: f32, rate: f32) -> 
         - coefficient * previous * before_previous;
     let amplitude = power.max(0.0).sqrt() * 2.0 / VISUAL_SAMPLE_COUNT as f32;
     amplitude_height(amplitude * 3.0)
+}
+
+/// **Why the fields may be as bold as they are.**
+///
+/// The ink they draw at is decoration, but the surface under it is not: the
+/// placard's words are composed over these bars, so until the type had a
+/// ground of its own the field *was* that ground and every ink on it had a
+/// contrast floor to clear.
+///
+/// This sweeps both rooms, the two grounds a field can sit on, and every ink
+/// the placard sets, and it asserts the two halves of that sentence — that the
+/// bare field would not have carried the type, and that with
+/// `now_playing::placard_mask` under it, it does not have to.
+#[cfg(test)]
+mod legibility {
+    use super::{INK_FLOOR, INK_RANGE};
+    use crate::theme;
+    use iced::Color;
+
+    /// WCAG 2.1 relative luminance, the instrument `theme` and `field` use.
+    fn luminance(color: Color) -> f32 {
+        fn linear(c: f32) -> f32 {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn contrast(fg: Color, bg: Color) -> f32 {
+        let (a, b) = (luminance(fg), luminance(bg));
+        let (hi, lo) = if a > b { (a, b) } else { (b, a) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    fn over(fg: Color, alpha: f32, bg: Color) -> Color {
+        Color {
+            r: fg.r.mul_add(alpha, bg.r * (1.0 - alpha)),
+            g: fg.g.mul_add(alpha, bg.g * (1.0 - alpha)),
+            b: fg.b.mul_add(alpha, bg.b * (1.0 - alpha)),
+            a: 1.0,
+        }
+    }
+
+    /// The mask `now_playing::placard_mask` lays under the type: the room's
+    /// own wall at 0.94, which is the number that function draws.
+    const MASK: f32 = 0.94;
+
+    #[test]
+    fn the_field_may_be_bold_because_the_type_has_its_own_ground() {
+        let loudest = INK_FLOOR + INK_RANGE;
+        for room in [theme::CLOSING_TIME, theme::READING_ROOM] {
+            // Each ink the placard sets, against the floor its use implies —
+            // the same table `crate::field`'s sweep uses.
+            let inks = [
+                (room.paper, 4.5),
+                (room.paper_dim, 4.5),
+                (room.paper_faint, 4.5),
+                (room.paper_muted, 3.0),
+            ];
+            for ground in [room.wall, room.plinth_lit] {
+                let bare = over(room.lamp, loudest, ground);
+                let masked = over(room.wall, MASK, bare);
+                for (ink, floor) in inks {
+                    assert!(
+                        contrast(ink, masked) >= floor,
+                        "an ink falls under {floor} over a full-scale band \
+                         even with the placard's mask under it"
+                    );
+                }
+            }
+            // **And the other half**: bare, this field would not carry the
+            // type. If this ever stops being true the mask has become
+            // optional, and *that* is the thing to check rather than to
+            // assume — but while it is true, the mask is load-bearing and
+            // must not be quietly dropped from `record_column`.
+            let bare = over(room.lamp, loudest, room.plinth_lit);
+            assert!(
+                contrast(room.paper_faint, bare) < 4.5,
+                "the field is now quiet enough to be a ground for type, so \
+                 the mask is no longer what permits it — restate this"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

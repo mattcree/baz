@@ -766,12 +766,28 @@ fn record_column<'a>(
     let sleeve =
         crate::visualizer::foreground(layout.visual.foreground, layout.edge, cover, jewel_case);
 
-    let placard = identity(
-        now,
-        layout.show_album,
+    // **The type gets its own ground here too, and did not until
+    // 2026-08-17.** `placard_mask` was written for the objectless state and
+    // used only there, so in the ordinary state — an album object on screen,
+    // which is the state a listener is in nearly all the time — the placard's
+    // words sat straight on whatever the visualizer was drawing.
+    //
+    // That was a legibility defect before it was an obstacle: swept against
+    // the bars at their old ink, `paper_faint` fell under its 4.5 floor
+    // wherever a loud band reached the type. And it was the obstacle too —
+    // the reason the bars had to be nearly invisible was that they were the
+    // ground for text. With the mask under the words they are not, and the
+    // field behind them can be as strong as it deserves
+    // (`crate::visualizer`, and this module's own legibility test).
+    let placard = placard_mask(
+        identity(
+            now,
+            layout.show_album,
+            layout.edge,
+            layout.visual.favourite,
+            layout.fact,
+        ),
         layout.edge,
-        layout.visual.favourite,
-        layout.fact,
     );
 
     // **No transport here.** The bar is under every place, this one included,
@@ -811,11 +827,21 @@ fn identity<'a>(
 fn fact_line(fact: &str, width: f32) -> Element<'static, Message> {
     let room = theme::active();
     button(
-        text(fact.to_owned())
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
+        // Centred, on the same axis as everything above it. This was the most
+        // visible half of the misalignment: the fact took the *whole* measure
+        // and set its text from the far left of it, while the placard beside
+        // it was a shrunk box centred under the artwork — so the one line
+        // whose left edge a reader could compare with the title's did not
+        // match it.
+        container(
+            text(fact.to_owned())
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .color(room.paper_dim)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Center),
     )
     .width(Length::Fixed(width))
     .height(Length::Fixed(theme::LINE_BODY))
@@ -855,11 +881,25 @@ fn placard<'a>(
     // A long title still stops at `width`: the title's own box is capped at
     // what is left after the heart's slot and the gap between them, so the
     // ellipsis lands where it always did.
+    // **The heart is balanced, so the title is centred and not merely
+    // centred-with-a-heart-on-it.** The owner, 2026-08-17: *"the alignment and
+    // general styling of the song title area of the now playing view is
+    // poor."*
+    //
+    // The composition above is centred on the artwork, and the title has to
+    // land on that axis. A row of `[title][heart]` centred as a unit puts the
+    // *pair* on the axis, which leaves the title itself half a heart to the
+    // left of the thing it names — visible, and exactly the kind of near-miss
+    // that reads as carelessness rather than as a decision.
+    //
+    // So the heart's slot is mirrored on the other side. The empty half costs
+    // nothing, cannot be pressed, and buys the one thing this page is for:
+    // the work's title on the work's centre line.
     let title_line: Element<'_, Message> = if let Some((path, selected)) = favourite {
+        let balance = theme::STEPPER_HIT + theme::GAP_SM;
         row![
-            container(title)
-                .max_width(width - theme::STEPPER_HIT - theme::GAP_SM)
-                .clip(true),
+            Space::new().width(Length::Fixed(balance)),
+            container(title).max_width(width - 2.0 * balance).clip(true),
             crate::views::page::favourite_slot(path, selected),
         ]
         .spacing(theme::GAP_SM)
@@ -881,6 +921,11 @@ fn placard<'a>(
         title_line,
     ]
     .spacing(theme::GAP_XS)
+    // **One axis for all of it.** The column shrinks to its content and was
+    // then left-aligning that content inside itself, so the eyebrow sat on the
+    // title's left edge while the block as a whole was centred under the
+    // artwork — three lines, and no two of them agreeing where the middle was.
+    .align_x(alignment::Horizontal::Center)
     .max_width(width);
     if show_album && let Some(album) = &now.album {
         placard = placard.push(
