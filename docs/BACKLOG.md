@@ -882,18 +882,44 @@ Newest first. Each was asked for in conversation and is now in the product.
   handle or a join that never returns would present exactly as this does. A
   recurrence turns main red with the log, which is the evidence needed.
 
-- **A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
-  (`crates/baz-core/tests/playback.rs`). Observed **once in 13 runs** during a
-  full-workspace run with four test binaries competing, on a machine also
-  running three build agents. **Not reproduced since**: 12 loaded single-test
-  runs and 5 further full-workspace runs, all green. The test asserts the
-  *specific* refusal variant, so the likely shapes are a different error
-  surfacing first under load, or the session ending before track 1 is reached
-  — the 16-sample sink capacity makes producer/consumer ordering tight. Left
-  unfixed rather than papered over with a retry or a loosened assertion: CI
-  runs `--no-fail-fast`, so a recurrence turns main red with the actual error
-  in the log, which is the evidence needed to fix it properly. If it recurs,
-  fix the race — do not weaken the assertion.
+- ~~**A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
+  (`crates/baz-core/tests/playback.rs`).~~ **Closed 2026-08-17 — reproduced,
+  diagnosed, fixed, and the assertion is untouched.**
+
+  The guess recorded here was the 16-sample sink and producer/consumer
+  ordering. **Both were wrong**: `OfflineSink` is synchronous and drops
+  overflow, so it cannot race anything. What was right was the other half of
+  the guess — *a different error surfacing first under load* — and the load
+  that mattered was not CPU but **a second process**.
+
+  The fixtures live at fixed paths under `CARGO_TARGET_TMPDIR`, and the
+  `OnceLock` that builds them guards one process only. Two runs of the binary
+  at once — a workspace run beside a build agent, exactly the reported
+  condition — put one process's writer and another's decoder on the same WAV.
+  A WAV caught mid-write has a header and no `data` chunk, the prefetch thread
+  fails to decode track 1, and `produce` propagates that through `join()??`
+  **before** it ever reaches the rate-change check. The test then reports
+  `wrong refusal: decode error: unsupported feature: wav: missing data chunk`,
+  which looks nothing like a race and is one.
+
+  Starting eight copies of the binary together **reproduced it 2 runs in 8** —
+  the step that turned a year-old guess into a cause.
+
+  The fix is a one-step publish: every fixture is written under a name the
+  process owns and `rename`d into place, so a reader sees a whole file or the
+  previous whole file, never half of one. Applied to all four WAV writers, the
+  raw layout WAV, and both FLAC encoder branches (the ffmpeg one gained an
+  explicit `-f flac`, since the scratch name no longer carries the extension
+  it used to infer the muxer from — verified by hand against real ffmpeg).
+  Afterwards: **24/24 concurrent single-test runs green**, and four concurrent
+  copies of the full `playback` and `engine` suites, 496 test executions, all
+  green.
+
+  `tests/engine.rs` had the identical defect and had simply never fired; it
+  got the same treatment, plus a wrap around the ReplayGain fixtures so their
+  write-then-tag read-modify-write happens on the private name — atomic
+  publish alone would still have let one process tag another's already-tagged
+  file.
 
 - **Opus is not played, and therefore not listed.** **Closed 2026-08-10 on
   evidence rather than deferred**: the owner's library was scanned for
@@ -1889,9 +1915,19 @@ The second half is a real, small piece of work and a real design question:
 - **No MPRIS `TrackList` or `Playlists` interface** (`HasTrackList` is
   `false`), and no `LoopStatus`/`Shuffle` — baz has neither loop nor shuffle
   yet, so they are absent rather than present-and-fixed.
-- **`Rate` and `Volume` are read-only `1.0`.** baz has no rate control
-  (ADR-0009: it plays at the source rate) and no volume control at all; a
-  writable property that discarded writes would be worse than an error.
+- **`Rate` is read-only `1.0`**, with `MinimumRate` and `MaximumRate` pinned
+  to it. baz plays at the source rate (ADR-0009) and has no rate control; a
+  writable property that silently discarded writes would be worse than an
+  error, so the property is honest rather than present.
+
+  ~~**and `Volume`**~~ — **wrong since ADR-0011, corrected 2026-08-17.** This
+  entry said baz had "no volume control at all". It has had a fader, a mute,
+  a wheel and a persisted level for months, and MPRIS `Volume` has been read
+  *and* write for as long: `set_volume` maps the level back through the same
+  taper the fader uses, unmutes when a client asks for sound while muted, and
+  refuses only when there is no engine to set a level on. Nothing was fixed
+  here; a stale line was, which is worth doing on its own account — a backlog
+  that misdescribes the product costs more than the gap it claims.
 - **Windows/macOS media-key and now-playing integration** — untouched. The
   `Media*` key names are bound in `keys.rs`, which covers a focused window;
   SMTC (Windows) and `MPNowPlayingInfoCenter` (macOS) are not.

@@ -106,17 +106,39 @@ fn wav_spec(rate: u32) -> hound::WavSpec {
     }
 }
 
+/// **Put a fixture in place in one step, or not at all.**
+///
+/// The same one-step publish `tests/playback.rs` documents, for the same
+/// reason: these fixtures live at fixed paths under `CARGO_TARGET_TMPDIR`, the
+/// `OnceLock` guards one process, and two concurrent runs of this binary would
+/// otherwise have one rewriting a WAV while the other decodes it. No flake was
+/// ever seen here — this is the same defect before it fires, which is the only
+/// good time to fix it.
+///
+/// It nests: a caller that needs to write *and then edit* a fixture (the
+/// ReplayGain four) wraps both steps, so the tagging read-modify-write happens
+/// on a name this process alone knows and only the finished file is published.
+fn published(path: &Path, write: impl FnOnce(&Path)) {
+    let mut scratch = path.as_os_str().to_owned();
+    scratch.push(format!(".{}.part", std::process::id()));
+    let scratch = PathBuf::from(scratch);
+    write(&scratch);
+    std::fs::rename(&scratch, path).expect("publish fixture");
+}
+
 fn write_sine_wav_at(path: &Path, rate: u32, frames: usize, t0: f64) {
-    let mut w = hound::WavWriter::create(path, wav_spec(rate)).expect("create wav");
-    #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
-    for n in 0..frames {
-        let t = t0 + n as f64 / f64::from(rate);
-        #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
-        let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
-        w.write_sample(s).expect("write sample");
-        w.write_sample(s).expect("write sample");
-    }
-    w.finalize().expect("finalize wav");
+    published(path, |path| {
+        let mut w = hound::WavWriter::create(path, wav_spec(rate)).expect("create wav");
+        #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+        for n in 0..frames {
+            let t = t0 + n as f64 / f64::from(rate);
+            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
+            w.write_sample(s).expect("write sample");
+            w.write_sample(s).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// A 5.1 sine, the same tone in the front pair and silence in the other four.
@@ -125,25 +147,27 @@ fn write_sine_wav_at(path: &Path, rate: u32, frames: usize, t0: f64) {
 /// WAVE's 5.1 layout exactly; a fixture needing a mask hound cannot write lives
 /// in `tests/playback.rs`, which writes its own header.
 fn write_five_one_wav(path: &Path, frames: usize) {
-    let spec = hound::WavSpec {
-        channels: 6,
-        sample_rate: RATE,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut w = hound::WavWriter::create(path, spec).expect("create wav");
-    #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
-    for n in 0..frames {
-        let t = n as f64 / f64::from(RATE);
-        #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
-        let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
-        w.write_sample(s).expect("write sample");
-        w.write_sample(s).expect("write sample");
-        for _ in 0..4 {
-            w.write_sample(0.0f32).expect("write sample");
+    published(path, |path| {
+        let spec = hound::WavSpec {
+            channels: 6,
+            sample_rate: RATE,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut w = hound::WavWriter::create(path, spec).expect("create wav");
+        #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+        for n in 0..frames {
+            let t = n as f64 / f64::from(RATE);
+            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
+            w.write_sample(s).expect("write sample");
+            w.write_sample(s).expect("write sample");
+            for _ in 0..4 {
+                w.write_sample(0.0f32).expect("write sample");
+            }
         }
-    }
-    w.finalize().expect("finalize wav");
+        w.finalize().expect("finalize wav");
+    });
 }
 
 fn write_sine_wav(path: &Path, frames: usize, t0: f64) {
@@ -160,29 +184,33 @@ fn chirp_freq_at(t: f64) -> f64 {
 /// A linear sine sweep: phase is the integral of the instantaneous
 /// frequency, `2π(f0·t + k·t²/2)`.
 fn write_chirp_wav(path: &Path) {
-    #[allow(clippy::cast_precision_loss)]
-    let total = CHIRP_SECS as f64;
-    let k = (CHIRP_F1 - CHIRP_F0) / total;
-    let mut w = hound::WavWriter::create(path, wav_spec(RATE)).expect("create wav");
-    #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
-    for n in 0..CHIRP_FRAMES {
-        let t = n as f64 / f64::from(RATE);
-        #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
-        let s = (AMP * (2.0 * PI * (CHIRP_F0 * t + 0.5 * k * t * t)).sin()) as f32;
-        w.write_sample(s).expect("write sample");
-        w.write_sample(s).expect("write sample");
-    }
-    w.finalize().expect("finalize wav");
+    published(path, |path| {
+        #[allow(clippy::cast_precision_loss)]
+        let total = CHIRP_SECS as f64;
+        let k = (CHIRP_F1 - CHIRP_F0) / total;
+        let mut w = hound::WavWriter::create(path, wav_spec(RATE)).expect("create wav");
+        #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+        for n in 0..CHIRP_FRAMES {
+            let t = n as f64 / f64::from(RATE);
+            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            let s = (AMP * (2.0 * PI * (CHIRP_F0 * t + 0.5 * k * t * t)).sin()) as f32;
+            w.write_sample(s).expect("write sample");
+            w.write_sample(s).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// A constant-[`DC`] stereo WAV — see [`DC`] for why the volume tests want one.
 fn write_dc_wav(path: &Path) {
-    let mut w = hound::WavWriter::create(path, wav_spec(RATE)).expect("create wav");
-    for _ in 0..DC_FRAMES {
-        w.write_sample(DC).expect("write sample");
-        w.write_sample(DC).expect("write sample");
-    }
-    w.finalize().expect("finalize wav");
+    published(path, |path| {
+        let mut w = hound::WavWriter::create(path, wav_spec(RATE)).expect("create wav");
+        for _ in 0..DC_FRAMES {
+            w.write_sample(DC).expect("write sample");
+            w.write_sample(DC).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// An `ID3v2.4` size field: seven bits per byte, high bit clear.
@@ -233,7 +261,9 @@ fn tag_with_replay_gain(path: &Path, frames: &[(&str, &str)]) {
     let audio = std::fs::read(path).expect("read fixture");
     let mut bytes = id3v2_txxx(frames);
     bytes.extend_from_slice(&audio);
-    std::fs::write(path, bytes).expect("write tagged fixture");
+    published(path, |path| {
+        std::fs::write(path, bytes).expect("write tagged fixture");
+    });
 }
 
 /// The four ReplayGain fixtures, written and tagged.
@@ -246,48 +276,57 @@ fn write_replay_gain_fixtures(dir: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf
     let rg_b = dir.join("rg_track_b_1s.wav");
     let rg_single = dir.join("rg_single_3s.wav");
     let rg_clip = dir.join("rg_clip_3s.wav");
-    write_sine_wav(&rg_a, A_FRAMES, 0.0);
-    write_sine_wav(&rg_b, B_FRAMES, 0.0);
-    write_dc_wav(&rg_single);
-    write_dc_wav(&rg_clip);
+
     // Tracks A and B share one album gain and album peak — they are an album —
     // while their track gains differ, so album mode and track mode are
     // distinguishable from the delivered samples alone.
-    tag_with_replay_gain(
-        &rg_a,
-        &[
-            ("REPLAYGAIN_TRACK_GAIN", "-6.02 dB"),
-            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
-            ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
-            ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
-        ],
-    );
-    tag_with_replay_gain(
-        &rg_b,
-        &[
-            ("REPLAYGAIN_TRACK_GAIN", "+2.50 dB"),
-            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
-            ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
-            ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
-        ],
-    );
+    published(&rg_a, |path| {
+        write_sine_wav(path, A_FRAMES, 0.0);
+        tag_with_replay_gain(
+            path,
+            &[
+                ("REPLAYGAIN_TRACK_GAIN", "-6.02 dB"),
+                ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+                ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
+                ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
+            ],
+        );
+    });
+    published(&rg_b, |path| {
+        write_sine_wav(path, B_FRAMES, 0.0);
+        tag_with_replay_gain(
+            path,
+            &[
+                ("REPLAYGAIN_TRACK_GAIN", "+2.50 dB"),
+                ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+                ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
+                ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
+            ],
+        );
+    });
     // A single downloaded track: no album figures to be relative to.
-    tag_with_replay_gain(
-        &rg_single,
-        &[
-            ("REPLAYGAIN_TRACK_GAIN", "-4.00 dB"),
-            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
-        ],
-    );
+    published(&rg_single, |path| {
+        write_dc_wav(path);
+        tag_with_replay_gain(
+            path,
+            &[
+                ("REPLAYGAIN_TRACK_GAIN", "-4.00 dB"),
+                ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+            ],
+        );
+    });
     // A gain the declared peak has no room for: +12 dB against a peak of 0.5,
     // which leaves 6.02 dB of headroom.
-    tag_with_replay_gain(
-        &rg_clip,
-        &[
-            ("REPLAYGAIN_TRACK_GAIN", "+12.00 dB"),
-            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
-        ],
-    );
+    published(&rg_clip, |path| {
+        write_dc_wav(path);
+        tag_with_replay_gain(
+            path,
+            &[
+                ("REPLAYGAIN_TRACK_GAIN", "+12.00 dB"),
+                ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+            ],
+        );
+    });
     (rg_a, rg_b, rg_single, rg_clip)
 }
 
@@ -312,7 +351,9 @@ fn fixtures() -> &'static Fixtures {
         write_sine_wav_at(&head_44k, RATE, HEAD_44K_FRAMES, 0.0);
         write_sine_wav_at(&tail_48k, TAIL_48K_RATE, TAIL_48K_FRAMES, 0.0);
         write_five_one_wav(&surround, RATE as usize);
-        std::fs::write(&bad, b"this is not audio at all, sorry").expect("write bad file");
+        published(&bad, |bad| {
+            std::fs::write(bad, b"this is not audio at all, sorry").expect("write bad file");
+        });
         let a_ref = AudioSource::decode_all(&a).expect("decode a").samples;
         let b_ref = AudioSource::decode_all(&b).expect("decode b").samples;
         let chirp_ref = AudioSource::decode_all(&chirp)

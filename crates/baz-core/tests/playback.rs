@@ -111,18 +111,49 @@ fn ideal_sample_at(rate: u32, n: usize, t0: f64) -> f32 {
     s
 }
 
+/// **Put a fixture in place in one step, or not at all.**
+///
+/// Every fixture here lives at a fixed path under `CARGO_TARGET_TMPDIR`, and
+/// the `OnceLock` that builds them makes that safe within *one* process only.
+/// Two runs of this binary at once — a workspace run beside a build agent,
+/// which is exactly the condition the rate-change flake was seen under — put
+/// one process's writer and another process's decoder on the same file, and a
+/// WAV caught mid-write has a header and no `data` chunk yet. The reader does
+/// not get a rate change to refuse; it gets a decode error, and a test
+/// asserting the *specific* refusal fails with something that looks nothing
+/// like a race.
+///
+/// That was the flake. It was blamed on the 16-sample sink and on
+/// producer/consumer ordering, and it was neither: `OfflineSink` is
+/// synchronous and drops overflow. Reproduced 2 runs in 8 by starting eight
+/// copies of this binary together, which is what turned a guess into a cause.
+///
+/// So write under a name this process owns and `rename` it into place. Rename
+/// is atomic, so a reader sees the whole old file or the whole new one and
+/// never half of either — and since the bytes are identical whichever run
+/// wrote them, either answer is the right one.
+fn published(path: &Path, write: impl FnOnce(&Path)) {
+    let mut scratch = path.as_os_str().to_owned();
+    scratch.push(format!(".{}.part", std::process::id()));
+    let scratch = PathBuf::from(scratch);
+    write(&scratch);
+    std::fs::rename(&scratch, path).expect("publish fixture");
+}
+
 fn write_wav_f32(path: &Path, rate: u32, interleaved: &[f32]) {
-    let spec = hound::WavSpec {
-        channels: 2,
-        sample_rate: rate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut w = hound::WavWriter::create(path, spec).expect("create wav");
-    for &s in interleaved {
-        w.write_sample(s).expect("write sample");
-    }
-    w.finalize().expect("finalize wav");
+    published(path, |path| {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: rate,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut w = hound::WavWriter::create(path, spec).expect("create wav");
+        for &s in interleaved {
+            w.write_sample(s).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// 16-bit PCM WAV (quantized) — the input format for FLAC encoding.
@@ -133,13 +164,15 @@ fn write_wav_i16(path: &Path, rate: u32, interleaved: &[f32]) {
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut w = hound::WavWriter::create(path, spec).expect("create wav");
-    for &s in interleaved {
-        #[allow(clippy::cast_possible_truncation)] // rounded and in i16 range
-        let q = (f64::from(s) * 32767.0).round() as i16;
-        w.write_sample(q).expect("write sample");
-    }
-    w.finalize().expect("finalize wav");
+    published(path, |path| {
+        let mut w = hound::WavWriter::create(path, spec).expect("create wav");
+        for &s in interleaved {
+            #[allow(clippy::cast_possible_truncation)] // rounded and in i16 range
+            let q = (f64::from(s) * 32767.0).round() as i16;
+            w.write_sample(q).expect("write sample");
+        }
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// A WAV with an arbitrary channel count from mono samples (each frame
@@ -151,13 +184,15 @@ fn write_wav_multi(path: &Path, rate: u32, channels: u16, mono: &[f32]) {
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let mut w = hound::WavWriter::create(path, spec).expect("create wav");
-    for &s in mono {
-        for _ in 0..channels {
-            w.write_sample(s).expect("write sample");
+    published(path, |path| {
+        let mut w = hound::WavWriter::create(path, spec).expect("create wav");
+        for &s in mono {
+            for _ in 0..channels {
+                w.write_sample(s).expect("write sample");
+            }
         }
-    }
-    w.finalize().expect("finalize wav");
+        w.finalize().expect("finalize wav");
+    });
 }
 
 /// Extract one channel from interleaved samples.
@@ -449,7 +484,9 @@ fn write_wav_layout(path: &Path, rate: u32, mask: u32, frames: usize, amp: f64, 
     for s in &samples {
         out.extend_from_slice(&s.to_le_bytes());
     }
-    std::fs::write(path, out).expect("write layout wav");
+    published(path, |path| {
+        std::fs::write(path, out).expect("write layout wav");
+    });
 }
 
 /// Peak amplitude of `x` at `f` Hz, by Goertzel.
@@ -574,25 +611,32 @@ fn encode_flac(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Fl
         (part1, &flac_part1),
         (part2, &flac_part2),
     ];
+    // The encoder is a separate process writing into the same shared folder,
+    // so it needs the same one-step publish the WAV writers got: it is handed
+    // the scratch name and `published` does the rename.
     let encoder = if have("ffmpeg", "-version") {
         for (wav, flac) in &jobs {
-            run_encoder(
-                Command::new("ffmpeg")
-                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-                    .arg(wav)
-                    .args(["-c:a", "flac"])
-                    .arg(flac),
-            );
+            published(flac, |flac| {
+                run_encoder(
+                    Command::new("ffmpeg")
+                        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                        .arg(wav)
+                        .args(["-c:a", "flac", "-f", "flac"])
+                        .arg(flac),
+                );
+            });
         }
         "ffmpeg"
     } else if have("flac", "--version") {
         for (wav, flac) in &jobs {
-            run_encoder(
-                Command::new("flac")
-                    .args(["--silent", "--force", "-o"])
-                    .arg(flac)
-                    .arg(wav),
-            );
+            published(flac, |flac| {
+                run_encoder(
+                    Command::new("flac")
+                        .args(["--silent", "--force", "-o"])
+                        .arg(flac)
+                        .arg(wav),
+                );
+            });
         }
         "flac"
     } else {
