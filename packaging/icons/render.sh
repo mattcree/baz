@@ -65,7 +65,9 @@ done
 # icns was what shipped first and macOS drew the generic icon over it** — the
 # container parses perfectly in an independent reader, so the fault is
 # something IconServices wants that a general parser does not, and the most
-# likely candidate is the `TOC ` chunk every `iconutil` file opens with. It is
+# likely candidate was the `TOC ` chunk — on the belief that every `iconutil`
+# file opens with one, which the first release to check it disproved: Apple's
+# tool built a 406 KB icon with no leading `TOC `. The chunk is optional. It is
 # written now. That is a hypothesis rather than a finding, which is exactly
 # why the shipping path no longer depends on it being right.
 iconset=baz.iconset
