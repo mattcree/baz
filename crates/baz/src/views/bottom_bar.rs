@@ -113,6 +113,7 @@ pub(crate) fn view<'a>(
     cover: Option<Cover>,
     source: Option<Message>,
     window_w: f32,
+    standing: Option<&crate::player::NowPlaying>,
     favourite: Option<(&'a std::path::Path, bool)>,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -157,7 +158,7 @@ pub(crate) fn view<'a>(
     .align_y(iced::Alignment::Center);
     let bar = row![
         container(now_playing_block(
-            player, cover, source, window_w, favourite
+            player, cover, source, window_w, standing, favourite
         ))
         .width(Length::Fill)
         .clip(true),
@@ -290,8 +291,10 @@ fn now_playing_block<'a>(
     cover: Option<Cover>,
     source: Option<Message>,
     window_w: f32,
+    standing: Option<&crate::player::NowPlaying>,
     favourite: Option<(&'a std::path::Path, bool)>,
 ) -> Element<'a, Message> {
+    let has_standing = standing.is_some();
     // **The heart is a sibling of the door, not a child of it.**
     //
     // The owner: *"add to favourites should be beside the playing song in the
@@ -325,7 +328,7 @@ fn now_playing_block<'a>(
             Space::new()
                 .width(Length::Fixed(theme::BAR_TITLE_MIN_W))
                 .height(Length::Fixed(0.0)),
-            back_to_source(player, cover, source, window_w),
+            back_to_source(player, cover, source, window_w, standing),
         ])
         .width(Length::Shrink)
         .clip(true),
@@ -341,7 +344,7 @@ fn now_playing_block<'a>(
         // it yields to the same instruction that asked the block to size
         // itself: a bar that is empty is already a different shape from a bar
         // that is playing.
-        if player.now_playing().is_some() {
+        if player.now_playing().is_some() || has_standing {
             crate::views::page::favourite_slot_maybe(favourite)
         } else {
             Space::new().width(Length::Fixed(0.0)).into()
@@ -401,14 +404,15 @@ fn time_readout(player: &PlayerState) -> Element<'static, Message> {
 ///   height for a control that is a *box*, and a control that is a block of
 ///   type is bounded below by the same number rather than exempt from it. The
 ///   assertion is in this module's tests.
-fn back_to_source(
-    player: &PlayerState,
+fn back_to_source<'a>(
+    player: &'a PlayerState,
     cover: Option<Cover>,
     source: Option<Message>,
     window_w: f32,
-) -> Element<'_, Message> {
+    standing: Option<&crate::player::NowPlaying>,
+) -> Element<'a, Message> {
     let room = theme::active();
-    let lines = now_playing_line(player, theme::bar_title_lane_w(window_w));
+    let lines = now_playing_line(player, theme::bar_title_lane_w(window_w), standing);
     let Some(source) = source else {
         return lines;
     };
@@ -491,7 +495,11 @@ fn back_to_source(
 /// continuation**, so the title and the artist above it sit on the same pixels
 /// from the first track of a queue to the last — the line coming and going as
 /// the music moves is precisely the case a reserved slot exists for.
-fn now_playing_line(player: &PlayerState, measure: f32) -> Element<'_, Message> {
+fn now_playing_line<'a>(
+    player: &'a PlayerState,
+    measure: f32,
+    standing: Option<&crate::player::NowPlaying>,
+) -> Element<'a, Message> {
     let room = theme::active();
     if let Some(note) = player.availability_note() {
         return text(note)
@@ -501,7 +509,16 @@ fn now_playing_line(player: &PlayerState, measure: f32) -> Element<'_, Message> 
             .wrapping(text::Wrapping::None)
             .into();
     }
-    let Some(now) = player.now_playing() else {
+    // **The last track baz knows about, when nothing is sounding.** `Nothing
+    // playing` is kept for the state it describes — a listener who has never
+    // played anything, and so has no last track — rather than shown at every
+    // launch over a run baz has already restored (`app.rs`'s `bar_standing`).
+    //
+    // It is drawn exactly as a sounding track is, because it *is* the same
+    // fact: this is the track. What differs is stated where state belongs —
+    // the transport offers `Play` rather than `Pause`, and the timecode beside
+    // it is blank.
+    let Some(now) = player.now_playing().or(standing) else {
         return text("Nothing playing")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
@@ -1470,10 +1487,31 @@ mod tests {
             block.contains("theme::BAR_TITLE_MIN_W"),
             "the block lost its floor, so a short title collapses it"
         );
+        // **The bar names the last track when nothing sounds** (the owner,
+        // 2026-08-17). `Nothing playing` is kept for the state it actually
+        // describes — nothing has ever been played — rather than shown at
+        // every launch over a run baz has already restored.
+        let line = {
+            let rest = shipped
+                .split_once("fn now_playing_line")
+                .expect("the lines exist")
+                .1;
+            &rest[..rest.find("\n}\n").expect("a function ends")]
+        };
+        assert!(
+            line.contains("player.now_playing().or(standing)"),
+            "the bar forgets the standing track again"
+        );
+        assert!(
+            line.contains("\"Nothing playing\""),
+            "the empty state was deleted rather than narrowed — it is still \
+             the right words for a listener who has never played anything"
+        );
         // **And no heart when there is no track to be about.**
         assert!(
-            block.contains("if player.now_playing().is_some()"),
-            "the heart is offered over nothing again"
+            block.contains("if player.now_playing().is_some() || has_standing"),
+            "the heart is offered over nothing again — or has stopped \
+             following the standing track, which is a subject like any other"
         );
         // The reserved slot is still there for the state it is *for*: a track
         // baz holds that has no library row.

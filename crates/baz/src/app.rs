@@ -7020,11 +7020,47 @@ impl App {
     /// remained blank until opening a playlist happened to request the same
     /// record's thumbnail. Both reads use `peek`, so a frame cannot reorder an
     /// LRU merely by observing it.
+    /// **The track the bar names when nothing is sounding** — the owner,
+    /// 2026-08-17: *"should we just default to showing the last thing that was
+    /// playing in the bottom bar since we already seem to know? it only makes
+    /// sense to have the nothing playing state when the user really has never
+    /// played anything before"*.
+    ///
+    /// He is right that baz already knows: [`Self::restore_the_run`] hands the
+    /// engine the whole remembered run at launch, so the file, its record and
+    /// its position are all in memory while the bar says `Nothing playing`.
+    ///
+    /// The subject is [`views::home::standing`]'s, unchanged — the same
+    /// reading `CONTINUE` has always drawn, so the band and the bar cannot
+    /// name different tracks. It answers `None` while anything is sounding
+    /// (then there is a real now-playing to draw) and `None` on a first run
+    /// with no history, which is the state he says the empty bar is *for*.
+    ///
+    /// **It states identity and never playback.** The transport beside it
+    /// offers `Play` rather than `Pause` and the timecode is blank, which is
+    /// how a listener reads *stopped* — so this adds the name of the thing and
+    /// claims nothing about it. Nothing here starts, seeks or queues anything.
+    fn bar_standing(&self) -> Option<crate::player::NowPlaying> {
+        let Screen::Shelf(state) = &self.screen else {
+            return None;
+        };
+        if self.player.now_playing().is_some() {
+            return None;
+        }
+        let (path, _) = views::home::standing(&self.player, &self.resume)?;
+        Some(crate::player::resolve_now_playing(&state.albums, path))
+    }
+
     fn bar_cover(&self) -> Option<views::bottom_bar::Cover> {
         let Screen::Shelf(state) = &self.screen else {
             return None;
         };
-        let id = self.player.playing_album()?;
+        // The sounding record, else the standing one — so the bar's sleeve
+        // and its words are always about the same track.
+        let id = self
+            .player
+            .playing_album()
+            .or_else(|| self.bar_standing().and_then(|now| now.album_id))?;
         let image = state
             .thumb(id)
             .cloned()
@@ -7403,6 +7439,7 @@ impl App {
         // The GUI is always an audio build, so the persistent bottom bar lives
         // under every place. A missing device is represented in the bar rather
         // than by changing the application's composition.
+        let standing = self.bar_standing();
         let whole: Element<'_, Message> = column![
             screen,
             views::bottom_bar::view(
@@ -7412,6 +7449,7 @@ impl App {
                 self.now_playing_source()
                     .map(|_| Message::OpenPlayingSource),
                 self.window.width,
+                standing.as_ref(),
                 // The same reading Now playing's title line takes: the
                 // sounding file, and whether the library holds it as a
                 // favourite. `None` is a sounding file with no library row,
@@ -7419,10 +7457,21 @@ impl App {
                 // and draws the action inert rather than dropping it, because
                 // a slot that came and went would move the title lane beside
                 // it, which is the one thing this bar may not do.
+                // **The heart follows the subject**, sounding or standing:
+                // a track the bar names is a track you can keep.
                 self.player
                     .now_playing()
                     .filter(|now| now.album_id.is_some())
                     .and_then(|_| self.player.now_playing_path())
+                    .or_else(|| {
+                        standing
+                            .as_ref()
+                            .filter(|now| now.album_id.is_some())
+                            .and_then(|_| {
+                                views::home::standing(&self.player, &self.resume)
+                                    .map(|(path, _)| path)
+                            })
+                    })
                     .map(|path| (path, is_favourite(state, path))),
             ),
         ]
