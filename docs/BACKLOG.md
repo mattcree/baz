@@ -493,8 +493,11 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
-- **Search folds case and nothing else, so `and` never finds `&`.**
-  **Written up as `docs/WORK.md` item 80.** *(The owner, 2026-08-17: "can we make sure our search treats 'and' as & or and…
+- ~~**Search folds case and nothing else, so `and` never finds `&`.**~~
+  **Shipped 2026-08-17** (`docs/WORK.md` item 80). `Index::search_fold`
+  lowercases *and* rewrites `&` to `and`, applied to the haystack and the
+  needle alike, so `Day & Night` answers `day and night` and the reverse. The
+  entry below is kept for the reasoning. *(The owner, 2026-08-17: "can we make sure our search treats 'and' as & or and…
   because I searched for a song which used the ampersand which wasn't found by
   searching with the word.")*
 
@@ -555,16 +558,25 @@ Newest first. Each was asked for in conversation and is now in the product.
   (`docs/design/24-what-baz-heard.md` §2): the block named a record, its owner
   knew in one second it was wrong, and the analysis is what has to answer.
 
-- **Right-clicking in a playlist resets the scroll position.**
-  **`docs/WORK.md` item 81.** *(The owner, 2026-08-17.)* Not diagnosed. Suspicion is that opening the context menu
+- ~~**Right-clicking in a playlist resets the scroll position.**~~
+  **Shipped 2026-08-17** (`docs/WORK.md` item 81). The suspicion below was
+  close and not quite right: nothing rebuilt the list. iced diffs the widget
+  tree **by position**, so a stack level that existed only while a layer was
+  open moved every widget beneath it one level down the moment the menu
+  appeared — and a scrollable that moves levels is a new scrollable, at the
+  top. Every floating layer is stacked always, empty at rest. *(The owner, 2026-08-17.)* Not diagnosed. Suspicion is that opening the context menu
   rebuilds the list and the scrollable comes back at the top rather than at
   the offset it was holding — the same shape as the bugs the `scroll_offset`
   fields on other places exist to prevent. Reproduce first: right-click deep
   in a long playlist and watch whether the offset survives the menu opening,
   the menu closing, and an action taken from it.
 
-- **Now Playing should fit its content, and the heart should belong to it.**
-  **`docs/WORK.md` item 82.** *(The owner, 2026-08-17: "can you make the now-playing fit the content up to
+- ~~**Now Playing should fit its content, and the heart should belong to
+  it.**~~ **Shipped 2026-08-17** (`docs/WORK.md` item 82), and revisited twice
+  since on his word: the placard fits its content up to the measure, the
+  heart's slot is mirrored by an empty one so the *title* lands on the
+  composition's axis rather than the title-and-heart pair, and the title is set
+  at the display rung and fitted with a visible ellipsis. *(The owner, 2026-08-17: "can you make the now-playing fit the content up to
   a max width and ensure the heart is snapped to the right hand side of that
   box so it doesn't appear to be off on its own.")*
 
@@ -688,8 +700,8 @@ Newest first. Each was asked for in conversation and is now in the product.
   measurements to be reachable outside `vibe::State`, which today they are
   not.
 
-- **A song whose drive is not mounted looks exactly like one that plays.**
-  **Shipped 2026-08-17.** Every track surface — a record's page, a playlist,
+- ~~**A song whose drive is not mounted looks exactly like one that
+  plays.**~~ **Shipped 2026-08-17.** Every track surface — a record's page, a playlist,
   the queue, favourites, a draft — draws such a row dimmed and says
   *· drive not connected* beside its title. Dimmed **and** worded, because a
   reading that rested on telling two inks apart is the one thing nothing in
