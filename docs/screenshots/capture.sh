@@ -276,8 +276,8 @@ park()  { xdotool mousemove 1400 430; sleep 0.5; xdotool mousemove 1402 432; sle
 #                    x 265…475, `Meadowgrass` x 755…965
 #   tile overlay     `Play` +26, `Queue` +78, `Add to…` +130,   [photograph]
 #                    `Open` +182 from the tile's top
-#   new-playlist     name field y 258, `Save playlist` at       [photograph]
-#   place            (315, 667) under a six-track draft
+#   new-playlist     name field y 186, `Save playlist` at       [photograph]
+#   place            (315, 595) under a six-track draft
 #   playlists panel  `New playlist` row y 252; once a list      [photograph]
 #                    exists its row sits at y 303 with its
 #                    `Add` at x 1556
@@ -295,10 +295,10 @@ ADD_TO_1=302; ADD_TO_2=635; PLAY_1=198
 # because no field had focus) and pressed a `Save` that was not there.
 rest 370 270;   click 361 $ADD_TO_1     # Seagrass → its own `Add to…`
 click 1400 252                          # `New playlist` — the draft place opens
-click 900 258                           # the name field, which must be focused
+click 900 186                           # the name field, which must be focused
 xdotool type --clearmodifiers --delay 60 "Sunday Morning"
 sleep 1.0
-click 315 667                           # `Save playlist` — a .m3u8 from here on
+click 315 595                           # `Save playlist` — a .m3u8 from here on
 click 105 133                           # back to the wall
 sleep 1.0
 

@@ -145,6 +145,29 @@
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
+    <release version="0.3.0" date="2026-08-17" type="stable">
+      <description>
+        <p>
+          Smart playlists are built around the line now. Draw how the music
+          should move from the first song to the last — ten points to pull
+          about — and the songs appear beside it. Your words are an optional
+          filter rather than the main event, because a drawn line is something
+          you can check by ear and a description is a guess.
+        </p>
+        <p>
+          Baz also says what it heard: the quietest, loudest, slowest and
+          fastest records in your collection by name, the tempo range in beats
+          per minute, and which of the five things it listens for your music
+          barely varies in. Claims you can check in a second, rather than a
+          summary you have to take on trust.
+        </p>
+        <p>
+          Searching for “and” now finds “&amp;”, right-clicking in a playlist
+          no longer sends it back to the top, and Now playing fits what is in
+          it.
+        </p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-08-15" type="stable">
       <description>
         <p>

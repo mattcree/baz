@@ -24,6 +24,8 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-17
+
 ### Changed
 
 - **The line comes first, and your words are a filter.** The curve — how the
@@ -3096,6 +3098,7 @@ a promise about the next commit.
   output (which is also what puts hardware volume out of reach).
   `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/compare/v0.2.0...main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.3.0...main
+[0.3.0]: https://github.com/mattcree/baz/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mattcree/baz/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mattcree/baz/releases/tag/v0.1.0
