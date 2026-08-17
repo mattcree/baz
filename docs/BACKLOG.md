@@ -670,6 +670,23 @@ Newest first. Each was asked for in conversation and is now in the product.
   not.
 
 - **A song whose drive is not mounted looks exactly like one that plays.**
+  **Shipped 2026-08-17.** Every track surface — a record's page, a playlist,
+  the queue, favourites, a draft — draws such a row dimmed and says
+  *· drive not connected* beside its title. Dimmed **and** worded, because a
+  reading that rested on telling two inks apart is the one thing nothing in
+  this product may do; and beside the title rather than instead of it, because
+  what the row *is* has not changed, only whether you can play it.
+
+  **The knowing was already here**, which is the part worth recording. This
+  entry said *"the hard part is not the badge, it is knowing"* and asked for a
+  root-level answer on the rescan clock. `Shelf::unavailable` has been exactly
+  that all along: cleared at the start of every pass, filled by the folders
+  that pass could not walk, so it describes the latest attempt and clears
+  itself when the drive comes back. The first attempt at this shipped a
+  second probe on the same clock before noticing — `crate::reach` is what
+  survived, and it is now only the join, a path-prefix test a row can afford
+  per frame.
+
   *(The owner, 2026-08-16: "we need to show beside songs when they are not
   available due to the drive not being loaded or being removed.")*
 

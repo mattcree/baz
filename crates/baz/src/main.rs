@@ -79,6 +79,7 @@ mod queue_edit;
 #[allow(dead_code)]
 mod queue_window;
 mod rail;
+mod reach;
 mod replaygain;
 mod resource;
 mod scan;

@@ -196,6 +196,7 @@ pub(crate) fn draft_row<'a>(
             .into(),
         playing: false,
         press: None,
+        offline: shelf.offline(&item.path),
     });
     let row = row![
         track,

@@ -562,6 +562,7 @@ fn entry_row<'a>(
                 row: index,
             },
         )),
+        offline: shelf.offline(&page_row.path),
     });
     // The drag wrapper owns the pointer for the body (crate::drag): every
     // row of the artefact is draggable — a file edit needs no engine, the

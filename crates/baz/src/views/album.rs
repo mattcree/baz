@@ -302,6 +302,7 @@ fn track_rows<'a>(
                 collecting,
                 hovered_row == Some(index),
                 crate::app::is_favourite(shelf, &track.path),
+                shelf.offline(&track.path),
             ));
         }
     }
@@ -564,6 +565,7 @@ fn track_row(
     collecting: Collecting,
     hovered: bool,
     favourite: bool,
+    offline: bool,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
@@ -594,6 +596,7 @@ fn track_row(
         duration: duration.into(),
         playing,
         press,
+        offline,
     });
     // The row's right press opens its mirror menu (doc 09 §5.2): the same
     // verbs the row's own controls speak, at the pointer.

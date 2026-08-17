@@ -548,6 +548,7 @@ fn queue_row(
         duration: row_state.duration.into(),
         playing,
         press: live.then_some(Message::ContentPressed(Content::QueueTrack(index))),
+        offline: shelf.offline(&item.path),
     });
     // The drag wrapper owns the pointer for the body (crate::drag's module
     // docs): live rows lift on threshold and still click under it; every

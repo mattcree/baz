@@ -8359,6 +8359,21 @@ pub(crate) struct Shelf {
 }
 
 impl Shelf {
+    /// **Is this file on a drive that is not connected?** — the reading every
+    /// track surface takes.
+    ///
+    /// From [`Self::unavailable`], which the scan already maintains: it is
+    /// cleared at the start of every pass and filled by the folders that pass
+    /// could not walk, so it describes the latest attempt and clears itself
+    /// when the drive comes back. The backlog entry that asked for this said
+    /// *"the hard part is not the badge, it is knowing"* and worried about a
+    /// `stat` per visible row per frame. The knowing was already here; the
+    /// first attempt at this shipped a second probe on the same clock before
+    /// noticing.
+    pub(crate) fn offline(&self, path: &std::path::Path) -> bool {
+        crate::reach::unreachable(&self.unavailable, path)
+    }
+
     /// Current play-ledger snapshot for the local Now Playing fact feed.
     pub(crate) fn history(&self) -> Option<&History> {
         self.history.as_ref()

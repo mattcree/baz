@@ -87,6 +87,7 @@ pub(crate) fn view<'a>(
             press: player
                 .engine_ready()
                 .then_some(Message::FavouritesPlayTrack(index)),
+            offline: shelf.offline(&item.path),
         });
         // The card is drawn behind the whole row — heart included — and the
         // row reports its own crossings, which is the only way a sibling can

@@ -744,6 +744,12 @@ pub(crate) struct TrackRow<'a> {
     /// What pressing it does, or `None` where it cannot act: no engine, or a
     /// missing file with nothing to play.
     pub(crate) press: Option<Message>,
+    /// **Whether the drive this file is on has gone** (`crate::reach`).
+    ///
+    /// One field on the one shared row is what puts the reading on every track
+    /// surface at once — the record's page, a playlist, the queue, favourites,
+    /// a draft — which is the whole reason this struct exists.
+    pub(crate) offline: bool,
 }
 
 /// Draw a [`TrackRow`] — the shared body, without its trailing slots.
@@ -759,6 +765,10 @@ pub(crate) struct TrackRow<'a> {
 /// one function across a 880 px page column and a 692 px run column — the
 /// anatomy is expressed in reserved lanes and a `Fill`, so it is the same row
 /// at any measure.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one row's whole anatomy: three metadata arrangements and a reading, read together"
+)]
 pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
     let room = theme::active();
     let TrackRow {
@@ -771,11 +781,16 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
         duration,
         playing,
         press,
+        offline,
     } = row;
+    // **A file on a drive that is not there is drawn as itself, dimmed.** Not
+    // hidden and not removed: an unplugged disk is a temporary absence, and a
+    // row that vanished with the drive would read as a library that had lost
+    // something.
     let heading = text(title)
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
-        .color(ink)
+        .color(if offline { room.paper_muted } else { ink })
         .wrapping(text::Wrapping::None);
     // The playing row's title takes the medium weight the now-playing bar gives
     // the same string — one more place the surfaces agree about what is
@@ -790,6 +805,25 @@ pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
         Some((label, press, true)) => (Some(metadata_label(label, room.paper_dim, press)), None),
         Some((label, press, false)) => (None, Some(metadata_label(label, room.paper_dim, press))),
         None => (None, None),
+    };
+    // …and it says so in a word, because dimming alone is a reading that rests
+    // on telling two inks apart — which is the one thing no reading in this
+    // product may do. The word is beside the title rather than instead of it:
+    // what the row *is* has not changed, only whether you can play it.
+    let heading: Element<'_, Message> = if offline {
+        row![
+            heading,
+            text("· drive not connected")
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_BODY)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::GAP_XS)
+        .align_y(iced::Alignment::Center)
+        .into()
+    } else {
+        heading.into()
     };
     let mut stack = column![heading].spacing(theme::GAP_XXS);
     match (under, inline_context) {
