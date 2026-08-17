@@ -474,6 +474,87 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **Search folds case and nothing else, so `and` never finds `&`.** *(The
+  owner, 2026-08-17: "can we make sure our search treats 'and' as & or and…
+  because I searched for a song which used the ampersand which wasn't found by
+  searching with the word.")*
+
+  `Index::ranked` builds its needle with `query.to_lowercase()` and matches
+  against titles folded the same way. `Day & Night` and `day and night` are
+  therefore different strings, and so are every `Simon & Garfunkel`,
+  `Earth, Wind & Fire` and `Above & Beyond` in a library that spells them the
+  way the sleeve does.
+
+  **Wanted:** one fold, applied to both sides, that treats `&` and `and` as
+  the same token. Worth doing as a *token* rule rather than a substring
+  replace — `Sand` must not become `S&`, and `R&B` must not become `Rand B`.
+  The same fold is the natural home for two neighbours already known to bite:
+  punctuation between words (`R.E.M.` against `REM`) and accents
+  (`Beyoncé` against `Beyonce`), which the module docs already admit are
+  folded by `to_lowercase` alone.
+
+- **A named extreme can be the analyser's worst reading rather than the
+  library's.** *(The owner, 2026-08-17: "the 'what baz heard' classified Day &
+  Night by thundercat as the fastest… it really isn't.")*
+
+  He is right, and the cause is measurable. The top of the tempo ranking on
+  his own 5 076-track library:
+
+  ```text
+  194.9  Thundercat — Day & Night
+  192.2  Walk On By
+  191.5  Maurice Jarre — Lara's Theme (Swing Version)
+  191.4  Orlando di Lasso — Matona mia cara
+  190.6  Klára Körmendi — Childish Chatter, for piano
+  ```
+
+  A Renaissance madrigal and a solo piano miniature are not at 190 BPM. These
+  are **octave errors** — beat trackers routinely report double or half the
+  felt tempo, and the top of an argmax ranking is exactly where they collect.
+  The bottom is worse in its own way: the three slowest read `0.0`, which is a
+  detection failure rather than a tempo.
+
+  **And the inconsistency is mine.** The same block already states the tempo
+  *range* as p05–p95, precisely so one bad reading cannot describe a library —
+  and then names the extremes with an argmin and an argmax, which is the one
+  place a single bad reading gets a sentence to itself.
+
+  **Wanted, in order of confidence:**
+
+  1. **Name the extremes from a robust rank**, not the end. The record at the
+     2nd percentile is still *the quiet end of your library* and cannot be one
+     misdetection.
+  2. **Fold tempo into a sane band** (roughly 60–180 BPM) by halving or
+     doubling before anything ranks it, which is what beat-tracking libraries
+     do and what would make the tempo axis itself better as well as the
+     reading.
+  3. **Drop `0.0` from consideration**, since it is an absence and not a
+     measurement.
+
+  This is the *check me* framing working exactly as designed
+  (`docs/design/24-what-baz-heard.md` §2): the block named a record, its owner
+  knew in one second it was wrong, and the analysis is what has to answer.
+
+- **Right-clicking in a playlist resets the scroll position.** *(The owner,
+  2026-08-17.)* Not diagnosed. Suspicion is that opening the context menu
+  rebuilds the list and the scrollable comes back at the top rather than at
+  the offset it was holding — the same shape as the bugs the `scroll_offset`
+  fields on other places exist to prevent. Reproduce first: right-click deep
+  in a long playlist and watch whether the offset survives the menu opening,
+  the menu closing, and an action taken from it.
+
+- **Now Playing should fit its content, and the heart should belong to it.**
+  *(The owner, 2026-08-17: "can you make the now-playing fit the content up to
+  a max width and ensure the heart is snapped to the right hand side of that
+  box so it doesn't appear to be off on its own.")*
+
+  The block takes the full measure whatever is in it, so the favourite mark
+  ends up against the window's edge with a stretch of nothing between it and
+  the title it belongs to — it reads as a control of the *page* rather than of
+  *this song*. **Wanted:** the block sized to its content up to a maximum, and
+  the heart against the right edge of that box, so proximity says what it is
+  attached to.
+
 - **A library's own spread is measured, known, and never shown.** **Shipped
   2026-08-16** — both wanted forms, evidence in
   `docs/design/impl/what-baz-heard/`. *(The owner,
