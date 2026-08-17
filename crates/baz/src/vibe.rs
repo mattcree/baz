@@ -446,74 +446,6 @@ impl Shape {
     }
 }
 
-/// **One word of the vocabulary** — a way of writing the request, never a
-/// second input beside it. Pressing one appends it to the line with a comma.
-///
-/// There is no language model here. The text tower answers *descriptive
-/// phrases about sound*: "slow sparse piano, melancholy" retrieves, "songs
-/// about my ex" retrieves noise. The vocabulary is the answer to that, and it
-/// is a route rather than a rule — telling somebody to describe the sound and
-/// not the story, without giving them the words, is a scold.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Chip {
-    /// Which row it sits in.
-    pub(crate) row: &'static str,
-    /// The word itself, exactly as it reaches the model.
-    pub(crate) word: &'static str,
-}
-
-impl Chip {
-    /// **The twelve, in two rows, each chosen by measurement** —
-    /// `docs/design/impl/vibe-eligibility/`, finding 6. Twenty-seven
-    /// candidates were scored on how far appending them moves a real request's
-    /// pool *towards the chip's own meaning*, over five ordinary starting
-    /// phrases. These twelve are the ones that did.
-    ///
-    /// **Design 21 §4 asked for three rows and the numbers refused one.** A
-    /// *moves like* row was measured too — `slow`, `driving`, `hypnotic`,
-    /// `sparse`, `danceable` and four more. Every one of them displaced the
-    /// pool heavily and pulled it almost nowhere: its best chip scored 0.046
-    /// against the *made of* row's 0.142, and two of its nine were at or below
-    /// zero. Appending an adjective to a five-word request scrambles the
-    /// embedding rather than steering it, and instrumentation words survive
-    /// that because they name something the audio tower can hear. The row also
-    /// duplicated the question the curve asks directly beneath it.
-    ///
-    /// If it is ever wanted back, the thing to change is not this list: it is
-    /// that movement words should steer the **curve** — press *driving*, get a
-    /// shape — rather than be appended to a sentence that then means something
-    /// else.
-    pub(crate) const ALL: [Self; 6] = [
-        Self {
-            row: "made of",
-            word: "acoustic guitar",
-        },
-        Self {
-            row: "made of",
-            word: "synthesizers",
-        },
-        Self {
-            row: "made of",
-            word: "piano",
-        },
-        Self {
-            row: "made of",
-            word: "strings",
-        },
-        Self {
-            row: "made of",
-            word: "electric guitars",
-        },
-        Self {
-            row: "made of",
-            word: "female vocals",
-        },
-    ];
-
-    /// The rows, in the order the band draws them.
-    pub(crate) const ROWS: [&'static str; 1] = ["made of"];
-}
-
 /// **A recipe: a mood you can start from.**
 ///
 /// The owner: *"we should have like 5-6 standard recipes — as part of the
@@ -778,22 +710,6 @@ fn resampled(points: &[ContourPoint], count: usize) -> Vec<ContourPoint> {
     }
     drawn.push(*points.last().expect("two points at least"));
     drawn
-}
-
-/// **Whether two lines are the same line**, whatever points they are drawn
-/// with — read at twenty-one places across the measure, which is finer than
-/// any drawing this page can produce.
-fn same_line(left: &[ContourPoint], right: &[ContourPoint]) -> bool {
-    if left.is_empty() || right.is_empty() {
-        return left.is_empty() && right.is_empty();
-    }
-    (0_u8..=20).all(|step| {
-        let at = f32::from(step) / 20.0;
-        match (level_at(left, at), level_at(right, at)) {
-            (Some(one), Some(other)) => (one - other).abs() < 0.001,
-            (none, other) => none.is_none() && other.is_none(),
-        }
-    })
 }
 
 /// A sentence's first letter, where the sentence was written as a clause.
@@ -1209,7 +1125,12 @@ pub(crate) struct State {
     /// **Advanced** adds the query builder proper — the vocabulary, the drawn
     /// line and its per-dimension curves, and the readouts that explain what
     /// the engine did.
-    /// **Whether the words are on show.**
+    /// **Whether the request is narrowed by words at all** — `All songs`
+    /// against `Matching songs`.
+    ///
+    /// Not a view flag: [`Self::effective_request`] reads it, so `All songs`
+    /// genuinely means all of them. The phrase is kept while it is off, so
+    /// changing your mind twice costs nothing.
     ///
     /// They are the optional half and the untrustworthy half, so they are
     /// folded away until asked for — which is what buys the line, the length
@@ -1600,25 +1521,6 @@ impl State {
         self.shape_touched = true;
     }
 
-    /// Which recipe the request currently matches, if any — so the row can
-    /// light the one you started from and stop lighting it the moment you
-    /// change the words.
-    pub(crate) fn recipe(&self) -> Option<usize> {
-        Recipe::ALL.iter().position(|recipe| {
-            self.prompt == recipe.prompt
-                && self.length == recipe.length
-                // **The same line, not the same points.** A preset is stored
-                // as the fewest points that state its arc and loaded at the
-                // working resolution, and the point count is a control of its
-                // own — so comparing vertices would have a recipe stop
-                // recognising itself the moment it was loaded.
-                && self
-                    .contour
-                    .lane(0)
-                    .is_some_and(|lane| same_line(&lane.points, &recipe.shape().points()))
-        })
-    }
-
     /// **Load a named shape onto every line.** A shape is a shape: asking for
     /// `Peak and fall` with tempo and brightness drawn means both of them
     /// peak and fall, which is what the picture then shows. Lines are shaped
@@ -1987,19 +1889,25 @@ impl State {
         if prompt.trim() != self.prompt.trim() {
             self.words_changed();
         }
+        // Words arriving from anywhere — a mood on the door, a preset — are
+        // words somebody asked for, so they turn the switch that uses them.
+        if !prompt.trim().is_empty() {
+            self.words_open = true;
+        }
         self.prompt = prompt;
     }
 
-    /// **Appending a word from the vocabulary**, with a comma — design 21 §4's
-    /// rule, and the one thing a chip does.
-    pub(crate) fn append_word(&mut self, word: &str) {
-        let existing = self.prompt.trim_end().trim_end_matches(',').to_owned();
-        let joined = if existing.is_empty() {
-            word.to_owned()
-        } else {
-            format!("{existing}, {word}")
-        };
-        self.set_prompt(&joined);
+    /// **All songs, or only the ones the words match.**
+    ///
+    /// Recounts, because everything on screen describing the eligible set has
+    /// just stopped being true of it — the same path the words themselves
+    /// take when they change.
+    pub(crate) fn set_words(&mut self, open: bool) {
+        if open == self.words_open {
+            return;
+        }
+        self.words_open = open;
+        self.words_changed();
     }
 
     /// How long the words must be still before they are worth a text
@@ -2149,6 +2057,16 @@ impl State {
     /// contour now, on its own axis, and the prompt says what it always
     /// meant.
     fn effective_request(&self) -> String {
+        // **`All songs` means all songs.** The choice is a request-level one,
+        // so it is answered here rather than by the view hiding a field that
+        // still filtered — which is what folding the words away used to do,
+        // under a line promising Baz would use everything it had heard.
+        //
+        // The words are kept rather than cleared: switching back should not
+        // cost somebody the phrase they wrote.
+        if !self.words_open {
+            return String::new();
+        }
         self.prompt.trim().to_owned()
     }
 
@@ -2912,20 +2830,26 @@ mod tests {
         }
     }
 
-    /// **A recipe fills the form and leaves it editable**, which is the whole
+    /// **A mood fills the form and leaves it editable**, which is the whole
     /// of what makes it a starting point rather than a mode.
+    ///
+    /// It used to also have to *recognise itself* afterwards, so a chip on
+    /// this page could light. The chips are gone — the moods are on the door
+    /// you come through, and the page teaches by example instead — so what is
+    /// left to hold is that pressing one sets all three parts of a request
+    /// and none of them stick.
     #[test]
-    fn a_recipe_fills_the_request_and_stops_claiming_it_the_moment_it_changes() {
+    fn a_recipe_fills_the_request_and_leaves_every_part_of_it_editable() {
         let mut state = State::default();
-        assert_eq!(
-            state.recipe(),
-            None,
-            "nothing is a recipe until one is pressed"
-        );
-        for (index, recipe) in Recipe::ALL.iter().enumerate() {
-            state.start_from(*recipe);
+        for recipe in Recipe::ALL {
+            state.start_from(recipe);
             assert_eq!(state.prompt, recipe.prompt);
             assert_eq!(state.length, recipe.length);
+            assert!(
+                state.words_open,
+                "{} filled the words without turning them on",
+                recipe.label
+            );
             assert_eq!(points(&state).len(), Contour::DEFAULT_POINTS);
             assert_eq!(
                 points(&state).first().map(|point| point.level),
@@ -2933,23 +2857,13 @@ mod tests {
                 "{} does not open where its shape does",
                 recipe.label
             );
-            assert_eq!(
-                state.recipe(),
-                Some(index),
-                "{} does not recognise itself",
-                recipe.label
-            );
         }
-        // Change any one of the three and it is the listener's request.
+        // Change any one of the three and it stays changed.
         state.start_from(Recipe::ALL[0]);
         state.set_prompt("something else entirely");
-        assert_eq!(state.recipe(), None);
-        state.start_from(Recipe::ALL[0]);
-        state.drag_contour(0, 0, 0.0, 1.9);
-        assert_eq!(state.recipe(), None);
-        state.start_from(Recipe::ALL[0]);
+        assert_eq!(state.prompt, "something else entirely");
         state.set_length(MixLength::TwoHours);
-        assert_eq!(state.recipe(), None);
+        assert_eq!(state.length, MixLength::TwoHours);
 
         // Every recipe says something to the model and draws a real line.
         for recipe in Recipe::ALL {
@@ -3517,23 +3431,6 @@ mod tests {
             ..State::default()
         };
         assert!(middling.row_is(0).is_empty(), "{:?}", middling.row_is(0));
-    }
-
-    /// **A chip appends; it never replaces.** Design 21 §4's rules table.
-    #[test]
-    fn the_vocabulary_appends_to_the_one_request() {
-        let mut state = State::default();
-        state.append_word("piano");
-        assert_eq!(state.prompt, "piano");
-        state.append_word("melancholy");
-        assert_eq!(state.prompt, "piano, melancholy");
-        state.set_prompt("warm brass,");
-        state.append_word("dark");
-        assert_eq!(state.prompt, "warm brass, dark");
-        // Every chip is in a row the band actually draws.
-        for chip in Chip::ALL {
-            assert!(Chip::ROWS.contains(&chip.row), "{}", chip.word);
-        }
     }
 
     #[test]

@@ -34,26 +34,18 @@ use crate::{theme, views};
 
 pub(crate) fn view(vibe: &crate::vibe::State, layout: Layout) -> Element<'_, Message> {
     let mut block = column![heading("How should it move?")].spacing(theme::GAP_SM);
-    block = block.push(views::hint(crate::vibe::shape_words(&vibe.contour)));
-    // **What the line is, said once, at the top of it.**
+    // **Say what the control is, not what is behind it.** The owner: *"remove
+    // the copy that is there at the top and describe what the curve does."*
     //
-    // The owner: *"the concept of the 'blend' of the curves isn't that
-    // clear."* It was not said anywhere — the word appeared beside each
-    // percentage as though it were a thing the reader already had, and the
-    // single line said nothing about being five.
-    //
-    // The expanded sentence is the one that matters, and it is the same
-    // answer as *"the stuff is not conforming to each"*: the walk satisfies
-    // the shares, not each line, because it cannot satisfy each line. Saying
-    // so turns a control that looks broken into one that is behaving
-    // visibly.
-    block = block.push(views::hint(if vibe.shown.is_some() {
-        "A song can only be in one place at a time, so the bigger a line's share, the \
-         more closely the songs follow it."
-    } else {
-        "Baz listens for five things. One line asks for all five at once — energy \
-         matters most, texture least."
-    }));
+    // What stood here was a live reading of the current shape and a paragraph
+    // about five weighted dimensions — the first repeated by the request
+    // sentence at the foot of the column, the second an answer to a question
+    // nobody has yet asked on first sight. The question they do have is
+    // *what am I looking at*, and it takes one line: the axes, and the verb.
+    block = block.push(views::hint(
+        "This line is your playlist, from the first song to the last. Drag it up where \
+         you want louder, faster music and down where you want quieter, slower music.",
+    ));
     // **One graph, and a row of tabs over it.** The owner: *"I like the idea
     // of all lines being on the same graph and a way to kinda toggle between
     // all and individual… then selecting each individually to be able to

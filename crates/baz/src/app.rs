@@ -605,8 +605,6 @@ pub(crate) enum Message {
     VibePrompt(String),
     /// Set the requested listening duration.
     VibeLength(crate::vibe::MixLength),
-    /// Append one word of the vocabulary to the request, with a comma.
-    VibeWord(usize),
     /// Show or hide the words that narrow the request.
     VibeWords(bool),
     /// The debounce clock: ask whether the words have been still long enough
@@ -4084,22 +4082,12 @@ impl App {
             // **A word from the vocabulary**, appended with a comma. Design 21
             // §4: a chip is a way of writing the one request, never a second
             // input beside it.
-            Message::VibeWord(word) => {
-                if let Screen::Shelf(state) = &mut self.screen
-                    && let Some(chip) = crate::vibe::Chip::ALL.get(*word)
-                {
-                    state.vibe.append_word(chip.word);
-                    self.playlists
-                        .suggest_creation_name(&state.vibe.prompt.clone());
-                }
-                Some(Task::none())
-            }
             // **The words have been still for 400 ms.** Embed once, off this
             // thread; the count and the closest three are computed against
             // vectors already in memory when it comes back.
             Message::VibeWords(open) => {
                 if let Screen::Shelf(state) = &mut self.screen {
-                    state.vibe.words_open = *open;
+                    state.vibe.set_words(*open);
                 }
                 Some(Task::none())
             }

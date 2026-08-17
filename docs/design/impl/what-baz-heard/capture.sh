@@ -102,8 +102,8 @@ shot "03-the-example-is-their-music"
 # **The count under the field**, which no longer says *match* and no longer
 # waits for the advanced depth. The field sits under the line, in the request
 # column, because the line is the question and the words narrow its answer.
-# The words are folded away until asked for, so the disclosure comes first.
-click 334 634
+# The words are off until chosen, so `Matching songs` comes first.
+click 400 634
 sleep 1
 click 588 668
 xdotool type --clearmodifiers --delay 30 "a slow warm pulse"

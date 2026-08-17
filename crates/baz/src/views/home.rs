@@ -907,18 +907,19 @@ mod tests {
             include_str!("compose/result.rs"),
         ]
         .join("\n");
-        // The words' own heading has moved twice under design note 25 — from
-        // `What do you want to hear?` to `NARROW IT DOWN` to a disclosure
-        // that says `Only certain songs` — because they went from being the
-        // request to being an optional filter on it. The assertion follows
-        // rather than being deleted: what it guards is that the composer
-        // still asks its question, still takes words, and is still the only
-        // place that does.
+        // The words' own control has been renamed three times under design
+        // note 25 — `What do you want to hear?`, `NARROW IT DOWN`, `Only
+        // certain songs`, and now one half of an `All songs` / `Matching
+        // songs` pair — because they went from being the request to being an
+        // optional filter on it to being a choice between two requests. The
+        // assertion follows rather than being deleted: what it guards is that
+        // the composer still asks its question, still takes words, and is
+        // still the only place that does.
         for required in [
             "VibePrompt",
             "Compose",
             "Save playlist",
-            "Only certain songs",
+            "Matching songs",
             "How should it move?",
         ] {
             assert!(

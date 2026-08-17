@@ -36,6 +36,18 @@ Every release is built from a tag by CI, gated on the full test suite — see
   real measurements and you can check it by ear; the description is a model's
   guess that, for two of six measured test phrases, was no better than
   picking at random. The page led with the guess.
+- **All songs, or matching songs.** The description box is one half of a plain
+  pair now rather than something you unfold, and **All songs** genuinely means
+  all of them — folding it away used to leave the words filtering anyway,
+  under a line saying they were not. The mood and word buttons are gone from
+  this page; the moods are on the door you arrive through, and what was
+  actually needed was a line saying what kind of thing to write: *describe the
+  sound, not the story — piano and strings, slow and sparse.*
+- **The line says what it is.** *This line is your playlist, from the first
+  song to the last. Drag it up where you want louder, faster music and down
+  where you want quieter, slower music.* It used to open by explaining five
+  weighted dimensions, which is not the question you have when you first look
+  at it.
 - **Compose is where you have been setting things, and there is less to set.**
   The button sits at the foot of the column you were working in, not across
   the page. Simple/Advanced is gone — it had come down to hiding one row of

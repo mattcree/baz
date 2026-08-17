@@ -59,22 +59,20 @@ const TIGHT: f32 = theme::GAP_XS;
 pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let room = theme::active();
     let vibe = &shelf.vibe;
-    // **Folded away until asked for.** The words are the optional half, and
-    // the untrustworthy half, and unfolded they are five rows — which is the
-    // difference between `Compose` sitting above the fold and below it. A
-    // request that arrived with words already in it opens itself.
-    let open = vibe.words_open || !vibe.prompt.trim().is_empty();
+    // **A binary, in the page's own either-or anatomy.** The owner: *"the
+    // 'only certain songs' thing should also be a binary option i.e. 'All
+    // songs' or 'Matching songs'."* It was a disclosure, which said *there is
+    // more of this* when what it governs is a choice between two requests —
+    // and, worse, a folded disclosure still filtered, under a line promising
+    // it would not. It is a request-level switch now, answered in
+    // `effective_request`, and it reads like the line tabs above it.
+    let open = vibe.words_open;
     let mut band = column![
         row![
-            chip("Only certain songs", open, Message::VibeWords(!open)),
-            Space::new().width(Length::Fill),
-            quiet(if open {
-                "Optional"
-            } else {
-                "Baz will use every song it has heard"
-            }),
+            chip("All songs", !open, Message::VibeWords(false)),
+            chip("Matching songs", open, Message::VibeWords(true)),
         ]
-        .align_y(iced::Alignment::Center)
+        .spacing(theme::GAP_XS)
     ]
     .spacing(TIGHT);
     if !open {
@@ -98,43 +96,20 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
             .line_height(theme::LEADING_BODY)
             .style(move |_theme, status| theme::input(room, status)),
         )
+        // **Two examples instead of twelve chips.** *"The pick a mood or word
+        // could be replaced just by a couple of examples to explain what sort
+        // of prompt to do."* The moods live on the door you came through, and
+        // the vocabulary was a row of words you could have typed. What was
+        // actually needed was a sentence saying what kind of thing to write —
+        // and the examples name instruments and texture, which is the half of
+        // this the model measurably hears.
+        .push(quiet(
+            "Describe the sound, not the story. For example: piano and strings, slow \
+             and sparse · loud guitars, no vocals",
+        ))
         .push(matches_note(vibe));
 
-    // The two ways of writing it, under one label rather than two.
-    let current = vibe.recipe();
-    // Two labels rather than one, because these are two different acts: a
-    // mood **replaces** the words, a vocabulary word **adds** to them.
-    let mut ways = column![views::caption_word("OR PICK A MOOD")].spacing(TIGHT);
-    ways = ways.push(wrap_chips(
-        crate::vibe::Recipe::ALL
-            .iter()
-            .enumerate()
-            .map(|(index, recipe)| {
-                chip(
-                    recipe.label,
-                    current == Some(index),
-                    Message::VibeRecipe(index),
-                )
-            })
-            .collect(),
-        3,
-    ));
-    ways = ways
-        .push(Space::new().height(theme::GAP_SM))
-        .push(views::caption_word("OR ADD A WORD"));
-    for name in crate::vibe::Chip::ROWS {
-        ways = ways.push(wrap_chips(
-            crate::vibe::Chip::ALL
-                .iter()
-                .enumerate()
-                .filter(|(_, chip)| chip.row == name)
-                .map(|(index, held)| chip(held.word, false, Message::VibeWord(index)))
-                .collect(),
-            3,
-        ));
-    }
-
-    column![band, ways].spacing(theme::GAP_MD).into()
+    band.into()
 }
 
 /// **How long**, as its own small block, so the length is not something you

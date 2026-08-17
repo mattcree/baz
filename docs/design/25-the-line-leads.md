@@ -253,6 +253,46 @@ zero crossings"* is now *"How bright or dark a song sounds."* *"Baz drew 24 of
 *"Closest: … If these look wrong, try different words."* Nothing became less
 true; several things stopped needing a second reading.
 
+## 4c. Two either-ors, and no mode
+
+The page settled on one idiom, used twice: **a pair of chips where the choice
+is between two things.**
+
+| | |
+|---|---|
+| `All five together` | `Energy · 40%` … `Texture · 10%` |
+| `All songs` | `Matching songs` |
+
+The second replaced a disclosure. The owner: *"the 'only certain songs' thing
+should also be a binary option i.e. 'All songs' or 'Matching songs'."* A
+disclosure says *there is more of this*; what this governs is a choice between
+two requests, so it should look like one. It also fixed a defect that came in
+with the fold: a **collapsed** words band still filtered, under a line
+promising Baz would use everything it had heard. `All songs` is answered in
+`effective_request` now, so it means what it says — while keeping the phrase,
+so changing your mind twice costs nothing.
+
+**The moods and the vocabulary came off this page.** *"The pick a mood or word
+could be replaced just by a couple of examples to explain what sort of prompt
+to do."* Twelve chips became one line:
+
+> *Describe the sound, not the story. For example: piano and strings, slow and
+> sparse · loud guitars, no vocals*
+
+The moods live on the door you arrive through, which is where you pick a mood.
+The vocabulary was six words you could have typed — and the finding that
+earned it (instruments and texture concentrate the right genre 3.5–4.1×, where
+moods measure at chance) is now carried by what the examples are *made of*
+rather than by a row of buttons.
+
+**And the copy at the head of the line says what the line is.** It described
+the five weighted dimensions, which answers a question nobody has on first
+sight. The one they do have is *what am I looking at*:
+
+> *This line is your playlist, from the first song to the last. Drag it up
+> where you want louder, faster music and down where you want quieter, slower
+> music.*
+
 ## 5. What still needs the owner
 
 The blind ballot (note 23 §7 experiment 1, plan 22 §0.1). The harness, the
