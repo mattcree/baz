@@ -36,6 +36,23 @@ impl Foreground {
         Self::ALL.into_iter().find(|choice| choice.code() == code)
     }
 
+    /// The next object in the cycle — the owner, 2026-08-17: *"can we make
+    /// the three album cover views into a toggle cycle similar to the
+    /// background visualisation button"*.
+    ///
+    /// The order is the order the three marks stood in, so a listener who knew
+    /// where to reach finds the same sequence under one press instead of
+    /// three targets. It returns to `Cover` from `None`, exactly as
+    /// [`Mode::next`] returns to `Off` — a cycle with no end is the only kind
+    /// a single control can offer.
+    pub(crate) const fn next(self) -> Self {
+        match self {
+            Self::Cover => Self::JewelCase,
+            Self::JewelCase => Self::None,
+            Self::None => Self::Cover,
+        }
+    }
+
     pub(crate) const fn draws_art(self) -> bool {
         !matches!(self, Self::None)
     }
@@ -201,13 +218,29 @@ pub(crate) fn foreground(
         .into()
 }
 
-/// Three radio-like foreground marks followed by one independent visualizer
-/// toggle, all in the app bar's existing display-options slot.
+/// **Three controls, not five**: the album object, the audio field and the
+/// fact feed, each one press that moves to the next state.
+///
+/// The album object was three radio-like marks standing side by side until
+/// 2026-08-17 — the owner: *"can we make the three album cover views into a
+/// toggle cycle similar to the background visualisation button"*. The
+/// visualizer beside it had been a cycle all along, so the bar was spending
+/// five slots on two questions and answering them in two different
+/// grammars. It is one grammar now, and the slot it gives back is two
+/// [`theme::STEPPER_HIT`] boxes of the app bar's scarcest lane.
+///
+/// **What a cycle costs, stated rather than discovered**: the states are no
+/// longer all visible at once, so a listener cannot see that a jewel case is
+/// available without pressing. The tooltip carries it — *"Cover art — choose
+/// Jewel case"* — which is the same promise [`mode_button`] has always made
+/// and is why he named that control as the one to match.
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
-    row(Foreground::ALL.map(|choice| foreground_button(choice, state.foreground)))
-        .push(mode_button(state.mode))
-        .push(facts_button(state.facts))
-        .into()
+    row![
+        foreground_button(state.foreground),
+        mode_button(state.mode),
+        facts_button(state.facts),
+    ]
+    .into()
 }
 
 fn facts_button(on: bool) -> Element<'static, Message> {
@@ -248,42 +281,47 @@ fn facts_button(on: bool) -> Element<'static, Message> {
     .into()
 }
 
-fn foreground_button(choice: Foreground, selected: Foreground) -> Element<'static, Message> {
+/// The album object, as one cycling control — [`mode_button`]'s twin.
+///
+/// It shows **the state it is in** and names the state the press leads to, and
+/// it is lit on the same rule its neighbour uses: lit while something is
+/// drawn, quiet at `None`, so the two controls read as one pair answering
+/// *what is on the screen*.
+///
+/// No new message. `VisualizationForeground` already means *be this object*,
+/// and the button computes which one — so the shell's arm, the config it
+/// persists and every test over them are untouched by the change of grammar.
+fn foreground_button(selected: Foreground) -> Element<'static, Message> {
     let room = theme::active();
-    let active = choice == selected;
+    let showing = selected.draws_art();
     let mark = container(
-        iced_image(crate::icon::handle(choice.glyph()))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(if active {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY
-            }),
+        iced_image(crate::icon::inked(
+            selected.glyph(),
+            if showing { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if showing { 1.0 } else { theme::GLYPH_OPACITY }),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
-    let boxed: Element<'static, Message> = if active {
-        container(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .into()
-    } else {
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.recess, status))
-            .on_press(Message::VisualizationForeground(choice))
-            .into()
-    };
+    let control = button(mark)
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::VisualizationForeground(selected.next()));
     tooltip(
-        boxed,
-        text(choice.label())
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
+        control,
+        text(format!(
+            "{} — choose {}",
+            selected.label(),
+            selected.next().label()
+        ))
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Bottom,
     )
     .gap(theme::GAP_XS)
@@ -514,6 +552,44 @@ mod tests {
         assert_eq!(state.mode, Mode::Spectrum);
         state.mode = Mode::Off;
         assert_eq!(state.foreground, Foreground::None);
+    }
+
+    /// **The album object cycles too, and comes back to where it started** —
+    /// one control, three states, no dead end.
+    #[test]
+    fn the_album_object_cycles_through_all_three_and_returns() {
+        let mut seen = vec![Foreground::Cover];
+        let mut at = Foreground::Cover;
+        for _ in 0..Foreground::ALL.len() {
+            at = at.next();
+            seen.push(at);
+        }
+        assert_eq!(
+            seen,
+            vec![
+                Foreground::Cover,
+                Foreground::JewelCase,
+                Foreground::None,
+                Foreground::Cover,
+            ],
+            "the cycle skips a state or does not return"
+        );
+        // Every state is reachable from every other, which is the property a
+        // single control has to have to replace three targets.
+        for start in Foreground::ALL {
+            let mut reached = vec![start];
+            let mut at = start;
+            for _ in 1..Foreground::ALL.len() {
+                at = at.next();
+                reached.push(at);
+            }
+            for choice in Foreground::ALL {
+                assert!(
+                    reached.contains(&choice),
+                    "{choice:?} is unreachable from {start:?}"
+                );
+            }
+        }
     }
 
     #[test]
