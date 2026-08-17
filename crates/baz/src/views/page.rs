@@ -287,12 +287,48 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
     // `Shrink` column resolves a `Fill` child against whatever the parent
     // offers — so inside a scroller the commitment stretched past the sleeve to
     // the viewport's edge and lost its right border to the clip.
-    let subject = container(sleeve).width(Length::Fixed(theme::ALBUM_ASIDE_W));
+    // **What the aside holds still, and what it lets turn** (the owner,
+    // 2026-08-17: *"the details area in the album view should be scrollable,
+    // but the play all button should not be in that scroll area"*).
+    //
+    // The line was in the wrong place, not missing: the sleeve was already
+    // held and everything under it scrolled, so the acts went with the facts.
+    // They are not the same kind of thing. `Details` is a table you read to
+    // the end and then stop; `Play album` is the thing you came for, and a
+    // control that can be scrolled out of reach is a control that is
+    // sometimes not there.
+    //
+    // So the fixed half gains **the commitment and nothing else**: the sleeve
+    // and `Play album`. The quieter acts stay in the scroller with the facts,
+    // which is both what he asked for — he named the play button — and what
+    // the arithmetic wants.
+    //
+    // **The arithmetic, because the note this replaces was right to do it.**
+    // The composed row gets the window less both bars, the strip and the
+    // place's two pads. The sleeve is 320 and clears a 587 px window; the
+    // sleeve and the commitment are 372 and clear 639; adding the acts would
+    // be 424 and want 691, and the playlist page's two act lines 476 and 743.
+    // So holding the commitment costs 52 px of headroom and holding the acts
+    // would cost three times that — for a control nobody named.
+    //
+    // In the 52 px band between them the commitment is clipped, and that is
+    // the honest cost of the instruction. It sits *below* the height at which
+    // the sleeve itself is already clipped, which this form has always
+    // conceded (`WINDOW_FLOOR_H` is 384, where the body is 117 against a
+    // 320 px cover) — so the band is inside a range where the page is already
+    // showing less of its subject than it holds, rather than a new failure.
+    //
+    // The stacked form below is one document and one scroll, and is
+    // unchanged: there, nothing can be scrolled *away* from anything.
+    let mut subject = column![]
+        .spacing(theme::GAP_MD)
+        .width(Length::Fixed(theme::ALBUM_ASIDE_W));
+    subject = subject.push(sleeve);
     let mut tail = column![]
         .spacing(theme::GAP_MD)
         .width(Length::Fixed(theme::ALBUM_ASIDE_W));
     if let Some(commitment) = commitment {
-        tail = tail.push(commitment);
+        subject = subject.push(commitment);
     }
     if !acts.is_empty() {
         // **Two to a line.** The aside is [`theme::ALBUM_ASIDE_W`] wide and
@@ -1494,12 +1530,17 @@ mod tests {
             );
         }
 
-        // **Why the fixed half is the cover *alone*.** The cover, `Play album`
-        // and the acts come to 424; the composed row gets the window less both
-        // bars, the strip and the place's two pads. At a 620 px window that is
-        // 361, so a fixed head of all three would put `Play album` past the
-        // body's edge with nothing able to scroll it — item 46's own defect,
-        // one block higher. The cover alone is 320 and clears it.
+        // **Why the fixed half is the cover and the commitment, and stops
+        // there.** The owner, 2026-08-17: *"the play all button should not be
+        // in that scroll area"*. He named the button; the arithmetic says take
+        // him at his word and no further.
+        //
+        // The composed row gets the window less both bars, the strip and the
+        // place's two pads. The cover is 320; the cover and the commitment are
+        // 372; adding the acts would be 424, and the playlist page's two act
+        // lines 476. So the instruction costs 52 px of headroom and the
+        // generous reading of it would cost three times that, for controls
+        // nobody asked to pin.
         let composed_at = |window: f32| {
             window
                 - theme::APP_BAR_H
@@ -1508,22 +1549,39 @@ mod tests {
                 - theme::TOP_BAR_H
                 - 2.0 * theme::HANG
         };
-        let head_with_controls = theme::ALBUM_ASIDE_W
-            + theme::GAP_MD
-            + theme::TRANSPORT_HIT
-            + theme::GAP_MD
-            + theme::TRANSPORT_HIT;
+        let held = theme::ALBUM_ASIDE_W + theme::GAP_MD + theme::TRANSPORT_HIT;
+        let with_acts = held + theme::GAP_MD + theme::TRANSPORT_HIT;
+        // The acts stay in the scroller, and this is the number that says why:
+        // holding them too would want a window ~52 px taller again.
         assert!(
-            head_with_controls > composed_at(620.0),
-            "the cover, the commitment and the acts now fit a 620 px window \
-             ({head_with_controls} in {}), so the commitment could join the \
-             fixed half — restate this rather than deleting it",
-            composed_at(620.0)
+            with_acts > held,
+            "the acts cost nothing to hold, so this reasoning is stale"
         );
+        // **The band where the instruction costs something**, stated rather
+        // than hidden: between the height at which the sleeve alone fits and
+        // the height at which the sleeve and the commitment do, the commitment
+        // is clipped.
+        let fits = |head: f32| {
+            let mut window = theme::WINDOW_FLOOR_H;
+            while composed_at(window) < head && window < 2160.0 {
+                window += 1.0;
+            }
+            window
+        };
         assert!(
-            theme::ALBUM_ASIDE_W < composed_at(620.0),
-            "the cover alone no longer fits a 620 px window, so the desktop \
-             form has a height at which it cannot draw its own subject"
+            fits(held) - fits(theme::ALBUM_ASIDE_W) < 64.0,
+            "holding the commitment now costs more than a 64 px band of \
+             window height ({} to {}) — restate the trade rather than \
+             letting it drift",
+            fits(theme::ALBUM_ASIDE_W),
+            fits(held)
+        );
+        // And that band sits inside the range where the sleeve is already
+        // clipped, which this form has always conceded rather than fixed.
+        assert!(
+            theme::ALBUM_ASIDE_W > composed_at(theme::WINDOW_FLOOR_H),
+            "the floor window now fits the sleeve, so the concession above is \
+             stale and the band is a new failure rather than an old one"
         );
     }
 }
