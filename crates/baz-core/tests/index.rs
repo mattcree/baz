@@ -770,6 +770,127 @@ fn same_album_title_by_different_artists_stays_separate() {
     assert!(albums.iter().all(|a| a.title == Some("Greatest Hits")));
 }
 
+/// **A folder that agrees on the album and disagrees on the artist is one
+/// record** — the untagged compilation (ADR-0008's chain, amended
+/// 2026-08-17, on the owner's own `O Brother, Where Art Thou?`, which stood
+/// as fifteen tiles).
+///
+/// No album artist, no compilation flag: every track falls to step 3 and
+/// groups by its own artist string. The folder is the signal that they are
+/// one release.
+#[test]
+fn one_folder_agreeing_on_an_album_is_one_record() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track(
+                "/m/ost/1.flac",
+                "Norman Blake",
+                "O Brother",
+                "Po' Lazarus",
+                1,
+            ),
+            track(
+                "/m/ost/2.flac",
+                "Harry McClintock",
+                "O Brother",
+                "Big Rock",
+                2,
+            ),
+            track(
+                "/m/ost/3.flac",
+                "Alison Krauss",
+                "O Brother",
+                "Down to the River",
+                3,
+            ),
+        ])
+        .expect("add");
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "three artists, one folder, one record");
+    // No artist holds a majority of three, so the record claims no name.
+    assert_eq!(albums[0].artist, AlbumArtist::Various);
+    assert_eq!(albums[0].title, Some("O Brother"));
+}
+
+/// **A guest on one track does not cost a record its name.** The commonest
+/// two-artist folder in any library is an album by one artist with a
+/// featured credit on a track, and a rule that turned those into
+/// `Various Artists` would do far more damage than the shattering it fixes.
+/// A *majority* is what makes the difference — a plurality would not have
+/// been enough.
+#[test]
+fn a_featured_credit_keeps_the_records_own_artist() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/kid/1.flac", "Radiohead", "Kid A", "Everything", 1),
+            track("/m/kid/2.flac", "Radiohead", "Kid A", "The National", 2),
+            track(
+                "/m/kid/3.flac",
+                "Radiohead feat. Björk",
+                "Kid A",
+                "Idioteque",
+                3,
+            ),
+        ])
+        .expect("add");
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "the guest did not split the record");
+    assert_eq!(albums[0].artist, AlbumArtist::Named("Radiohead"));
+}
+
+/// **Two records cannot share a track number**, which is what tells a
+/// compilation apart from a folder of loose files that happen to agree on a
+/// common album title.
+///
+/// This is the guard that keeps `same_album_title_by_different_artists_stays_separate`
+/// true: two different `Greatest Hits` dropped in one directory are both
+/// track 1, and a record has one track 1.
+#[test]
+fn a_repeated_track_number_refuses_the_merge() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/loose/a.flac", "Alpha", "Greatest Hits", "A-Side", 1),
+            track("/m/loose/b.flac", "Beta", "Greatest Hits", "B-Side", 1),
+        ])
+        .expect("add");
+    assert_eq!(
+        library.albums().len(),
+        2,
+        "two track ones cannot be one record"
+    );
+    // …and the same two files, numbered as a running sequence, are one.
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/comp/a.flac", "Alpha", "Greatest Hits", "A-Side", 1),
+            track("/m/comp/b.flac", "Beta", "Greatest Hits", "B-Side", 2),
+        ])
+        .expect("add");
+    assert_eq!(library.albums().len(), 1);
+}
+
+/// **The folder merges and never splits.** A record whose discs sit in their
+/// own folders is one record by title, and this pass must not undo that by
+/// letting a directory into the identity.
+#[test]
+fn discs_in_separate_folders_are_still_one_record() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/set/d1/1.flac", "Alpha", "The Wall", "In the Flesh", 1),
+            track("/m/set/d2/1.flac", "Alpha", "The Wall", "Hey You", 1),
+        ])
+        .expect("add");
+    assert_eq!(
+        library.albums().len(),
+        1,
+        "one artist, one title, one record"
+    );
+}
+
 #[test]
 fn unknown_artist_and_album_tracks_group_together_first() {
     let mut library = Library::open_in_memory().expect("open");
@@ -1684,7 +1805,7 @@ fn a_flagged_compilation_with_differing_artists_becomes_one_various_album() {
 }
 
 #[test]
-fn a_compilation_names_itself_when_the_tagger_named_it() {
+fn the_various_artists_phrase_is_the_compilation_bucket_not_a_name() {
     let mut library = Library::open_in_memory().expect("open");
     library
         .add_tracks(vec![
@@ -1703,10 +1824,13 @@ fn a_compilation_names_itself_when_the_tagger_named_it() {
 
     let albums = library.albums();
     assert_eq!(albums.len(), 1);
-    // The owner's real files carry this exact tag. It is a *name*, not baz's
-    // compilation bucket, and the two must remain distinguishable.
-    assert_eq!(albums[0].artist, AlbumArtist::Named("Various Artists"));
-    assert_ne!(albums[0].artist, AlbumArtist::Various);
+    // **And it names itself `Various`** — reversed 2026-08-17 with the rule
+    // itself (`AlbumArtist::named_or_various`, and the reasoning in
+    // `album_artist_resolution_follows_the_documented_chain`). The owner's
+    // real files carry this exact tag, and so do 345 others; treating the
+    // phrase as a name kept his `O Brother, Where Art Thou?` as two records,
+    // one per spelling of the same fact.
+    assert_eq!(albums[0].artist, AlbumArtist::Various);
 }
 
 #[test]
@@ -2166,10 +2290,8 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
         assert_eq!(track.compilation, None);
     }
 
-    // Until the rescan, grouping is *exactly* the pre-v3 behaviour: the
-    // double rip is still one album with two editions, and the soundtrack is
-    // still shattered. The upgrade fixes nothing by itself and breaks
-    // nothing either.
+    // The double rip is still one album with two editions: the upgrade breaks
+    // nothing.
     let albums = library.albums();
     let passage = albums
         .iter()
@@ -2177,14 +2299,24 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
         .expect("the double rip");
     assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
     assert_eq!(passage.editions.len(), 2);
-    assert_eq!(
-        albums
-            .iter()
-            .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
-            .count(),
-        2,
-        "two artist strings, two entries — the bug, faithfully preserved"
-    );
+    // **And the shattered soundtrack is whole, before any rescan.** This
+    // asserted the opposite until 2026-08-17, on a premise that was true when
+    // it was written: v2 has no album-artist column and no compilation flag,
+    // so nothing could group these two rows until the files were read again.
+    //
+    // `SearchIndex::merge_folders` does not need either column. It reads the
+    // folder and the album title, which a v2 database already holds, so the
+    // rows the owner already has are grouped on the first launch after the
+    // upgrade rather than on the first rescan. Nothing was lost to gain it —
+    // every column assertion above is unchanged.
+    let soundtrack: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(soundtrack.len(), 1, "one folder, one album, one record");
+    // Two tracks, one artist string each: nothing holds a majority, so the
+    // record claims no name rather than borrowing one track's.
+    assert_eq!(soundtrack[0].artist, AlbumArtist::Various);
 }
 
 #[test]

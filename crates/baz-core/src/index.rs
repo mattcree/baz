@@ -1874,7 +1874,14 @@ impl Library {
         let tracks = self.index.tracks.get(start..end)?;
         let first = tracks.first()?;
         let mut built = Album {
-            artist: AlbumArtist::of(&first.meta),
+            // The run's agreed artist when its folder had to agree on one
+            // (`merge_folders`), else this track's own — which for every
+            // track in an ordinary library is the same answer.
+            artist: match &first.record_artist {
+                Some(RecordArtist::Named(name)) => AlbumArtist::Named(name),
+                Some(RecordArtist::Various) => AlbumArtist::Various,
+                None => AlbumArtist::of(&first.meta),
+            },
             title: first.record_title(),
             year: None,
             genre: None,
@@ -2433,15 +2440,40 @@ impl<'a> AlbumArtist<'a> {
     #[must_use]
     pub fn of(meta: &'a TrackMeta) -> Self {
         if let Some(name) = meta.album_artist.as_deref() {
-            return Self::Named(name);
+            return Self::named_or_various(name);
         }
         if meta.compilation == Some(true) {
             return Self::Various;
         }
         match meta.artist.as_deref() {
-            Some(name) => Self::Named(name),
+            Some(name) => Self::named_or_various(name),
             None => Self::Unknown,
         }
+    }
+
+    /// A name, unless the name **is** the words people write instead of a
+    /// name.
+    ///
+    /// `Various Artists` is not a performer. It is what a tagger writes in the
+    /// artist field to say *this release has no one artist* — the same thing
+    /// the compilation flag says, in the only field the format gave them. A
+    /// library that took it literally files a shelf under `V` and, worse,
+    /// keeps it apart from the copy of the same record whose files set the
+    /// flag instead: 345 tracks of the owner's library say it, and his `O
+    /// Brother, Where Art Thou?` stood as two records for exactly this reason
+    /// after the folder merge had done the rest.
+    ///
+    /// **A closed list of two, matched whole**, in the spirit of
+    /// [`DISC_MARKERS`]: `various artists` and `various`. `VA` is deliberately
+    /// absent — it is a plausible band name, and this is a rule that must
+    /// never take a real artist's name away. Anything else that merely
+    /// contains the word is a name (`Various Production` is a group).
+    fn named_or_various(name: &'a str) -> Self {
+        let folded = name.trim().to_lowercase();
+        if folded == "various artists" || folded == "various" {
+            return Self::Various;
+        }
+        Self::Named(name)
     }
 
     /// The name, when there is one. `None` for a compilation or an unknown
@@ -2454,6 +2486,42 @@ impl<'a> AlbumArtist<'a> {
             Self::Various | Self::Unknown => None,
         }
     }
+}
+
+/// What one folder-and-album group has been seen to contain, while
+/// [`SearchIndex::folder_merge_groups`] is deciding.
+#[derive(Default)]
+struct FolderTally {
+    /// Each artist key in the group, how many tracks carry it, and the
+    /// unfolded spelling to show if it wins.
+    artists: HashMap<ArtistKey, (usize, Option<String>)>,
+    /// Every (disc, track) number stated so far.
+    numbers: HashSet<(Option<u32>, u32)>,
+    /// **Whether two tracks claimed the same number** — the one piece of
+    /// evidence that refuses a merge outright.
+    ///
+    /// A record has one track 5. So a folder holding two of them is not one
+    /// record however much else it agrees on, and this is what tells a
+    /// nineteen-track soundtrack apart from a directory of loose files that
+    /// happen to share a common album title. Two different `Greatest Hits`
+    /// dropped in one folder are both track 1, and stay two records.
+    ///
+    /// Tracks that state no number cannot collide and cannot vouch for
+    /// anything; they are simply not counted, so a folder that numbers
+    /// nothing is judged on the artists alone.
+    clash: bool,
+}
+
+/// A track's folder-and-album identity: the directory it sits in, and its
+/// folded album title.
+///
+/// `None` when it names no album — a track with no album title is not a
+/// record, and a folder of loose files with no album tag between them must not
+/// become one ([`SearchIndex::merge_folders`]).
+fn folder_key(meta: &TrackMeta) -> Option<(PathBuf, String)> {
+    let album = meta.album.as_deref()?;
+    let folder = meta.path.parent()?;
+    Some((folder.to_path_buf(), album.to_lowercase()))
 }
 
 /// The disc markers [`split_disc_marker`] knows, ASCII case-insensitively.
@@ -3253,6 +3321,11 @@ struct SearchIndex {
     /// shelf, and both [`Library::albums`] and [`Library::search_albums`] build
     /// their [`Album`]s from it.
     album_starts: Vec<usize>,
+    /// Whether any folder currently merges disagreeing artists — i.e. whether
+    /// any [`IndexedTrack::record_artist`] is set. Lets a library with no such
+    /// folder skip the rewrite entirely, and lets one that *had* one still
+    /// undo it (see [`SearchIndex::merge_folders`]).
+    merged_artists: bool,
     /// Whether the last [`SearchIndex::rebuild_order`] merged any disc-marked
     /// titles at all — i.e. whether any [`IndexedTrack::record_base`] is set.
     ///
@@ -3342,6 +3415,11 @@ impl SearchIndex {
     /// run — so the disc merge and the grouping are one decision made once,
     /// rather than a presentation layer folding two runs back together.
     fn rebuild_order(&mut self) {
+        // **Artists first, then discs.** A folder whose artist keys disagree
+        // has already defeated the disc merge, which groups on (artist, base):
+        // unify the artist and a two-disc compilation's halves can find each
+        // other. The other order fixes neither.
+        self.merge_folders();
         self.merge_discs();
         self.tracks.sort_unstable_by(|a, b| {
             a.key
@@ -3366,6 +3444,133 @@ impl SearchIndex {
             self.album_of
                 .push(self.album_starts.len().saturating_sub(1));
         }
+    }
+
+    /// **Make one folder's disagreeing artists one record** — the untagged
+    /// compilation (ADR-0008's fallback chain, amended 2026-08-17).
+    ///
+    /// The owner, over a photograph of his own Home: *"it seems some albums
+    /// are not grouped properly… it contains a bunch of different things from
+    /// the same album."* The record was `O Brother, Where Art Thou?
+    /// (Soundtrack)`, standing as **fifteen** tiles.
+    ///
+    /// Nothing in the chain was wrong. Every one of those files declares the
+    /// same album, sits in the same folder, names **no album artist** and
+    /// **sets no compilation flag** — so step 3 groups them by track artist,
+    /// exactly as designed, and the track artists are `Soggy Bottom Boys,
+    /// The`, `Soggy Bottom Boys, The/John Hartford`, `Soggy Bottom Boys,
+    /// The/Alison Krauss` and a dozen more. Fifteen keys, fifteen records.
+    ///
+    /// # The signal, because a guess would not do
+    ///
+    /// [`SearchIndex::merge_discs`] states the posture this follows: *decline
+    /// where there is no signal*. The signal here is the same shape as that
+    /// one — a fact about the library rather than about a track. **Tracks in
+    /// one folder, declaring one album title, that disagree about the
+    /// artist.** Files a person put in one directory and a tagger wrote one
+    /// album name across are one release; the artist disagreeing is what a
+    /// compilation *is*, and the flag that would have said so is simply
+    /// missing.
+    ///
+    /// The folder is evidence to **merge** and never to split. A record spread
+    /// across `Disc 1/` and `Disc 2/` folders is untouched by this pass and
+    /// still merges by title, because nothing here ever adds the folder to a
+    /// key.
+    ///
+    /// # Which name it keeps, and why it is a majority and not a plurality
+    ///
+    /// The merged record shows **the artist a majority of its tracks name**,
+    /// and [`RecordArtist::Various`] when none does.
+    ///
+    /// A majority is what keeps this from wrecking the ordinary case. An album
+    /// by one artist with a guest on one track — `Radiohead` on nine files and
+    /// `Radiohead feat. Björk` on the tenth — is two keys in one folder and
+    /// would be caught by this pass; nine of ten is a majority, so it stays
+    /// `Radiohead` and only the shattering is undone. A plurality would not
+    /// have been enough: three tracks out of nineteen is the largest bloc in
+    /// the soundtrack above, and naming a various-artists record after
+    /// three-nineteenths of it would be inventing a fact.
+    ///
+    /// `Various` is therefore reached by *inference* here where step 2 of the
+    /// chain reaches it by a flag. That is a real widening of the variant's
+    /// meaning and it is the honest one: it claims no name, which is precisely
+    /// what the evidence supports. Naming the record after one of its tracks
+    /// would claim more than the files do.
+    ///
+    /// # Cost
+    ///
+    /// One pass to group by (folder, folded album title), and a second only
+    /// over the groups that disagreed. A library where every folder agrees —
+    /// which is almost every library, and 660 of the owner's 663 records —
+    /// allocates the map and finds nothing to do.
+    fn merge_folders(&mut self) {
+        let merged = self.folder_merge_groups();
+        if merged.is_empty() && !self.merged_artists {
+            return;
+        }
+        self.merged_artists = !merged.is_empty();
+        for track in &mut self.tracks {
+            let agreed = folder_key(&track.meta).and_then(|key| merged.get(&key));
+            match agreed {
+                Some(RecordArtist::Named(name)) => {
+                    track.key.artist = ArtistKey::Named(name.to_lowercase());
+                    track.record_artist = Some(RecordArtist::Named(name.clone()));
+                }
+                Some(RecordArtist::Various) => {
+                    track.key.artist = ArtistKey::Various;
+                    track.record_artist = Some(RecordArtist::Various);
+                }
+                // Recomputed rather than left alone, for `merge_discs`'
+                // reason: a folder can *stop* disagreeing when the odd track
+                // is removed or retagged, and the key has to go back.
+                None => {
+                    track.key.artist = ArtistKey::of(&track.meta);
+                    track.record_artist = None;
+                }
+            }
+        }
+    }
+
+    /// The (folder, folded album title) groups that disagree about the artist,
+    /// each with the name the merged record keeps —
+    /// [`SearchIndex::merge_folders`]' decision, made before anything is
+    /// rewritten.
+    fn folder_merge_groups(&self) -> HashMap<(PathBuf, String), RecordArtist> {
+        let mut seen: HashMap<(PathBuf, String), FolderTally> = HashMap::new();
+        for track in &self.tracks {
+            let Some(key) = folder_key(&track.meta) else {
+                continue;
+            };
+            let tally = seen.entry(key).or_default();
+            let entry = tally
+                .artists
+                .entry(ArtistKey::of(&track.meta))
+                // The display spelling travels with the count: the key is
+                // folded, and a record is not titled in lower case.
+                .or_insert_with(|| (0, AlbumArtist::of(&track.meta).name().map(str::to_owned)));
+            entry.0 += 1;
+            if let Some(number) = track.meta.track {
+                tally.clash |= !tally.numbers.insert((disc_of(&track.meta), number));
+            }
+        }
+        seen.into_iter()
+            .filter(|(_, tally)| tally.artists.len() > 1 && !tally.clash)
+            .map(|(group, tally)| (group, tally.artists))
+            .map(|(group, counted)| {
+                let total: usize = counted.values().map(|(count, _)| *count).sum();
+                let winner = counted
+                    .into_iter()
+                    // A strict majority, and ties broken on the name so the
+                    // answer never depends on map order.
+                    .max_by(|a, b| a.1.0.cmp(&b.1.0).then_with(|| b.0.cmp(&a.0)))
+                    .filter(|(_, (count, name))| count * 2 > total && name.is_some());
+                let artist = match winner {
+                    Some((_, (_, Some(name)))) => RecordArtist::Named(name),
+                    _ => RecordArtist::Various,
+                };
+                (group, artist)
+            })
+            .collect()
     }
 
     /// **Make a multi-disc set one album**: where two album titles under one
@@ -3534,6 +3739,25 @@ struct IndexedTrack {
     /// Set by [`SearchIndex::merge_discs`], which is the only thing that can:
     /// whether a marker comes off depends on what *else* the library holds.
     record_base: Option<usize>,
+    /// **The artist this track's record shows, when its folder had to agree on
+    /// one** — set by [`SearchIndex::merge_folders`], `None` for the
+    /// overwhelming majority of tracks, whose own tag is the answer.
+    ///
+    /// Owned rather than borrowed from [`TrackMeta`] because the merged name
+    /// may be a *different* track's tag: the record keeps the name most of it
+    /// carries, and "most of it" is not knowable from any one row.
+    record_artist: Option<RecordArtist>,
+}
+
+/// The album artist a folder-merged record shows. [`AlbumArtist`] without the
+/// borrow, and without `Unknown` — a merge that could not name anything is a
+/// compilation, which is what [`RecordArtist::Various`] says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecordArtist {
+    /// The name most of the folder carries.
+    Named(String),
+    /// Different artists, one release, and no name any of them agree on.
+    Various,
 }
 
 impl IndexedTrack {
@@ -3577,6 +3801,7 @@ impl IndexedTrack {
             key,
             // Nothing is merged until `merge_discs` has seen the whole library.
             record_base: None,
+            record_artist: None,
         }
     }
 
@@ -4552,18 +4777,42 @@ mod tests {
         assert_eq!(AlbumArtist::of(&bare_meta()), AlbumArtist::Unknown);
         assert_eq!(AlbumArtist::of(&bare_meta()).name(), None);
 
-        // A tag that literally reads "Various Artists" is a *name* the user's
-        // tagger wrote, not baz's compilation bucket. The owner's library has
-        // one; the two must stay distinguishable.
+        // **A tag that literally reads "Various Artists" is the compilation
+        // bucket, not a name** — reversed 2026-08-17, and worth stating as a
+        // reversal.
+        //
+        // This asserted the opposite, on the grounds that the string is "a
+        // *name* the user's tagger wrote" and that "the owner's library has
+        // one; the two must stay distinguishable". The library has 345 of
+        // them now, and the distinction was measured: across 4 880 tracks it
+        // changes **exactly one record** — his `O Brother, Where Art Thou?`,
+        // which stood as two tiles because one folder's files set the
+        // compilation flag and another's wrote the phrase instead. Two
+        // spellings of the same fact, filed apart.
+        //
+        // Nothing was bought by keeping them apart. `Various` is what a
+        // listener sees either way, so the distinction was invisible where it
+        // was right and duplicated a record where it was wrong.
         let literal = TrackMeta {
             album_artist: Some("Various Artists".to_owned()),
             ..bare_meta()
         };
-        assert_eq!(
-            AlbumArtist::of(&literal),
-            AlbumArtist::Named("Various Artists")
-        );
-        assert_ne!(AlbumArtist::of(&literal), AlbumArtist::Various);
+        assert_eq!(AlbumArtist::of(&literal), AlbumArtist::Various);
+        // The list is closed and matched whole, so a real name that merely
+        // contains the word survives.
+        for name in ["Various Production", "Various Artists Collective"] {
+            let band = TrackMeta {
+                album_artist: Some(name.to_owned()),
+                ..bare_meta()
+            };
+            assert_eq!(AlbumArtist::of(&band), AlbumArtist::Named(name));
+        }
+        // And `VA` is deliberately not on it: it is a plausible band name.
+        let va = TrackMeta {
+            album_artist: Some("VA".to_owned()),
+            ..bare_meta()
+        };
+        assert_eq!(AlbumArtist::of(&va), AlbumArtist::Named("VA"));
     }
 
     #[test]

@@ -35,8 +35,9 @@
 
 | Ask | State | Where |
 |---|---|---|
+| *"should we just default to showing the last thing that was playing in the bottom bar since we already seem to know? it only makes sense to have the nothing playing state when the user really has never played anything before"* | **logged 2026-08-17 — blitz item 8** | baz keeps a play history (`history.tsv`) and restores a run on resume, so the last track is known at launch; `Nothing playing` is currently shown whenever the engine holds nothing, which is most launches rather than only the first. **It interacts with item 7**: if the bar carries the last track, the heart has a subject again and the *hide the heart* half of that item narrows to the genuinely-never-played case. Needs a decision on what the transport shows — a paused-at-zero run the way `Resume` already restores one, or a readout with no position. |
 | *"can we remove smart playlists from the Home screen"* | **logged 2026-08-17 — blitz item 1** | The `SMART PLAYLISTS` band on Home: a heading, a sentence of explanation, and a lone `New smart playlist` control. The door stays where it belongs (Playlists), and Home stops explaining a feature to somebody who came to listen. |
-| *"it seems some albums are not grouped properly e.g. look at the home.png, it contains a bunch of different things from the same album — maybe worth investigating that album"* | **logged 2026-08-17 — blitz item 2** | Visible in the frame he pointed at: **`O Brother, Where Art Thou? (Soundtrack)` stands four times** in Recently added, each as its own record with its own sleeve. A soundtrack is the exact case ADR-0008 exists for — many track artists, one album — so either the files carry no consistent `ALBUMARTIST` and the fallback is shattering them, or the grouping key is picking up something else that differs per file. **Investigate the album before proposing a rule**: the answer is in what those files actually say. |
+| *"it seems some albums are not grouped properly e.g. look at the home.png, it contains a bunch of different things from the same album — maybe worth investigating that album"* | **shipped 2026-08-17 — `docs/design/impl/untagged-compilation/`** | Visible in the frame he pointed at: **`O Brother, Where Art Thou? (Soundtrack)` stands four times** in Recently added, each as its own record with its own sleeve. A soundtrack is the exact case ADR-0008 exists for — many track artists, one album — so either the files carry no consistent `ALBUMARTIST` and the fallback is shattering them, or the grouping key is picking up something else that differs per file. **Investigate the album before proposing a rule**: the answer is in what those files actually say. **It was the first.** Every one of those files declares the same album in the same folder, names no album artist, sets no compilation flag, and carries a different track-artist string — so step 3 of ADR-0008's chain groups them by track artist, correctly, into fifteen records. Across the library: **3 records of 663 shatter, into 18 tiles.** `SearchIndex::merge_folders` now merges a folder that agrees on an album and disagrees on the artist, keeping the artist a *majority* of its tracks name (so a featured credit never costs a record its name) and refusing outright when two tracks claim the same number (so two `Greatest Hits` loose in one directory stay two records). It merges and never splits, so discs in their own folders are untouched. **One argued decision was reversed with it**, loudly rather than quietly: a tag literally reading `Various Artists` is now the compilation bucket rather than a name — measured at **exactly one record changed** across 4 880 tracks, and that record is this one. Proven against a copy of his own `library.db`: fifteen tiles to one. |
 | *"the details area in the album view should be scrollable, but the play all button should not be in that scroll area"* | **logged 2026-08-17 — blitz item 3** | The record page's left column. The control is the thing you came for and must not leave with the text. |
 | *"the alignment and general styling of the song title area of the now playing view is poor"* | **logged 2026-08-17 — blitz item 4** | |
 | *"can we make the three album cover views into a toggle cycle similar to the background visualisation button"* | **logged 2026-08-17 — blitz item 5** | Now Playing's cover treatments become one cycling control, matching the gesture the background visualisation already uses — one control, pressed repeatedly, rather than three side by side. |
@@ -1148,6 +1149,17 @@ Newest first. Each was asked for in conversation and is now in the product.
   device" affordance (which means talking to the sound server, and so the
   libpipewire dependency ADR-0011 declined), or simply documenting that
   exclusive mode wants a device the desktop is not routed to.
+  - **And it makes `an_exclusive_sink_reopens_at_the_requested_rate` a
+    load-flake** (`crates/baz-core/tests/playback.rs`), observed once on
+    2026-08-17 during a full-workspace run and green on the next run and when
+    run alone. The test opens the real card exclusively and asserts the rate it
+    negotiated; another test binary holding the device is exactly the
+    `DeviceBusy` case above, arriving as a wrong rate rather than a refusal.
+    **Not the fixture race fixed the same day** — that one is a shared *file*
+    and this is a shared *device*, and no rename can isolate a sound card. The
+    fix is for the test to state which device it needs and skip when it cannot
+    have it, the way the `HI_RATE` branch already skips a card with no such
+    mode.
 
 - **Exclusive mode has no loopback-verified bit-exactness measurement.** No
   device on the maintainer's machine offers a playback loopback, and loading
