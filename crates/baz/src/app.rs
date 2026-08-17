@@ -7202,6 +7202,7 @@ impl App {
                     },
                     self.resource_reading,
                     self.sleep_remaining(),
+                    self.ink(),
                 )
             }
         };

@@ -435,6 +435,21 @@ pub enum Control {
     WindowMaximise,
     /// The app bar's close button.
     WindowClose,
+    /// **The Settings place's six stepper marks**, one identity each.
+    ///
+    /// They are named individually for the same reason the transport's four
+    /// are: [`Ink`] answers *which control the pointer is on*, so a shared
+    /// identity would light all six marks whenever the pointer found any one
+    /// of them. Doc 10 §7 step 6 gave them the transport's drawn glyph pair;
+    /// this gives them its ink ladder too, which is the half that was
+    /// missing — the button ground answered a hover and the mark inside it
+    /// did not.
+    SettingsWorkersDown,
+    SettingsWorkersUp,
+    SettingsPreampDown,
+    SettingsPreampUp,
+    SettingsNoTagPreampDown,
+    SettingsNoTagPreampUp,
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is

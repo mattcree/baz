@@ -1298,14 +1298,18 @@ Newest first. Each was asked for in conversation and is now in the product.
   Wall membership, rail sorting and search-corpus membership
   for playlists stay deferred (ADR-0024 §A2); the sleeve (§A1) is the
   vocabulary any outcome keeps.
-- **The settings steppers' marks do not ride the transport's hover tween.**
-  Doc 10 §7 step 6 swapped their font `−`/`+` for the drawn glyph pair at
-  the resting ink; the row-slot glyphs draw at the hovered weight because
-  they exist only under the pointer, but the steppers stand at rest, and
-  brightening their marks on hover would need two more `motion::Control`
-  identities and the `mouse_area` wiring the transport carries. The button
-  ground answers hover meanwhile, which is what every word control gets;
-  wire the ink if the steppers ever read as dead.
+- ~~**The settings steppers' marks do not ride the transport's hover tween.**~~
+  **Closed 2026-08-17** — `docs/design/impl/stepper-ink/`. The price this
+  entry quoted was the right one and slightly understated: six
+  `motion::Control` identities rather than two, because there are three
+  stepper rows, plus the two-line `mouse_area` every other icon button carries
+  and `Ink` threaded into `settings::view`. `theme::glyph_ink` — the whole
+  ladder with its 90 ms tween — already existed; the steppers were the last
+  icon button in the product still reading `glyph_opacity`, which is that
+  ladder with the pointer's part left out. **Six identities and not one**: a
+  shared identity would light all six marks whenever the pointer found any of
+  them. Measured on a real X server — mark peak 137 at rest, 232 under the
+  pointer, and the `−` beside the hovered `+` unmoved at 137.
 - **The strip's split regime never hosts a third line** (doc 10 §8, stated
   so a future proposal meets the reason): a tenant that does not fit the L9
   budget re-homes by subject (doc 07's L8) or displaces an argued

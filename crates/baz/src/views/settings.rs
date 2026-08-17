@@ -70,12 +70,13 @@
 use std::path::{Path, PathBuf};
 
 use iced::widget::{
-    Column, Space, button, checkbox, column, container, image as iced_image, pick_list, row, rule,
-    scrollable, text, text_input, tooltip,
+    Column, Space, button, checkbox, column, container, image as iced_image, mouse_area, pick_list,
+    row, rule, scrollable, text, text_input, tooltip,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
+use crate::motion::{Control, Ink};
 use crate::playback::OutputChoice;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
@@ -211,6 +212,7 @@ pub(crate) fn view<'a>(
     diagnostic_lines: Vec<String>,
     resources: Option<crate::resource::Reading>,
     sleep: Option<std::time::Duration>,
+    ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
@@ -222,11 +224,11 @@ pub(crate) fn view<'a>(
     let blocks = match section {
         LIBRARY_SECTION => vec![library_section(library)],
         APPEARANCE_SECTION => vec![appearance_section(&theme_view)],
-        VIBE_SECTION => vec![vibe_section(vibe_workers)],
+        VIBE_SECTION => vec![vibe_section(vibe_workers, ink)],
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![
             output_section(output, player),
-            replay_gain_section(player),
+            replay_gain_section(player, ink),
             sleep_section(sleep),
         ],
     };
@@ -525,7 +527,7 @@ fn sleep_section(remaining: Option<std::time::Duration>) -> Element<'static, Mes
     .into()
 }
 
-fn vibe_section(workers: usize) -> Element<'static, Message> {
+fn vibe_section(workers: usize, ink: Ink) -> Element<'static, Message> {
     let room = theme::active();
     column![
         section_heading(
@@ -539,6 +541,9 @@ fn vibe_section(workers: usize) -> Element<'static, Message> {
             workers < crate::config::MAX_VIBE_WORKERS,
             Message::VibeWorkers(workers.saturating_sub(1).max(1)),
             Message::VibeWorkers((workers + 1).min(crate::config::MAX_VIBE_WORKERS)),
+            Control::SettingsWorkersDown,
+            Control::SettingsWorkersUp,
+            ink,
         ),
         text(format!(
             "1–{} sessions. More workers finish sooner but use more CPU and RAM.",
@@ -738,7 +743,7 @@ fn section_entry(
 
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
 /// clipping prevention, and what it all came to for the track playing now.
-fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
+fn replay_gain_section(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let state = player.replay_gain();
     // No engine, nothing to configure — the same rule the album panel's Play
@@ -777,6 +782,9 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             live && state.preamp_can_step(1),
             Message::ReplayGainPreamp(-1),
             Message::ReplayGainPreamp(1),
+            Control::SettingsPreampDown,
+            Control::SettingsPreampUp,
+            ink,
         ))
         .push(stepper_row(
             "Untagged files",
@@ -785,6 +793,9 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             live && state.no_tag_preamp_can_step(1),
             Message::ReplayGainNoTagPreamp(-1),
             Message::ReplayGainNoTagPreamp(1),
+            Control::SettingsNoTagPreampDown,
+            Control::SettingsNoTagPreampUp,
+            ink,
         ))
         .push(
             // **A checkbox is a pointer target too** (law L7). It was
@@ -1412,6 +1423,10 @@ fn mode_selector(state: replaygain::ReplayGain, live: bool) -> Element<'static, 
 /// rule the bottom bar is built on, and it holds in a proportional face because
 /// Plex Sans's figures are tabular. A stepper at the end of its travel renders
 /// disabled rather than absorbing the press.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a stepper row is a label, a value, and two marks each with a message, an identity and an enablement"
+)]
 fn stepper_row(
     label: &'static str,
     value: String,
@@ -1419,6 +1434,9 @@ fn stepper_row(
     can_increase: bool,
     decrease: Message,
     increase: Message,
+    down: Control,
+    up: Control,
+    ink: Ink,
 ) -> Element<'static, Message> {
     let room = theme::active();
     container(
@@ -1438,8 +1456,22 @@ fn stepper_row(
             )
             .width(Length::Fixed(theme::SETTING_VALUE_W))
             .align_x(alignment::Horizontal::Right),
-            stepper(icon::Glyph::Minus, "Step down", can_decrease, decrease),
-            stepper(icon::Glyph::Plus, "Step up", can_increase, increase),
+            stepper(
+                icon::Glyph::Minus,
+                "Step down",
+                can_decrease,
+                decrease,
+                down,
+                ink,
+            ),
+            stepper(
+                icon::Glyph::Plus,
+                "Step up",
+                can_increase,
+                increase,
+                up,
+                ink
+            ),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
@@ -1469,19 +1501,26 @@ fn stepper(
     name: &'static str,
     enabled: bool,
     message: Message,
+    named: Control,
+    ink: Ink,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_opacity(enabled, false)),
+            .opacity(theme::glyph_ink(
+                enabled,
+                false,
+                ink.hover(named),
+                ink.pressed(named),
+            )),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
-    tooltip(
+    let named_control = tooltip(
         button(mark)
             .width(Length::Fixed(theme::STEPPER_HIT))
             .height(Length::Fixed(theme::STEPPER_HIT))
@@ -1495,13 +1534,89 @@ fn stepper(
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
+    .style(move |_theme| theme::tooltip(room));
+    // The same two lines every icon button in the product carries — the
+    // pointer's arrival and departure are shell state, because the fade has to
+    // outlive the frame that started it (`crate::motion`).
+    mouse_area(named_control)
+        .on_enter(Message::ControlEntered(named))
+        .on_exit(Message::ControlLeft(named))
+        .into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The steppers ride the same ink ladder as the transport.**
+    ///
+    /// Doc 10 §7 step 6 gave them the transport's drawn glyph pair and left
+    /// the ink behind: the button *ground* answered a hover while the mark
+    /// inside it stood at rest, so two identical-looking icon buttons behaved
+    /// differently depending on which place you found them in. The backlog
+    /// deferred it on the grounds that wiring the ink needed control
+    /// identities and `mouse_area` — which it did, and which is all it needed.
+    #[test]
+    fn a_stepper_mark_answers_the_pointer_like_every_other_icon_button() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/settings.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let stepper = source
+            .split_once("fn stepper(")
+            .expect("the stepper mark")
+            .1;
+        let stepper = &stepper[..stepper.find("\n}\n").expect("a function ends")];
+        assert!(
+            stepper.contains("theme::glyph_ink("),
+            "the mark is back on the resting-only reading"
+        );
+        assert!(
+            !stepper.contains("theme::glyph_opacity("),
+            "the mark reads the ladder without the pointer's part of it"
+        );
+        assert!(
+            stepper.contains("Message::ControlEntered(named)")
+                && stepper.contains("Message::ControlLeft(named)"),
+            "nothing tells the shell the pointer arrived, so the fade never starts"
+        );
+    }
+
+    /// **Six marks, six identities.** [`Ink`] answers *which* control the
+    /// pointer is on, so sharing one identity between the marks would light
+    /// all of them at once — the bug this fix would have shipped with had the
+    /// identities been convenient rather than correct.
+    #[test]
+    fn every_stepper_mark_is_its_own_control() {
+        let named = [
+            Control::SettingsWorkersDown,
+            Control::SettingsWorkersUp,
+            Control::SettingsPreampDown,
+            Control::SettingsPreampUp,
+            Control::SettingsNoTagPreampDown,
+            Control::SettingsNoTagPreampUp,
+        ];
+        for (i, a) in named.iter().enumerate() {
+            for b in &named[i + 1..] {
+                assert_ne!(a, b, "two stepper marks share one identity");
+            }
+        }
+        // And each is spent exactly once in the place's own source.
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/settings.rs"),
+        )
+        .expect("this module's own source");
+        for control in named {
+            let spelling = format!("Control::{control:?}");
+            assert_eq!(
+                source.matches(&spelling).count(),
+                // The call site, and this test's own list.
+                2,
+                "{spelling} is not wired to exactly one mark"
+            );
+        }
+    }
 
     const MINUTE: i64 = 60 * 1_000_000_000;
     const HOUR: i64 = 60 * MINUTE;
