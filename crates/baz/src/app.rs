@@ -494,6 +494,12 @@ pub(crate) enum Message {
     /// survives the focus rule, because the field's own handling of this key
     /// is *half* of what the listener asked for (see [`App::escape_in_field`]).
     EscapeInField,
+    /// **A missing playlist entry, pointed at a file that is there**
+    /// (ADR-0024 §3): the display row, and the candidate the listener
+    /// confirmed. The only message in the product that rewrites an entry's
+    /// path, and it exists only as a press on a candidate the `Locate…` card
+    /// was showing.
+    PlaylistRepairEntry(usize, std::path::PathBuf),
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
     HistoryForward,
@@ -3515,7 +3521,13 @@ impl App {
                 // saw, and a press sends exactly what was on screen. A
                 // target none of whose verbs can act offers nothing: no
                 // card of disabled words, and no card at all.
-                let listed = menu::items(*target, &self.menu_facts());
+                // The chooser's items come from the index rather than from
+                // the facts, because a candidate *is* an index row (the
+                // target's own note).
+                let listed = match target {
+                    menu::Target::LocatePlaylistEntry { row } => self.locate_items(*row),
+                    other => menu::items(*other, &self.menu_facts()),
+                };
                 self.menu = (!listed.is_empty()).then(|| menu::Menu {
                     at: *at,
                     items: listed,
@@ -3849,6 +3861,11 @@ impl App {
                 }
             }
             Message::PlaylistAddEntry(row) => self.add_playlist_entry_to_picker(*row),
+            Message::PlaylistRepairEntry(row, to) => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.repair_entry(*row, to, &state.library);
+                }
+            }
             Message::PlaylistRenameStart => {
                 if let Some(open) = &mut self.playlists.open {
                     let seeded = open.name().to_owned();
@@ -5737,6 +5754,59 @@ impl App {
     /// does too much. With an empty query this press is spent on the blur
     /// alone, which is why clicking into an empty well and pressing Esc puts
     /// the caret away rather than sending you home.
+    /// **The `Locate…` card for a missing playlist entry** (ADR-0024 §3).
+    ///
+    /// Built here rather than in `crate::menu` because a candidate is an
+    /// index row and the index is the shell's. Each item is one path, labelled
+    /// by where it sits, and pressing it is the confirmation — the only thing
+    /// in the product that writes a new path into a playlist file.
+    ///
+    /// An entry with nothing to propose returns nothing, which opens no card
+    /// at all. That is the same rule every other target follows and it is the
+    /// honest answer: there is no file of that name under any current root, so
+    /// there is nothing to offer and a card of one greyed apology would be
+    /// worse than silence. The row's own path is still on screen underneath,
+    /// which is where the listener finds out what is being looked for.
+    fn locate_items(&self, row: usize) -> Vec<menu::Item> {
+        let Screen::Shelf(state) = &self.screen else {
+            return Vec::new();
+        };
+        let Some(open) = self.playlists.open.as_ref() else {
+            return Vec::new();
+        };
+        let Some(page_row) = open.rows.get(row).filter(|page_row| page_row.missing) else {
+            return Vec::new();
+        };
+        let found = crate::repair::candidates(&page_row.path, &state.library);
+        let listed: Vec<menu::Item> = found
+            .shown
+            .iter()
+            .map(|path| menu::Item {
+                label: crate::repair::location(path),
+                presses: vec![Message::PlaylistRepairEntry(row, path.clone())],
+                accelerator: None,
+            })
+            .collect();
+        // **The cap is never silent, and never a row either.** A card that
+        // showed eight of forty without saying so would read as "these are
+        // the matches", and the listener is the one deciding. But the obvious
+        // fix — a final line reading `32 more elsewhere` — is exactly the
+        // thing this module's own mirror test calls a lie: *an inert item*
+        // presses nothing and is a word dressed as a control. So the overflow
+        // goes to the health log, which is a place a person can actually read
+        // it (Settings → Debug), and the card stays a list of things that can
+        // be pressed.
+        if found.total > listed.len() {
+            crate::baz_log!(
+                "[playlists] {:?} has {} matches under a current root;                  offering the {} closest",
+                page_row.path,
+                found.total,
+                listed.len()
+            );
+        }
+        listed
+    }
+
     fn escape_in_field(&mut self) -> Task<Message> {
         if let Screen::Shelf(state) = &mut self.screen
             && state.search_open

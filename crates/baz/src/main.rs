@@ -80,6 +80,7 @@ mod queue_edit;
 mod queue_window;
 mod rail;
 mod reach;
+mod repair;
 mod replaygain;
 mod resource;
 mod scan;

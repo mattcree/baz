@@ -1570,6 +1570,39 @@ impl Playlists {
         });
     }
 
+    /// **Point a missing entry at a file that is there** (ADR-0024 §3).
+    ///
+    /// The confirmation is the only thing that writes the file, so this is the
+    /// only function in the product that changes an entry's path, and it is
+    /// reached from exactly one place: a listener pressing a candidate they
+    /// were shown. Nothing repairs on a scan, on a load, or on a rescan
+    /// finding the file again — an entry the listener has not spoken about
+    /// stays as it was written.
+    ///
+    /// It goes through `edit_open` like every other edit, which means it
+    /// inherits the whole contract: the externally-edited re-read, the save,
+    /// the undo snapshot — so a repair confirmed by mistake is one
+    /// <kbd>Ctrl</kbd>+<kbd>Z</kbd> away — and the reload.
+    ///
+    /// The `#EXTINF` line rides along untouched. It is the *file's* claim
+    /// about the track, written by whatever made the playlist, and this
+    /// gesture is about where a file lives rather than what it is.
+    pub(crate) fn repair_entry(&mut self, row: usize, to: &Path, library: &Library) {
+        self.edit_open(library, |playlist| {
+            let Some(at) = entry_indices(playlist).get(row).copied() else {
+                return false;
+            };
+            let Some(Item::Entry(entry)) = playlist.items_mut().get_mut(at) else {
+                return false;
+            };
+            if entry.path == to {
+                return false;
+            }
+            entry.path = to.to_path_buf();
+            true
+        });
+    }
+
     /// The page's ▲▼ steppers: move the entry at display row `row` one step
     /// up (`-1`) or down (`+1`), swapping with its neighbouring *entry* —
     /// notes keep their positions, because a rewrite never moves what it did
@@ -3192,6 +3225,77 @@ mod tests {
             .iter()
             .map(|row| row.path.clone())
             .collect()
+    }
+
+    /// **A repair rewrites one path, reaches the disk, and comes back**
+    /// (ADR-0024 §3). The confirmation is the only thing that writes the
+    /// file, so what the file says afterwards is the whole of the test — and
+    /// `Undo` matters as much as the write: a listener who confirms the wrong
+    /// candidate has spent one press, and must not have spent their playlist.
+    #[test]
+    fn a_confirmed_repair_reaches_the_disk_and_undoes() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Mix", &["/gone/b.flac", "/m/c.flac"])
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        let original = open_paths(&playlists);
+        assert_eq!(original[0], PathBuf::from("/gone/b.flac"));
+
+        playlists.repair_entry(0, Path::new("/m/b.flac"), &library);
+        let repaired = open_paths(&playlists);
+        assert_eq!(repaired[0], PathBuf::from("/m/b.flac"), "the entry moved");
+        assert_eq!(repaired[1], original[1], "and nothing else did");
+
+        let on_disk = playlists
+            .folder
+            .as_ref()
+            .expect("folder")
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|file| file.name == "Mix")
+            .expect("the file")
+            .read()
+            .expect("read");
+        let written: Vec<PathBuf> = on_disk.entries().map(|entry| entry.path.clone()).collect();
+        assert_eq!(
+            written,
+            vec![PathBuf::from("/m/b.flac"), PathBuf::from("/m/c.flac")],
+            "the confirmation did not reach the file"
+        );
+
+        playlists.undo_open(&library);
+        assert_eq!(open_paths(&playlists), original, "a repair is undoable");
+    }
+
+    /// **A repair that would change nothing writes nothing.** Confirming the
+    /// path an entry already holds is not an edit, and letting it through
+    /// would push an undo snapshot that walks back to the state it is already
+    /// in — a `Ctrl+Z` that visibly does nothing.
+    #[test]
+    fn repairing_an_entry_to_where_it_already_points_is_not_an_edit() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Mix", &["/m/a.flac"])
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        playlists.repair_entry(0, Path::new("/m/a.flac"), &library);
+        assert!(
+            !playlists.can_undo_open(),
+            "a no-op repair recorded an undo step"
+        );
+        // And a row the page does not have is refused rather than panicking.
+        playlists.repair_entry(99, Path::new("/m/b.flac"), &library);
+        assert!(!playlists.can_undo_open());
     }
 
     /// **Undo round-trips the page's edits** (doc 11 §5 P2): a remove and a

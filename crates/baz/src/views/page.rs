@@ -1035,6 +1035,48 @@ fn slot(
     .into()
 }
 
+/// **The `Locate…` slot** — a missing playlist entry's one control
+/// (ADR-0024 §3).
+///
+/// It stands in the slot a missing row does not use: an entry whose file has
+/// gone cannot be favourited, so the heart's place is free and the row keeps
+/// its anatomy rather than growing a column for one state.
+///
+/// It is a slot by shape and a **chooser** by behaviour, which is why it is
+/// not [`icon_slot`]. `Locate…` cannot act on its press — it has to *show*
+/// the candidates and let the listener pick one, because repair is offered and
+/// never automatic. So there is no `button` here: a button would capture the
+/// press and leave the card nowhere to open from. The mark sits inside
+/// [`crate::menu::chooser_area`], which answers the press with the pointer's
+/// position and opens the card there.
+pub(crate) fn locate_slot(offered: bool, row: usize) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::new().width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Magnifier))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY_HOVER),
+    )
+    .width(Length::Fixed(theme::STEPPER_HIT))
+    .height(Length::Fixed(theme::STEPPER_HIT))
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let named = tooltip(
+        mark,
+        text("Locate…")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room));
+    crate::menu::chooser_area(named, crate::menu::Target::LocatePlaylistEntry { row })
+}
+
 /// **The transfer `+`** (09 §8.1): this row's track, toward a destination of
 /// the user's choosing — the picker opens holding it, its first row the Queue.
 ///

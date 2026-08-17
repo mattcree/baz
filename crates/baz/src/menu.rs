@@ -90,6 +90,21 @@ pub(crate) enum Target {
     /// The bar's now-playing block — what makes S4 two gestures from
     /// anywhere: the sounding track is always in the bar.
     NowPlaying,
+    /// **The candidates for a missing playlist entry** (ADR-0024 §3), by
+    /// display row.
+    ///
+    /// The one target that is not part of the mirror layer, and the
+    /// distinction is worth keeping straight because the mirror rule is
+    /// pinned by this module's own tests. Every other target answers a
+    /// *right* press and offers verbs some visible control already makes.
+    /// This one answers the `Locate…` control's *left* press and is that
+    /// control's chooser — the surface where the proposal is made and
+    /// confirmed. There is nothing for it to mirror, because the thing it
+    /// offers is a list of paths rather than a verb.
+    ///
+    /// Its items are built in `app.rs` rather than in [`items`]: they come
+    /// from the index, and [`Facts`] is assembled before the target is known.
+    LocatePlaylistEntry { row: usize },
 }
 
 /// One item: a short verb, and the presses it makes. Every message here is
@@ -271,6 +286,12 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
                 );
             }
         }
+        Target::LocatePlaylistEntry { .. } => {
+            // Built by the shell, which has the index (see the variant's
+            // own note). Reaching here means somebody routed it the ordinary
+            // way, and an empty list is the honest answer rather than a
+            // panic — a menu with no items opens no card at all.
+        }
         Target::PlaylistTrack { row, missing } => {
             // The track-row menu, spending the page's own messages. A
             // missing entry's row is not a control (`views/playlist.rs`),
@@ -393,6 +414,7 @@ pub(crate) fn area<'a>(
         content: content.into(),
         target: Some(target),
         plain_cursor: false,
+        button: mouse::Button::Right,
     })
 }
 
@@ -406,6 +428,27 @@ pub(crate) fn selection_area<'a>(
         content: content.into(),
         target: Some(target),
         plain_cursor: true,
+        button: mouse::Button::Right,
+    })
+}
+
+/// **Wrap a control so its ordinary left press opens `target`'s card at the
+/// pointer.**
+///
+/// The one non-mirror use of this widget (see [`Target::LocatePlaylistEntry`]).
+/// `Locate…` has to *show* something before anything is confirmed, and the
+/// card this opens is that showing — so the control cannot be a `button`,
+/// which would capture the press and leave the card nowhere to open. It is a
+/// styled surface inside this area instead, and the area answers the press.
+pub(crate) fn chooser_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    target: Target,
+) -> Element<'a, Message> {
+    Element::new(Area {
+        content: content.into(),
+        target: Some(target),
+        plain_cursor: false,
+        button: mouse::Button::Left,
     })
 }
 
@@ -418,6 +461,7 @@ pub(crate) fn selection_cursor<'a>(
         content: content.into(),
         target: None,
         plain_cursor: true,
+        button: mouse::Button::Right,
     })
 }
 
@@ -428,6 +472,10 @@ struct Area<'a> {
     content: Element<'a, Message>,
     target: Option<Target>,
     plain_cursor: bool,
+    /// Which button opens `target`. Every mirror-layer area waits on the
+    /// right press; the `Locate…` chooser is opened by an ordinary left one,
+    /// because it is a control's own answer rather than a menu over a row.
+    button: mouse::Button,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
@@ -493,13 +541,14 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
         if shell.is_event_captured() {
             return;
         }
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event
+        if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event
+            && *button == self.button
             && self.target.is_some()
             && let Some(at) = cursor.position()
             && layout.bounds().contains(at)
         {
             shell.publish(Message::OpenMenu(
-                self.target.expect("right press has a menu target"),
+                self.target.expect("the press has a menu target"),
                 at,
             ));
             shell.capture_event();
@@ -608,7 +657,28 @@ mod tests {
                 missing: true,
             },
             Target::NowPlaying,
+            // Present so the census is complete, and contributing nothing:
+            // see the test below.
+            Target::LocatePlaylistEntry { row: 2 },
         ]
+    }
+
+    /// **The chooser target offers nothing through [`items`]**, deliberately.
+    ///
+    /// It is the one target that is not part of the mirror layer — its card
+    /// is a list of *paths*, built by the shell against the index, and there
+    /// is no visible control that "sends a path" for it to mirror. Keeping it
+    /// in [`every_target`] means the mirror test walks it like the others and
+    /// finds nothing to object to; this pins that the emptiness is the design
+    /// rather than a builder somebody forgot to write.
+    #[test]
+    fn the_locate_chooser_is_not_built_here() {
+        for facts in every_facts() {
+            assert!(
+                items(Target::LocatePlaylistEntry { row: 0 }, &facts).is_empty(),
+                "the chooser's items come from the shell, which has the index"
+            );
+        }
     }
 
     /// **Every menu item is a press some visible on-screen control also

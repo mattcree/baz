@@ -587,9 +587,10 @@ fn entry_row<'a>(
     let mut slots = row![
         body,
         if page_row.missing {
-            iced::widget::Space::new()
-                .width(Length::Fixed(theme::STEPPER_HIT))
-                .into()
+            // **The heart's place, spent on `Locate…`** (ADR-0024 §3). A
+            // missing entry cannot be favourited, so the slot is free, and
+            // repair is the one act this row *can* offer.
+            page::locate_slot(offered, index)
         } else {
             page::favourite_slot(
                 &page_row.path,

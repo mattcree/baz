@@ -1271,12 +1271,27 @@ Newest first. Each was asked for in conversation and is now in the product.
   ▲▼ steppers, the `+` and the picker remain the visible routes — the drag
   is sugar, exactly as the ADR ordered it. Captures at
   `docs/design/impl/drag/`.
-- **A missing playlist entry cannot be repaired in place.** ADR-0024 §3
-  specifies the surface — candidate matches (same filename under a current
-  root) proposed per entry, confirmed by the user, the confirmation being the
-  only thing that writes the file — and the page today only counts and shows
-  the broken path. Repair by hand (edit the file; the page re-reads) works
-  meanwhile.
+- ~~**A missing playlist entry cannot be repaired in place.**~~ **Shipped
+  2026-08-17** — `docs/design/impl/locate-missing-entry/`. §3's surface, built
+  to its own terms: `crate::repair` proposes and cannot write; the candidates
+  are **filename** matches, not tag matches, because a missing entry's
+  `#EXTINF` came from whatever wrote the playlist and a tag match's failure
+  mode is a confident swap the listener cannot see; *"under a current root"*
+  needed no code, since the index holds exactly what the scanner walked; and
+  the order is shared path tail, so a remounted drive's true match leads
+  without the ordering claiming to know anything about likelihood.
+
+  The control is a magnifier in the slot a missing row leaves free — an entry
+  whose file has gone cannot be favourited, so the heart's place is spent on
+  the one act the row can offer. Its card is `crate::menu`'s float opened by a
+  **left** press, which makes `Target::LocatePlaylistEntry` the only target
+  outside the mirror layer; a test pins that rather than leaving it to be
+  rediscovered. The write goes through `edit_open`, so a repair inherits the
+  externally-edited re-read, the save and the undo step.
+
+  Driven end to end on a real X server against a playlist with a deliberately
+  dead path: one press on one candidate, `2 of 3 · 1 missing` becomes
+  `3 tracks · 4:48`, and exactly one line of the file changed.
 - ~~**The playlists folder is not shown in Settings → Library.**~~ **Closed
   2026-08-14.** The exact listener-owned directory now stands beside the music
   roots with `Open folder`. Linux uses the desktop portal with a correctly
