@@ -118,6 +118,18 @@
       <caption>A playlist, kept as an ordinary .m3u8 file you own</caption>
     </screenshot>
     <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/smart-playlist.png</image>
+      <caption>Draw how a playlist should move, and baz fills it from your own music</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/album.png</image>
+      <caption>A record's own page, with the run in play order</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/search.png</image>
+      <caption>Search reaches everything, from anywhere</caption>
+    </screenshot>
+    <screenshot>
       <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/home.png</image>
       <caption>Home: what you have, and what arrived recently</caption>
     </screenshot>

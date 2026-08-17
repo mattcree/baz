@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Build a silent FLAC fixture with generated covers for the composition audit.
-# Every sample is a zero; every cover is drawn by ImageMagick.
+# Build a silent FLAC fixture with generated covers for the composition audit
+# and for the store screenshots.
+#
+# Every sample is a zero — one of the two independent guarantees that a
+# headless run is inaudible — and every cover is drawn by ImageMagick. The
+# metadata is fictional and deliberately so: `docs/screenshots/` is published
+# on Flathub and in the README, and a store page is not the place to publish
+# somebody's record collection or somebody else's cover art.
 set -euo pipefail
 
 FIX=${1:-/tmp/baz-comp-fixture}
@@ -29,33 +35,68 @@ mkflac 3600 "$TMP/hour.flac"
 echo "pool done"
 
 # cover FAMILY HUE OUT  — six visual families, hue-varied so the lamp differs
+# **Sleeves carry words.** The six families were abstract marks on flat fields,
+# which is a picture of a colour scheme rather than of a record: almost every
+# real sleeve has the artist or the title printed on it somewhere, and a wall
+# of untitled shapes is the strongest single tell that a screenshot is a
+# fixture. Every family sets its own type now — different weight, position and
+# scale per family, so the wall still reads as twenty-five different designers
+# and not one template with the text swapped.
+#
+# Grain over the lot: a flat gradient is a rendering, and a little noise is the
+# difference between "generated" and "photographed".
 cover() {
-  local fam=$1 hue=$2 out=$3 txt=$4
+  local fam=$1 hue=$2 out=$3 artist=$4 title=$5
   local S=600
   case $fam in
-    mono)   # near-black monolith with one faint mark: the black-sleeve case
+    mono)   # near-black monolith, the title small and low
       magick -size ${S}x${S} "xc:hsl(${hue},18%,7%)" \
-        -fill "hsl(${hue},22%,17%)" -draw "rectangle 250,470 350,500" "$out" ;;
-    pale)   # paper-pale sleeve
+        -fill "hsl(${hue},22%,17%)" -draw "rectangle 60,60 540,420" \
+        -fill "hsl(${hue},12%,72%)" -pointsize 26 -gravity southwest \
+        -annotate +62+92 "$artist" \
+        -fill "hsl(${hue},10%,52%)" -pointsize 20 -gravity southwest \
+        -annotate +62+62 "$title" "$out" ;;
+    pale)   # paper-pale sleeve, centred serif-ish block
       magick -size ${S}x${S} "xc:hsl(${hue},14%,88%)" \
-        -fill "hsl(${hue},30%,42%)" -draw "circle 300,300 300,120" "$out" ;;
-    chroma) # saturated flat field, one bar
+        -fill "hsl(${hue},30%,42%)" -draw "circle 300,250 300,110" \
+        -fill "hsl(${hue},40%,18%)" -pointsize 34 -gravity south \
+        -annotate +0+96 "$title" \
+        -fill "hsl(${hue},20%,38%)" -pointsize 22 -gravity south \
+        -annotate +0+58 "$artist" "$out" ;;
+    chroma) # saturated field, title reversed out of the bar
       magick -size ${S}x${S} "xc:hsl(${hue},72%,46%)" \
-        -fill "hsl($(( (hue+180) % 360 )),72%,22%)" -draw "rectangle 0,430 600,470" "$out" ;;
-    split)  # two-tone diagonal
+        -fill "hsl($(( (hue+180) % 360 )),72%,22%)" -draw "rectangle 0,390 600,510" \
+        -fill "hsl(${hue},20%,96%)" -pointsize 40 -gravity west \
+        -annotate +40+50 "$title" \
+        -fill "hsl($(( (hue+180) % 360 )),40%,90%)" -pointsize 22 -gravity west \
+        -annotate +40+96 "$artist" "$out" ;;
+    split)  # two-tone diagonal, type across the top
       magick -size ${S}x${S} "xc:hsl(${hue},40%,30%)" \
         -fill "hsl($(( (hue+40) % 360 )),55%,62%)" \
-        -draw "polygon 0,600 600,0 600,600" "$out" ;;
-    rings)  # concentric geometry
+        -draw "polygon 0,600 600,0 600,600" \
+        -fill "hsl(${hue},10%,95%)" -pointsize 30 -gravity northwest \
+        -annotate +44+44 "$artist" \
+        -fill "hsl(${hue},14%,80%)" -pointsize 24 -gravity northwest \
+        -annotate +44+86 "$title" "$out" ;;
+    rings)  # concentric geometry, the name on the rim
       magick -size ${S}x${S} "xc:hsl(${hue},30%,14%)" \
         -fill none -stroke "hsl(${hue},60%,58%)" -strokewidth 8 \
-        -draw "circle 300,300 300,90" -draw "circle 300,300 300,160" \
-        -draw "circle 300,300 300,230" "$out" ;;
-    type)   # typographic sleeve
+        -draw "circle 300,270 300,80" -draw "circle 300,270 300,150" \
+        -draw "circle 300,270 300,220" -stroke none \
+        -fill "hsl(${hue},40%,88%)" -pointsize 32 -gravity south \
+        -annotate +0+74 "$artist" \
+        -fill "hsl(${hue},30%,60%)" -pointsize 20 -gravity south \
+        -annotate +0+42 "$title" "$out" ;;
+    type)   # typographic sleeve: the title is the whole design
       magick -size ${S}x${S} "xc:hsl(${hue},25%,20%)" \
-        -fill "hsl(${hue},18%,86%)" -pointsize 92 -gravity center \
-        -annotate +0+0 "$txt" "$out" ;;
+        -fill "hsl(${hue},18%,86%)" -pointsize 54 -gravity center \
+        -size 480x -background none -fill "hsl(${hue},18%,86%)" \
+        label:"$title" -gravity center -composite \
+        -fill "hsl(${hue},14%,58%)" -pointsize 22 -gravity south \
+        -annotate +0+46 "$artist" "$out" ;;
   esac
+  # A little noise, so a sleeve reads as a printed thing rather than a fill.
+  magick "$out" -attenuate 0.28 +noise Gaussian -quality 92 "$out"
 }
 
 # album: DIR_INDEX FAMILY HUE NTRACKS "Album Title" "Artist" YEAR GENRE
@@ -63,7 +104,7 @@ album() {
   local i=$1 fam=$2 hue=$3 n=$4 title=$5 artist=$6 year=$7 genre=$8
   local dir="$FIX/$(printf '%02d' "$i") - $artist - $title"
   mkdir -p "$dir"
-  cover "$fam" "$hue" "$dir/cover.jpg" "${title:0:2}"
+  cover "$fam" "$hue" "$dir/cover.jpg" "$artist" "$title"
   local t
   for ((t = 1; t <= n; t++)); do
     local d=${DURS[$(( (i * 7 + t * 5) % ${#DURS[@]} ))]}
@@ -80,16 +121,33 @@ album() {
   done
 }
 
+# **Track titles that read as titles.** They were a pool of fifteen with the
+# track number stuck on the end — `Blue Hour 3` — which is the one detail that
+# gave the fixture away as generated in every frame it appeared in. Forty-eight
+# now, and the stride is coprime with the pool so an album walks it without
+# repeating inside itself.
 TITLES=("Slow Return" "Field Recording" "Anhydrous" "Nightwatch" "The Long Lie Down"
         "Cassette Weather" "Pilot Light" "Undertow" "Marginalia" "Sixth Street"
-        "Blue Hour" "Ledger" "Attic Tape" "Ferrous" "Quiet Part Loud")
-track_title() { local i=$1 t=$2; echo "${TITLES[$(( (i * 3 + t) % ${#TITLES[@]} ))]} $t"; }
+        "Blue Hour" "Ledger" "Attic Tape" "Ferrous" "Quiet Part Loud"
+        "Winter Ferry" "Halogen" "A Careful Distance" "Saltmarsh" "Every Little Light"
+        "The Wire Fence" "Nine Bells" "Low Tide" "Signal Hill" "Middle Distance"
+        "Terminal Velocity" "Paper Anniversary" "Grain" "Fathoms" "The Slow Parade"
+        "Bell Foundry" "Overcast" "Stray Current" "Coastal Path" "Lantern"
+        "Two Weeks Notice" "Hinterland" "The Quiet Coach" "Aftermath" "Sea Fret"
+        "Meridian" "Rushlight" "The Turning Year" "Copperplate" "Understory"
+        "Northerly" "Gasworks" "The Last Post")
+track_title() { local i=$1 t=$2; echo "${TITLES[$(( (i * 11 + t * 7) % ${#TITLES[@]} ))]}"; }
 
 echo "building albums..."
 album  1 mono    28  9  "Closing Time"                          "Halvard Sten"        1997 "Ambient"
 album  2 pale    42 11  "Paper Mill"                            "The Ardent"          2003 "Folk"
 album  3 chroma 210  7  "Cyan Handbook"                         "Nils Odden"          2011 "Electronic"
-album  4 split   12 13  "A Rather Considerably Overlong Album Title That Will Clip" "Marguerite Vance-Lindqvist" 1984 "Jazz"
+# **The one title that exists to be too long**, so the audit has a caption that
+# clips. `$LONG_TITLE` lets a caller ask for an ordinary one instead — the
+# store capture does, because a store page wants a wall of records and not a
+# demonstration of an ellipsis. Overriding it here rather than retagging
+# afterwards is what keeps the sleeve and the caption saying the same thing.
+album  4 split   12 13  "${LONG_TITLE:-A Rather Considerably Overlong Album Title That Will Clip}" "Marguerite Vance-Lindqvist" 1984 "Jazz"
 album  5 rings  340  6  "Orbits"                                "Kesh"                2019 "Electronic"
 album  6 type    68 10  "Werkbund"                              "Studio Hain"         1978 "Krautrock"
 album  7 mono   200  8  "Basalt"                                "Ini Kovac"           2005 "Drone"

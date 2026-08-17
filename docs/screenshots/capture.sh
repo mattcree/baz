@@ -88,66 +88,32 @@ W=1600; H=900
 mkdir -p "$OUT"
 
 # ------------------------------------------------------------------ fixture
-# Rebuilt unless $FIX already holds one — regenerating costs a minute and the
-# sleeves are deterministic, so a re-run of this script re-photographs the same
-# wall rather than a differently-coloured one.
-if [[ ! -d $FIX ]]; then
-  "$REPO/docs/design/composition/tools/mkfixture.sh" "$FIX"
+# Rebuilt unless $FIX already holds one **from this generator** — regenerating
+# costs a minute and the sleeves are deterministic, so a re-run re-photographs
+# the same wall rather than a differently-coloured one.
+#
+# The stamp is the generator's own hash, and it is here because its absence
+# cost a confused half hour: the titles and sleeves were made realistic in
+# `mkfixture.sh`, the capture re-ran, and it photographed the old wall — a
+# directory that exists satisfied a guard that meant to ask whether it was
+# *current*.
+STAMP=$(sha256sum "$REPO/docs/design/composition/tools/mkfixture.sh" | cut -c1-16)
+if [[ ! -d $FIX || $(cat "$FIX/.generator" 2>/dev/null) != "$STAMP" ]]; then
+  rm -rf "$FIX"
+  # **The one title that exists to be too long, made ordinary.** Album 4's
+  # name is a clipping test the composition audit needs and a store page does
+  # not; the generator takes the override, so the sleeve and the caption agree
+  # — which retagging afterwards could never manage.
+  #
+  # Everything else this script used to do to the fixture after the fact —
+  # track titles without their index, typographic sleeves carrying the whole
+  # album name — is the generator's own work now. It was duplicated here for
+  # as long as the generator did it badly.
+  LONG_TITLE="Nightjar" "$REPO/docs/design/composition/tools/mkfixture.sh" "$FIX"
 
-  # The clipping title, retitled. Same band, same year, same sleeve.
-  for f in "$FIX"/04\ *?/*.flac; do
-    metaflac --remove-tag=ALBUM --set-tag="ALBUM=Nightjar" "$f"
-  done
-  mv "$FIX"/04\ -\ * "$FIX/04 - Marguerite Vance-Lindqvist - Nightjar"
+  echo "$STAMP" > "$FIX/.generator"
 
-  # Track titles without their index. Forty of them, strided by the track
-  # number, so no album repeats a title inside itself.
-  python3 - "$FIX" <<'RETAG'
-import pathlib, subprocess, sys
 
-TITLES = [
-    "Slow Return", "Field Recording", "Anhydrous", "Nightwatch",
-    "The Long Lie Down", "Cassette Weather", "Pilot Light", "Undertow",
-    "Marginalia", "Sixth Street", "Blue Hour", "Ledger", "Attic Tape",
-    "Ferrous", "Quiet Part Loud", "Low Tide", "Signal Fire", "Winter Count",
-    "Halfway House", "Lantern Hours", "Bright Ash", "Nine Bells",
-    "Saltmarsh", "Coastal Path", "Every Little Light", "Thaw",
-    "The Quiet Wing", "Bellrock", "Paper Anniversary", "Northern Line",
-    "Dust and Copper", "A Better Room", "Standing Water", "Fathom",
-    "Green Room", "Storm Glass", "The Turning Year", "Hollow Way",
-    "Small Hours", "Driftwood",
-]
-
-root = pathlib.Path(sys.argv[1])
-for i, album in enumerate(sorted(p for p in root.iterdir() if p.is_dir())):
-    for track in sorted(album.glob("*.flac")):
-        # `NN Title.flac` — the leading number is the track number the
-        # fixture already tagged, and it is what orders this loop.
-        n = int(track.name.split(" ", 1)[0])
-        title = TITLES[(i * 11 + n) % len(TITLES)]
-        subprocess.run(
-            ["metaflac", "--remove-tag=TITLE", f"--set-tag=TITLE={title}",
-             str(track)],
-            check=True,
-        )
-        track.rename(album / f"{n:02d} {title}.flac")
-RETAG
-
-  # The four typographic sleeves, redrawn with the album's whole name instead
-  # of its first two letters — which is what a typographic sleeve is. The
-  # ground colour is sampled from the sleeve being replaced, so the wall keeps
-  # the hue spread the fixture chose. Album 6, 12, 18 and 24 are mkfixture's
-  # `type` family; the guard makes a fixture that renumbers itself fail loudly
-  # rather than quietly ship two-letter covers again.
-  for i in 06 12 18 24; do
-    dir=$(echo "$FIX/$i - "*)
-    [[ -d $dir ]] || { echo "no album $i in the fixture — has mkfixture.sh changed?"; exit 1; }
-    title=$(metaflac --show-tag=ALBUM "$dir"/01*.flac | head -1 | cut -d= -f2-)
-    bg=$(magick "$dir/cover.jpg[1x1+0+0]" -format '%[pixel:p{0,0}]' info:)
-    magick -size 440x440 -background "$bg" -fill '#e6e3da' -gravity center \
-      caption:"$(echo "$title" | tr '[:lower:]' '[:upper:]')" \
-      -background "$bg" -extent 600x600 "$dir/cover.jpg"
-  done
 fi
 
 # ------------------------------------------------------------------ scratch
@@ -281,7 +247,7 @@ park()  { xdotool mousemove 1400 430; sleep 0.5; xdotool mousemove 1402 432; sle
 #   playlists panel  `New playlist` row y 252; once a list      [photograph]
 #                    exists its row sits at y 303 with its
 #                    `Add` at x 1556
-ADD_TO_1=302; ADD_TO_2=635; PLAY_1=198
+ADD_TO_1=302; ADD_TO_2=635; PLAY_1=198; OPEN_1=354
 
 # ------------------------------------------------------------ the playlist
 # Four records into one list, each through its own tile's `Add to…`. The first
@@ -385,6 +351,106 @@ click 105 185
 park
 shot playlist
 
+# 5 · a record's own page — the sleeve at size, the track list beside it, and
+#     the run in play order. Reached from the wall the way a listener reaches
+#     it: the caption selects, and `Open` on the sleeve's own veil goes in.
+click 105 133
+park
+rest 648 255                            # the veil over `Werkbund`
+click 596 $OPEN_1
+park
+shot album
+
+# 6 · search, which is app-wide and the fastest way to anything. Typed rather
+#     than pasted: the count beside the field is live, and a paste would
+#     photograph it mid-debounce.
+click 200 24
+xdotool type --clearmodifiers --delay 55 "hain"
+sleep 1.8
+park
+shot search
+xdotool key --clearmodifiers Escape
+sleep 0.8
+
+# ------------------------------------------------- 7 · the smart playlist
+# **A second pass, against a different fixture, and it has to be.**
+#
+# Every sample in the wall's fixture is a zero — one of the two guarantees
+# that this run is inaudible — and silence analyses to the same vector for
+# every track. A smart playlist photographed against it would show a flat line
+# and a list in no order, which is a picture of the feature not working. So
+# the frame that shows it is taken against `mkfixture-varied.sh`: twenty-four
+# tracks whose tempo and loudness genuinely walk, at −30 dBFS, still routed to
+# a null PCM and still never played.
+#
+# Twenty-four is enough because this frame's subject is the line and the list
+# it produced, and neither is a count. The library's size appears on the door
+# behind it, which this frame is past.
+kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
+APID=""
+sleep 1
+
+VARIED=${VARIED:-/tmp/baz-varied}
+[[ -d $VARIED ]] || "$REPO/docs/design/impl/contour/mkfixture-varied.sh" "$VARIED"
+V=$S/vibe
+rm -rf "$V"; mkdir -p "$V"/{home,data,config,cache,run}; chmod 700 "$V/run"
+cp "$S/home/.asoundrc" "$V/home/.asoundrc"
+mkdir -p "$V/config/baz"
+printf 'music_dirs = ["%s"]\ngroup_key = "alphabet"\n' "$VARIED" > "$V/config/baz/config.toml"
+env -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS DISPLAY="$DISP" \
+    WINIT_UNIX_BACKEND=x11 HOME="$V/home" XDG_DATA_HOME="$V/data" \
+    XDG_CONFIG_HOME="$V/config" XDG_CACHE_HOME="$V/cache" \
+    XDG_RUNTIME_DIR="$V/run" BAZ_ROOM=closing-time BAZ_VIBE_WORKERS=4 \
+    BAZ_VIBE_MODEL_DIR="$REPO/models/vibe" \
+    "$BIN" >> "$V/app.log" 2>&1 &
+APID=$!
+WID=""
+for _ in $(seq 1 80); do
+  WID=$(timeout 3 xdotool search --sync --onlyvisible --class baz 2>/dev/null | head -1)
+  [[ -n $WID ]] && break
+  sleep 0.25
+done
+[[ -z $WID ]] && { echo "no window for the smart playlist pass"; tail -20 "$V/app.log"; exit 1; }
+xdotool windowmove "$WID" 0 0; xdotool windowsize "$WID" $W $H
+xdotool windowfocus --sync "$WID"
+sleep 6
+
+click 105 81                            # Home
+click 327 515                           # `New smart playlist`
+sleep 2
+click 1120 626                          # `Listen to my music` — the one step first
+# Wait by watching the store stop growing, rather than by guessing.
+DB="$V/data/baz/vibe.db"
+last=-1; still=0
+for _ in $(seq 1 120); do
+  sleep 5
+  size=$(stat -c %s "$DB" 2>/dev/null || echo 0)
+  if [[ "$size" == "$last" && "$size" != "0" ]]; then
+    still=$((still + 1)); [[ $still -ge 3 ]] && break
+  else still=0; fi
+  last=$size
+done
+sleep 6
+click 359 786                           # `Your own words` — into the page itself
+sleep 3
+# **One composition, and only one**, because every one after the first carries
+# a diff — *10 new · 9 kept* — which is a good line in the app and clutter in
+# a store frame.
+#
+# That one is the **length press**, not `Compose`. Opening the door sets
+# `open`, so by the time this page is reached any control that settles
+# recomposes — which means choosing a length here *is* a composition, and a
+# `Compose` press after it would be the second. Half an hour because the
+# fixture is 48 tracks: an hour is reachable but leaves the list at the edge
+# of what the diversity rules allow, and a shortfall note is the honest thing
+# to say and the wrong thing to photograph.
+click 315 586                           # `half an hour` — and this composes
+sleep 7
+sleep 6
+park
+shot smart-playlist
+
 echo "== isolation receipt"
 grep -m2 '^\[mpris\]' "$S/app.log" || echo "  NO MPRIS LINE — check $S/app.log"
+grep -m1 '^\[mpris\]' "$V/app.log" || echo "  NO MPRIS LINE — check $V/app.log"
 echo "done — $OUT"

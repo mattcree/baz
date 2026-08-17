@@ -7,10 +7,10 @@ hour becoming legible, and it is legible because every line on it is a
 accept.
 
 `capture.sh` runs the shipping binary headless against
-`docs/design/impl/contour/mkfixture-varied.sh`'s 24-track fixture, whose
+`docs/design/impl/contour/mkfixture-varied.sh`'s 48-track fixture, whose
 properties are known in advance — tempo and loudness walk from 62 BPM at
-amplitude 0.18 to 168 BPM at 1.00, every file is a 220 Hz tone under a click
-train, every file is tagged `GENRE=Electronic`. That is what makes these
+amplitude 0.18 to 168 BPM at 1.00 across twelve records, every file is a
+220 Hz tone under a click train, every file is tagged `GENRE=Electronic`. That is what makes these
 screenshots evidence rather than decoration: the fixture's own construction
 says what the page must say, and the page says it.
 
@@ -28,7 +28,7 @@ check out:
 |---|---|
 | Quietest and Slowest — Ini Kovac | record 01, 62 BPM at amplitude 0.18 — the bottom of both walks |
 | Loudest and Fastest — Studio Hain | record 06, 168 BPM at 1.00 — the top of both |
-| Tempo runs 66 to 176 BPM, centred on 117 | brackets the fixture's 58–172 BPM span, p05–p95 |
+| Tempo runs 71 to 169 BPM, centred on 124 | brackets the fixture's 58–172 BPM span, p05–p95 |
 | barely varies in brightness and texture | one tone at one frequency, so there is nothing on either axis to vary |
 
 The last row is the one worth dwelling on. A rank axis spreads whatever it is
@@ -95,7 +95,7 @@ chance against their own genre, so that sentence claimed a precision the
 retrieval does not have — design note 23 §4's charge, and the worst kind
 available, because it is a dishonesty rather than a limitation.
 
-It now reads **`Baz drew 24 of 24 to choose from`** — the same arithmetic with
+It now reads **`Using 48 of your 48 songs`** — the same arithmetic with
 the claim removed, and the three nearest carry the grading out loud: *if these are not what you meant, it has not understood the
 phrase.* The titles are the only part of that readout anybody can check,
 which is why they are the part that asks to be checked.

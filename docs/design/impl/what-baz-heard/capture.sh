@@ -2,7 +2,7 @@
 # **What listening bought** — design note 24, photographed on a real run.
 #
 # The claims this exercises are all falsifiable against the fixture, which is
-# the point of the feature: `mkfixture-varied.sh` builds 24 tracks whose tempo
+# the point of the feature: `mkfixture-varied.sh` builds 48 tracks whose tempo
 # and loudness walk from 62 BPM at amplitude 0.18 to 168 BPM at 1.00, all
 # tagged `GENRE=Electronic`, all a 220 Hz tone under a click train. So:
 #
