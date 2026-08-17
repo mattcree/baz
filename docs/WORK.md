@@ -1771,6 +1771,116 @@ or not."*
     work, not a pass: every place has to state its order, and an order nobody
     stated would be the DOM order, which is a shape nobody designed.
 
+79. **Not started — the analysis has to be worth the claims made about it.**
+    *(The owner, 2026-08-17: "the most important is that our model of the songs
+    that is used in the smart playlists needs to be rock solid.")*
+
+    **This is the foundation item.** Every reading on the composing page and
+    every line on *what Baz heard* is a claim about the per-track features; if
+    those are shaky, the page is confidently wrong rather than merely limited,
+    which `docs/design/23-the-three-dimensions.md` §4 names as the worst thing
+    this feature can be.
+
+    One defect is already proven. The five fastest tracks in the owner's
+    5 076-track library are led by a Renaissance madrigal and a solo piano
+    miniature at ~190 BPM — **octave errors**, the standard failure of beat
+    tracking — and the three slowest read `0.0`, which is a detection failure
+    recorded as a measurement. See the backlog entry *a named extreme can be
+    the analyser's worst reading*.
+
+    **The audit is built and run** — `cargo run -p baz-vibe --bin vibe-audit --
+    STORE LIBRARY` — and the picture is better than the raw store suggested,
+    with one real defect left. Over the owner's 4 870 loaded tracks:
+
+    ```text
+    feature              min     p05     p50     p95     max   zero pinned  bad
+    tempo             -0.263  -0.036   0.243   0.631   0.892      0      0    0
+    loudness mean     -0.053   0.409   0.660   0.816   0.909      0      0    0
+    flatness mean     -0.982  -0.866  -0.543  -0.166   0.112      0      0    0
+    …
+    tempo, BPM:  60–80 ▏2   80–100 ▏271   100–120 ▏1136
+                 120–140 ▏2328   140–160 ▏714   160–180 ▏365   180–200 ▏54
+    ```
+
+    * **No failures at all in what the app loads.** No zeros, no non-finite
+      values, nothing pinned at the normaliser's ±1. The tempo histogram is a
+      single hump at 120–140 with no doubled second mode, so octave errors are
+      a **tail**, not a systemic fault: they are perhaps fifty tracks, and they
+      collect exactly where an argmax looks.
+    * **206 stored vectors are not the owner's music.** They are a test
+      fixture of digital silence under `/tmp/scratch/music` — every feature
+      pinned at −1 — analysed into the real store by some earlier run. They
+      are **inert**: `baz_vibe::prepare` walks the *library's* paths, so a row
+      whose file the library does not hold is never loaded. Worth pruning
+      anyway, since nothing ever removes a row.
+    * **Several features occupy a narrow band** of bliss' range — zero
+      crossings sits between −0.98 and −0.50, spectral flatness sd between
+      −0.99 and −0.52. Not a fault, and it is what the collection-relative
+      rank axes exist to stretch, but it is why brightness and texture feel
+      less responsive than energy.
+    * **52 tracks share a vector with another**, which is the same file twice
+      in a library and nothing to fix.
+
+    **Done:** a named extreme is taken a hundredth in from each end rather
+    than at it, so one misdetection can no longer describe a library — the
+    same reasoning that already governed the p05–p95 tempo range.
+
+    **Still open, and it needs the owner's word because it costs a full
+    re-analysis:** whether to fold tempo into a sane band (halve anything the
+    tracker puts above ~180 BPM). It is the standard remedy and it would fix
+    the tail properly rather than stepping around it, but it changes stored
+    feature values, which means a `feature_version` bump and about an hour of
+    listening again on a five-thousand-track library.
+
+    The rest of the original plan, still to do: per-feature minimum, quantiles and
+    maximum; counts of exact zeros, non-finite values, and values pinned at
+    the normaliser's ±1 boundary; the tempo histogram, which should be
+    unimodal around 100–130 BPM and will show the doubled hump if octave
+    errors are what they look like; and coverage — how many library tracks
+    have no features, and how many carry a stale `feature_version`.
+
+    1. **Prune the store** of rows the library no longer holds.
+    2. **Pin determinism**: the same file analysed twice must give the same
+       vector, or nothing above it can be reproduced.
+    3. **Decide the tempo fold**, above.
+
+80. **Not started — search folds case and nothing else, so `and` never finds
+    `&`.** *(The owner, 2026-08-17: "can we make sure our search treats 'and'
+    as & or and… because I searched for a song which used the ampersand which
+    wasn't found by searching with the word.")*
+
+    `Index::ranked` builds its needle with `query.to_lowercase()` and matches
+    titles folded the same way, so `Day & Night` and `day and night` are
+    different strings — and so is every `Simon & Garfunkel` and `Earth, Wind &
+    Fire` spelled the way the sleeve does.
+
+    One fold, applied to both sides, treating `&` and `and` as the same
+    **token** — a substring replace turns `Sand` into `S&` and `R&B` into
+    `Rand B`. The same fold is the natural home for the two neighbours the
+    index's own module docs already admit to: punctuation between words
+    (`R.E.M.` against `REM`) and accents (`Beyoncé` against `Beyonce`).
+
+81. **Not started — right-clicking in a playlist resets the scroll position.**
+    *(The owner, 2026-08-17.)*
+
+    Not reproduced yet. The suspicion is that opening the context menu
+    rebuilds the list and the scrollable returns at the top rather than at the
+    offset it was holding — the shape the `scroll_offset` fields on other
+    places exist to prevent. Check three moments separately: the menu opening,
+    the menu closing, and an action taken from it.
+
+82. **Not started — Now Playing should fit its content, and the heart should
+    belong to it.** *(The owner, 2026-08-17: "can you make the now-playing fit
+    the content up to a max width and ensure the heart is snapped to the right
+    hand side of that box so it doesn't appear to be off on its own.")*
+
+    The block takes the full measure whatever is in it, so the favourite mark
+    ends up against the window's edge with a stretch of nothing between it and
+    the title it belongs to — it reads as a control of the *page* rather than
+    of *this song*. Size the block to its content up to a maximum and put the
+    heart against the right edge of that box, so proximity says what it is
+    attached to.
+
 ## Doing
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries

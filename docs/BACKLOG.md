@@ -474,8 +474,8 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
-- **Search folds case and nothing else, so `and` never finds `&`.** *(The
-  owner, 2026-08-17: "can we make sure our search treats 'and' as & or and…
+- **Search folds case and nothing else, so `and` never finds `&`.**
+  **Written up as `docs/WORK.md` item 80.** *(The owner, 2026-08-17: "can we make sure our search treats 'and' as & or and…
   because I searched for a song which used the ampersand which wasn't found by
   searching with the word.")*
 
@@ -494,7 +494,8 @@ Newest first. Each was asked for in conversation and is now in the product.
   folded by `to_lowercase` alone.
 
 - **A named extreme can be the analyser's worst reading rather than the
-  library's.** *(The owner, 2026-08-17: "the 'what baz heard' classified Day &
+  library's.** **Written up as `docs/WORK.md` item 79**, which the owner has
+  named the most important thing outstanding. *(The owner, 2026-08-17: "the 'what baz heard' classified Day &
   Night by thundercat as the fastest… it really isn't.")*
 
   He is right, and the cause is measurable. The top of the tempo ranking on
@@ -535,8 +536,8 @@ Newest first. Each was asked for in conversation and is now in the product.
   (`docs/design/24-what-baz-heard.md` §2): the block named a record, its owner
   knew in one second it was wrong, and the analysis is what has to answer.
 
-- **Right-clicking in a playlist resets the scroll position.** *(The owner,
-  2026-08-17.)* Not diagnosed. Suspicion is that opening the context menu
+- **Right-clicking in a playlist resets the scroll position.**
+  **`docs/WORK.md` item 81.** *(The owner, 2026-08-17.)* Not diagnosed. Suspicion is that opening the context menu
   rebuilds the list and the scrollable comes back at the top rather than at
   the offset it was holding — the same shape as the bugs the `scroll_offset`
   fields on other places exist to prevent. Reproduce first: right-click deep
@@ -544,7 +545,7 @@ Newest first. Each was asked for in conversation and is now in the product.
   the menu closing, and an action taken from it.
 
 - **Now Playing should fit its content, and the heart should belong to it.**
-  *(The owner, 2026-08-17: "can you make the now-playing fit the content up to
+  **`docs/WORK.md` item 82.** *(The owner, 2026-08-17: "can you make the now-playing fit the content up to
   a max width and ensure the heart is snapped to the right hand side of that
   box so it doesn't appear to be off on its own.")*
 

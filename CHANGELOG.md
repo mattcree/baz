@@ -121,6 +121,14 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **The loudest and fastest records baz names are no longer whichever track
+  the analyser got most wrong.** Beat trackers routinely report double the
+  real tempo, and those mistakes collect at exactly the top of the list — so
+  a Renaissance madrigal could be named the fastest thing in a library. The
+  named ends are taken a hundredth in from each end now, which is the same
+  reasoning the tempo range has always used, and on a small collection it
+  still names the true end.
+
 - **Compose works with the description left empty.** It refused a request that
   had no words in it — which was right while the words *were* the request, and
   became a button that silently did nothing once the line took over and **All

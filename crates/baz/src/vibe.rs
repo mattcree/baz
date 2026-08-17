@@ -350,6 +350,16 @@ pub(crate) fn level_at(points: &[ContourPoint], fraction: f32) -> Option<f32> {
     Some(pair[0].level + (pair[1].level - pair[0].level) * mix)
 }
 
+/// **How far in from each end a named extreme is taken**: a hundredth.
+///
+/// Not the end itself, because the end is where a misdetection lands — see
+/// [`State::rebuild_profile`]. Not far in either: over a five-thousand-track
+/// library this steps past about fifty, which still leaves the record named
+/// inside the top one per cent, and on a library too small for a hundredth to
+/// be anything it steps past none and names the true end.
+#[cfg(feature = "vibe-analysis")]
+const EXTREME_MARGIN: usize = 100;
+
 /// **Below this p05–p95 span, an axis has nothing to say about a
 /// collection.**
 ///
@@ -1678,7 +1688,26 @@ impl State {
                 .map(|(path, features)| (features.value(engine), path))
                 .collect();
             ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
-            for (word, end) in [(low_word, ranked.first()), (high_word, ranked.last())] {
+            // **A step in from each end.** The owner, on the shipped block:
+            // *"the 'what baz heard' classified Day & Night by thundercat as
+            // the fastest… it really isn't."* He was right, and the cause is
+            // that a single reading got a sentence to itself: the five
+            // fastest tracks in his library are led by a Renaissance madrigal
+            // and a solo piano miniature at 190 BPM, which are **octave
+            // errors** — the standard failure of beat tracking, and exactly
+            // the thing that collects at the top of an argmax.
+            //
+            // The tempo *range* two lines below has always been p05–p95 for
+            // this reason. Naming the ends with an argmin and an argmax was
+            // the one place in the same block where one bad reading could
+            // describe a whole library, which is an inconsistency rather than
+            // a judgement.
+            let step = ranked.len() / EXTREME_MARGIN;
+            let ends = [
+                (low_word, ranked.get(step)),
+                (high_word, ranked.get(ranked.len().saturating_sub(step + 1))),
+            ];
+            for (word, end) in ends {
                 if let Some((_, path)) = end
                     && let Some((title, artist)) = named(path)
                 {
@@ -3117,6 +3146,61 @@ mod tests {
             "{}",
             state.query()
         );
+    }
+
+    /// **A named end is a step in from the end.**
+    ///
+    /// Enough tracks and the step is real; too few and it names the true end
+    /// rather than nothing. Both halves matter: the first is what stops one
+    /// misdetection describing a library, and the second is what keeps the
+    /// reading working on a collection of two dozen.
+    #[cfg(feature = "vibe-analysis")]
+    #[test]
+    fn a_named_end_steps_past_the_very_end_once_there_is_room_to() {
+        let heard = |tempo: f32| {
+            let mut values = vec![0.0_f32; 30];
+            values[0] = tempo;
+            SonicFeatures::from_values(values, vec![0.0; 512])
+        };
+        let named = |number: usize| TrackVm {
+            disc: None,
+            number: u32::try_from(number).ok(),
+            title: format!("{number:03}"),
+            artist: None,
+            duration: None,
+            path: PathBuf::from(format!("/m/{number:03}.flac")),
+            bytes: None,
+        };
+        let fastest = |state: &mut State, count: usize| {
+            let mut album = album();
+            album.editions[0].tracks = (0..count).map(named).collect();
+            state.features = (0..count)
+                .map(|index| {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "a bounded track index into a normalized tempo"
+                    )]
+                    let tempo = index as f32 / count as f32;
+                    (PathBuf::from(format!("/m/{index:03}.flac")), heard(tempo))
+                })
+                .collect();
+            state.rebuild_profile(&[album], &HashMap::new());
+            state
+                .profile
+                .extremes
+                .iter()
+                .find(|(word, _, _)| *word == "Fastest")
+                .map(|(_, title, _)| title.clone())
+                .expect("a fastest record")
+        };
+
+        // Two hundred tracks: a hundredth is two, so the second-fastest is
+        // named and the outlier at the very top is not.
+        let mut state = State::default();
+        assert_eq!(fastest(&mut state, 200), "197");
+        // Twenty-four: a hundredth is nothing, so the true end is named.
+        let mut state = State::default();
+        assert_eq!(fastest(&mut state, 24), "023");
     }
 
     /// **The field's example is made of their music**, and declines rather
