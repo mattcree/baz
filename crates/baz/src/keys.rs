@@ -276,12 +276,19 @@
 //!
 //! Under type-anywhere the query layer is the one that matters, and the order
 //! is why <kbd>Esc</kbd> *clears* before it blurs: a listener who has typed
-//! three letters into a wall wants the wall back, not the caret moved. iced's
-//! `text_input` consumes <kbd>Esc</kbd> to blur itself first, so what a
-//! listener actually presses is **Esc, Esc** — blur, then clear — and the
-//! second press reaches [`Message::EscapePressed`] through this module. That
-//! is a toolkit limit rather than a design choice and it is recorded as one in
-//! `app.rs`'s `escape`.
+//! three letters into a wall wants the wall back, not the caret moved.
+//!
+//! **This took two presses until 2026-08-17.** iced's `text_input` consumes
+//! <kbd>Esc</kbd> to blur itself and reports the press captured, so the focus
+//! rule dropped it and the three letters stayed on the wall until a second
+//! press — a toolkit limit rather than a design choice, and recorded as one
+//! here for as long as it lasted. The fix was in the report itself: `Captured`
+//! says *the caret is in the well*, which is the fact needed to finish the job
+//! on the first press. A captured <kbd>Esc</kbd> is [`Message::EscapeInField`]
+//! and clears the query on the same press iced blurs on; an uncaptured one is
+//! the ordinary top-down peel. The captured one deliberately peels nothing
+//! else — see `app.rs`'s `escape_in_field` for why a press the field
+//! has already spent must not also take a layer out from under it.
 //!
 //! # <kbd>Ctrl</kbd>+<kbd>R</kbd> is free again
 //!
@@ -384,6 +391,22 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
     // does in a browser.
     if key == &Key::Named(key::Named::F11) && modifiers.is_empty() {
         return Some(Message::ToggleFullscreen);
+    }
+    // **Esc is the second exception, and for the opposite reason to F11's.**
+    // F11 survives the focus rule because the field has no business with it.
+    // Esc survives because the field's business with it is only *half* the
+    // listener's: `text_input` blurs itself and captures the press, so the
+    // query it was blurring off stayed on the wall until a second press. The
+    // capture report says the caret is in the well, which is exactly the fact
+    // needed to finish the job on the first press instead — and to stop
+    // there, so a press the field also consumed can never fall through and
+    // navigate somewhere.
+    if key == &Key::Named(key::Named::Escape) && modifiers.is_empty() {
+        return Some(if focus == Focus::TextField {
+            Message::EscapeInField
+        } else {
+            Message::EscapePressed
+        });
     }
     // The focused text field already had this key and made its decision.
     if focus == Focus::TextField {
@@ -488,9 +511,6 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 
         // Confirm the open chooser, else activate selected content (module docs).
         Key::Named(key::Named::Enter) if bare => Some(Message::PlayFirstMatch),
-
-        // Peel one layer, top down (module docs; `app.rs` holds the order).
-        Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
 
         // **Type anywhere.** The last `Character` arm in the table, so every
         // binding above wins and a key that means something is never text
@@ -619,9 +639,12 @@ mod tests {
     }
 
     fn bind(key: &Key, modifiers: Modifiers) -> Option<String> {
-        binding_for(key, modifiers, Focus::Elsewhere)
-            .as_ref()
-            .map(tag)
+        bind_with(key, modifiers, Focus::Elsewhere)
+    }
+
+    /// The same, for the two keys whose answer depends on who has focus.
+    fn bind_with(key: &Key, modifiers: Modifiers, focus: Focus) -> Option<String> {
+        binding_for(key, modifiers, focus).as_ref().map(tag)
     }
 
     fn none() -> Modifiers {
@@ -660,7 +683,9 @@ mod tests {
         assert!(binding_for(&ch(" "), none(), Focus::TextField).is_none());
     }
 
-    /// …and neither is anything else. A captured press is the field's.
+    /// …and neither is anything else, bar the two window-and-well keys that
+    /// have their own reasons (`F11` above, `Esc` below). A captured press is
+    /// the field's.
     #[test]
     fn a_focused_text_field_swallows_every_binding() {
         let every_bound_key = [
@@ -689,7 +714,6 @@ mod tests {
             (ch("K"), Modifiers::SHIFT),
             (ch("&"), none()),
             (named(key::Named::Enter), none()),
-            (named(key::Named::Escape), none()),
             (named(key::Named::MediaPlayPause), none()),
             (named(key::Named::MediaTrackNext), none()),
             (named(key::Named::MediaTrackPrevious), none()),
@@ -704,6 +728,42 @@ mod tests {
             assert!(
                 binding_for(key, *modifiers, Focus::Elsewhere).is_some(),
                 "{key:?} + {modifiers:?} should bind when nothing captured it"
+            );
+        }
+    }
+
+    /// **<kbd>Esc</kbd> answers on the first press with the caret in the
+    /// well**, which for a long time it did not: `text_input` blurs itself and
+    /// captures the key, so the focus rule dropped it and the query a listener
+    /// was mid-way through typing survived until they pressed again.
+    ///
+    /// The binding is not the same one in both places, and that is the point.
+    /// Captured, it is [`Message::EscapeInField`], which clears the query and
+    /// stops — a press the field has already spent on its own blur must not
+    /// also peel a place out from under it. Uncaptured, it is the ordinary
+    /// top-down peel.
+    #[test]
+    fn escape_answers_the_well_on_the_first_press() {
+        assert_eq!(
+            bind_with(&named(key::Named::Escape), none(), Focus::TextField),
+            Some("EscapeInField".to_owned()),
+            "Esc in the well still takes two presses to clear a query"
+        );
+        assert_eq!(
+            bind_with(&named(key::Named::Escape), none(), Focus::Elsewhere),
+            Some("EscapePressed".to_owned()),
+            "Esc outside the well no longer peels"
+        );
+        // Modified, it is nobody's: the field keeps it, as it keeps every
+        // other chord it captured.
+        for modifiers in [Modifiers::SHIFT, Modifiers::COMMAND, Modifiers::ALT] {
+            assert!(
+                binding_for(&named(key::Named::Escape), modifiers, Focus::TextField).is_none(),
+                "modified Esc is the field's"
+            );
+            assert!(
+                binding_for(&named(key::Named::Escape), modifiers, Focus::Elsewhere).is_none(),
+                "only a bare Esc peels"
             );
         }
     }

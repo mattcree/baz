@@ -490,6 +490,10 @@ pub(crate) enum Message {
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
     /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
+    /// **Esc while the caret is in the search well** — the one binding that
+    /// survives the focus rule, because the field's own handling of this key
+    /// is *half* of what the listener asked for (see [`App::escape_in_field`]).
+    EscapeInField,
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
     HistoryForward,
@@ -2233,6 +2237,7 @@ impl App {
         }
         match message {
             Message::EscapePressed => self.escape(),
+            Message::EscapeInField => self.escape_in_field(),
             Message::HistoryBack => self.travel_history(true),
             Message::HistoryForward => self.travel_history(false),
             Message::DismissSearch => match &mut self.screen {
@@ -5714,6 +5719,33 @@ impl App {
     /// <kbd>Esc</kbd> to blur before this is reached at all; that is the
     /// documented two-press behaviour, and §4.6 of the design spec owns the
     /// fix.)
+    /// **Esc with the caret in the search well: the press belongs to the well.**
+    ///
+    /// It used to take two. iced's `text_input` consumes Esc to blur itself
+    /// and reports the press captured, so the focus rule in [`crate::keys`]
+    /// dropped it and the three letters a listener had typed stayed on the
+    /// wall until they pressed again — recorded for a long time as a toolkit
+    /// limit rather than a design choice, which it was. The toolkit's capture
+    /// report is the missing half: it says *the caret is in the well*, and
+    /// that is enough to clear the query on the same press iced is blurring
+    /// on. One press, wall back, which is what "peel the query" always meant.
+    ///
+    /// It deliberately peels **nothing else**. The layers `escape` walks —
+    /// fullscreen, a drag, the menu, the place — are all reachable with the
+    /// caret in the well, and letting one press take the field's blur *and* a
+    /// layer underneath would trade a key that did too little for one that
+    /// does too much. With an empty query this press is spent on the blur
+    /// alone, which is why clicking into an empty well and pressing Esc puts
+    /// the caret away rather than sending you home.
+    fn escape_in_field(&mut self) -> Task<Message> {
+        if let Screen::Shelf(state) = &mut self.screen
+            && state.search_open
+        {
+            return state.clear_query();
+        }
+        Task::none()
+    }
+
     fn escape(&mut self) -> Task<Message> {
         // Fullscreen is a window layer around every place. Leave it before
         // changing the place or peeling any in-place layer, so the kiosk's

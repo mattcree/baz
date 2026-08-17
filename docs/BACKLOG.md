@@ -882,6 +882,11 @@ Newest first. Each was asked for in conversation and is now in the product.
   handle or a join that never returns would present exactly as this does. A
   recurrence turns main red with the log, which is the evidence needed.
 
+  **Checked against the cause found for the rate-change flake below and ruled
+  out** (2026-08-17): that one was two processes sharing a fixture path, and
+  `history.rs` builds its ledger in a `tempfile::tempdir()` unique per run, so
+  no second process can reach it. The suspects above stand unchanged.
+
 - ~~**A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
   (`crates/baz-core/tests/playback.rs`).~~ **Closed 2026-08-17 — reproduced,
   diagnosed, fixed, and the assertion is untouched.**
@@ -1309,23 +1314,34 @@ Newest first. Each was asked for in conversation and is now in the product.
   own design: `WALL · MARQUEE` will be a state row in the state row's
   vocabulary, and nothing shipped pre-empts its keys.
 - **No keyboard route out of the search field.** Transport keys are bound
-  (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
-  press while focused except Tab and the vertical arrows, so while the search
-  well has focus *nothing* is a shortcut — the field takes the key and the
-  subscription never sees it. Escape blurs it, which is the whole of the
-  escape hatch today. A proper fix wants a focus-aware shell (or a toolkit
-  that reports focus synchronously), which is the same missing capability as
-  the accessibility gap above.
-  - **This got more visible when the well became resident** (ADR-0030's second
-    amendment), and it is worth stating in its own words because it looks like
-    a new defect and is not: **<kbd>Esc</kbd> takes two presses to peel a query
-    you are still typing** — the first is iced's `text_input` unfocusing and
-    *capturing*, the second reaches `crate::keys`. Same for
-    <kbd>Ctrl</kbd>+<kbd>B</kbd>, which asks for nothing at all while the caret
-    is in the well. Both are captured in
-    `docs/design/impl/search-in-lane/05` and `06`. Unchanged behaviour, older
-    than this move, and it will not be fixed by anything short of the
-    focus-aware shell above.
+  (`crates/baz/src/keys.rs`), but `text_input` captures every key press while
+  focused except Tab and the vertical arrows, so while the search well has
+  focus almost nothing is a shortcut — the field takes the key, and the focus
+  rule in `crate::keys` honours that rather than second-guessing it.
+  <kbd>F11</kbd> and <kbd>Esc</kbd> are the two exceptions, each for a stated
+  reason. Everything else waits on a focus order per place, which is the same
+  missing capability as the accessibility gap above.
+  - ~~**<kbd>Esc</kbd> takes two presses to peel a query you are still
+    typing.**~~ **Fixed 2026-08-17** —
+    `docs/design/impl/escape-in-the-well/`. The claim that this needed "a
+    focus-aware shell (or a toolkit that reports focus synchronously)" was
+    **written against iced 0.13 and never revisited**: baz is on 0.14 and
+    `keys.rs` has read `iced::event::Status` into its own `Focus` for some
+    time. `Captured` *is* that synchronous report, and it says the one thing
+    needed — the caret is in the well. A captured <kbd>Esc</kbd> now binds to
+    `Message::EscapeInField`, which clears the query on the same press iced is
+    blurring on, and peels nothing else: a press the field has already spent
+    must not also take a layer out from under it, so an empty well gets the
+    blur alone rather than sending you home. Proven on a real X server, not
+    only in unit tests — one press, query gone, wall back, still on Library.
+  - **<kbd>Ctrl</kbd>+<kbd>B</kbd> still asks for nothing while the caret is
+    in the well**, and neither does any other chord. **This is the focus rule
+    working**, and `a_focused_text_field_swallows_every_binding` pins it.
+    Letting modified keys through is a real design change with a real risk of
+    taking <kbd>Ctrl</kbd>+<kbd>A</kbd>/<kbd>C</kbd>/<kbd>V</kbd>/<kbd>X</kbd>
+    off the field, so it is a decision to make rather than a defect to fix.
+    Both behaviours are captured in `docs/design/impl/search-in-lane/05`
+    and `06`.
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 
