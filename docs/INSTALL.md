@@ -82,11 +82,39 @@ Verify what you downloaded before you run it:
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-Then unpack and put the binary somewhere on your `PATH`:
+Then unpack it and run the installer:
 
 ```sh
 tar xf baz-<version>-linux-x86_64.tar.gz
 cd baz-<version>-linux-x86_64
+./install.sh
+```
+
+That puts the binary in `~/.local/bin`, the menu entry in
+`~/.local/share/applications`, the AppStream metadata in
+`~/.local/share/metainfo` and the whole icon ladder in
+`~/.local/share/icons/hicolor` — so baz appears in your launcher with its own
+mark and the media keys work. It needs no privilege, touches nothing outside
+`~/.local`, and rewrites the entry's `Exec=` to the binary it actually
+installed. `./install.sh --system` writes to `/usr/local` instead (with
+`sudo`), and `--prefix DIR` writes anywhere.
+
+It keeps a manifest of every file it wrote, so:
+
+```sh
+./uninstall.sh          # or --system / --prefix DIR, matching the install
+```
+
+removes exactly those and nothing else. Your library, playlists and settings
+live in `~/.local/share/baz` and `~/.config/baz` and are never touched by
+either script.
+
+### By hand
+
+If you would rather place the files yourself, the archive is laid out so you
+can:
+
+```sh
 install -Dm755 baz ~/.local/bin/baz
 ```
 

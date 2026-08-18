@@ -51,6 +51,22 @@ use crate::theme;
 /// narrower; the reservation is what the pointer aims at (law L7).
 pub const HIT_W: f32 = theme::STEPPER_HIT;
 
+/// **The gap between one fader and the next**, and the reason it is stated
+/// here rather than at the row that draws it.
+///
+/// The owner: *"the lines of the graphic EQ do not seem to be spread out
+/// enough."* They were on [`theme::GAP_XS`] — a 4 px seam between 32 px
+/// columns, which is the rhythm of a *detent run* (one control with several
+/// states, touching) rather than of ten separate controls. Ten faders that
+/// nearly touch read as a fence.
+///
+/// It lives beside [`HIT_W`] because the pair is one fact — the **pitch** —
+/// and [`crate::response`] derives the drawn curve's frequency axis from that
+/// same pitch. Change the gap at the row alone and the curve slides off the
+/// handles it is supposed to pass through; `the_curve_peaks_under_the_fader_that_raised_it`
+/// would catch it, but only after somebody had to work out why.
+pub const GAP: f32 = theme::GAP_MD;
+
 /// The rail a fader draws inside its hit band.
 const RAIL_W: f32 = 4.0;
 

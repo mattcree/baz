@@ -101,14 +101,14 @@ impl Response {
 
 /// **The frequency span a row of faders covers**, edge to edge.
 ///
-/// The row is `n` columns of [`fader::HIT_W`] on [`theme::GAP_XS`] gaps, and
+/// The row is `n` columns of [`fader::HIT_W`] on [`fader::GAP`] gaps, and
 /// each band's fader is centred in its own column. So the row's left edge is
 /// half a column *before* the first band and its right edge half a column
 /// after the last — and since the centres are octave-spaced, half a column is
 /// a fixed fraction of an octave.
 fn span() -> (f32, f32) {
     let centres = baz_core::equalizer::CENTRES;
-    let pitch = fader::HIT_W + theme::GAP_XS;
+    let pitch = fader::HIT_W + fader::GAP;
     let overhang = (fader::HIT_W / 2.0) / pitch;
     #[expect(
         clippy::cast_precision_loss,
@@ -250,7 +250,7 @@ mod tests {
         Rectangle {
             x: 0.0,
             y: 0.0,
-            width: 10.0 * fader::HIT_W + 9.0 * theme::GAP_XS,
+            width: 10.0 * fader::HIT_W + 9.0 * fader::GAP,
             height: 168.0,
         }
     }
@@ -259,7 +259,7 @@ mod tests {
     fn fader_centre_x(index: usize) -> f32 {
         #[expect(clippy::cast_precision_loss, reason = "ten bands")]
         let at = index as f32;
-        at * (fader::HIT_W + theme::GAP_XS) + fader::HIT_W / 2.0
+        at * (fader::HIT_W + fader::GAP) + fader::HIT_W / 2.0
     }
 
     /// Which curve sample lands nearest `x`.

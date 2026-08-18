@@ -348,7 +348,17 @@ pub(crate) fn view<'a>(
             // corner: a cover whose own pixels run out before the stage does
             // used to hang from the top edge with all its slack underneath,
             // which is what earned the owner's *"cramped up into the corner"*.
-            container(object).align_y(alignment::Vertical::Center),
+            // **`height(Fill)` is what makes `align_y` mean anything.** A
+            // container that shrinks to its content has no spare height to
+            // centre within, so the row placed it at the top and the owner saw
+            // *"at less wide widths the cd is weirdly positioned up in the top
+            // right."* It only showed at narrow widths because that is where
+            // the object is width-bound and therefore shorter than the stage —
+            // at 1920 it fills the height and top and centre are the same
+            // pixel.
+            container(object)
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center),
         ]
         .spacing(theme::GAP_XL)
         .padding(iced::Padding {
@@ -386,7 +396,7 @@ fn show_album_line(album: Option<&str>, source: Option<&Source>) -> bool {
 }
 
 /// The full-width source footer reserved at the bottom of the place.
-const SOURCE_CARD_H: f32 = 76.0;
+const SOURCE_CARD_H: f32 = 108.0;
 
 /// What the old centred composition reserved under the work. Kept because
 /// `art_edge` and its tests still speak in it; the marquee sizes its object
@@ -915,7 +925,11 @@ fn field_layer(
 /// field, and it sits directly under a 64 px title whose contrast against it
 /// has to hold whatever the record's hue happens to be.
 fn tinted(ground: iced::Color, ink: iced::Color) -> iced::Color {
-    const WEIGHT: f32 = 0.22;
+    // **Muted, and still the record's.** The owner: *"ensure the background
+    // colour is a bit more muted, yet still based on the album."* 0.22 read as
+    // a coloured bar; this is the record's hue arriving as a cast on the
+    // room's own surface, which is what a tint is.
+    const WEIGHT: f32 = 0.12;
     iced::Color {
         r: ground.r.mul_add(1.0 - WEIGHT, ink.r * WEIGHT),
         g: ground.g.mul_add(1.0 - WEIGHT, ink.g * WEIGHT),
@@ -1003,7 +1017,8 @@ fn source_link(source: Source, hues: Option<field::Field>) -> Element<'static, M
             background: Some(iced::Background::Gradient(
                 iced::gradient::Linear::new(std::f32::consts::PI)
                     .add_stop(0.0, iced::Color { a: 0.0, ..solid })
-                    .add_stop(0.55, iced::Color { a: 0.82, ..solid })
+                    .add_stop(0.45, iced::Color { a: 0.35, ..solid })
+                    .add_stop(0.78, iced::Color { a: 0.86, ..solid })
                     .add_stop(1.0, solid)
                     .into(),
             )),

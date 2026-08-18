@@ -71,7 +71,8 @@ const PANEL_W: f32 = if FADER_ROW_W > CONTROLS_ROW_W {
 };
 
 /// Eleven faders on their gaps, plus the card's padding.
-const FADER_ROW_W: f32 = 11.0 * crate::fader::HIT_W + 10.0 * theme::GAP_XS + 4.0 * theme::GAP_LG;
+const FADER_ROW_W: f32 =
+    11.0 * crate::fader::HIT_W + 10.0 * crate::fader::GAP + 4.0 * theme::GAP_LG;
 
 /// What the row of controls above them needs.
 ///
@@ -85,13 +86,16 @@ const CONTROLS_ROW_W: f32 = 560.0;
 pub(crate) fn layer(
     eq: EqualizerSettings,
     saved: &[crate::config::SavedCurve],
+    editing: Option<usize>,
     naming: Option<&str>,
     window: iced::Size,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let limit = baz_core::equalizer::LIMIT_DB;
 
-    let mut bands = row![].spacing(theme::GAP_XS).align_y(iced::Alignment::End);
+    let mut bands = row![]
+        .spacing(crate::fader::GAP)
+        .align_y(iced::Alignment::End);
     for (index, centre) in baz_core::equalizer::CENTRES.into_iter().enumerate() {
         let db = f32::from(eq.bands_centidb[index]) / 100.0;
         bands = bands.push(strip(&label_of(centre), db, limit, room, move |db| {
@@ -110,8 +114,8 @@ pub(crate) fn layer(
             switch("EQ enabled", eq.enabled, Message::EqualizerEnabled, room),
             switch("Auto gain", eq.auto_gain, Message::EqualizerAutoGain, room),
             Space::new().width(Length::Fill),
-            presets(eq.bands_centidb, saved, room),
-            keeping(eq.bands_centidb, saved),
+            presets(eq.bands_centidb, saved, editing, room),
+            keeping(eq.bands_centidb, saved, editing),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
@@ -153,7 +157,7 @@ pub(crate) fn layer(
                 Message::EqualizerPreampSet(centidb(db))
             }),
         ]
-        .spacing(theme::GAP_XS)
+        .spacing(crate::fader::GAP)
         .align_y(iced::Alignment::End),
     ]
     .spacing(theme::GAP_MD);
@@ -195,6 +199,7 @@ pub(crate) fn layer(
 fn presets(
     bands_centidb: [i16; 10],
     saved: &[crate::config::SavedCurve],
+    editing: Option<usize>,
     room: &'static theme::Palette,
 ) -> Element<'static, Message> {
     let mut choices: Vec<Choice> = (0..baz_core::equalizer::PRESETS.len())
@@ -209,10 +214,19 @@ fn presets(
     // The listener's own curves are looked for **first**: a curve saved on top
     // of an offered one is the one they named, and naming it is the stronger
     // statement about what it is.
-    let selected = saved
-        .iter()
-        .position(|curve| curve.bands_centidb == bands_centidb)
+    // **The curve being edited keeps its name in the picker**, changed or not.
+    // Falling back to `Custom` the moment a band moved would contradict the
+    // `Reset` standing beside it — reset to *what*, if the panel has stopped
+    // admitting which curve this is?
+    let selected = editing
+        .filter(|at| *at < saved.len())
         .map(|at| Choice::Saved(at, saved[at].name.clone()))
+        .or_else(|| {
+            saved
+                .iter()
+                .position(|curve| curve.bands_centidb == bands_centidb)
+                .map(|at| Choice::Saved(at, saved[at].name.clone()))
+        })
         .or_else(|| {
             baz_core::equalizer::PRESETS
                 .iter()
@@ -275,17 +289,31 @@ impl std::fmt::Display for Choice {
 fn keeping(
     bands_centidb: [i16; 10],
     saved: &[crate::config::SavedCurve],
+    editing: Option<usize>,
 ) -> Element<'static, Message> {
-    if saved
-        .iter()
-        .any(|curve| curve.bands_centidb == bands_centidb)
-    {
-        return word("Forget", Message::EqualizerForget);
+    let editing = editing.filter(|at| *at < saved.len());
+    if let Some(curve) = editing.and_then(|at| saved.get(at)) {
+        return if curve.bands_centidb == bands_centidb {
+            // Loaded and untouched: there is nothing to save, and the only
+            // thing left to do with it is stop having it.
+            word("Forget", Message::EqualizerForget)
+        } else {
+            // **Loaded and changed** — the owner: *"when we edit an existing
+            // custom preset we should give the option to save or reset."*
+            // `Save` writes over it under its own name without asking for one
+            // again; `Reset` puts the faders back to what the name means.
+            row![
+                word("Save", Message::EqualizerSaveOver),
+                word("Reset", Message::EqualizerReset),
+            ]
+            .spacing(theme::GAP_XS)
+            .into()
+        };
     }
     if baz_core::equalizer::Preset::matching(bands_centidb).is_some() {
         return Space::new().into();
     }
-    word("Keep", Message::EqualizerSaveStart)
+    word("Save", Message::EqualizerSaveStart)
 }
 
 /// The name field's identity, so opening it can put the caret in it.
@@ -314,7 +342,7 @@ fn naming_row(naming: Option<&str>, room: &'static theme::Palette) -> Element<'s
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .style(move |_theme, status| theme::input(room, status)),
-        word("Keep", Message::EqualizerSaveCommit),
+        word("Save", Message::EqualizerSaveCommit),
         word("Cancel", Message::EqualizerSaveCancel),
     ]
     .spacing(theme::GAP_SM)
@@ -504,7 +532,7 @@ mod tests {
     #[test]
     fn the_panel_is_the_width_of_its_faders() {
         let faders = 11.0 * crate::fader::HIT_W;
-        let gaps = 10.0 * theme::GAP_XS;
+        let gaps = 10.0 * crate::fader::GAP;
         assert!(
             PANEL_W > faders + gaps,
             "the panel is narrower than the faders it holds"
@@ -539,7 +567,8 @@ mod tests {
         let box_and = |label: &str| theme::STEPPER_HIT + theme::GAP_SM + measure(label);
         // Both words that can stand in the keeping slot, so neither the wider
         // one nor a future third can overflow unnoticed.
-        let keeping = measure("Forget").max(measure("Keep")) + 2.0 * theme::GAP_MD;
+        // The widest the slot gets: `Save` and `Reset` together.
+        let keeping = measure("Save") + measure("Reset") + theme::GAP_XS + 4.0 * theme::GAP_MD;
         let needed = box_and("EQ enabled")
             + theme::GAP_SM
             + box_and("Auto gain")
@@ -632,6 +661,70 @@ mod tests {
         );
         // And nothing warns when there is nothing to warn about.
         assert!(!nothing_to_hold.contains("distort"));
+    }
+
+    /// **The keeping slot has four states and each one offers what it should.**
+    ///
+    /// Asserted on the source rather than the widget tree, which cannot be
+    /// walked — so this checks that each arm exists and reaches for the right
+    /// message. The states, and why each is what it is:
+    ///
+    /// - an **offered** curve: nothing, because saving a copy of `More bass`
+    ///   under another name is not a thing to offer and deleting it is not
+    ///   yours to do;
+    /// - a curve that is **nobody's yet**: `Save`, which asks for a name;
+    /// - one of **yours, untouched**: `Forget`, because there is nothing to
+    ///   save;
+    /// - one of **yours, changed**: `Save` over it under its own name, and
+    ///   `Reset` back to what that name means.
+    #[test]
+    fn the_keeping_slot_offers_what_the_curve_is() {
+        let src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/equalizer.rs"),
+        )
+        .expect("this file");
+        let code = src.split("#[cfg(test)]").next().unwrap_or_default();
+        let slot = code
+            .split_once("fn keeping(")
+            .expect("the keeping slot")
+            .1
+            .split_once("\nfn ")
+            .expect("the next function")
+            .0;
+
+        for (message, why) in [
+            (
+                "Message::EqualizerForget",
+                "a saved curve you have not changed can only be forgotten",
+            ),
+            (
+                "Message::EqualizerSaveOver",
+                "a saved curve you have changed must be savable under its own name",
+            ),
+            (
+                "Message::EqualizerReset",
+                "a saved curve you have changed must be resettable to what its name means",
+            ),
+            (
+                "Message::EqualizerSaveStart",
+                "a curve that is nobody's yet must be savable, which asks for a name",
+            ),
+        ] {
+            assert!(slot.contains(message), "{why} — `{message}` is not offered");
+        }
+        // And the offered curves get nothing: absent, not disabled, which is
+        // this product's rule everywhere.
+        assert!(
+            slot.contains("Preset::matching(bands_centidb).is_some()")
+                && slot.contains("Space::new()"),
+            "an offered curve is no longer left alone in the keeping slot"
+        );
+        // `Keep` was the word for two of these and the owner said it was not
+        // sensible. It should not come back by copy-paste.
+        assert!(
+            !code.contains("\"Keep\""),
+            "the `Keep` label is back; the owner asked for `Save`"
+        );
     }
 
     /// Decibels round-trip through the protocol's own units.

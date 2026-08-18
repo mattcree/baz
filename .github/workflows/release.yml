@@ -251,6 +251,14 @@ jobs:
             cp packaging/io.github.mattcree.baz.desktop "$stage/"
             cp packaging/flatpak/io.github.mattcree.baz.metainfo.xml "$stage/"
             cp -r packaging/icons/hicolor "$stage/icons"
+            # **And the step that puts them where a desktop looks.** All of the
+            # above shipped for a while with `docs/INSTALL.md` asking the
+            # reader to make five `install -Dm644` copies themselves, which is
+            # not an installed application — it is an application and a list of
+            # chores. `install.sh` makes those copies and keeps a manifest;
+            # `uninstall.sh` reads the manifest back.
+            install -m755 packaging/linux/install.sh "$stage/install.sh"
+            install -m755 packaging/linux/uninstall.sh "$stage/uninstall.sh"
           fi
 
           ls -l "$stage"

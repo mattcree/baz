@@ -548,8 +548,12 @@ pub(crate) enum Message {
     EqualizerSaveCommit,
     /// Put the name field away without saving.
     EqualizerSaveCancel,
-    /// Forget the saved curve currently showing in the picker.
+    /// Forget the saved curve currently being edited.
     EqualizerForget,
+    /// Put the edited curve back to what its name means.
+    EqualizerReset,
+    /// Write the faders over the saved curve being edited, under its own name.
+    EqualizerSaveOver,
     /// **Auto gain**: whether the pre-amp follows the curve.
     ///
     /// Two labels ago this was a button called `Suggest a pre-amp`, then one
@@ -1507,6 +1511,15 @@ struct App {
     /// **Curves the listener saved**, loaded from the config and written back
     /// whenever one is added or removed.
     equalizer_presets: Vec<crate::config::SavedCurve>,
+    /// **Which saved curve is on the faders**, if one was chosen.
+    ///
+    /// A *selection*, not a match. Comparing the ten bands against the saved
+    /// list answers *are these numbers one of my curves*, which is a different
+    /// question from *am I editing one of my curves* — and the second is the
+    /// one the panel needs, because the moment a listener nudges a band the
+    /// first says no and the relationship the panel should be offering to save
+    /// or reset is gone.
+    equalizer_editing: Option<usize>,
     /// The name being typed for a curve about to be saved, if one is.
     ///
     /// `None` is the ordinary state. It is a field on the app rather than on
@@ -2147,6 +2160,22 @@ impl App {
             shortcuts_open: false,
             equalizer,
             equalizer_open: false,
+            // **A curve loaded from the config is one you are editing**, if it
+            // is one of yours.
+            //
+            // Without this, launching onto a saved curve and nudging a band
+            // offered `Save` — a new name for a curve that already had one —
+            // rather than `Save`/`Reset` over the one it plainly is. The
+            // relationship has to survive the first nudge, so it cannot be
+            // re-derived from the bands each frame: that is the reading that
+            // stops being true the moment the listener changes anything, which
+            // is precisely when it is needed.
+            equalizer_editing: stored.as_ref().and_then(|config| {
+                config
+                    .equalizer_presets
+                    .iter()
+                    .position(|curve| curve.bands_centidb == config.equalizer_bands_centidb)
+            }),
             equalizer_presets: stored
                 .as_ref()
                 .map(|config| config.equalizer_presets.clone())
@@ -2412,6 +2441,7 @@ impl App {
             }
             Message::EqualizerPresetChosen(crate::views::equalizer::Choice::Saved(index, _)) => {
                 if let Some(curve) = self.equalizer_presets.get(index) {
+                    self.equalizer_editing = Some(index);
                     // **A saved curve brings its own headroom**, unlike an
                     // offered one which derives it: this is what the listener
                     // had set, and someone who deliberately left themselves
@@ -2463,14 +2493,16 @@ impl App {
                 // rows reading `Kitchen` in one picker is a list that cannot
                 // be used, and the listener's intent — *this is what Kitchen
                 // means now* — is the ordinary reading.
-                if let Some(existing) = self
+                if let Some(at) = self
                     .equalizer_presets
-                    .iter_mut()
-                    .find(|saved| saved.name == curve.name)
+                    .iter()
+                    .position(|saved| saved.name == curve.name)
                 {
-                    *existing = curve;
+                    self.equalizer_presets[at] = curve;
+                    self.equalizer_editing = Some(at);
                 } else if self.equalizer_presets.len() < crate::config::MAX_SAVED_CURVES {
                     self.equalizer_presets.push(curve);
+                    self.equalizer_editing = Some(self.equalizer_presets.len() - 1);
                 } else {
                     crate::baz_log!(
                         "[equaliser] {} saved curves is the limit; {:?} was not kept",
@@ -2483,14 +2515,50 @@ impl App {
                 Task::none()
             }
             Message::EqualizerForget => {
-                let bands = self.equalizer.bands_centidb;
-                self.equalizer_presets
-                    .retain(|saved| saved.bands_centidb != bands);
-                self.persist_equalizer_presets();
+                if let Some(at) = self.equalizer_editing.take()
+                    && at < self.equalizer_presets.len()
+                {
+                    self.equalizer_presets.remove(at);
+                    self.persist_equalizer_presets();
+                }
+                Task::none()
+            }
+            Message::EqualizerReset => {
+                // **Back to what the name means.** The bands *and* the
+                // headroom, because a saved curve keeps its own pre-amp and
+                // restoring half of it would leave the listener somewhere
+                // they had never been.
+                if let Some(curve) = self
+                    .equalizer_editing
+                    .and_then(|at| self.equalizer_presets.get(at))
+                {
+                    self.equalizer.bands_centidb = curve.bands_centidb;
+                    self.equalizer.preamp_centidb = curve.preamp_centidb;
+                    self.send_equalizer();
+                    self.persist_equalizer();
+                }
+                Task::none()
+            }
+            Message::EqualizerSaveOver => {
+                // Saving over the curve you are editing needs no name: it
+                // already has one, and asking for it again would invite a
+                // second entry under a spelling one character different.
+                if let Some(curve) = self
+                    .equalizer_editing
+                    .and_then(|at| self.equalizer_presets.get_mut(at))
+                {
+                    curve.bands_centidb = self.equalizer.bands_centidb;
+                    curve.preamp_centidb = self.equalizer.preamp_centidb;
+                    self.persist_equalizer_presets();
+                }
                 Task::none()
             }
             Message::EqualizerPresetChosen(crate::views::equalizer::Choice::Builtin(index)) => {
                 if let Some(preset) = baz_core::equalizer::PRESETS.get(index) {
+                    // An offered curve is not one of the listener's, so
+                    // whatever they were editing is no longer what is on the
+                    // faders.
+                    self.equalizer_editing = None;
                     self.equalizer.bands_centidb = preset.bands_centidb;
                     // **The headroom comes with the curve.** A preset that
                     // boosts is a preset that needs room, and leaving the
@@ -7989,7 +8057,7 @@ impl App {
             // own controls stay, because hiding baz's title bar on the
             // platforms where baz draws it takes minimise, maximise and close
             // with it. See `views::app_bar::chromeless`.
-            views::app_bar::chromeless(self.window_maximized, owns_chrome(), ink)
+            views::app_bar::chromeless(self.window_maximized, owns_chrome(), false, ink)
         } else {
             views::app_bar::view(
                 state,
@@ -8103,6 +8171,7 @@ impl App {
                 views::equalizer::layer(
                     self.equalizer,
                     &self.equalizer_presets,
+                    self.equalizer_editing,
                     self.equalizer_naming.as_deref(),
                     self.window,
                 )
@@ -8164,7 +8233,16 @@ impl App {
     /// it, which is exactly the class of bug a resident surface introduces.
     fn body_width(&self) -> f32 {
         match &self.screen {
-            Screen::Shelf(state) if self.place.wears_lane() => state.body_width(),
+            // **Chromeless has no lane to take off.** The owner: *"when in full
+            // screen mode there is a black gap at the right hand side"*, then
+            // *"the visualisation just isn't being drawn at the full size of
+            // the window."* Both are this: the composition hid the lane and
+            // this went on subtracting it, so every place that sizes itself
+            // against the body — the field, the spectrum, the record's own
+            // column — was drawn a lane's width short of the glass.
+            Screen::Shelf(state) if self.place.wears_lane() && !self.chromeless => {
+                state.body_width()
+            }
             _ => self.window.width,
         }
     }
@@ -8184,7 +8262,15 @@ impl App {
     /// route in and out of it — but since ADR-0040 it wears the **app bar**,
     /// like every other place, and that does come off the top.
     fn body_height(&self) -> f32 {
-        (self.window.height - theme::APP_BAR_H - theme::BAR_CONTENT_H - 1.0).max(0.0)
+        // The bottom bar's band and its hairline are gone with the frame; the
+        // app bar's strip is not, because chromeless keeps a shorter one for
+        // the window's own controls.
+        let below = if self.chromeless {
+            0.0
+        } else {
+            theme::BAR_CONTENT_H + 1.0
+        };
+        (self.window.height - theme::APP_BAR_H - below).max(0.0)
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and

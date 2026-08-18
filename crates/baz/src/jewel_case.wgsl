@@ -5,7 +5,8 @@ struct Uniforms {
     scale_x: f32,
     scale_y: f32,
     front_opacity: f32,
-    _pad1: f32,
+    // Was `_pad1`. The buffer stays eight floats — see `Pipeline::upload`.
+    lens: f32,
     _pad2: f32,
 };
 
@@ -96,18 +97,21 @@ fn vs_main(@builtin(vertex_index) vertex: u32) -> VertexOut {
     let world = turn(positions[face * 4u + corner]);
     let normal = turn(normals[face]);
     let view_z = 2.55 - world.z;
-    // **How much of its own box the case fills.**
+    // **The lens is computed per frame, not fixed** — see `Pipeline::upload`.
     //
-    // The projected half-width is `0.5 * lens / view_z`, so 4.0 put the case
-    // at 0.78 of its bounds at rest and less when turned — a 660 px box drew
-    // about 370 px of album, and the owner said the art was too small three
-    // times before anyone measured which of the two numbers was wrong.
+    // The projected half-extent is `lens · bounds / (4 · view_z)`, and `view_z`
+    // depends on the *yaw*: a turned case brings one edge nearer the camera, so
+    // the same lens draws it larger. A constant 4.0 was sized for the worst
+    // angle and therefore drew the case at 0.78 of its box at rest; raising it
+    // to 4.75 filled the box at rest and clipped the top and bottom corners
+    // edge-on, which is what the owner saw as *"the 3d cd case is being cut off
+    // at the top and bottom when it spins."*
     //
-    // 4.75 gives 0.93 at rest. It stops short of filling the box because the
-    // near corner of a *turned* case projects wider than the flat front does:
-    // at the depth this case has, the worst case is about 0.945, and the rest
-    // is margin so a rotation can never clip against the bounds.
-    let lens = 4.75;
+    // Both readings were of the same mistake: a fixed lens cannot hold a
+    // constant size through a rotation. The CPU solves `lens = 2 · fill ·
+    // view_z_min(yaw)` each frame instead, so the case fills the same share at
+    // every angle — no clipping, and no breathing either.
+    let lens = uniforms.lens;
     var out: VertexOut;
     out.position = vec4<f32>(
         uniforms.centre_x * view_z + world.x * lens * uniforms.scale_x,

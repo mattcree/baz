@@ -160,6 +160,44 @@ pub(crate) fn view(
     .into()
 }
 
+/// How much of its own box the case is drawn at.
+///
+/// Short of 1.0 so the soft edge and the shadow the fragment shader lays
+/// around the silhouette have somewhere to go.
+const CASE_FILL: f32 = 0.94;
+
+/// **The lens that keeps the case one size through a whole turn.**
+///
+/// The projected half-extent is `lens · bounds / (4 · view_z)`, and `view_z`
+/// is `2.55 − z'` where `z'` is the vertex's depth *after* the yaw. A turned
+/// case brings one edge nearer the camera, so a **fixed** lens draws it larger
+/// edge-on than flat-on — which is why the original 4.0 had to be sized for
+/// the worst angle and therefore drew the case at 0.78 of its box at rest,
+/// and why raising it to 4.75 filled the box at rest and clipped the corners
+/// at 90°.
+///
+/// Solving for the lens each frame removes the compromise. The nearest any
+/// vertex comes is `0.5·|sin θ| + D·|cos θ|` — the half-width swinging toward
+/// the camera, plus what is left of the half-depth — so:
+///
+/// ```text
+/// view_z_min = 2.55 − (0.5·|sin θ| + D·|cos θ|)
+/// lens       = 2 · CASE_FILL · view_z_min
+/// ```
+///
+/// At rest that is 4.83 and edge-on 3.94, and the case fills the same share of
+/// its box at both. The owner found the fixed version as *"the 3d cd case is
+/// being cut off at the top and bottom when it spins."*
+fn lens_for(yaw: f32) -> f32 {
+    // The half-depth the shader draws the case at, kept in step with `D` in
+    // `jewel_case.wgsl`; `the_lens_never_lets_the_case_leave_its_box` is what
+    // notices if the two drift apart.
+    const HALF_DEPTH: f32 = 0.035;
+    const CAMERA_Z: f32 = 2.55;
+    let nearest = 0.5f32.mul_add(yaw.sin().abs(), HALF_DEPTH * yaw.cos().abs());
+    2.0 * CASE_FILL * (CAMERA_Z - nearest)
+}
+
 impl shader::Program<Message> for Case {
     type State = ();
     type Primitive = Primitive;
@@ -430,7 +468,7 @@ impl Pipeline {
             bounds.width / screen.width,
             bounds.height / screen.height,
             front_opacity,
-            0.0,
+            lens_for(yaw),
             0.0,
         ];
         queue.write_buffer(&self.uniform, 0, &f32_bytes(values));
@@ -828,6 +866,64 @@ fn in_bounds_mut(image: &mut image::RgbaImage, x: u32, y: u32) -> Option<&mut im
 
 #[cfg(test)]
 mod tests {
+    /// **The case never leaves its box, at any angle** — and always fills the
+    /// same share of it.
+    ///
+    /// The fault this holds shut, in the owner's words: *"the 3d cd case is
+    /// being cut off at the top and bottom when it spins."* A fixed lens
+    /// cannot do both jobs, because the projected size depends on how near the
+    /// nearest vertex is and a yaw changes that: `lens 4.0` was sized for the
+    /// worst angle and so drew the case at 0.78 of its box at rest, and `4.75`
+    /// filled the box at rest and overflowed it by 16% edge-on.
+    ///
+    /// This sweeps a whole turn and checks the projected extent both ways —
+    /// never past the bounds, and never so far short that the box is mostly
+    /// empty. Nothing here needs a GPU: it is the same arithmetic the vertex
+    /// shader does, which is the point of solving for the lens on the CPU.
+    #[test]
+    fn the_lens_never_lets_the_case_leave_its_box() {
+        const HALF_DEPTH: f32 = 0.035;
+        const CAMERA_Z: f32 = 2.55;
+
+        let mut lowest = f32::MAX;
+        let mut highest = 0.0_f32;
+        for step in 0..=720 {
+            #[expect(clippy::cast_precision_loss, reason = "a sweep of 721 angles")]
+            let yaw = (step as f32) * std::f32::consts::TAU / 720.0;
+            let lens = lens_for(yaw);
+
+            // The nearest a vertex comes to the camera at this angle, which is
+            // where the projection is largest.
+            let nearest = 0.5f32.mul_add(yaw.sin().abs(), HALF_DEPTH * yaw.cos().abs());
+            let view_z = CAMERA_Z - nearest;
+            assert!(view_z > 0.5, "the case reached the camera at yaw {yaw}");
+
+            // `out.position.y = centre·view_z + 0.5·lens·scale_y`, divided by
+            // `view_z` — so as a fraction of the box's own height:
+            let extent = lens / (2.0 * view_z);
+            assert!(
+                extent <= 1.0,
+                "at yaw {yaw:.2} the case projects {extent:.3} of its box and \
+                 is clipped top and bottom"
+            );
+            lowest = lowest.min(extent);
+            highest = highest.max(extent);
+        }
+
+        // And it is the *same* share throughout: a case that swelled and shrank
+        // as it turned would be the old fault wearing the other face.
+        assert!(
+            (highest - lowest) < 0.01,
+            "the case breathes between {lowest:.3} and {highest:.3} of its box \
+             over one turn"
+        );
+        assert!(
+            lowest > 0.85,
+            "the case fills only {lowest:.3} of its box, which is the postage \
+             stamp the owner asked twice to be rid of"
+        );
+    }
+
     use super::*;
 
     #[test]

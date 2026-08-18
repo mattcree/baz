@@ -520,6 +520,7 @@ fn gear(ink: Ink) -> Element<'static, Message> {
 pub(crate) fn chromeless(
     maximized: bool,
     owns_chrome: bool,
+    near: bool,
     ink: Ink,
 ) -> Element<'static, Message> {
     let mut controls = row![crate::visualizer::chromeless_mark(true)]
@@ -528,10 +529,23 @@ pub(crate) fn chromeless(
     if owns_chrome {
         controls = controls.push(window_controls(maximized, ink));
     }
+    // `theme::app_bar_pad` rather than a spelling of its own, so the marks sit
+    // on exactly the verticals the framed bar puts them on and taking the
+    // frame away moves nothing sideways — the owner's *"make sure the padding
+    // is the same for the window controls"*.
+    //
+    // **The fade-in on approach is not built yet.** `near` is threaded and
+    // ignored: the same ask says these should be invisible until the pointer
+    // comes near, and doing that honestly means an opacity factor down through
+    // every mark's own `iced_image`, because iced has no opacity wrapper for a
+    // container. Half of it — a conditional that removed the row — would move
+    // everything under it on every approach, which is the one thing this file
+    // spends its longest comment forbidding.
+    let _ = near;
     container(
         row![Space::new().width(Length::Fill), controls]
             .align_y(iced::Alignment::Center)
-            .padding(theme::pad(0.0, theme::APP_BAR_EDGE)),
+            .padding(theme::app_bar_pad()),
     )
     .height(Length::Fixed(theme::APP_BAR_H))
     .width(Length::Fill)

@@ -159,6 +159,53 @@ jobs:
           test -x /tmp/bundle-check/baz.app/Contents/MacOS/baz
           test -f /tmp/bundle-check/baz.app/Contents/Info.plist
           test -f "/tmp/bundle-check/baz.app/Contents/Resources/io.github.mattcree.baz.icns"
+      # **The Linux installer, run and reversed**, for the same reason the
+      # bundle above is assembled here: an install path nobody exercises until
+      # somebody downloads a release is an install path nobody reviews. This
+      # stages exactly what `release.yml` stages, installs into a scratch HOME,
+      # checks the four places a desktop looks, then uninstalls and checks that
+      # what it wrote is what it took back.
+      - name: Linux install and uninstall round-trip
+        run: |
+          set -euo pipefail
+          stage=$(mktemp -d)
+          home=$(mktemp -d)
+          printf '#!/bin/sh\nexit 0\n' > "$stage/baz"
+          chmod +x "$stage/baz"
+          cp packaging/io.github.mattcree.baz.desktop "$stage/"
+          cp packaging/flatpak/io.github.mattcree.baz.metainfo.xml "$stage/"
+          cp -r packaging/icons/hicolor "$stage/icons"
+          install -m755 packaging/linux/install.sh "$stage/install.sh"
+          install -m755 packaging/linux/uninstall.sh "$stage/uninstall.sh"
+
+          ( cd "$stage" && HOME="$home" ./install.sh )
+
+          app=io.github.mattcree.baz
+          test -x "$home/.local/bin/baz"
+          test -f "$home/.local/share/applications/$app.desktop"
+          test -f "$home/.local/share/metainfo/$app.metainfo.xml"
+          test -f "$home/.local/share/icons/hicolor/256x256/apps/$app.png"
+          test -f "$home/.local/share/icons/hicolor/scalable/apps/$app.svg"
+          # The entry a desktop reads must still be a valid one after the
+          # `Exec=` rewrite, and must point at the binary that was installed.
+          desktop-file-validate "$home/.local/share/applications/$app.desktop"
+          grep -qx "Exec=$home/.local/bin/baz" \
+            "$home/.local/share/applications/$app.desktop"
+
+          ( cd "$stage" && HOME="$home" ./uninstall.sh )
+
+          # Nothing of ours survives. Caches the system's own tools regenerate
+          # are not ours and are not checked.
+          ! test -e "$home/.local/bin/baz"
+          ! test -e "$home/.local/share/applications/$app.desktop"
+          ! test -e "$home/.local/share/icons/hicolor/256x256/apps/$app.png"
+          ! test -e "$home/.local/share/$app/installed-files"
+
+          # And a second uninstall refuses rather than improvising a delete.
+          if ( cd "$stage" && HOME="$home" ./uninstall.sh ); then
+            echo "uninstall.sh succeeded with no manifest — it is guessing" >&2
+            exit 1
+          fi
       # Offline, deliberately. The screenshot URLs point at `docs/screenshots/`
       # on `main`, so on a pull request they name a branch's files at a URL
       # that only resolves once the branch has landed — a fetching validator
