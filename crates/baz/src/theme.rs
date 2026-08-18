@@ -4071,10 +4071,15 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     }
 }
 
-/// The output picker is the Settings form's input well: a recess at rest and
-/// a paper edge when the pointer or its open menu arrives.
+/// **The product's one picker**: a recess at rest and a paper edge when the
+/// pointer or its open menu arrives.
+///
+/// Named for the shape rather than for its first caller — it was
+/// `output_picker` while Settings' audio-output list was the only one, and the
+/// equaliser's preset list is the second. A style named after one of its users
+/// invites a near-copy for the next.
 #[must_use]
-pub fn output_picker(p: &Palette, status: pick_list::Status) -> pick_list::Style {
+pub fn picker(p: &Palette, status: pick_list::Status) -> pick_list::Style {
     let edge = match status {
         pick_list::Status::Active => p.recess,
         pick_list::Status::Hovered | pick_list::Status::Opened { .. } => p.paper_ring(p.recess),
@@ -4092,10 +4097,10 @@ pub fn output_picker(p: &Palette, status: pick_list::Status) -> pick_list::Style
     }
 }
 
-/// The menu beneath [`output_picker`], on the same raised plane as the other
+/// The menu beneath [`picker`], on the same raised plane as the other
 /// small floating surfaces.
 #[must_use]
-pub fn output_menu(p: &Palette) -> iced::widget::overlay::menu::Style {
+pub fn picker_menu(p: &Palette) -> iced::widget::overlay::menu::Style {
     iced::widget::overlay::menu::Style {
         background: Background::Color(p.plinth),
         border: Border {

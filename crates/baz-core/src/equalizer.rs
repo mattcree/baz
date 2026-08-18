@@ -62,6 +62,91 @@ pub const CENTRES: [f32; 10] = [
     31.5, 63.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0,
 ];
 
+/// **A named curve**, offered so a listener does not have to know what 4 kHz
+/// sounds like to shape their music.
+///
+/// The owner, 2026-08-18: *"maybe we should add a few presets in a dropdown —
+/// that seems common."* This crate's own note had argued the other way (*"a
+/// list of named curves is somebody else's taste sold as a feature"*), and
+/// that objection was right about **genre** presets and wrong as a general
+/// rule. A preset called *Rock* claims to know what rock should sound like,
+/// which is taste. A preset called *Loudness* claims that quiet playback
+/// hollows out the bass and treble, which is a measured property of hearing;
+/// one called *Late night* claims that deep bass carries through walls, which
+/// is a property of buildings.
+///
+/// So the offered set is **situations, not genres**. Each one can be defended
+/// by saying what it is *for*, and that sentence ships beside it in
+/// [`Self::about`] rather than living in a manual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Preset {
+    /// What it is called in the list.
+    pub name: &'static str,
+    /// What it is for, in one line, shown under the picker.
+    pub about: &'static str,
+    /// The ten band gains in centidecibels, low to high.
+    pub bands_centidb: [i16; 10],
+}
+
+/// **The offered curves.**
+///
+/// Deliberately few. A list long enough to scroll is a list a listener reads
+/// instead of listening, and every entry here has to earn its line by naming a
+/// situation the ten faders would otherwise take a minute to describe.
+pub const PRESETS: [Preset; 6] = [
+    Preset {
+        name: "Flat",
+        about: "Every band at zero. With the equaliser off as well, baz plays                 the file untouched.",
+        bands_centidb: [0; 10],
+    },
+    Preset {
+        name: "More bass",
+        about: "Weight under the music, for speakers or headphones that are                 thin at the bottom.",
+        bands_centidb: [600, 500, 350, 150, 0, 0, 0, 0, 0, 0],
+    },
+    Preset {
+        name: "More treble",
+        about: "Air and detail at the top, for a recording that sounds dull or                 a system that rolls off early.",
+        bands_centidb: [0, 0, 0, 0, 0, 0, 150, 350, 500, 550],
+    },
+    Preset {
+        name: "Voices forward",
+        about: "Lifts the range voices sit in and takes weight off the bottom                 — for spoken word, or a mix that buries the singer.",
+        bands_centidb: [-300, -300, -150, 0, 200, 400, 400, 250, 0, -100],
+    },
+    Preset {
+        name: "Quiet listening",
+        about: "The ear loses the bottom and top of the range at low volume,                 so this gives them back. For playing softly, not loudly.",
+        bands_centidb: [700, 500, 300, 0, -100, -200, -100, 100, 400, 600],
+    },
+    Preset {
+        name: "Late night",
+        about: "Takes out the deep bass that travels through walls, and lifts                 speech a little so you can still follow it quietly.",
+        bands_centidb: [-800, -600, -300, 0, 0, 100, 150, 100, 0, -200],
+    },
+];
+
+impl Preset {
+    /// The curve as [`Bands`].
+    #[must_use]
+    pub fn bands(&self) -> Bands {
+        Bands::from_centidb(self.bands_centidb)
+    }
+
+    /// **Which offered curve these bands are**, if they are one of them.
+    ///
+    /// The picker shows the listener's own setting as *Custom* rather than
+    /// pretending a curve they dragged by hand is a preset — and a curve they
+    /// dragged back onto a preset's exact numbers *is* that preset, because
+    /// there is no hidden state to disagree with.
+    #[must_use]
+    pub fn matching(bands_centidb: [i16; 10]) -> Option<&'static Self> {
+        PRESETS
+            .iter()
+            .find(|preset| preset.bands_centidb == bands_centidb)
+    }
+}
+
 /// How far a band may be pushed, either way, in decibels.
 ///
 /// ±12 is the range a graphic equaliser is *for*. Beyond it the useful act is
@@ -528,6 +613,98 @@ pub fn response_curve(bands: Bands, preamp_db: f32, from_hz: f32, to_hz: f32, ou
               them assert nothing"
 )]
 mod tests {
+    /// **Every offered curve is one a fader could have made.**
+    ///
+    /// A preset is not a back door: it sets the same ten bands the listener
+    /// drags, so a curve outside `±LIMIT_DB` would load as something they
+    /// could see but never restore after nudging one band.
+    #[test]
+    fn a_preset_stays_inside_the_range_the_faders_offer() {
+        let limit = (LIMIT_DB * 100.0) as i16;
+        for preset in PRESETS {
+            for (index, centidb) in preset.bands_centidb.into_iter().enumerate() {
+                assert!(
+                    centidb.abs() <= limit,
+                    "{} asks for {centidb} centidB at {} Hz, outside the \
+                     ±{LIMIT_DB} dB a fader can reach",
+                    preset.name,
+                    CENTRES[index]
+                );
+            }
+        }
+    }
+
+    /// **Each one is a different curve, and says what it is for.**
+    ///
+    /// Two presets with the same numbers under different names would be the
+    /// taste-sold-as-a-feature the doc comment warns about, arrived at by
+    /// accident.
+    #[test]
+    fn the_offered_curves_are_distinct_and_explained() {
+        for (at, preset) in PRESETS.iter().enumerate() {
+            assert!(
+                !preset.about.is_empty(),
+                "{} is offered with no statement of what it is for",
+                preset.name
+            );
+            for other in &PRESETS[at + 1..] {
+                assert_ne!(
+                    preset.bands_centidb, other.bands_centidb,
+                    "{} and {} are the same curve under two names",
+                    preset.name, other.name
+                );
+            }
+        }
+        // And no genre names, which is the line the set is drawn on.
+        for preset in PRESETS {
+            for genre in ["Rock", "Jazz", "Classical", "Pop", "Dance", "Metal"] {
+                assert!(
+                    !preset.name.contains(genre),
+                    "{} names a genre — a preset may claim a situation, which \
+                     is a fact about rooms or hearing, not a taste about music",
+                    preset.name
+                );
+            }
+        }
+    }
+
+    /// **Flat is flat**, and is the one preset the engine can prove: it must
+    /// leave the equaliser with nothing to do, so the transparent path stays
+    /// reachable from the picker.
+    #[test]
+    fn choosing_flat_gives_the_untouched_path_back() {
+        let flat = PRESETS
+            .iter()
+            .find(|preset| preset.name == "Flat")
+            .expect("Flat is offered");
+        assert!(flat.bands().is_flat());
+
+        let mut eq = Equalizer::default();
+        eq.set_enabled(true);
+        eq.set_bands(flat.bands());
+        assert!(
+            !eq.is_active(),
+            "an equaliser set to Flat still claims work to do, so the pump \
+             would copy every sample for nothing"
+        );
+    }
+
+    /// **A curve is recognised as its own preset**, and a hand-dragged one is
+    /// not mistaken for one.
+    #[test]
+    fn the_picker_can_name_the_curve_it_is_looking_at() {
+        for preset in PRESETS {
+            let found = Preset::matching(preset.bands_centidb).expect("its own curve");
+            assert_eq!(found.name, preset.name);
+        }
+        let mut nudged = PRESETS[1].bands_centidb;
+        nudged[5] += 50;
+        assert!(
+            Preset::matching(nudged).is_none(),
+            "a curve one nudge away from a preset is still called that preset"
+        );
+    }
+
     use super::*;
 
     /// **Off is off**: an inactive equaliser returns the block untouched, and

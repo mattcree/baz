@@ -412,17 +412,46 @@ fn marquee_measure(width: f32) -> f32 {
 
 /// **How big the album object is** in the marquee composition.
 ///
-/// A third of the body's shorter side, bounded — the object is no longer the
-/// subject of this page and does not want to be. Never larger than the source's
-/// own pixels, which is the rule the old composition had and the one thing
-/// about it that must not change: baz does not upscale a cover.
+/// # It was a third, and a third was too little
+///
+/// The first draft of this composition took `room * 0.34` and capped at
+/// `LIST_MEASURE / 2`, with a comment saying *"the object is no longer the
+/// subject of this page and does not want to be"*. The owner, on the shipped
+/// page: *"can you also make sure the album is not tiny on the now playing
+/// screen!"*
+///
+/// He is right and the comment was the tell. Moving the title off the artwork
+/// meant the object stopped being the *anchor* of the composition; it did not
+/// mean the object should shrink. At 1920 × 1080 that arithmetic drew a
+/// 290 px box — and a jewel case is drawn *in perspective inside* its box, so
+/// what actually reached the glass was about 215 px of album in a 1688 × 854
+/// stage, with an 800 px cover sitting in the cache unused.
+///
+/// **A cover a listener has to lean in at is not a picture of a record.** The
+/// share is `0.58` and the cap is most of a list measure, which at 1920 draws
+/// close to 500 px and at 2560 a little over 700 — a real object across the
+/// diagonal from the title, which is what the composition was for.
+///
+/// # The one rule that does not move
+///
+/// Never larger than the source's own pixels. That is the rule the old centred
+/// composition had, and it is a fact about the file rather than a preference
+/// about the layout: baz does not upscale a cover, at any size, in any
+/// composition.
 fn marquee_edge(width: f32, height: f32, source: f32) -> f32 {
     let room = width.min(height - SOURCE_CARD_H);
-    (room * 0.34)
-        .clamp(theme::CONTINUE_SLEEVE, theme::LIST_MEASURE * 0.5)
+    (room * MARQUEE_OBJECT_SHARE)
+        .clamp(theme::CONTINUE_SLEEVE, theme::LIST_MEASURE * 0.9)
         .min(source)
         .max(1.0)
 }
+
+/// How much of the stage's shorter side the album object takes.
+///
+/// Enough to be an object rather than an ornament, and short of the half that
+/// would have it competing with the title for the eye. See [`marquee_edge`]
+/// for the 0.34 this replaced and why it was wrong.
+const MARQUEE_OBJECT_SHARE: f32 = 0.58;
 
 /// **The title ladder** — three rungs, chosen by how much there is to set.
 ///
@@ -846,7 +875,13 @@ fn source_link(source: Source) -> Element<'static, Message> {
     )
     .width(Length::Fill)
     .height(Length::Fixed(SOURCE_CARD_H))
-    .padding([theme::GAP_SM, theme::HANG])
+    // **On the marquee's own margin, not the standard gutter.** The owner:
+    // *"the text alignment between the title text and the source bar below
+    // looks bad."* It was 40 against the title block's 60, so the two stacked
+    // columns of type on this page started twenty pixels apart — close enough
+    // to read as a mistake rather than as a second margin. `MARGIN` is the
+    // place's own edge and this band is inside the place.
+    .padding([theme::GAP_SM, MARGIN])
     .style(move |_theme, status| {
         let ground = room.step_up(room.wall);
         let background = match status {
@@ -867,6 +902,86 @@ fn source_link(source: Source) -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    /// **The source band's type stands on the marquee's own margin.**
+    ///
+    /// The owner: *"the text alignment between the title text and the source
+    /// bar below looks bad."* It was, and by exactly twenty pixels: the title
+    /// block sits at [`MARGIN`] and the band was padded with
+    /// [`theme::HANG`], so the page's two stacked columns of type started at
+    /// 60 and 40. Close enough to read as a mistake rather than as a second,
+    /// deliberate margin.
+    ///
+    /// Stated as an identity of the *tokens* rather than of two numbers that
+    /// happen to agree, so moving `MARGIN` moves both edges together.
+    #[test]
+    fn the_source_band_shares_the_title_s_left_edge() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/now_playing.rs"),
+        )
+        .expect("this file");
+        let shipped = source.split("#[cfg(test)]").next().unwrap_or_default();
+        assert!(
+            shipped.contains("padding([theme::GAP_SM, MARGIN])"),
+            "the source band is not padded to the place's own margin — its \
+             text will not line up with the title above it"
+        );
+        assert!(
+            !shipped.contains("padding([theme::GAP_SM, theme::HANG])"),
+            "the source band is back on the standard gutter, twenty pixels \
+             inside the title's edge"
+        );
+    }
+
+    /// **The album is an object, not an ornament.**
+    ///
+    /// The owner, on the shipped composition: *"can you also make sure the
+    /// album is not tiny on the now playing screen!"* It was drawn at a third
+    /// of the stage's shorter side and capped at half a list measure, which
+    /// put about 215 px of visible jewel case in a 1688 × 854 stage while an
+    /// 800 px cover sat unused.
+    ///
+    /// This holds the floor at the sizes baz is actually used at. It is
+    /// deliberately a *ratio* test rather than a pixel one: what went wrong
+    /// was a share, and a share is what has to stay right.
+    #[test]
+    fn the_album_takes_a_real_share_of_the_stage() {
+        // Body sizes, with the lane out of the width — the stage the object
+        // and the marquee actually divide between them.
+        for (width, height) in [(1048.0, 710.0), (1688.0, 854.0), (2328.0, 1214.0)] {
+            let plenty = f32::INFINITY;
+            let edge = marquee_edge(width, height, plenty);
+            let shorter = width.min(height - SOURCE_CARD_H);
+            let share = edge / shorter;
+            assert!(
+                share > 0.45,
+                "at {width}x{height} the album takes {share:.2} of the stage's \
+                 shorter side ({edge:.0} px) — that is the ornament the owner \
+                 called tiny, not an object"
+            );
+            assert!(
+                share < 0.72,
+                "at {width}x{height} the album takes {share:.2} of the stage — \
+                 it is now competing with the title rather than balancing it"
+            );
+        }
+    }
+
+    /// **And it is still never larger than its own pixels**, which is the one
+    /// part of the old composition that may not move whatever the share is.
+    #[test]
+    fn a_bigger_object_still_never_upscales_a_cover() {
+        for source in [96.0_f32, 300.0, 500.0, 800.0, 1400.0] {
+            for (width, height) in [(1048.0, 710.0), (1688.0, 854.0), (3608.0, 2084.0)] {
+                let edge = marquee_edge(width, height, source);
+                assert!(
+                    edge <= source.max(1.0),
+                    "a {source} px cover was drawn at {edge} px on a \
+                     {width}x{height} stage"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -966,6 +1081,13 @@ mod tests {
 
     /// **The object is bounded by the room and by its own pixels**, and never
     /// upscaled — the one rule the old composition had that this one keeps.
+    ///
+    /// The upper bound used to be the flat `LIST_MEASURE / 2` the share was
+    /// capped at, asserted as *"the object took the page back"*. That was the
+    /// cap being checked against itself, and it is why nothing failed when the
+    /// share turned out to be far too small for the page: a ceiling cannot
+    /// notice a floor. It is stated against the **stage** now, which is the
+    /// thing the object actually has to share.
     #[test]
     fn the_object_never_outgrows_its_source_or_the_room() {
         for width in [320.0_f32, 1280.0, 3840.0] {
@@ -977,9 +1099,12 @@ mod tests {
                         "{width}x{height}: upscaled a {source} px source"
                     );
                     assert!(edge > 0.0);
+                    let room = width.min(height - SOURCE_CARD_H).max(1.0);
                     assert!(
-                        edge <= theme::LIST_MEASURE * 0.5,
-                        "{width}x{height}: the object took the page back"
+                        edge <= room * 0.72 || edge <= theme::CONTINUE_SLEEVE,
+                        "{width}x{height}: the object took the page back — \
+                         {edge:.0} px of a {room:.0} px stage leaves the \
+                         marquee nowhere to stand"
                     );
                 }
             }

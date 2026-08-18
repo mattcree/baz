@@ -531,10 +531,19 @@ pub(crate) enum Message {
     EqualizerCommitted,
     /// Open or close the equaliser panel (the app bar's fader mark).
     ToggleEqualizer,
-    /// Every band back to flat. The pre-amp is left alone: it is the
-    /// listener's headroom, not part of the curve.
-    EqualizerFlat,
-    /// Take the pre-amp the curve suggests — the largest boost, given back.
+    /// The equaliser panel: one of `baz_core::equalizer::PRESETS` was chosen.
+    ///
+    /// This replaced a `Flat` button. Flat is now the first offered preset, so
+    /// there is one control for *choose a curve* rather than one button for
+    /// the only curve baz was willing to name — see
+    /// `baz_core::equalizer::PRESETS`.
+    EqualizerPresetChosen(usize),
+    /// **Make room**: take the headroom the curve needs — the largest boost,
+    /// given back off the whole signal so it cannot clip.
+    ///
+    /// Spelled `Suggest a pre-amp` on the panel until the owner asked what it
+    /// meant. The mechanism has not changed; the label names the situation now
+    /// instead of the machinery.
     EqualizerSuggestPreamp,
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
@@ -2343,9 +2352,26 @@ impl App {
                 self.equalizer_open = !self.equalizer_open;
                 Task::none()
             }
-            Message::EqualizerFlat => {
-                self.equalizer.bands_centidb = [0; 10];
-                self.send_equalizer();
+            Message::EqualizerPresetChosen(index) => {
+                if let Some(preset) = baz_core::equalizer::PRESETS.get(index) {
+                    self.equalizer.bands_centidb = preset.bands_centidb;
+                    // **The headroom comes with the curve.** A preset that
+                    // boosts is a preset that needs room, and leaving the
+                    // pre-amp where the last one left it is how a listener
+                    // gets a distorted first impression of a curve baz
+                    // offered them. `Flat` suggests zero, so choosing it
+                    // hands the whole signal back.
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "derived from bands already clamped to ±12 dB"
+                    )]
+                    {
+                        self.equalizer.preamp_centidb =
+                            (preset.bands().suggested_preamp() * 100.0).round() as i16;
+                    }
+                    self.send_equalizer();
+                    self.persist_equalizer();
+                }
                 Task::none()
             }
             Message::EqualizerSuggestPreamp => {

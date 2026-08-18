@@ -597,8 +597,8 @@ fn output_section<'a>(output: OutputView<'a>, player: &'a PlayerState) -> Elemen
     .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
     .text_size(theme::SIZE_BODY)
     .text_line_height(theme::LEADING_BODY)
-    .style(move |_theme, status| theme::output_picker(room, status))
-    .menu_style(move |_theme| theme::output_menu(room));
+    .style(move |_theme, status| theme::picker(room, status))
+    .menu_style(move |_theme| theme::picker_menu(room));
 
     let mut section = column![
         section_heading(

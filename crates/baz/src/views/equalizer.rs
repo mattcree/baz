@@ -38,7 +38,7 @@
 //! headroom the bands are given back, and a listener reading the curve should
 //! not read it as an eleventh frequency.
 
-use iced::widget::{Space, button, checkbox, column, container, row, rule, text};
+use iced::widget::{Space, button, checkbox, column, container, pick_list, row, rule, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{EqualizerSettings, Message};
@@ -85,26 +85,18 @@ pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'stati
                 .style(move |_theme, status| theme::check(room, status))
                 .on_toggle(Message::EqualizerEnabled),
             Space::new().width(Length::Fill),
-            word("Flat", Message::EqualizerFlat),
-            word("Suggest a pre-amp", Message::EqualizerSuggestPreamp),
+            presets(eq.bands_centidb, room),
+            word("Make room", Message::EqualizerSuggestPreamp),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
-        // **The switch's own consequence, in the present tense.** Which state
-        // you are in is the fact worth stating, and it is worth stating in
-        // full: *off* here is not a flat filter, it is baz not being in the
-        // path at all, and that is the promise the whole feature is measured
-        // against.
-        text(if eq.enabled {
-            "Shaping the sound. Turn this off and baz plays the file untouched \
-             — the same bytes, not a flat filter."
-        } else {
-            "Off. baz is playing the file untouched — the same bytes, not a \
-             flat filter."
-        })
-        .size(theme::SIZE_META)
-        .line_height(theme::LEADING_META)
-        .color(room.paper_faint),
+        // **The line under the controls says what is true right now**, and
+        // which sentence that is depends on what the panel is doing. Three
+        // states, in the order a listener meets them.
+        text(sentence(eq))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint),
         row![
             // **The curve, and the faders standing on it.** The picture is
             // behind the controls rather than beside them because they are
@@ -160,6 +152,106 @@ pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'stati
             .padding(theme::pad(theme::APP_BAR_H + theme::GAP_SM, theme::GAP_LG)),
     ]
     .into()
+}
+
+/// **The offered curves**, and the listener's own if it is not one of them.
+///
+/// The owner: *"maybe we should add a few presets in a dropdown — that seems
+/// common."* It is, and this panel had exactly one — a `Flat` button — because
+/// an earlier note here argued that named curves are somebody else's taste.
+/// See `baz_core::equalizer::PRESETS` for why that objection was right about
+/// genres and wrong as a rule, and why the offered set is situations instead.
+///
+/// A curve dragged by hand shows as **Custom** rather than as whichever preset
+/// it is nearest: the picker reports what the faders say, and there is no
+/// hidden state for it to disagree with. Drag back onto a preset's exact
+/// numbers and it is that preset again.
+fn presets(bands_centidb: [i16; 10], room: &'static theme::Palette) -> Element<'static, Message> {
+    let choices: Vec<Choice> = (0..baz_core::equalizer::PRESETS.len())
+        .map(Choice)
+        .collect();
+    let selected = baz_core::equalizer::PRESETS
+        .iter()
+        .position(|preset| preset.bands_centidb == bands_centidb)
+        .map(Choice);
+    pick_list(choices, selected, |Choice(at)| {
+        Message::EqualizerPresetChosen(at)
+    })
+    .placeholder("Custom")
+    .width(Length::Fixed(PRESET_W))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .text_size(theme::SIZE_META)
+    .text_line_height(theme::LEADING_META)
+    .style(move |_theme, status| theme::picker(room, status))
+    .menu_style(move |_theme| theme::picker_menu(room))
+    .into()
+}
+
+/// How wide the preset picker stands.
+///
+/// Wide enough for `Quiet listening` — the longest offered name — plus its
+/// handle, and no wider: the picker is one of three things in the row and the
+/// faders below are what the panel is for.
+const PRESET_W: f32 = 150.0;
+
+/// One offered curve, by index, so the list carries no owned strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Choice(usize);
+
+impl std::fmt::Display for Choice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            baz_core::equalizer::PRESETS
+                .get(self.0)
+                .map_or("Custom", |preset| preset.name),
+        )
+    }
+}
+
+/// **The headroom control is named for what it does** — see [`sentence`].
+///
+/// The owner: *"what does the suggest a pre-amp mean — a bit obscure?"* It
+/// was, and the label was the whole problem. *Suggest a pre-amp* names the
+/// **mechanism** (there is a pre-amp; here is a suggested value for it) and
+/// says nothing about the **situation** (you are boosting; a boost has to come
+/// from somewhere; this takes it from the whole signal so nothing clips).
+///
+/// `Make room` names the situation, and the line under the row says which room
+/// and how much, with the numbers in it.
+///
+/// **What is true right now**, in one line under the controls.
+///
+/// Three states, and each one is a fact rather than an instruction:
+///
+/// 1. **Off** — and off is not a flat filter, it is baz not being in the path
+///    at all. That is the promise the whole feature is measured against, so it
+///    is stated in full every time.
+/// 2. **On, boosting more than there is room for** — this is where the
+///    headroom control stops being obscure, because the sentence names the
+///    loudest boost and what pressing it would do.
+/// 3. **On, with room** — the plain present tense.
+fn sentence(eq: EqualizerSettings) -> String {
+    if !eq.enabled {
+        return "Off. baz is playing the file untouched — the same bytes, not a \
+                flat filter."
+            .to_owned();
+    }
+    let bands = baz_core::equalizer::Bands::from_centidb(eq.bands_centidb);
+    let wanted = bands.suggested_preamp();
+    let preamp = f32::from(eq.preamp_centidb) / 100.0;
+    // `suggested_preamp` answers zero or a negative number of decibels: the
+    // amount the whole signal has to come down by so the largest boost fits.
+    if wanted < 0.0 && preamp > wanted + 0.05 {
+        let boost = -wanted;
+        return format!(
+            "The biggest lift here is +{boost:.0} dB, and there is nowhere for it \
+             to go — loud parts can distort. Make room turns everything down by \
+             {boost:.0} so it fits."
+        );
+    }
+    "Shaping the sound. Turn this off and baz plays the file untouched — the \
+     same bytes, not a flat filter."
+        .to_owned()
 }
 
 /// One column: the gain, the fader, the name.
