@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 baz-core = { workspace = true }
 bliss-audio = { workspace = true }
+libc = { workspace = true }
 ndarray = { workspace = true }
 ort = { workspace = true }
 rustfft = { workspace = true }

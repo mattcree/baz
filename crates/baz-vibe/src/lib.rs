@@ -536,6 +536,25 @@ pub fn embed_request(prompt: &str) -> Result<Vec<f32>, Error> {
     semantic::embed_text(prompt.trim()).map_err(Error::Semantic)
 }
 
+/// **Release the text tower**, which is the largest thing this crate holds.
+///
+/// The tower is opened on the first request and kept, because a listener
+/// typing into the composing place embeds a phrase every time it settles and
+/// paying 126 MB of load per phrase would make the live count unaffordable.
+/// Kept *forever*, though, is a different bargain: it is roughly 370 MiB
+/// resident, and a listener who composed one playlist an hour ago and has
+/// been listening since is holding it for nothing.
+///
+/// So the surface calls this when the composing place is left. The tower
+/// reopens on the next request, at the cost of one load — which is the right
+/// way round, because leaving the page is common and coming back to it is not.
+///
+/// Safe to call at any time, including while an analysis is running: the
+/// tower is behind a lock and reopens on demand.
+pub fn release_text_model() {
+    semantic::release_text();
+}
+
 /// **The songs the words let in** — the eligible set, and the first of the two
 /// stages selection now has.
 ///

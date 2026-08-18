@@ -102,6 +102,101 @@ is exactly the cost design 21 §10 said this readout would have. 234 MiB is the
 real price of the count; 603 would have been the price of not noticing which
 thread it ran on.
 
+## The floor was not what this file said it was — 2026-08-18
+
+This file's own next-step list said: *"Release the sessions when a scan ends.
+The 500 MiB floor is the evidence that they are not released today."* That was
+a reasonable reading and it was **wrong**, and only asking the process what it
+held on either side of a release could say so.
+
+### First, the harness had stopped reaching the thing it measures
+
+Three UI moves had happened since the last run, and this script clicks blind
+coordinates. The first repaired run reported a *composing* peak of **355 MiB**
+against a recorded 1 363 — the clicks had landed on nothing, no compose had
+started, and the phase labels went on being printed as if they meant
+something. The repair after that looked right, at 1 751 MiB, and a screenshot
+showed why it was not: the typed request had gone into the **app-bar search**
+while the number came from the analysis running behind it.
+
+**A harness that cannot reach the thing it measures does not fail. It reports
+a different number in the same shape.** The script now ends every step in a
+check that it arrived, saves `before-compose.png` and `after-leaving.png` as
+receipts, and prints `VOID` on an idle-shaped curve. The route it drives is
+today's: Playlists → New smart playlist → *the page starts listening by
+itself* → press an offered mood → walk away.
+
+That last step is new and is the point: the old script never left the page, so
+it could not have measured what leaving costs.
+
+### Then: the sessions were already going, and it changed nothing
+
+`baz_vibe::release_text_model` now runs when the composing place is left, and
+the health log carries a resident-set reading either side of it. The first run
+with it wired up:
+
+```
+[vibe] released the text tower: 826 MiB -> 826 MiB
+```
+
+**Dropping the session returned nothing.** `free` handed the arena back to
+glibc's allocator, which kept it. The several hundred MiB the process sat on
+above its idle baseline was *retained*, not live — the opposite of what the
+note above assumed, and invisible to any amount of reasoning about ownership.
+
+### `malloc_trim` is what actually returns it
+
+One FFI call, on the same path, immediately after the drop. Five runs, each a
+**paired** before/after across the trim in a single process:
+
+| run | before | after | returned |
+|---|---|---|---|
+| 1 | 750 MiB | 622 MiB | **128 MiB** |
+| 2 | 922 MiB | 762 MiB | **160 MiB** |
+| 3 | 997 MiB | 870 MiB | **127 MiB** |
+| 4 | 969 MiB | 863 MiB | **106 MiB** |
+| 5 | 833 MiB | 706 MiB | **127 MiB** |
+
+**106–160 MiB, every run, immediately.** It is glibc-only — musl has no
+equivalent — so elsewhere it is a no-op and the memory comes back when it
+comes back.
+
+### Why the table is paired, and why nothing here compares two runs
+
+Look down the *before* column: 750, 922, 997, 969, 833. Same binary for runs
+3–5, same fixture, same worker count, and the floor moves by 160 MiB between
+runs — as much as the effect being measured. The listening peak ranges 1 606
+to 1 934 MiB across the same set.
+
+So **a single run cannot support a claim here, and neither can two runs
+compared across builds** — which is exactly what the tables higher up this
+page do. Those numbers stand as recorded, but their differences are worth less
+than they look wherever they are smaller than about 200 MiB. The paired
+reading is immune to it: both numbers come from one process, seconds apart,
+with only the release between them.
+
+### A second trim was tried and dropped
+
+The analysis workers are tokio blocking threads that retire on their own
+keep-alive and take their audio sessions with them, so a trim fifteen seconds
+later ought to have collected their pages. Measured: **762 MiB -> 762 MiB**.
+Whatever ONNX Runtime's per-session arena is, it is not on glibc's free lists
+for `malloc_trim` to walk. A delayed task that reliably returns nothing is
+worse than no task at all, so it is not in the build.
+
+### What is still open, stated plainly
+
+The owner's complaint was *"I see 1.8GB"*, and **the peak is still 1.6–1.9 GiB**.
+Nothing here touches it. This returns 106–160 MiB of the *floor* — what baz
+holds for the rest of the session after one compose, which is the part a
+listener lives with all day, but it is not the headline number.
+
+The peak's fix is still the one this file already named: **one shared audio
+session behind a mutex** instead of one per worker, which would take it to
+roughly 400 MiB and trade wall-clock for it. That needs a *time* measurement
+beside this memory one before anyone chooses, and `vibe-rate.rs` is the tool
+that would produce it.
+
 ## How long listening actually takes — plan 22 item 0.4
 
 Design 21 §10 recorded that **nobody had measured a per-track analysis rate on

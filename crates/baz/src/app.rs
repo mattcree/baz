@@ -4071,10 +4071,12 @@ impl App {
                     self.place = Place::Playlist(renamed);
                     self.place_history.visit(self.place);
                     // A playlist door, or the Library after a delete —
-                    // never `Now playing`, so the only task this can answer
-                    // with is `Task::none()`, and the machine this arm lives
-                    // in answers `bool`. Discarded deliberately rather than
-                    // by omission.
+                    // never the composing place, which is the one `from` that
+                    // now answers with real work (it releases the Vibe text
+                    // tower). The machine this arm lives in answers `bool`,
+                    // so the task is discarded deliberately rather than by
+                    // omission — and `every_place_that_leaves_work_behind_is_awaited`
+                    // is what keeps a third of these from appearing quietly.
                     let _ = self.note_place_left(from);
                 }
             }
@@ -4112,10 +4114,12 @@ impl App {
                     self.place = Place::Playlists;
                     self.place_history.visit(self.place);
                     // A playlist door, or the Library after a delete —
-                    // never `Now playing`, so the only task this can answer
-                    // with is `Task::none()`, and the machine this arm lives
-                    // in answers `bool`. Discarded deliberately rather than
-                    // by omission.
+                    // never the composing place, which is the one `from` that
+                    // now answers with real work (it releases the Vibe text
+                    // tower). The machine this arm lives in answers `bool`,
+                    // so the task is discarded deliberately rather than by
+                    // omission — and `every_place_that_leaves_work_behind_is_awaited`
+                    // is what keeps a third of these from appearing quietly.
                     let _ = self.note_place_left(from);
                 }
             }
@@ -7315,6 +7319,18 @@ impl App {
             && let Screen::Shelf(state) = &mut self.screen
         {
             state.vibe.leave_page();
+            // **And the text tower goes with the page.** It is the largest
+            // single thing baz holds — roughly 370 MiB resident once ONNX
+            // Runtime has its arena — and until this it was kept for the life
+            // of the process after one compose. Measured on
+            // `docs/design/impl/vibe-memory/`'s harness rather than reasoned
+            // about, which is that directory's whole rule.
+            //
+            // It reopens on the next request. That is the right way round:
+            // leaving this page is common, coming back to it is not, and a
+            // listener who composed a playlist an hour ago and has been
+            // listening since was holding a model for nothing.
+            return Task::future(crate::vibe::release_text()).discard();
         }
         Task::none()
     }
@@ -12933,6 +12949,43 @@ mod tests {
     /// no-sample-disturbed edit — and reaches for no transport verb, no
     /// `SetQueue`, no `JumpTo`: the *list* comes back, never the playback
     /// position.
+    /// **A place that leaves work behind has that work awaited.**
+    ///
+    /// `note_place_left` answered `Task::none()` for its whole life, so two
+    /// call sites wrote `let _ =` and reasoned, correctly at the time, that
+    /// there was nothing to lose. Then leaving the composing place started
+    /// releasing the Vibe text tower — 370 MiB and an `malloc_trim` — and a
+    /// discarded task became a silently skipped release.
+    ///
+    /// It cost a measurement run to notice, because the failure is invisible:
+    /// the memory is simply still there, which is what it looked like before.
+    /// The two existing sites are safe (both leave a playlist place, never the
+    /// composing one) and documented as such; this pins the count so a third
+    /// has to be argued for rather than typed.
+    #[test]
+    fn every_place_that_leaves_work_behind_is_awaited() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("app.rs is this file");
+        let shipped = source.split("#[cfg(test)]").next().unwrap_or_default();
+        let discarded = shipped.matches("let _ = self.note_place_left").count();
+        assert_eq!(
+            discarded, 2,
+            "there are {discarded} call sites discarding `note_place_left`'s \
+             task, not the two documented ones. Leaving the composing place \
+             releases the Vibe text tower through that task, so a site that \
+             drops it drops the release — and nothing fails, the memory is \
+             just still held. Return the task, or say in a comment why this \
+             `from` can never be the composing place."
+        );
+        assert!(
+            shipped.contains("never the composing place"),
+            "the discarding call sites have lost the comment explaining why \
+             they are safe"
+        );
+    }
+
     #[test]
     fn an_undo_restores_the_list_and_never_sounds() {
         let source = std::fs::read_to_string(

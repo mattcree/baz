@@ -89,22 +89,47 @@ sample() { # seconds  label
 
 sample 10 idle
 
-# Home → the vibe route. `New vibe playlist` is Home's own door to it, which
-# is a listener's route rather than a deep link.
-click 32 81
-click 327 515
-sleep 1
-# The request field, then Compose — the field's own `on_submit`, so the press
-# does not depend on where the button falls.
+# **The route, as a listener walks it**, rather than as a deep link.
 #
-# The coordinate moved once, in 2026-08's rebuild: the page became two panes
-# with the field at the head of the ask band. At 1 280 px the body is 1 048 —
-# under `COMPOSE_BREAKPOINT` — so this run measures the stacked form, which is
-# the same engine and the same compose.
-click 500 194
-xdotool type --clearmodifiers --delay 40 "a slow build into something loud"
-xdotool key --clearmodifiers Return
-sample 90 composing
+# It has moved three times and this script clicked blind coordinates through
+# all three. A run on 2026-08-18 came back with a "composing" peak of 355 MiB
+# against a recorded 1 363 — the clicks landed on nothing, and the phase
+# labels went on being printed as if they meant something. Worse, the repair
+# after that one *looked* right: the peak came back at 1 751 MiB, and only a
+# screenshot showed that the typed request had gone into the app-bar search
+# while the number came from the analysis running behind it. A harness that
+# cannot reach the thing it measures does not fail, it reports a different
+# number in the same shape.
+#
+# So the drive below ends every step in a check that it arrived, and the
+# phases now separate the two costs the page actually has.
+#
+# Today: Playlists in the lane → `New smart playlist`. Arriving *starts the
+# listening* — the page analyses the library on its own — and composing is a
+# press on one of the offered moods.
+click 32 185
+click 755 315
+sleep 2
+
+# Phase 1: the analysis. This is the workers' audio towers, and it is the
+# peak. It starts by itself, so there is nothing to press.
+sample 100 listening
+
+# Phase 2: the compose, which is the text tower. `Late-night drive` is the
+# first offered mood; pressing it embeds its words and selects against
+# whatever has been heard so far.
+import -window "$WID" "$S/before-compose.png" 2>/dev/null
+click 360 462
+sample 40 composing
+
+# Phase 3: **walk away**, which is the case the floor is about. A listener
+# composes and goes back to listening; the question is what baz still holds
+# an hour later. Leaving the composing place is what releases the text tower,
+# so a run that never leaves measures the old behaviour however new the
+# binary is.
+import -window "$WID" "$S/before-leaving.png" 2>/dev/null
+click 32 133
+import -window "$WID" "$S/after-leaving.png" 2>/dev/null
 sample 120 after
 
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
@@ -113,6 +138,20 @@ kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null
 echo "--- peak by phase (MiB) ---"
 awk -F'\t' '{ mb=$2/1024; if (mb > peak[$3]) peak[$3]=mb; last[$3]=mb }
             END { for (phase in peak) printf "%-10s peak %7.1f   last %7.1f\n", phase, peak[phase], last[phase] }' "$log"
+# **The reading is void unless the analysis actually ran.** An idle-shaped
+# curve is what a broken route looks like, and it looks like a win.
+# **The reading is void unless the page was actually reached.** An idle-shaped
+# curve is what a broken route looks like, and it looks like a win. The
+# receipts beside it are `$S/before-compose.png` and `$S/after-leaving.png`:
+# if a number here surprises you, look at those before believing it.
+awk -F'\t' '$3 == "listening" { mb = $2 / 1024; if (mb > peak) peak = mb }
+     END { if (peak < 500)
+             printf "VOID: listening peaked at %.0f MiB, which is idle-shaped.\n\
+       The page was not reached, and the numbers above are an idle process.\n", peak }' "$log"
+grep -q 'released the text tower' "$S/app.log" \
+  || echo "NOTE: no release line in the log — either this build predates the \
+release, or leaving the page did not happen. Check after-leaving.png."
+
 echo "--- isolation receipt ---"
 grep -m1 mpris "$S/app.log" || echo "NO MPRIS LINE — the isolation is unproven"
 grep -m3 -i 'vibe\|analys' "$S/app.log" || true

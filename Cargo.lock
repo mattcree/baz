@@ -475,6 +475,7 @@ dependencies = [
  "baz-core",
  "bliss-audio",
  "hound",
+ "libc",
  "ndarray 0.17.2",
  "ort",
  "rusqlite",

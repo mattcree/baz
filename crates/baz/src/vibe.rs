@@ -2342,6 +2342,54 @@ pub(crate) async fn embed(prompt: String) -> (String, Result<Vec<f32>, String>) 
     (asked, result)
 }
 
+/// **Give the text tower back**, off the interface thread.
+///
+/// Dropping an ONNX Runtime session tears down its arena, which is not
+/// instant and has no business happening between two frames. Called when the
+/// composing place is left — see `baz_vibe::release_text_model` for why that
+/// is the moment and not a timer.
+#[cfg(feature = "vibe-analysis")]
+pub(crate) async fn release_text() {
+    // If the pool is gone the process is going with it, and the memory this
+    // was called to return is about to be returned by exit(2).
+    let before = resident_mib();
+    drop(tokio::task::spawn_blocking(baz_vibe::release_text_model).await);
+    let after = resident_mib();
+    if let (Some(before), Some(after)) = (before, after) {
+        crate::baz_log!("[vibe] released the text tower: {before} MiB -> {after} MiB");
+    } else {
+        crate::baz_log!("[vibe] released the text tower");
+    }
+
+    // **A second trim, later, was tried and did not earn its keep.** The
+    // analysis workers are tokio blocking threads that retire on their own
+    // keep-alive and take their audio sessions with them, so a trim fifteen
+    // seconds after this one ought to have collected their pages. Measured:
+    // `762 MiB -> 762 MiB`. Whatever ONNX Runtime's per-session arena is, it
+    // is not on glibc's free lists for `malloc_trim` to walk, and a delayed
+    // task that reliably returns nothing is worse than no task at all.
+}
+
+/// This process's own resident set, in MiB — Linux only, and `None` anywhere
+/// else rather than a guess.
+#[cfg(feature = "vibe-analysis")]
+fn resident_mib() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+        let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+        Some(kib / 1024)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+#[cfg(not(feature = "vibe-analysis"))]
+pub(crate) async fn release_text() {}
+
 #[cfg(not(feature = "vibe-analysis"))]
 pub(crate) fn embed(prompt: String) -> impl Future<Output = (String, Result<Vec<f32>, String>)> {
     std::future::ready((

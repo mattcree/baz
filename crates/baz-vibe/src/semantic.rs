@@ -85,6 +85,64 @@ pub(crate) fn embed_text(prompt: &str) -> Result<Vec<f32>, String> {
     held.as_mut().expect("model inserted above").text(prompt)
 }
 
+/// **Give the text tower back** when the page that needed it is gone.
+///
+/// The tower is roughly 370 MiB resident once ONNX Runtime has its arena, and
+/// [`TEXT`] holds it for the life of the process. Measured on the harness in
+/// `docs/design/impl/vibe-memory/`: a compose peaks at 1 666 MiB and settles
+/// two minutes later at **836** against a 260 MiB idle baseline. The workers'
+/// sessions do come back — tokio retires its blocking threads and their
+/// thread-locals go with them — and the ~576 MiB that does not is this.
+///
+/// Releasing is always *safe*: [`embed_text`] opens the tower on demand, so
+/// the worst a badly-timed release can cost is one reload. What it must not be
+/// is frequent, which is why the caller is a navigation away from the
+/// composing place and not, say, a debounce.
+pub(crate) fn release_text() {
+    // A poisoned lock means a panic left the tower in an unknown state, and
+    // dropping it is if anything more correct than keeping it. There is
+    // nothing to report to: this is called for its effect on the resident set.
+    match TEXT.lock() {
+        Ok(mut held) => drop(held.take()),
+        Err(poisoned) => drop(poisoned.into_inner().take()),
+    }
+    trim();
+}
+
+/// **Hand the freed pages back to the operating system.**
+///
+/// Dropping the session is not enough, and the measurement is what says so.
+/// With the release wired up and nothing else changed, the health log read
+/// `released the text tower: 826 MiB -> 826 MiB`: `free` returned the arena to
+/// glibc's allocator, which kept it. The 566 MiB the process was sitting on
+/// above its idle baseline was **retained**, not live — which is the opposite
+/// of what `docs/design/impl/vibe-memory/`'s own next-step note assumed
+/// ("the floor is the evidence that they are not released today"), and it
+/// could only be told apart by asking the process what it was holding on
+/// either side of the drop.
+///
+/// `malloc_trim` is the call that returns it. It is glibc-only: musl's
+/// allocator has no equivalent and every other target keeps its own policy,
+/// so elsewhere this is a no-op and the memory comes back when it comes back.
+fn trim() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: `malloc_trim` takes a pad in bytes and walks the allocator's
+        // own free lists. It holds no Rust invariant, cannot observe or
+        // invalidate any reference, and is safe to call from any thread at any
+        // time; the `unsafe` is only because it is an `extern "C"` symbol.
+        #[expect(
+            unsafe_code,
+            reason = "malloc_trim is an FFI call with no Rust-side invariant; \
+                      the workspace denies unsafe by default and this is the \
+                      documented opt-out the manifest anticipates"
+        )]
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+}
+
 pub(crate) fn embed_audio(decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
     MODEL.with(|slot| {
         let mut model = slot.borrow_mut();
