@@ -377,6 +377,72 @@ mod tests {
     }
 
     /// Six records, `a`..`f`, two 100-second tracks each.
+    /// A record held in two formats, the first entry being the one
+    /// `baz_core`'s `rank_editions` would put first (ADR-0007's fidelity
+    /// order — this fixture states the order rather than re-deriving it,
+    /// because the ranking itself is `baz-core`'s to test).
+    fn two_editions(name: &str) -> AlbumVm {
+        let mut album = album(name, Some(100));
+        let lossy: Vec<TrackVm> = (1..=2)
+            .map(|side| track(&format!("/m/{name}/{side}.mp3"), Some(100)))
+            .collect();
+        album.editions.push(EditionVm {
+            key: EditionKey(Some(baz_core::library::AudioFormat::Mp3)),
+            detail: None,
+            bitrate: Some(320),
+            bit_depth: None,
+            sample_rate: None,
+            replay_gain: ReplayGainCoverage {
+                album: 0,
+                track: 0,
+                total: lossy.len(),
+            },
+            tracks: lossy,
+        });
+        album
+    }
+
+    /// **An automatic list takes the best edition, never an arbitrary one**
+    /// (the owner, 2026-08-07: *"shuffle and auto-queueing must prefer the
+    /// highest-quality edition"*).
+    ///
+    /// It always did — every implicit list resolves through
+    /// `vm::selected_edition`, whose fallback is `editions.first()`, and the
+    /// index sorts editions by `rank_editions` before anyone sees them. This
+    /// pins the *chain*: it is three links long and each one is somewhere
+    /// else, so it is the kind of property that can be broken by a change
+    /// that looks local.
+    #[test]
+    fn an_implicit_list_takes_the_ranked_edition_and_honours_a_choice() {
+        let albums = vec![two_editions("dual")];
+        let list = ImplicitList::all_songs(&albums, &[0], |_| None);
+        let extension = |item: &crate::vm::QueueItemVm| {
+            item.path
+                .extension()
+                .map(|ext| ext.to_string_lossy().into_owned())
+        };
+        let paths: Vec<Option<String>> = list.queue.items.iter().map(extension).collect();
+        assert_eq!(paths.len(), 2, "one edition's worth of tracks, not both");
+        assert!(
+            paths.iter().all(|ext| ext.as_deref() == Some("flac")),
+            "an automatic list picked the lesser edition: {paths:?}"
+        );
+
+        // …and a listener who has chosen an edition gets the one they chose:
+        // "prefer the best" is the rule for what baz decides, not an override
+        // of what the listener decided.
+        let mp3 = EditionKey(Some(baz_core::library::AudioFormat::Mp3));
+        let chosen = ImplicitList::all_songs(&albums, &[0], |_| Some(mp3));
+        assert!(
+            chosen
+                .queue
+                .items
+                .iter()
+                .all(|item| extension(item).as_deref() == Some("mp3")),
+            "the listener's own edition choice was overridden"
+        );
+    }
+
     fn wall() -> Vec<AlbumVm> {
         ["a", "b", "c", "d", "e", "f"]
             .iter()

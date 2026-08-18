@@ -500,6 +500,10 @@ pub(crate) enum Message {
     /// path, and it exists only as a press on a candidate the `Locate…` card
     /// was showing.
     PlaylistRepairEntry(usize, std::path::PathBuf),
+    /// **Open or close the shortcuts card** (`?`). One message for both,
+    /// because the key is the only way in and the only way out besides `Esc`
+    /// and a press outside — a control that toggles is honest about that.
+    ToggleShortcuts,
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
     HistoryForward,
@@ -1428,6 +1432,9 @@ struct App {
     menu: Option<menu::Menu>,
     /// Whether the bottom-right application health/event card is visible.
     status_open: bool,
+    /// Whether the shortcuts card is up. Session state and deliberately not
+    /// persisted: a card you asked for once is not a preference.
+    shortcuts_open: bool,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -2032,6 +2039,7 @@ impl App {
             queue_undo: crate::undo::History::new(),
             menu: None,
             status_open: false,
+            shortcuts_open: false,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
@@ -2249,6 +2257,10 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::ToggleShortcuts => {
+                self.shortcuts_open = !self.shortcuts_open;
+                Task::none()
+            }
             Message::EscapePressed => self.escape(),
             Message::EscapeInField => self.escape_in_field(),
             Message::HistoryBack => self.travel_history(true),
@@ -5911,6 +5923,14 @@ impl App {
         if self.drag.take().is_some() {
             return Task::none();
         }
+        // The shortcuts card floats over every other layer, including the
+        // menu, because it is the one surface a listener opens *while lost*.
+        // It peels first for that reason: whatever it is covering is what they
+        // were trying to get back to.
+        if self.shortcuts_open {
+            self.shortcuts_open = false;
+            return Task::none();
+        }
         // The context menu is the outermost layer wherever it stands — it
         // floats over the panel itself — so it peels before everything, one
         // layer per press (doc 09 §5.2).
@@ -7607,6 +7627,18 @@ impl App {
                 Screen::Shelf(state) if self.status_open =>
                     views::status::layer(&state.health, self.health_summary(), self.window),
                 Screen::Shelf(_) | Screen::Setup(_) | Screen::Blocked(_) => nothing(),
+            },
+        ]
+        .into();
+        // **The shortcuts card**, over everything else it could be covering —
+        // it is opened when a listener does not know where they are, so the
+        // one thing it must never be is underneath.
+        let whole: Element<'_, Message> = iced::widget::stack![
+            whole,
+            if self.shortcuts_open {
+                views::shortcuts::layer(self.window)
+            } else {
+                nothing()
             },
         ]
         .into();
@@ -12131,7 +12163,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 23] = [
+        const CONTROLS: [(&str, &str); 24] = [
             (
                 "ToggleLane",
                 "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
@@ -12144,6 +12176,12 @@ mod tests {
                  and the playlist page's counts (doc 11 §5 P2) — present \
                  exactly while there is an edit to take back, which is \
                  exactly when the chord acts",
+            ),
+            (
+                "ToggleShortcuts",
+                "Settings' `Show shortcuts` word — the card `?` opens, given a \
+                 visible door because a key that is the only way to a card \
+                 about keys reaches exactly the people who did not need it",
             ),
             ("PlayPause", "the bottom bar's play/pause button"),
             (
@@ -13048,11 +13086,11 @@ mod tests {
             "a layer is falling back to the unstacked tree again, which resets \
              every widget under it"
         );
-        // Four layers — search, status, the context menu, the drag ghost —
-        // and every one of them has a resting form.
+        // Five layers — search, status, the shortcuts card, the context menu,
+        // the drag ghost — and every one of them has a resting form.
         assert_eq!(
             drawn.matches("nothing()").count(),
-            4,
+            5,
             "a floating layer has no empty form, or one has been added without one"
         );
     }

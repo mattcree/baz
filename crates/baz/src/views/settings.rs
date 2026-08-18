@@ -230,6 +230,7 @@ pub(crate) fn view<'a>(
             output_section(output, player),
             replay_gain_section(player, ink),
             sleep_section(sleep),
+            shortcuts_section(),
         ],
     };
     let content = container(
@@ -488,6 +489,31 @@ fn word_action(label: &'static str, message: Message) -> Element<'static, Messag
 /// that keeps the run, the position and the queue exactly where they were, so
 /// the morning's first press carries on rather than starting over. Nothing is
 /// faded — a fade would be baz changing the volume the listener set.
+/// **The door to the shortcuts card**, and the reason it exists at all.
+///
+/// `?` opens the card, and a key that is the *only* way to reach a card about
+/// keys is a joke at the listener's expense — it is reachable exactly by the
+/// people who did not need it. `crate::keys`' own rule says every binding is a
+/// press some visible control also makes, and `app.rs`'s
+/// `every_keyboard_binding_is_a_press_some_control_also_makes` enforces it, so
+/// the card needed a control before it could ship.
+///
+/// Settings is where it goes because Settings is where a person looks for
+/// *how does this work*, and because the app bar's lane is the scarcest space
+/// in the product — the card is read once and then never again, which is not
+/// what earns a permanent slot.
+fn shortcuts_section() -> Element<'static, Message> {
+    column![
+        section_heading(
+            "Keyboard",
+            "Everything you can press, with what it does. Or press ? at any time.",
+        ),
+        row![word_action("Show shortcuts", Message::ToggleShortcuts)].spacing(theme::GAP_SM),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
 fn sleep_section(remaining: Option<std::time::Duration>) -> Element<'static, Message> {
     let room = theme::active();
     let mut choices = row![].spacing(theme::GAP_SM);

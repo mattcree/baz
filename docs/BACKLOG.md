@@ -351,6 +351,21 @@ Newest first. Each was asked for in conversation and is now in the product.
   concessions is the closed set. **A proposal for a fifth head row needs an
   argument that beats L8.4's, and "there is room" is not one.**
 
+- ~~**Shuffle and auto-queueing must prefer the highest-quality edition.**~~
+  **Verified already true, 2026-08-18, and pinned so it stays true.** The
+  chain is three links in three files and none of them announced itself:
+  `baz-core` sorts an album's editions by `rank_editions` before anyone sees
+  them, `vm::selected_edition` falls back to `editions.first()`, and every
+  implicit list — `All songs`, an artist's songs, `Play all` — resolves through
+  it. Shuffle is a traversal *over* that already-resolved list, so it never had
+  a chance to pick an edition at all.
+
+  A listener's own edition choice still wins, which is the reading the ask
+  wants rather than a departure from it: *prefer the best* is the rule for what
+  baz decides, not an override of what the listener decided.
+  `an_implicit_list_takes_the_ranked_edition_and_honours_a_choice` now covers
+  both halves — a property spread over three files is exactly the kind a local
+  change breaks silently. The original ask below stands as the reasoning.
 - **Shuffle and auto-queueing must prefer the highest-quality edition.** When a
   track exists in several formats (ADR-0007), any automatic selection — library
   shuffle, mood-steered radio, "play something" — picks the best available
@@ -1464,8 +1479,30 @@ Newest first. Each was asked for in conversation and is now in the product.
     off the field, so it is a decision to make rather than a defect to fix.
     Both behaviours are captured in `docs/design/impl/search-in-lane/05`
     and `06`.
-- **No shortcut discovery in the interface.** The bindings are in the README
-  and nowhere the user can see them while running — no `?` overlay, no menu.
+- ~~**No shortcut discovery in the interface.**~~ **Shipped 2026-08-18.**
+  <kbd>?</kbd> opens a card over whatever you were doing: four groups —
+  playing, going places, changing things, getting out — with the modifier
+  named for the platform, so a Mac listener reads `Cmd` and not a key they do
+  not have.
+
+  **It cannot name a key that does nothing.** Every row comes from one table
+  in `crate::keys`, and a test walks every row back through `binding_for`; a
+  second assertion fails if a row is added and not covered, so the test cannot
+  pass by ignoring the new one. A discovery surface is the documentation a
+  listener trusts immediately and blames themselves for.
+
+  **And it needed a visible control before it could ship**, which the keyboard
+  mirror rule caught rather than a reviewer: `?` alone would have been a card
+  about keys reachable only by the people who did not need it. Settings gains
+  `Show shortcuts`. The app bar was considered and refused — its lane is the
+  scarcest space in the product and a card read once does not earn a
+  permanent slot.
+
+  **What it cost, stated**: <kbd>Shift</kbd>+<kbd>/</kbd> used to be a third
+  spelling of *focus search*, and `?` used to be an ordinary query character.
+  Bare <kbd>/</kbd> still opens search, and once the well has focus the focus
+  rule hands it every key — so `?` types normally *inside* a query and only
+  *beginning* a search with one has changed.
 
 ## "Feels like treacle when I resize" — measured, not reproduced
 

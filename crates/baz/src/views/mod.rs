@@ -99,6 +99,7 @@ pub(crate) mod search;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
+pub(crate) mod shortcuts;
 pub(crate) mod status;
 pub(crate) mod top_bar;
 

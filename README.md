@@ -140,6 +140,7 @@ frame.
 | <kbd>1</kbd> … <kbd>6</kbd> | arrange the wall |
 | <kbd>Ctrl</kbd>+scroll | closer or wider |
 | <kbd>Esc</kbd> | back out of whatever is open |
+| <kbd>?</kbd> | this table, on screen |
 
 Media keys work too. The *volume* media keys are deliberately left alone: they
 mean your system's volume, and baz's fader is baz's own. The full table,

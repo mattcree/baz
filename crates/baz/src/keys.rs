@@ -359,6 +359,68 @@ pub(crate) const SEEK_STEP_MS: i64 = 5_000;
 /// Step for Shift+Left/Right, in milliseconds (module docs).
 pub(crate) const SEEK_STEP_LARGE_MS: i64 = 30_000;
 
+/// **What the modifier is called on this platform.**
+///
+/// [`Modifiers::COMMAND`] is Ctrl everywhere and Cmd on macOS, and until the
+/// shortcuts card existed nothing had to *say* which — the bindings were
+/// documented in prose that could name both. A card that printed `Ctrl` to a
+/// Mac listener would be teaching them a key they do not have.
+pub(crate) const COMMAND_LABEL: &str = if cfg!(target_os = "macos") {
+    "Cmd"
+} else {
+    "Ctrl"
+};
+
+/// **Every shortcut baz offers, as the card shows them.**
+///
+/// One table, and it is the *only* place the card gets its rows — a card that
+/// listed a key by hand could drift from the keys that exist, which is the
+/// failure a discovery surface makes worst. `the_card_only_promises_keys_that
+/// _work` walks every row back through [`binding_for`].
+///
+/// Grouped the way a listener thinks rather than the way the match arms fall:
+/// what plays, where you go, what you change, and the way out.
+pub(crate) const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Playing",
+        &[
+            ("Space", "play or pause"),
+            ("← →", "seek 5 seconds (Shift for 30)"),
+            ("{cmd}+← →", "previous or next track"),
+            ("↑ ↓", "volume"),
+            ("{cmd}+M", "mute"),
+        ],
+    ),
+    (
+        "Going places",
+        &[
+            ("any letter", "search tracks, albums and playlists"),
+            ("{cmd}+F", "search"),
+            ("{cmd}+U", "now playing, and what is up next"),
+            ("{cmd}+P", "playlists"),
+            ("{cmd}+,", "settings"),
+            ("1 … 6", "arrange the wall"),
+        ],
+    ),
+    (
+        "Changing things",
+        &[
+            ("{cmd}+Z", "undo the last edit to this list"),
+            ("{cmd}+- +", "closer or wider"),
+            ("F11", "full screen"),
+        ],
+    ),
+    (
+        "Getting out",
+        &[("Esc", "back out of whatever is open"), ("?", "this card")],
+    ),
+];
+
+/// Render a [`SHORTCUTS`] key for this platform.
+pub(crate) fn shortcut_key(key: &str) -> String {
+    key.replace("{cmd}", COMMAND_LABEL)
+}
+
 /// Who the key press belongs to — read off iced's capture report, not
 /// inferred (module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,7 +568,17 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // survive type-anywhere as the *explicit* door: a listener who wants
         // the caret before they want a filter, and the only way to start a
         // query with a digit.
-        Key::Character("/") if bare || shift => Some(Message::FocusSearch),
+        // **`?` opens the shortcuts card**, and takes Shift+`/` with it.
+        //
+        // Bare `/` is still search — the reflex from every browser and every
+        // editor — but the shifted spelling was search too, which spent the
+        // one key every application in the world uses for *what can I press*.
+        // Both spellings are matched because a keyboard layout may report
+        // either: the produced character on most, the unshifted key plus the
+        // modifier on some.
+        Key::Character("?") => Some(Message::ToggleShortcuts),
+        Key::Character("/") if shift => Some(Message::ToggleShortcuts),
+        Key::Character("/") if bare => Some(Message::FocusSearch),
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
         // Confirm the open chooser, else activate selected content (module docs).
@@ -729,6 +801,78 @@ mod tests {
                 binding_for(key, *modifiers, Focus::Elsewhere).is_some(),
                 "{key:?} + {modifiers:?} should bind when nothing captured it"
             );
+        }
+    }
+
+    /// **The card only promises keys that work.**
+    ///
+    /// A discovery surface is the one kind of documentation a listener trusts
+    /// immediately and blames themselves for when it is wrong, so every row of
+    /// [`SHORTCUTS`] is walked back through [`binding_for`] here. The table is
+    /// prose — `← →`, `1 … 6`, `{cmd}+- +` — so this parses it the way a
+    /// reader does and asserts the keys behind the words.
+    #[test]
+    fn the_card_only_promises_keys_that_work() {
+        let bound = |key: Key, modifiers| binding_for(&key, modifiers, Focus::Elsewhere).is_some();
+        let command = Modifiers::COMMAND;
+        // Each row, as (what the card prints, the presses it stands for).
+        let claims: Vec<(&str, Vec<(Key, Modifiers)>)> = vec![
+            ("Space", vec![(named(key::Named::Space), none())]),
+            (
+                "← →",
+                vec![
+                    (named(key::Named::ArrowLeft), none()),
+                    (named(key::Named::ArrowRight), none()),
+                    (named(key::Named::ArrowLeft), Modifiers::SHIFT),
+                    (named(key::Named::ArrowRight), Modifiers::SHIFT),
+                ],
+            ),
+            (
+                "{cmd}+← →",
+                vec![
+                    (named(key::Named::ArrowLeft), command),
+                    (named(key::Named::ArrowRight), command),
+                ],
+            ),
+            (
+                "↑ ↓",
+                vec![
+                    (named(key::Named::ArrowUp), none()),
+                    (named(key::Named::ArrowDown), none()),
+                ],
+            ),
+            ("{cmd}+M", vec![(ch("m"), command)]),
+            ("any letter", vec![(ch("k"), none())]),
+            ("{cmd}+F", vec![(ch("f"), command)]),
+            ("{cmd}+U", vec![(ch("u"), command)]),
+            ("{cmd}+P", vec![(ch("p"), command)]),
+            ("{cmd}+,", vec![(ch(","), command)]),
+            ("1 … 6", vec![(ch("1"), none()), (ch("6"), none())]),
+            ("{cmd}+Z", vec![(ch("z"), command)]),
+            ("{cmd}+- +", vec![(ch("-"), command), (ch("="), command)]),
+            ("F11", vec![(named(key::Named::F11), none())]),
+            ("Esc", vec![(named(key::Named::Escape), none())]),
+            ("?", vec![(ch("?"), none())]),
+        ];
+        for (printed, presses) in &claims {
+            for (key, modifiers) in presses {
+                assert!(
+                    bound(key.clone(), *modifiers),
+                    "the card prints `{printed}` but {key:?} + {modifiers:?} \
+                     is bound to nothing"
+                );
+            }
+        }
+        // **And every row of the table is covered above.** Without this the
+        // test passes by simply not mentioning a new row.
+        let printed: Vec<&str> = claims.iter().map(|(printed, _)| *printed).collect();
+        for (_, rows) in SHORTCUTS {
+            for (key, does) in *rows {
+                assert!(
+                    printed.contains(key),
+                    "`{key}` ({does}) is on the card and not checked here"
+                );
+            }
         }
     }
 
@@ -991,10 +1135,14 @@ mod tests {
     #[test]
     fn search_focus_has_two_spellings() {
         assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
+        // **The shifted spelling went to the shortcuts card** (2026-08-17).
+        // It was a third way to reach search, and it was spending the one key
+        // every application in the world uses for *what can I press*.
         assert_eq!(
             bind(&ch("/"), Modifiers::SHIFT).as_deref(),
-            Some("FocusSearch")
+            Some("ToggleShortcuts")
         );
+        assert_eq!(bind(&ch("?"), none()).as_deref(), Some("ToggleShortcuts"));
         assert_eq!(
             bind(&ch("f"), Modifiers::COMMAND).as_deref(),
             Some("FocusSearch")
@@ -1093,7 +1241,13 @@ mod tests {
     /// *modified* one never is.
     #[test]
     fn a_bare_printable_character_is_the_query_and_a_modified_one_is_not() {
-        for text in ["k", "z", "é", "曲", "ß", "&", "!", "'", "-", ".", "?", ","] {
+        // **`?` is not in this list since 2026-08-17**: it opens the shortcuts
+        // card. What that costs is stated rather than hidden — you cannot
+        // *begin* a search with a question mark. Once the well has focus the
+        // focus rule hands it every key, so `?` types normally inside a query
+        // (`Where Are We Now?` is searchable), and `/` still opens the well
+        // for a query that must start with one.
+        for text in ["k", "z", "é", "曲", "ß", "&", "!", "'", "-", ".", ","] {
             assert_eq!(
                 bind(&ch(text), none()).as_deref(),
                 Some(format!("QueryTyped({text:?})").as_str()),
