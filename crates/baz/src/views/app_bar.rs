@@ -500,6 +500,44 @@ fn gear(ink: Ink) -> Element<'static, Message> {
     )
 }
 
+/// **The bar with the frame off**: the window's own controls, and nothing else.
+///
+/// The owner, on the first cut of chromeless mode: *"we should still keep the
+/// window controls when we go into the 'full screen' mode."* He is right, and
+/// the first version's answer to it — a lone mark drawn on the Now playing
+/// page — was solving the wrong half. The problem was never *how do I get
+/// back*; it was that on the platforms where baz draws its own title bar,
+/// hiding that bar takes minimise, maximise and close with it, and a window
+/// with no close button is not a mode, it is a trap.
+///
+/// So the strip stays and empties instead. What is left is the window's own
+/// furniture plus the toggle that brought you here, which keeps the way out
+/// where the way in was rather than somewhere new to learn.
+///
+/// It is **not** the ordinary bar with its tenants hidden: this is a separate,
+/// shorter strip with no ground of its own, so the field and the sleeve run
+/// under it and the only ink is the marks themselves.
+pub(crate) fn chromeless(
+    maximized: bool,
+    owns_chrome: bool,
+    ink: Ink,
+) -> Element<'static, Message> {
+    let mut controls = row![crate::visualizer::chromeless_mark(true)]
+        .spacing(theme::CONTROL_CLUSTER_GAP)
+        .align_y(iced::Alignment::Center);
+    if owns_chrome {
+        controls = controls.push(window_controls(maximized, ink));
+    }
+    container(
+        row![Space::new().width(Length::Fill), controls]
+            .align_y(iced::Alignment::Center)
+            .padding(theme::pad(0.0, theme::APP_BAR_EDGE)),
+    )
+    .height(Length::Fixed(theme::APP_BAR_H))
+    .width(Length::Fill)
+    .into()
+}
+
 /// **The three window controls** — minimise, maximise, close, in that order,
 /// at the bar's right end.
 ///
@@ -684,12 +722,26 @@ mod tests {
             src.contains("owns_chrome.then(|| window_controls(maximized, ink))"),
             "the buttons are no longer drawn behind the chrome question"
         );
-        assert_eq!(
-            src.matches("window_controls(maximized, ink)").count(),
-            1,
-            "the buttons are drawn from more than one place, so one of them \
-             can escape the condition"
-        );
+        // **Every call site is behind the question**, rather than there being
+        // only one call site. There are two now — the ordinary bar and the
+        // chromeless strip, which keeps the buttons because hiding baz's
+        // title bar would otherwise take the only close button with it — so
+        // counting sites stopped being the same claim as *none of them
+        // escapes*. This checks the claim instead.
+        for (at, _) in src.match_indices("window_controls(maximized, ink)") {
+            let before = &src[..at];
+            let guarded = before.ends_with("owns_chrome.then(|| ")
+                || before
+                    .rsplit_once("if owns_chrome {")
+                    .is_some_and(|(_, after)| !after.contains('}'));
+            assert!(
+                guarded,
+                "a call to `window_controls` at byte {at} is not behind the \
+                 chrome question, so a build that owns its chrome could draw \
+                 the buttons twice — or one that does not could draw a second \
+                 set over the system's own"
+            );
+        }
         // **And absent means no child, not a child of no width.** `Row`'s
         // spacing falls between every pair of *children*, so a placeholder
         // `Space` still collects a `GAP_LG` and pushes everything to its left
@@ -962,9 +1014,10 @@ mod tests {
         );
         assert_eq!(
             code.matches("spacing(theme::CONTROL_CLUSTER_GAP)").count(),
-            3,
-            "the bar's three clusters — history, the application's doors, the \
-             window buttons — no longer all stand on the cluster seam"
+            4,
+            "the bar's clusters — history, the application's doors, the window \
+             buttons, and the chromeless strip that keeps those buttons when \
+             the rest of the bar goes — no longer all stand on the cluster seam"
         );
     }
 }

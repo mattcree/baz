@@ -413,6 +413,8 @@ pub(crate) struct EqualizerSettings {
     pub(crate) bands_centidb: [i16; 10],
     /// The stated attenuation, in centidecibels.
     pub(crate) preamp_centidb: i16,
+    /// Whether the pre-amp follows the curve rather than the listener.
+    pub(crate) auto_gain: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -548,13 +550,15 @@ pub(crate) enum Message {
     EqualizerSaveCancel,
     /// Forget the saved curve currently showing in the picker.
     EqualizerForget,
-    /// **Make room**: take the headroom the curve needs — the largest boost,
-    /// given back off the whole signal so it cannot clip.
+    /// **Auto gain**: whether the pre-amp follows the curve.
     ///
-    /// Spelled `Suggest a pre-amp` on the panel until the owner asked what it
-    /// meant. The mechanism has not changed; the label names the situation now
-    /// instead of the machinery.
-    EqualizerSuggestPreamp,
+    /// Two labels ago this was a button called `Suggest a pre-amp`, then one
+    /// called `Make room`. Both were the wrong *shape* as well as the wrong
+    /// words: pressing something once to fix headroom you are about to change
+    /// again by dragging a band is a chore, not a control. The owner:
+    /// *"make it 'auto gain' as a checkbox"* — which is what it always
+    /// wanted to be, a standing mode rather than an act.
+    EqualizerAutoGain(bool),
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
     HistoryForward,
@@ -2063,6 +2067,7 @@ impl App {
                 enabled: config.equalizer_enabled,
                 bands_centidb: config.equalizer_bands_centidb,
                 preamp_centidb: config.equalizer_preamp_centidb,
+                auto_gain: config.equalizer_auto_gain,
             });
         if equalizer.enabled {
             playback.send(Command::SetEqualizer {
@@ -2374,6 +2379,12 @@ impl App {
                 if let Some(band) = self.equalizer.bands_centidb.get_mut(index) {
                     *band = centidb.clamp(-1200, 1200);
                 }
+                // **Auto gain follows the hand.** The headroom is recomputed
+                // on the same frame as the band, so the pre-amp fader tracks
+                // the drag rather than jumping when it ends — and the sound
+                // never passes through a moment of being too loud on its way
+                // to a curve that fits.
+                self.apply_auto_gain();
                 // **Sent, not written.** The engine hears every frame of the
                 // drag so the sound follows the hand; the config waits for
                 // the release.
@@ -2381,6 +2392,12 @@ impl App {
                 Task::none()
             }
             Message::EqualizerPreampSet(centidb) => {
+                // **Taking hold of the pre-amp is how you claim it.** With
+                // auto gain on, the next band would overwrite whatever this
+                // drag set — so rather than fight the listener, or let a
+                // control move and mean nothing, the drag turns the mode off
+                // and the checkbox unticks where they can see it.
+                self.equalizer.auto_gain = false;
                 self.equalizer.preamp_centidb = centidb.clamp(-1200, 1200);
                 self.send_equalizer_only();
                 Task::none()
@@ -2494,18 +2511,17 @@ impl App {
                 }
                 Task::none()
             }
-            Message::EqualizerSuggestPreamp => {
-                let suggested =
-                    baz_core::equalizer::Bands::from_centidb(self.equalizer.bands_centidb)
-                        .suggested_preamp();
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "a suggestion derived from bands already clamped to ±12 dB"
-                )]
-                {
-                    self.equalizer.preamp_centidb = (suggested * 100.0).round() as i16;
-                }
+            Message::EqualizerAutoGain(on) => {
+                self.equalizer.auto_gain = on;
+                // Turning it **on** takes effect at once — a checkbox that
+                // needed a band nudged before it did anything would look
+                // broken. Turning it off leaves the headroom where it stands:
+                // that is the value the listener is now in charge of, and
+                // snapping it to zero would undo work they never asked to
+                // undo.
+                self.apply_auto_gain();
                 self.send_equalizer();
+                self.persist_equalizer();
                 Task::none()
             }
             Message::ToggleShortcuts => {
@@ -5977,6 +5993,30 @@ impl App {
     /// Separate from [`Self::persist_equalizer`] because they change on
     /// different gestures: the live curve is written when a drag ends, and
     /// this when a curve is named or forgotten.
+    /// **Put the pre-amp where the curve needs it**, when the listener has
+    /// asked for that.
+    ///
+    /// `suggested_preamp` answers zero or a negative number of decibels: the
+    /// amount the whole signal has to come down by so the largest boost fits
+    /// without clipping. A curve that only cuts needs nothing, and gets zero
+    /// — auto gain never makes anything *louder*, because turning a quiet
+    /// recording up is a decision about taste and this is a decision about
+    /// arithmetic.
+    fn apply_auto_gain(&mut self) {
+        if !self.equalizer.auto_gain {
+            return;
+        }
+        let suggested = baz_core::equalizer::Bands::from_centidb(self.equalizer.bands_centidb)
+            .suggested_preamp();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "derived from bands already clamped to ±12 dB"
+        )]
+        {
+            self.equalizer.preamp_centidb = (suggested * 100.0).round() as i16;
+        }
+    }
+
     fn persist_equalizer_presets(&mut self) {
         let curves = self.equalizer_presets.clone();
         persist(|config| {
@@ -5990,6 +6030,7 @@ impl App {
             config.equalizer_enabled = settings.enabled;
             config.equalizer_bands_centidb = settings.bands_centidb;
             config.equalizer_preamp_centidb = settings.preamp_centidb;
+            config.equalizer_auto_gain = settings.auto_gain;
         });
     }
 
@@ -7765,7 +7806,6 @@ impl App {
                     self.body_height(),
                     self.now_playing_source(),
                     views::now_playing::Visual {
-                        chromeless: self.chromeless,
                         rotation: self.case_rotation,
                         foreground: self.visualization.foreground,
                         mode: self.visualization.mode,
@@ -7945,10 +7985,11 @@ impl App {
         // So the column always has two children and the first one is either
         // the bar or nothing at all.
         let bar: Element<'_, Message> = if self.chromeless {
-            iced::widget::Space::new()
-                .width(iced::Length::Fill)
-                .height(0.0)
-                .into()
+            // **Emptied, not removed** — and not entirely empty: the window's
+            // own controls stay, because hiding baz's title bar on the
+            // platforms where baz draws it takes minimise, maximise and close
+            // with it. See `views::app_bar::chromeless`.
+            views::app_bar::chromeless(self.window_maximized, owns_chrome(), ink)
         } else {
             views::app_bar::view(
                 state,

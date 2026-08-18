@@ -160,6 +160,7 @@ const EQ_BANDS: &str = "equalizer_bands_centidb";
 /// The equaliser's stated attenuation, in centidecibels.
 const EQ_PREAMP: &str = "equalizer_preamp_centidb";
 const EQ_PRESET: &str = "equalizer_preset";
+const EQ_AUTO_GAIN: &str = "equalizer_auto_gain";
 
 /// The shared-mode output endpoint, absent to follow the system default.
 const OUTPUT_DEVICE: &str = "output_device";
@@ -323,6 +324,12 @@ pub struct Config {
     pub equalizer_bands_centidb: [i16; 10],
     /// The stated attenuation, in centidecibels.
     pub equalizer_preamp_centidb: i16,
+    /// **Whether the pre-amp follows the curve** instead of the listener.
+    ///
+    /// On by default: a listener who boosts and does not know what headroom
+    /// is should not get distortion for it. Turning it off is how you say
+    /// *the pre-amp is mine*.
+    pub equalizer_auto_gain: bool,
     /// **Curves the listener saved**, in the order they saved them.
     ///
     /// The other half of the owner's *"we probably want a way to allow users
@@ -371,6 +378,7 @@ impl Default for Config {
             equalizer_enabled: false,
             equalizer_bands_centidb: [0; 10],
             equalizer_preamp_centidb: 0,
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
@@ -411,8 +419,13 @@ fn write_equalizer(out: &mut String, config: &Config) {
          # in hundredths of a decibel, ±1200\n\
          {EQ_BANDS} = {:?}\n\
          # attenuation applied before the bands, in hundredths of a decibel\n\
-         {EQ_PREAMP} = {}",
-        config.equalizer_enabled, config.equalizer_bands_centidb, config.equalizer_preamp_centidb,
+         {EQ_PREAMP} = {}\n\
+         # whether that attenuation follows the curve rather than the listener\n\
+         {EQ_AUTO_GAIN} = {}",
+        config.equalizer_enabled,
+        config.equalizer_bands_centidb,
+        config.equalizer_preamp_centidb,
+        config.equalizer_auto_gain,
     );
     // **Saved curves, one table each**, so a hand-editor can add or remove one
     // without counting commas in a nested array. The pre-amp is written with
@@ -519,7 +532,10 @@ fn clamp_centidb(value: i16) -> i16 {
 /// filters rather than a bad config. Each value is clamped through
 /// `equalizer::Band`, so a hand-edited ±9000 becomes ±1200 rather than a
 /// refusal to read the file at all.
-fn read_equalizer(table: &toml::Table) -> (bool, [i16; 10], i16) {
+fn read_equalizer(table: &toml::Table) -> StoredEqualizer {
+    // A struct rather than the four-tuple this was: `let (a, b, c, d) = …`
+    // spread the call site over six lines and tipped `from_toml` past its
+    // line budget, and a fifth key would have made the tuple unreadable.
     let enabled = table
         .get(EQ_ENABLED)
         .and_then(toml::Value::as_bool)
@@ -545,7 +561,28 @@ fn read_equalizer(table: &toml::Table) -> (bool, [i16; 10], i16) {
         .and_then(|value| i16::try_from(value).ok())
         .unwrap_or(0)
         .clamp(-1200, 1200);
-    (enabled, bands, preamp)
+    // **On for a document that predates the key.** Every config written before
+    // auto gain existed belongs to a listener who had no way to ask for it,
+    // and the safe reading of a boost with no stated headroom is that they did
+    // not mean to clip.
+    let auto_gain = table
+        .get(EQ_AUTO_GAIN)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
+    StoredEqualizer {
+        enabled,
+        bands,
+        preamp,
+        auto_gain,
+    }
+}
+
+/// What [`read_equalizer`] found in the document.
+struct StoredEqualizer {
+    enabled: bool,
+    bands: [i16; 10],
+    preamp: i16,
+    auto_gain: bool,
 }
 
 fn write_music_dirs(out: &mut String, music_dirs: &[PathBuf]) {
@@ -759,8 +796,7 @@ impl Config {
                     })
             })
             .unwrap_or_default();
-        let (equalizer_enabled, equalizer_bands_centidb, equalizer_preamp_centidb) =
-            read_equalizer(&table);
+        let equalizer = read_equalizer(&table);
         let (visualization_foreground, now_playing_facts) = read_now_playing(&table);
         let vibe_workers = table
             .get(VIBE_WORKERS)
@@ -793,9 +829,10 @@ impl Config {
             output_device,
             shuffle,
             repeat,
-            equalizer_enabled,
-            equalizer_bands_centidb,
-            equalizer_preamp_centidb,
+            equalizer_enabled: equalizer.enabled,
+            equalizer_bands_centidb: equalizer.bands,
+            equalizer_preamp_centidb: equalizer.preamp,
+            equalizer_auto_gain: equalizer.auto_gain,
             equalizer_presets: read_saved_curves(&table),
             visualization_foreground,
             now_playing_facts,
@@ -976,6 +1013,7 @@ mod tests {
     #[test]
     fn a_saved_curve_round_trips_through_the_document() {
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: vec![
                 SavedCurve {
                     name: "Kitchen speakers".to_owned(),
@@ -1087,6 +1125,7 @@ preamp_centidb = -9000
     #[test]
     fn a_curve_named_with_a_quote_survives_the_write() {
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: vec![SavedCurve {
                 name: "Ol' \"loud\" one\\two".to_owned(),
                 bands_centidb: [0; 10],
@@ -1107,6 +1146,7 @@ preamp_centidb = -9000
     #[test]
     fn the_equaliser_round_trips_and_degrades_to_flat() {
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             equalizer_enabled: true,
             equalizer_bands_centidb: [-300, 0, 250, 600, 0, 0, -150, 0, 400, 0],
@@ -1175,6 +1215,7 @@ preamp_centidb = -9000
             "/home/user/# not a comment",
         ] {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from(dir)],
                 ..Config::default()
@@ -1190,6 +1231,7 @@ preamp_centidb = -9000
     fn round_trips_every_shape_of_volume_position() {
         for position in [0, 1, 618, MAX_POSITION - 1, MAX_POSITION] {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 volume: Volume::new(position),
                 ..Config::default()
@@ -1211,6 +1253,7 @@ preamp_centidb = -9000
             crate::visualizer::Foreground::None,
         ] {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 visualization_foreground: foreground,
                 ..Config::default()
@@ -1247,6 +1290,7 @@ preamp_centidb = -9000
     fn the_fact_feed_is_on_by_default_and_round_trips_off() {
         assert!(Config::from_toml("").now_playing_facts);
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             now_playing_facts: false,
             ..Config::default()
@@ -1284,6 +1328,7 @@ preamp_centidb = -9000
             Place::Settings,
         ] {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 last_place: place,
                 ..Config::default()
@@ -1323,6 +1368,7 @@ preamp_centidb = -9000
         ];
         for replay_gain in cases {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 replay_gain,
@@ -1359,6 +1405,7 @@ preamp_centidb = -9000
         ] {
             assert_eq!(mode_key(mode), word);
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 replay_gain: settings(mode, 0, 0, true),
                 ..Config::default()
@@ -1381,6 +1428,7 @@ preamp_centidb = -9000
     fn round_trips_every_group_key_as_its_own_word() {
         for key in GroupKey::ALL {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 group_key: key,
@@ -1464,6 +1512,7 @@ preamp_centidb = -9000
     fn round_trips_every_density_step_as_its_own_word() {
         for density in Density::ALL {
             let config = Config {
+                equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 density,
@@ -1681,6 +1730,7 @@ preamp_centidb = -9000
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from(raw)],
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
@@ -1712,6 +1762,7 @@ preamp_centidb = -9000
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/Music")],
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
@@ -1748,6 +1799,7 @@ preamp_centidb = -9000
             PathBuf::from("/home/user/My \"Music\""),
         ];
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: dirs.clone(),
             ..Config::default()
@@ -1858,6 +1910,7 @@ preamp_centidb = -9000
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![
                 PathBuf::from("/first"),
@@ -1878,6 +1931,7 @@ preamp_centidb = -9000
     #[test]
     fn the_written_document_parses_as_toml() {
         let config = Config {
+            equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/My \"Music\"")],
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),

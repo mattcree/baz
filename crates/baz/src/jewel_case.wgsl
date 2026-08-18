@@ -96,7 +96,18 @@ fn vs_main(@builtin(vertex_index) vertex: u32) -> VertexOut {
     let world = turn(positions[face * 4u + corner]);
     let normal = turn(normals[face]);
     let view_z = 2.55 - world.z;
-    let lens = 4.0;
+    // **How much of its own box the case fills.**
+    //
+    // The projected half-width is `0.5 * lens / view_z`, so 4.0 put the case
+    // at 0.78 of its bounds at rest and less when turned — a 660 px box drew
+    // about 370 px of album, and the owner said the art was too small three
+    // times before anyone measured which of the two numbers was wrong.
+    //
+    // 4.75 gives 0.93 at rest. It stops short of filling the box because the
+    // near corner of a *turned* case projects wider than the flat front does:
+    // at the depth this case has, the worst case is about 0.945, and the rest
+    // is margin so a rotation can never clip against the bounds.
+    let lens = 4.75;
     var out: VertexOut;
     out.position = vec4<f32>(
         uniforms.centre_x * view_z + world.x * lens * uniforms.scale_x,

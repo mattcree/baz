@@ -325,7 +325,7 @@ pub(crate) fn foreground(
 /// and is why he named that control as the one to match.
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
     row![
-        chromeless_button(state.chromeless),
+        chromeless_mark(state.chromeless),
         foreground_button(state.foreground),
         mode_button(state.mode),
         facts_button(state.facts),
@@ -350,7 +350,7 @@ pub(crate) fn marks(state: State) -> Element<'static, Message> {
 /// one is a *window* operation and this one is about what baz draws inside the
 /// window. Both at once is the reading the ask is really after, and neither
 /// needs to know about the other.
-fn chromeless_button(on: bool) -> Element<'static, Message> {
+pub(crate) fn chromeless_mark(on: bool) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(crate::icon::inked(

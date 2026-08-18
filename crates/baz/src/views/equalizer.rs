@@ -107,18 +107,11 @@ pub(crate) fn layer(
         // a flat filter — so the sentence is next to the switch and not in a
         // manual.
         row![
-            checkbox(eq.enabled)
-                .label("Shape the sound")
-                .size(theme::STEPPER_HIT)
-                .text_size(theme::SIZE_META)
-                .text_line_height(theme::LEADING_META)
-                .spacing(theme::GAP_SM)
-                .style(move |_theme, status| theme::check(room, status))
-                .on_toggle(Message::EqualizerEnabled),
+            switch("EQ enabled", eq.enabled, Message::EqualizerEnabled, room),
+            switch("Auto gain", eq.auto_gain, Message::EqualizerAutoGain, room),
             Space::new().width(Length::Fill),
             presets(eq.bands_centidb, saved, room),
             keeping(eq.bands_centidb, saved),
-            word("Make room", Message::EqualizerSuggestPreamp),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
@@ -329,16 +322,42 @@ fn naming_row(naming: Option<&str>, room: &'static theme::Palette) -> Element<'s
     .into()
 }
 
-/// **The headroom control is named for what it does** — see [`sentence`].
+/// One labelled checkbox, the panel's own anatomy for a standing decision.
+fn switch(
+    label: &'static str,
+    on: bool,
+    message: impl Fn(bool) -> Message + 'static,
+    room: &'static theme::Palette,
+) -> Element<'static, Message> {
+    checkbox(on)
+        .label(label)
+        .size(theme::STEPPER_HIT)
+        .text_size(theme::SIZE_META)
+        .text_line_height(theme::LEADING_META)
+        .spacing(theme::GAP_SM)
+        .style(move |_theme, status| theme::check(room, status))
+        .on_toggle(message)
+        .into()
+}
+
+/// **The headroom control, twice renamed and finally reshaped.**
 ///
-/// The owner: *"what does the suggest a pre-amp mean — a bit obscure?"* It
-/// was, and the label was the whole problem. *Suggest a pre-amp* names the
-/// **mechanism** (there is a pre-amp; here is a suggested value for it) and
-/// says nothing about the **situation** (you are boosting; a boost has to come
-/// from somewhere; this takes it from the whole signal so nothing clips).
+/// It shipped as `Suggest a pre-amp`, which named the machinery: there is a
+/// pre-amp, here is a value for it. The owner asked what that meant, so it
+/// became `Make room`, which named the situation. He was still right the
+/// second time, about something bigger: *"make it 'auto gain' as a
+/// checkbox."*
 ///
-/// `Make room` names the situation, and the line under the row says which room
-/// and how much, with the numbers in it.
+/// The **shape** was wrong, not just the words. Pressing something once to
+/// fix headroom you are about to change again by dragging the next band is a
+/// chore, not a control — and a listener who pressed it, then boosted one
+/// more band, was quietly back where they started with no sign of it. As a
+/// standing mode it simply holds: the pre-amp follows the curve, on every
+/// frame of every drag.
+///
+/// Taking hold of the pre-amp fader turns it off, which is the honest way to
+/// resolve a control the listener and the mode both want — the mode yields,
+/// visibly, and the checkbox unticks where they can see it.
 ///
 /// **What is true right now**, in one line under the controls.
 ///
@@ -358,16 +377,31 @@ fn sentence(eq: EqualizerSettings) -> String {
             .to_owned();
     }
     let bands = baz_core::equalizer::Bands::from_centidb(eq.bands_centidb);
-    let wanted = bands.suggested_preamp();
-    let preamp = f32::from(eq.preamp_centidb) / 100.0;
     // `suggested_preamp` answers zero or a negative number of decibels: the
     // amount the whole signal has to come down by so the largest boost fits.
+    let wanted = bands.suggested_preamp();
+    let preamp = f32::from(eq.preamp_centidb) / 100.0;
+
+    if eq.auto_gain {
+        if wanted < 0.0 {
+            let room = -wanted;
+            return format!(
+                "Auto gain is holding {room:.0} dB back so the boost has \
+                 somewhere to go. Turn it off to set the pre-amp yourself."
+            );
+        }
+        return "Shaping the sound. Nothing here is boosted, so auto gain has \
+                nothing to hold back."
+            .to_owned();
+    }
+
     if wanted < 0.0 && preamp > wanted + 0.05 {
         let boost = -wanted;
         return format!(
-            "The biggest lift here is +{boost:.0} dB, and there is nowhere for it \
-             to go — loud parts can distort. Make room turns everything down by \
-             {boost:.0} so it fits."
+            "The biggest lift here is +{boost:.0} dB with only \
+             {:.0} dB held back — loud parts can distort. Auto gain would hold \
+             back {boost:.0}.",
+            -preamp
         );
     }
     "Shaping the sound. Turn this off and baz plays the file untouched — the \
@@ -502,18 +536,17 @@ mod tests {
         #[expect(clippy::cast_precision_loss, reason = "labels are a few dozen chars")]
         let measure = |label: &str| label.chars().count() as f32 * per_char;
 
-        let switch = theme::STEPPER_HIT + theme::GAP_SM + measure("Shape the sound");
+        let box_and = |label: &str| theme::STEPPER_HIT + theme::GAP_SM + measure(label);
         // Both words that can stand in the keeping slot, so neither the wider
         // one nor a future third can overflow unnoticed.
         let keeping = measure("Forget").max(measure("Keep")) + 2.0 * theme::GAP_MD;
-        let headroom = measure("Make room") + 2.0 * theme::GAP_MD;
-        let needed = switch
+        let needed = box_and("EQ enabled")
+            + theme::GAP_SM
+            + box_and("Auto gain")
             + theme::GAP_SM
             + PRESET_W
             + theme::GAP_SM
             + keeping
-            + theme::GAP_SM
-            + headroom
             + 2.0 * theme::GAP_LG;
 
         assert!(
@@ -539,6 +572,66 @@ mod tests {
         assert_eq!(label_of(31.5), "32");
         assert_eq!(label_of(1000.0), "1k");
         assert_eq!(label_of(16000.0), "16k");
+    }
+
+    /// **The sentence says which state the panel is in**, and each of the four
+    /// is different from the others.
+    ///
+    /// The line under the controls is the only place the panel explains
+    /// itself, so a state that reads like another state is the whole readout
+    /// failing quietly.
+    #[test]
+    fn the_line_under_the_controls_tells_the_states_apart() {
+        let boosting = [600, 400, 0, 0, 0, 0, 0, 0, 0, 0];
+        let cutting = [-600, -400, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        let off = sentence(EqualizerSettings {
+            enabled: false,
+            bands_centidb: boosting,
+            preamp_centidb: 0,
+            auto_gain: true,
+        });
+        let held = sentence(EqualizerSettings {
+            enabled: true,
+            bands_centidb: boosting,
+            preamp_centidb: -600,
+            auto_gain: true,
+        });
+        let nothing_to_hold = sentence(EqualizerSettings {
+            enabled: true,
+            bands_centidb: cutting,
+            preamp_centidb: 0,
+            auto_gain: true,
+        });
+        let unguarded = sentence(EqualizerSettings {
+            enabled: true,
+            bands_centidb: boosting,
+            preamp_centidb: 0,
+            auto_gain: false,
+        });
+
+        let all = [&off, &held, &nothing_to_hold, &unguarded];
+        for (at, one) in all.iter().enumerate() {
+            for other in &all[at + 1..] {
+                assert_ne!(one, other, "two of the panel's states read the same");
+            }
+        }
+
+        // Off says what off *means*, which is the promise the feature is
+        // measured against and not merely that a switch is down.
+        assert!(off.contains("untouched") && off.contains("not a flat filter"));
+        // The two that matter name the number, because "some headroom" is not
+        // a fact a listener can act on.
+        assert!(
+            held.contains("6 dB"),
+            "auto gain does not say how much: {held}"
+        );
+        assert!(
+            unguarded.contains("+6 dB"),
+            "the warning does not name the lift: {unguarded}"
+        );
+        // And nothing warns when there is nothing to warn about.
+        assert!(!nothing_to_hold.contains("distort"));
     }
 
     /// Decibels round-trip through the protocol's own units.
