@@ -2848,6 +2848,30 @@ impl App {
                     Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
                 }
             }
+            // **A file dropped on a running baz is music to play.**
+            //
+            // The Setup screen's own drop answers *where is your music*; once
+            // the library is open the question is different, and the answer
+            // every player in the world gives is the queue. It is also the
+            // only answer that cannot lose anything: nothing is scanned,
+            // nothing is written, no root is added, and the run you were
+            // listening to keeps playing with the drop behind it.
+            //
+            // A **folder** is walked for the audio it holds, in path order, so
+            // dropping an album folder queues the album. Anything baz cannot
+            // decode is counted and reported rather than silently ignored —
+            // dropping a folder of FLACs and one PDF should not leave a
+            // listener wondering which track went missing.
+            Message::FileDropped(path) if matches!(self.screen, Screen::Shelf(_)) => {
+                self.queue_dropped(&path)
+            }
+            // The hover marks are the Setup screen's; on the shelf a drop is
+            // taken without ceremony and the queue's own count is the receipt.
+            Message::FileHovered | Message::FileHoverLeft
+                if matches!(self.screen, Screen::Shelf(_)) =>
+            {
+                Task::none()
+            }
             message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
             message if matches!(self.screen, Screen::Blocked(_)) => self.update_blocked(&message),
             message => match &mut self.screen {
@@ -5715,6 +5739,39 @@ impl App {
             return Task::none();
         }
         self.enter_playlist_place(id)
+    }
+
+    /// **Queue what was dropped.**
+    ///
+    /// One `FileDropped` arrives per path, so a multi-file drop is several
+    /// calls and the queue grows in the order the platform delivered them —
+    /// which is the order the file manager showed them.
+    ///
+    /// Paths are taken as they are, not looked up in the library: the engine
+    /// plays paths (ADR-0024 §3's reasoning, from the other direction), so a
+    /// folder that was never scanned plays anyway. What the library *is* used
+    /// for is the metadata: a dropped file baz already knows keeps its title
+    /// and artist, and one it does not is named by its filename rather than by
+    /// nothing.
+    fn queue_dropped(&mut self, path: &Path) -> Task<Message> {
+        let found = crate::drop::audio_under(path);
+        if found.is_empty() {
+            crate::baz_log!("[drop] {path:?} holds nothing baz can play");
+            return Task::none();
+        }
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        let items: Vec<vm::QueueItemVm> = found
+            .iter()
+            .map(|path| vm::dropped_item(&state.library, path))
+            .collect();
+        crate::baz_log!(
+            "[drop] queued {} from {path:?}",
+            crate::drop::phrase(items.len())
+        );
+        self.append_items_to_run(items);
+        Task::none()
     }
 
     /// **Send the equaliser and write it down**, in that order.

@@ -996,6 +996,48 @@ pub enum RunSource {
     Assembled,
 }
 
+/// **A dropped file as a queue row.**
+///
+/// The library is asked first: a file baz has already scanned keeps the title,
+/// artist, record and duration the scan read, so dropping a track from a folder
+/// baz holds is indistinguishable from queueing it from the wall.
+///
+/// A file baz has *never seen* still queues — the engine plays paths, and
+/// refusing a file the listener explicitly dragged in because the cache has no
+/// row for it would invert the cache/source-of-truth order (ADR-0024 §3's
+/// reasoning, arrived at from the other direction). It is named by its file
+/// stem, which is the same fallback a missing playlist entry gets, and it
+/// claims no artist, record or duration rather than guessing at them.
+#[must_use]
+pub fn dropped_item(library: &Library, path: &Path) -> QueueItemVm {
+    if let Some(meta) = library.tracks().find(|meta| meta.path == path) {
+        return QueueItemVm {
+            title: meta.title.clone().unwrap_or_else(|| stem_of(path)),
+            artist: meta.artist.clone(),
+            album: meta.album.clone(),
+            album_artist: AlbumArtist::of(meta).name().map(str::to_owned),
+            duration: meta.duration,
+            path: path.to_path_buf(),
+        };
+    }
+    QueueItemVm {
+        title: stem_of(path),
+        artist: None,
+        album: None,
+        album_artist: None,
+        duration: None,
+        path: path.to_path_buf(),
+    }
+}
+
+/// A path's file stem as a display name, or the whole path when it has none.
+fn stem_of(path: &Path) -> String {
+    path.file_stem().map_or_else(
+        || path.display().to_string(),
+        |stem| stem.to_string_lossy().into_owned(),
+    )
+}
+
 impl QueueVm {
     /// **Playing provenance**: the playlist file's name this run was reified
     /// from, or `None` for a list that came from anywhere else.

@@ -53,6 +53,7 @@ mod contour;
 mod desktop;
 mod diagnostic;
 mod drag;
+mod drop;
 mod facts;
 mod field;
 mod font;
