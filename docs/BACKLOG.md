@@ -978,6 +978,46 @@ Newest first. Each was asked for in conversation and is now in the product.
   publish alone would still have let one process tag another's already-tagged
   file.
 
+- **The format list broadened, 2026-08-18** — the owner: *"ideally we support
+  all common codecs/formats"*, with *"ensure cross-platform support"*, which
+  together decide the method as well as the goal.
+  - **AIFF** (`.aiff`, `.aif`) now scans, tags and plays. **Zero new
+    dependencies**: symphonia 0.5's `aiff` feature is a crate baz already
+    builds and lofty already tags AIFF as `ID3v2`, so nothing about the
+    pure-Rust, no-system-library property changed — which is exactly what the
+    cross-platform requirement is protecting.
+  - **`.oga`** now scans. It is Ogg under its other spelling and was already
+    fully decodable; only the extension was missing.
+  - ~~`.aac`~~ — **added, then removed the same hour, and the removal is the
+    interesting part.** Raw ADTS needs `AdtsReader`, which ADR-0040 §2.5
+    deleted from baz's probe after a fuzz sweep produced 650 crash artifacts
+    that were *all* it. Listing `.aac` would have put it back. The AAC
+    *decoder* is untouched and every AAC inside an MP4 still plays;
+    `aac_is_absent_because_its_demuxer_is_the_one_the_fuzzer_condemned` now
+    fails the build if anyone tries again.
+  - **The new parser was fuzzed before it was trusted**, because registering a
+    reader adds a surface arbitrary bytes reach. Seven minutes seeded with a
+    real AIFF found a panic in symphonia's `TimeBase::new` on a `COMM` chunk
+    declaring a **zero sample rate**. It is contained by ADR-0040 §2 exactly
+    as the MP4 `ftyp` overflow is — §2 is the guard for the parsers baz *does*
+    register, not a claim that none of them panics — and the 38-byte
+    reproducer is pinned in `tests/hostile_media.rs`. Unlike the MP4 one it is
+    an explicit `panic!` rather than an overflow check, so it fires in release
+    builds too.
+  - **`.caf` and `.mka` were considered and left out**: symphonia can read
+    both, but lofty has no `FileType` for either, so they would scan with no
+    tags at all and arrive on the wall as filenames.
+  - **A new test drives real encoded files** rather than asserting over the
+    extension constant (`tests/formats.rs`), because the first version of this
+    work passed while decoding nothing — it skipped for want of an encoder and
+    reported `ok`. It now skips **loudly**, per case.
+- **Opus, re-checked 2026-08-18 and still out.** Symphonia publishes no
+  `symphonia-codec-opus` at all (`cargo info` errors), and the pure-Rust
+  `opus-decoder` is **still 0.1.1** with no release since the entry below was
+  written — so the "too young, no maintenance record" judgement is better
+  supported now, not worse. The libopus route would cost a C library and
+  `cmake` on every platform, which is precisely the cross-platform property
+  the same instruction asked to protect.
 - **Opus is not played, and therefore not listed.** **Closed 2026-08-10 on
   evidence rather than deferred**: the owner's library was scanned for
   `.opus`, `.ogg` and `.oga` across `~/Music` and both NAS shares and holds

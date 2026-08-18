@@ -82,7 +82,9 @@ pub mod inference;
 /// a codec we cannot play (`.ogg` carries Vorbis, FLAC *or* Opus). The second
 /// half of the promise is kept in [`Scan`], which drops files whose actual
 /// codec is not decodable.
-pub const AUDIO_EXTENSIONS: &[&str] = &["flac", "mp3", "ogg", "m4a", "mp4", "wav"];
+pub const AUDIO_EXTENSIONS: &[&str] = &[
+    "flac", "mp3", "ogg", "oga", "m4a", "mp4", "wav", "aiff", "aif",
+];
 
 /// The codec a track's samples are stored in.
 ///
@@ -105,6 +107,12 @@ pub enum AudioFormat {
     Alac,
     /// Linear PCM in a RIFF WAVE container — `.wav`.
     Wav,
+    /// **AIFF** — `.aiff`, `.aif`. Apple's uncompressed PCM container, and the
+    /// commonest thing a Mac library holds that is not already here. Decoded
+    /// by symphonia's RIFF reader and tagged by lofty (`ID3v2`, as WAV is),
+    /// so it costs **no new dependency at all** — the feature was in the
+    /// crate baz already builds and the extension was simply not scanned.
+    Aiff,
     /// MPEG-1/2 Audio Layer III — `.mp3`.
     Mp3,
     /// Advanced Audio Coding — `.m4a` / `.mp4`.
@@ -131,7 +139,7 @@ impl AudioFormat {
     /// file.
     #[must_use]
     pub fn is_lossless(self) -> bool {
-        matches!(self, Self::Flac | Self::Alac | Self::Wav)
+        matches!(self, Self::Flac | Self::Alac | Self::Wav | Self::Aiff)
     }
 
     /// Whether [`crate::playback`] can decode this codec — i.e. whether a
@@ -165,6 +173,7 @@ impl AudioFormat {
             Self::Flac => "flac",
             Self::Alac => "alac",
             Self::Wav => "wav",
+            Self::Aiff => "aiff",
             Self::Mp3 => "mp3",
             Self::Aac => "aac",
             Self::Vorbis => "vorbis",
@@ -182,6 +191,7 @@ impl AudioFormat {
             "flac" => Some(Self::Flac),
             "alac" => Some(Self::Alac),
             "wav" => Some(Self::Wav),
+            "aiff" => Some(Self::Aiff),
             "mp3" => Some(Self::Mp3),
             "aac" => Some(Self::Aac),
             "vorbis" => Some(Self::Vorbis),
@@ -197,6 +207,7 @@ impl AudioFormat {
             Self::Flac => "FLAC",
             Self::Alac => "ALAC",
             Self::Wav => "WAV",
+            Self::Aiff => "AIFF",
             Self::Mp3 => "MP3",
             Self::Aac => "AAC",
             Self::Vorbis => "Vorbis",
@@ -933,6 +944,7 @@ fn detect_format(file: &TaggedFile) -> Option<AudioFormat> {
     match file.file_type() {
         FileType::Flac => Some(AudioFormat::Flac),
         FileType::Wav => Some(AudioFormat::Wav),
+        FileType::Aiff => Some(AudioFormat::Aiff),
         FileType::Mpeg => Some(AudioFormat::Mp3),
         FileType::Aac => Some(AudioFormat::Aac),
         FileType::Vorbis => Some(AudioFormat::Vorbis),

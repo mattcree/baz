@@ -140,7 +140,9 @@ use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptio
 use symphonia::core::meta::{MetadataOptions, MetadataRevision};
 use symphonia::core::probe::{Hint, Probe};
 use symphonia::core::units::Time;
-use symphonia::default::formats::{FlacReader, IsoMp4Reader, MpaReader, OggReader, WavReader};
+use symphonia::default::formats::{
+    AiffReader, FlacReader, IsoMp4Reader, MpaReader, OggReader, WavReader,
+};
 use symphonia_metadata::id3v2::Id3v2Reader;
 
 use super::downmix::Downmix;
@@ -158,7 +160,11 @@ use crate::replaygain::{ReplayGainReader, ReplayGainTags, field_of_key};
 /// arbitrary bytes can reach, whatever the file is called. ADTS's marker is a
 /// twelve-bit sync word, which random data carries constantly.
 ///
-/// baz has no use for the reader that marker selects. `.aac` is not an
+/// baz has no use for the reader that marker selects, and **`.aac` stayed out
+/// of `AUDIO_EXTENSIONS` on 2026-08-18 for exactly this reason** — it was
+/// added while broadening the format list, and adding it would have meant
+/// registering the one reader a fuzz sweep had already condemned. `.aac` is
+/// not an
 /// [`AUDIO_EXTENSIONS`](crate::library::AUDIO_EXTENSIONS) member, so no raw
 /// ADTS stream is ever *listed*, so none is ever played; every AAC baz decodes
 /// arrives inside an MP4, through `IsoMp4Reader` and the AAC **decoder**,
@@ -183,6 +189,14 @@ use crate::replaygain::{ReplayGainReader, ReplayGainTags, field_of_key};
 /// `.m4a` used to play and now does not. It was never listed by the scanner,
 /// so reaching it meant opening it by another route.
 ///
+/// **`AiffReader` was added on 2026-08-18** with `.aiff`/`.aif`, and it is
+/// worth saying why it is welcome where `AdtsReader` is not — the rule above
+/// is about *markers*, not about formats. ADTS is selected by a twelve-bit
+/// sync word, which random bytes carry constantly; AIFF is selected by the
+/// eight-byte `FORM....AIFF` header, which they do not. A reader is a parser
+/// arbitrary bytes can reach, and how *specifically* it is chosen is the whole
+/// of how often they reach it.
+///
 /// `Id3v2Reader` is registered because the default registry registers it and
 /// baz depends on it — ReplayGain tags on an MP3 live in the ID3v2 block, and
 /// `absorb_replay_gain` reads them off this probe's `metadata`.
@@ -195,6 +209,7 @@ fn probe() -> &'static Probe {
         probe.register_all::<IsoMp4Reader>();
         probe.register_all::<OggReader>();
         probe.register_all::<WavReader>();
+        probe.register_all::<AiffReader>();
         probe.register_all::<Id3v2Reader>();
         probe
     })

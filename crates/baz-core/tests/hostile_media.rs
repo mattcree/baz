@@ -137,6 +137,25 @@ const MP4_FTYP_LENGTH_OVERFLOW: &[u8] = &[
     0x00, 0xf2, 0x00, 0x66, 0x74, 0x79, 0x70, 0xfb, 0xfb, 0x25, 0xf7,
 ];
 
+/// 38 bytes of AIFF whose `COMM` chunk declares a **zero sample rate**, which
+/// symphonia hands to `TimeBase::new`: `symphonia-core/src/units.rs:150`,
+/// `TimeBase cannot have 0 numerator or denominator`.
+///
+/// **Found by fuzzing `AiffReader` on the day it was registered**
+/// (2026-08-18), which is the reason it was fuzzed: adding a parser to
+/// `playback::source`'s probe adds a surface arbitrary bytes can reach, and
+/// ADR-0040 §2 is the guard for the parsers baz *does* register rather than a
+/// claim that none of them panics. A seven-minute sweep seeded with a real
+/// AIFF found this one; it is contained exactly as the MP4 overflow above is.
+///
+/// It is an explicit `panic!` rather than an overflow check, so unlike
+/// `MP4_FTYP_LENGTH_OVERFLOW` it fires in **release** builds too.
+const AIFF_COMM_ZERO_SAMPLE_RATE: &[u8] = &[
+    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x02, 0xb1, 0x3e, 0x41, 0x49, 0x46, 0x46, 0x43, 0x4f, 0x4d, 0x4d,
+    0x00, 0x00, 0x00, 0x12, 0x00, 0x02, 0x00, 0x00, 0xac, 0x44, 0x00, 0x10, 0xb9, 0x0e, 0xac, 0x44,
+    0x00, 0x00, 0x00, 0x5b, 0x2d, 0xf1,
+];
+
 /// Every input above, with the name a failure should report.
 fn every_hostile_input() -> Vec<(&'static str, &'static [u8])> {
     vec![
@@ -150,6 +169,7 @@ fn every_hostile_input() -> Vec<(&'static str, &'static [u8])> {
         ("adts, length behind position", ADTS_LENGTH_BEHIND_POSITION),
         ("aac, band index past the end", AAC_BAND_INDEX_PAST_END),
         ("mp4 ftyp, length overflow", MP4_FTYP_LENGTH_OVERFLOW),
+        ("aiff comm, zero sample rate", AIFF_COMM_ZERO_SAMPLE_RATE),
     ]
 }
 
