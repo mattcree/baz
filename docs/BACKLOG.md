@@ -1990,8 +1990,29 @@ The second half is a real, small piece of work and a real design question:
   engine's three-second threshold, otherwise steps back, and restarts at the
   head, matching the resident transport and media key.
 - **No MPRIS `TrackList` or `Playlists` interface** (`HasTrackList` is
-  `false`), and no `LoopStatus`/`Shuffle` — baz has neither loop nor shuffle
-  yet, so they are absent rather than present-and-fixed.
+  `false`). These let *another* application read and manipulate baz's queue
+  from outside; almost nothing consumes them, and the owner's answer on
+  2026-08-18 was to skip them.
+  - ~~**and no `LoopStatus`/`Shuffle` — baz has neither loop nor shuffle
+    yet**~~ — **that reason expired, and the gap was real.** Shuffle shipped
+    2026-08-10 and repeat-the-list on 2026-08-15, and this entry went on
+    explaining their absence, so a desktop's shuffle switch and
+    `playerctl shuffle on` did nothing to a player that had the feature.
+    **Both published and writable since 2026-08-18.** `LoopStatus`' three
+    strings map onto baz's three states exactly — `None`, `Track`,
+    `Playlist` — with the format and parse kept as one pair so a client's
+    read-modify-write cannot drift, and an unrecognised string **refused
+    rather than rounded** to `None`. Writing them needed *stated values*
+    rather than the toggle and the cycle the controls send: a property write
+    of `true` to something already `true` must leave it true, so
+    `App::set_shuffle` and `set_repeat` are now the one path and the controls
+    are written in terms of them. Read back over a private D-Bus session
+    against the real binary; the writes answer `NotSupported` on a machine
+    with no sound card, which is the honest reply and the same one `Volume`
+    gives.
+
+    **Linux only, inherently** — MPRIS is the freedesktop protocol. The
+    Windows and macOS equivalents are the separate entry below.
 - **`Rate` is read-only `1.0`**, with `MinimumRate` and `MaximumRate` pinned
   to it. baz plays at the source rate (ADR-0009) and has no rate control; a
   writable property that silently discarded writes would be worse than an

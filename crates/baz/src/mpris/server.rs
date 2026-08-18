@@ -426,6 +426,70 @@ impl Player {
         1.0
     }
 
+    /// **Whether the run is walked in a drawn order.**
+    ///
+    /// Present since 2026-08-18. It was absent for a stated reason — *"baz has
+    /// neither loop nor shuffle yet"* — and that reason expired when both
+    /// shipped, leaving a desktop's shuffle switch and `playerctl shuffle on`
+    /// doing nothing to a player that had the feature.
+    #[zbus(property)]
+    fn shuffle(&self) -> bool {
+        self.snapshot.shuffle
+    }
+
+    /// Set it. A **property**, so this states a value; the crossed-arrows
+    /// control states the other one. Both land on `App::set_shuffle`, which is
+    /// what stops a client writing `true` to something already true from
+    /// turning it off.
+    ///
+    /// Nothing about the reported state moves here — the request goes to the
+    /// engine and the property changes when the front end publishes again,
+    /// which is the honesty rule the volume setter follows.
+    #[zbus(property)]
+    fn set_shuffle(&self, shuffle: bool) -> zbus::Result<()> {
+        if !self.snapshot.can_control {
+            return Err(fdo::Error::NotSupported("baz has no engine to shuffle".to_owned()).into());
+        }
+        self.ask(Request::SetShuffle(shuffle));
+        Ok(())
+    }
+
+    /// **What happens when the run reaches its end.**
+    ///
+    /// The spec's three strings map onto baz's three states exactly, so
+    /// nothing is approximated: `None` ends the run, `Track` repeats the
+    /// completed track, `Playlist` re-walks the traversal — which for a
+    /// shuffled run is the order it drew rather than a fresh draw, because
+    /// that order *is* the run.
+    #[zbus(property)]
+    fn loop_status(&self) -> String {
+        state::loop_status_of(self.snapshot.repeat).to_owned()
+    }
+
+    /// Set it, by the same mapping.
+    ///
+    /// An unknown string is **refused rather than rounded** to the nearest
+    /// state: the spec enumerates exactly three, and quietly treating a fourth
+    /// as `None` would turn a client's bug into a silent change of the
+    /// listener's playback.
+    #[zbus(property)]
+    fn set_loop_status(&self, status: &str) -> zbus::Result<()> {
+        if !self.snapshot.can_control {
+            return Err(fdo::Error::NotSupported(
+                "baz has no engine to set a loop mode on".to_owned(),
+            )
+            .into());
+        }
+        let Some(repeat) = state::repeat_of(status) else {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "LoopStatus is None, Track or Playlist; not {status:?}"
+            ))
+            .into());
+        };
+        self.ask(Request::SetRepeat(repeat));
+        Ok(())
+    }
+
     /// The fader's level as a linear amplitude, `0.0..=1.0` — mapped through
     /// `baz-core`'s taper, and `0.0` while muted (see [`crate::mpris`]).
     #[zbus(property)]

@@ -989,6 +989,12 @@ pub(crate) enum Message {
     /// sounding track plays to its end and what follows is re-planned
     /// (`baz_core::traversal`). See [`App::toggle_shuffle`].
     ToggleShuffle,
+    /// **Shuffle set to a value**, from MPRIS's `Shuffle` property. The
+    /// toggle above is the control's spelling; this is the protocol's, and
+    /// they resolve to one function ([`App::set_shuffle`]).
+    SetShuffle(bool),
+    /// **Repeat set to a value**, from MPRIS's `LoopStatus` property.
+    SetRepeat(baz_core::protocol::Repeat),
     /// Turn Repeat current track on or off.
     CycleRepeat,
     /// The record's page: a different format of this album was picked.
@@ -2622,6 +2628,17 @@ impl App {
             }
             Message::ToggleShuffle => {
                 self.toggle_shuffle();
+                Task::none()
+            }
+            // **The property spellings**, which only MPRIS sends: a desktop's
+            // shuffle switch and its repeat menu state a value rather than
+            // asking for the next one.
+            Message::SetShuffle(on) => {
+                self.set_shuffle(on);
+                Task::none()
+            }
+            Message::SetRepeat(repeat) => {
+                self.set_repeat(repeat);
                 Task::none()
             }
             Message::SleepTimerSet(minutes) => {
@@ -6527,7 +6544,20 @@ impl App {
     /// is the whole of what there is to do: the mode is about what plays
     /// **next**.
     fn toggle_shuffle(&mut self) {
-        let on = !self.player.shuffle();
+        self.set_shuffle(!self.player.shuffle());
+    }
+
+    /// **Shuffle at a stated value**, which a toggle cannot express.
+    ///
+    /// MPRIS's `Shuffle` is a *property*: a client writes `true`, and writing
+    /// `true` to something already true must leave it true. Routing that
+    /// through [`Self::toggle_shuffle`] would turn it off — the classic bug of
+    /// serving a property with a verb — so the toggle is now written in terms
+    /// of this rather than the other way round.
+    fn set_shuffle(&mut self, on: bool) {
+        if self.player.shuffle() == on {
+            return;
+        }
         let traversal = traversal(on);
         if !self.playback.send(Command::SetTraversal { traversal }) {
             self.player.engine_closed();
@@ -6602,11 +6632,19 @@ impl App {
 
     fn cycle_repeat(&mut self) {
         use baz_core::protocol::Repeat;
-        let repeat = match self.player.repeat() {
+        self.set_repeat(match self.player.repeat() {
             Repeat::Off => Repeat::All,
             Repeat::All => Repeat::One,
             Repeat::One => Repeat::Off,
-        };
+        });
+    }
+
+    /// **Repeat at a stated value** — [`Self::set_shuffle`]'s reason, for
+    /// MPRIS's `LoopStatus`, which is likewise a property and not a cycle.
+    fn set_repeat(&mut self, repeat: baz_core::protocol::Repeat) {
+        if self.player.repeat() == repeat {
+            return;
+        }
         if !self.playback.send(Command::SetRepeat { repeat }) {
             self.player.engine_closed();
             return;
@@ -10669,6 +10707,8 @@ fn message_for(request: mpris::Request) -> Message {
         mpris::Request::SeekTo(position_ms) => Message::SeekTo(position_ms),
         mpris::Request::SetVolume(position) => Message::SetVolume(position),
         mpris::Request::SetMute(muted) => Message::SetMute(muted),
+        mpris::Request::SetShuffle(on) => Message::SetShuffle(on),
+        mpris::Request::SetRepeat(repeat) => Message::SetRepeat(repeat),
         mpris::Request::Raise => Message::Raise,
         mpris::Request::Quit => Message::Quit,
     }
@@ -12292,13 +12332,26 @@ mod tests {
         // **Turning it off never stops the music, and never touches the run.**
         // `SetTraversal` lets the sounding track play out and re-plans what
         // follows; a queue command here would be the old design returning.
-        let toggle = body("toggle_shuffle");
+        //
+        // Read from `set_shuffle` rather than `toggle_shuffle` since
+        // 2026-08-18: MPRIS's `Shuffle` is a property and needed a stated
+        // value, so the toggle is now written in terms of the setter and the
+        // setter is where the rule lives. The toggle is asserted to be exactly
+        // that delegation below, so there is still only one path.
+        let toggle = body("set_shuffle");
         assert!(toggle.contains("Command::SetTraversal"));
         assert!(
             !toggle.contains("Command::SetQueue")
                 && !toggle.contains("Command::UpdateQueue")
                 && !toggle.contains("Command::Play"),
             "the toggle touched the queue instead of the walk"
+        );
+        // …and the toggle is nothing but the setter, so a press and a protocol
+        // write cannot drift apart.
+        let delegate = body("toggle_shuffle");
+        assert!(
+            delegate.contains("self.set_shuffle(!self.player.shuffle())"),
+            "the toggle grew a second path to shuffle"
         );
         assert!(
             toggle.contains("persist_shuffle"),

@@ -237,6 +237,13 @@ pub(crate) enum Request {
     /// Unmute, because a `Volume` write above zero arrived while muted (see
     /// the module docs). Never sent to mute — MPRIS has no way to ask.
     SetMute(bool),
+    /// **`Shuffle`**, written as a property — a stated value, never a toggle
+    /// (see `App::set_shuffle` for why the distinction is load-bearing).
+    SetShuffle(bool),
+    /// **`LoopStatus`**, written as a property. The spec's three strings map
+    /// onto baz's own three states exactly: `None` is off, `Track` repeats the
+    /// completed track, and `Playlist` re-walks the run's traversal.
+    SetRepeat(baz_core::protocol::Repeat),
     /// `Raise` — bring the window forward. Best effort: a Wayland compositor
     /// may decline, which is its right.
     Raise,

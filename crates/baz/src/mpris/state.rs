@@ -49,6 +49,7 @@ use std::path::Path;
 use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::player::{Phase, PlayerState};
+use baz_core::protocol::Repeat;
 
 /// Prefix for our per-track object paths; the track sequence number
 /// ([`PlayerState::track_seq`]) is appended.
@@ -147,6 +148,10 @@ pub(crate) struct Snapshot {
     /// Whether output is muted — separate engine state, folded into the
     /// reported `Volume` by [`Snapshot::volume`].
     pub(crate) muted: bool,
+    /// **`Shuffle`** — whether the run is walked in a drawn order.
+    pub(crate) shuffle: bool,
+    /// **`LoopStatus`**, as baz's own three-state repeat.
+    pub(crate) repeat: Repeat,
     /// `CanGoNext`.
     pub(crate) can_go_next: bool,
     /// `CanGoPrevious`.
@@ -168,6 +173,34 @@ pub(crate) struct Snapshot {
     pub(crate) can_control: bool,
 }
 
+/// **`LoopStatus`'s three strings, in one place with their inverse.**
+///
+/// The spec enumerates exactly `None`, `Track` and `Playlist`, and baz's own
+/// three states map onto them one to one. The pair lives here rather than
+/// inline in the D-Bus impl so the spelling that is *published* and the
+/// spelling that is *accepted* cannot drift — a getter and a setter that
+/// disagreed would make a client's read-modify-write silently change the
+/// listener's playback.
+pub(crate) const fn loop_status_of(repeat: Repeat) -> &'static str {
+    match repeat {
+        Repeat::Off => "None",
+        Repeat::One => "Track",
+        Repeat::All => "Playlist",
+    }
+}
+
+/// The inverse. `None` for anything the spec does not name — **refused rather
+/// than rounded**, because quietly treating a fourth string as `None` would
+/// turn a client's bug into a change of what the listener hears.
+pub(crate) fn repeat_of(status: &str) -> Option<Repeat> {
+    match status {
+        "None" => Some(Repeat::Off),
+        "Track" => Some(Repeat::One),
+        "Playlist" => Some(Repeat::All),
+        _ => None,
+    }
+}
+
 impl Default for Snapshot {
     /// Everything absent or refused, except the volume — which defaults to
     /// unity because that is what a freshly spawned engine is at (ADR-0011),
@@ -180,6 +213,10 @@ impl Default for Snapshot {
             position_us: 0,
             volume_position: MAX_POSITION,
             muted: false,
+            // Both off, which is what a freshly spawned engine is at and what
+            // the config seeds before the first publish.
+            shuffle: false,
+            repeat: Repeat::Off,
             can_go_next: false,
             can_go_previous: false,
             can_play: false,
@@ -234,6 +271,8 @@ impl Snapshot {
             position_us: ms_to_us(player.elapsed_ms()),
             volume_position: player.volume().position(),
             muted: player.muted(),
+            shuffle: player.shuffle(),
+            repeat: player.repeat(),
             can_go_next: player.next_enabled(),
             can_go_previous: player.previous_enabled(),
             can_play: player.play_pause_enabled(),
@@ -357,6 +396,31 @@ pub(crate) fn file_url(path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **`LoopStatus` round-trips, and refuses everything else.**
+    ///
+    /// The getter and the setter are one pair so a client's read-modify-write
+    /// cannot change what the listener hears by accident, and an unrecognised
+    /// string is refused rather than rounded to `None` — which would turn a
+    /// client's bug into silence at the end of the run.
+    #[test]
+    fn the_loop_status_strings_round_trip_and_nothing_else_is_accepted() {
+        for repeat in [Repeat::Off, Repeat::One, Repeat::All] {
+            assert_eq!(repeat_of(loop_status_of(repeat)), Some(repeat));
+        }
+        // The exact spellings the spec names, so a rename cannot pass.
+        assert_eq!(loop_status_of(Repeat::Off), "None");
+        assert_eq!(loop_status_of(Repeat::One), "Track");
+        assert_eq!(loop_status_of(Repeat::All), "Playlist");
+        for refused in ["none", "track", "PLAYLIST", "All", "", "Loop"] {
+            assert_eq!(
+                repeat_of(refused),
+                None,
+                "{refused:?} was accepted as a loop status"
+            );
+        }
+    }
+
     use std::path::PathBuf;
     use std::time::Duration;
 
