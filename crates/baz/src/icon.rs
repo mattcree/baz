@@ -825,42 +825,68 @@ const LANE_COLLAPSED: &[Outline] = &[
 /// the pair read as a pair.
 /// **The equaliser mark**: three rails, three handles, no two at the same
 /// height — see [`Glyph::Equalizer`] for why they disagree.
+///
+/// # Drawn at the cluster's weight, not at a hairline
+///
+/// The first drawing had 0.05 rails and 0.11 handles, which laid **0.179** of
+/// the box in ink against [`GEAR`]'s 0.324 one seam away and [`BELL`]'s 0.342
+/// on the other side — a little over half the mass of both its neighbours.
+///
+/// That is the identical fault the owner named twice about the bell (*"the
+/// bell icon is a little bit narrow/skinny"*, then *"still weirdly skinny"*),
+/// arriving on a brand-new mark the same week the bell's was fixed. What that
+/// says is that the lesson was never written down anywhere a *new* glyph would
+/// meet it: both bell fixes were bell-shaped, one measuring the widest
+/// scanline and the next the median run, and neither said anything about the
+/// mark that had not been drawn yet.
+///
+/// So the rails are 0.10 and the handles 0.26 × 0.21, which puts it at about
+/// 0.31 — inside its neighbours' range — and
+/// `a_mark_in_the_app_bar_carries_its_neighbours_weight` now holds the whole
+/// cluster to that rather than one glyph at a time.
+///
+/// The handles stay narrower than the 0.28 rail pitch so two of them at the
+/// same height could never fuse into a bar.
 const EQUALIZER: &[Outline] = &[
+    // First rail and its handle, high.
     &[
-        (0.195, 0.145),
-        (0.245, 0.145),
-        (0.245, 0.855),
-        (0.195, 0.855),
+        (0.170, 0.145),
+        (0.270, 0.145),
+        (0.270, 0.855),
+        (0.170, 0.855),
     ],
     &[
-        (0.085, 0.285),
-        (0.355, 0.285),
-        (0.355, 0.395),
-        (0.085, 0.395),
+        (0.090, 0.235),
+        (0.350, 0.235),
+        (0.350, 0.445),
+        (0.090, 0.445),
+    ],
+    // Second rail, low.
+    &[
+        (0.450, 0.145),
+        (0.550, 0.145),
+        (0.550, 0.855),
+        (0.450, 0.855),
     ],
     &[
-        (0.475, 0.145),
-        (0.525, 0.145),
-        (0.525, 0.855),
-        (0.475, 0.855),
+        (0.370, 0.515),
+        (0.630, 0.515),
+        (0.630, 0.725),
+        (0.370, 0.725),
+    ],
+    // Third rail, between them — so no two agree and the mark reads as a
+    // curve being set rather than as three of anything.
+    &[
+        (0.730, 0.145),
+        (0.830, 0.145),
+        (0.830, 0.855),
+        (0.730, 0.855),
     ],
     &[
-        (0.365, 0.565),
-        (0.635, 0.565),
-        (0.635, 0.675),
-        (0.365, 0.675),
-    ],
-    &[
-        (0.755, 0.145),
-        (0.805, 0.145),
-        (0.805, 0.855),
-        (0.755, 0.855),
-    ],
-    &[
-        (0.645, 0.405),
-        (0.915, 0.405),
-        (0.915, 0.515),
-        (0.645, 0.515),
+        (0.650, 0.355),
+        (0.910, 0.355),
+        (0.910, 0.565),
+        (0.650, 0.565),
     ],
 ];
 
@@ -1987,6 +2013,80 @@ fn encloses(outline: Outline, x: f32, y: f32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// **A mark in the app bar carries its neighbours' weight.**
+    ///
+    /// The owner, about the bell, twice: *"the bell icon is a little bit
+    /// narrow/skinny"*, then *"the bell icon is still weirdly skinny."* Both
+    /// fixes were bell-shaped — the first widened it and measured the widest
+    /// scanline, the second widened its dome and measured the median run —
+    /// and neither said anything to a glyph that had not been drawn yet. So
+    /// the third mark to arrive underweight was
+    /// [`Glyph::Equalizer`](super::Glyph::Equalizer), laying **0.179** of its
+    /// box in ink beside a gear at 0.324, on the day it was added.
+    ///
+    /// A glyph is read by its **mass**, which is neither of the two things
+    /// those fixes measured: a wide outline can be a hairline and a tall one
+    /// can be a spike. So this measures the ink, and it measures every mark in
+    /// the cluster rather than one at a time — which is the form that catches
+    /// the *next* one.
+    ///
+    /// The band is deliberately generous. `HOME` and `NOW_PLAYING` are solid
+    /// silhouettes and run heavy; `OPEN` and the history arrows are strokes
+    /// by [`Glyph`](super::Glyph)'s own open-angle rule and run light. What is
+    /// being ruled out is not variety, it is a mark that reads as a different
+    /// weight of ink from the ones it stands beside.
+    #[test]
+    fn a_mark_in_the_app_bar_carries_its_neighbours_weight() {
+        /// Fraction of the box a glyph fills, alpha-weighted so an antialiased
+        /// edge counts for what it actually shows.
+        fn ink(glyph: Glyph) -> f32 {
+            let pixels = rasterize(glyph, [255, 255, 255]);
+            let laid: u64 = pixels.chunks_exact(4).map(|p| u64::from(p[3])).sum();
+            let box_full = u64::from(RASTER_PX) * u64::from(RASTER_PX) * 255;
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a fraction of a raster; f32 has decades of headroom here"
+            )]
+            {
+                laid as f32 / box_full as f32
+            }
+        }
+
+        // The app bar's right cluster, in the order it is drawn.
+        let cluster = [Glyph::Equalizer, Glyph::Bell, Glyph::Gear];
+        let weights: Vec<(Glyph, f32)> = cluster.map(|glyph| (glyph, ink(glyph))).into();
+
+        let lightest = weights
+            .iter()
+            .copied()
+            .fold(f32::MAX, |seen, (_, weight)| seen.min(weight));
+        let heaviest = weights
+            .iter()
+            .copied()
+            .fold(0.0_f32, |seen, (_, weight)| seen.max(weight));
+
+        // Under two thirds of the heaviest is the reading the owner has twice
+        // called skinny; the bell was at 0.53 of the gear when he said it the
+        // second time, and the equaliser at 0.55 when it was added.
+        assert!(
+            lightest / heaviest > 0.75,
+            "the app bar's marks run {lightest:.3}–{heaviest:.3} of their box \
+             in ink: {weights:?}. The lightest is {:.0}% of the heaviest, and \
+             a mark at that fraction of its neighbour reads as skinny however \
+             wide its outline is.",
+            100.0 * lightest / heaviest
+        );
+
+        // And none of them is a hairline in absolute terms — a mark can be
+        // consistent with a cluster that is uniformly too light.
+        for (glyph, weight) in &weights {
+            assert!(
+                *weight > 0.20,
+                "{glyph:?} lays {weight:.3} of its box in ink, which is a \
+                 hairline at ICON_PX 20 whatever its neighbours do"
+            );
+        }
+    }
 
     /// **The sheet holds every glyph the product draws.**
     ///
