@@ -209,9 +209,13 @@ pub(crate) fn view(
     // bell and the gear read as two marks adrift beside three tight window
     // buttons: the owner's *"the top bar has weird spacing as well for
     // icons/controls"*.
-    let application = row![crate::views::status::bell(health), gear(ink)]
-        .spacing(theme::CONTROL_CLUSTER_GAP)
-        .align_y(iced::Alignment::Center);
+    let application = row![
+        equalizer(ink),
+        crate::views::status::bell(health),
+        gear(ink)
+    ]
+    .spacing(theme::CONTROL_CLUSTER_GAP)
+    .align_y(iced::Alignment::Center);
     let furniture = row![marks(density, visualization), application]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
@@ -448,6 +452,30 @@ fn marks(
         .width(Length::Fixed(theme::APP_BAR_MARKS_W))
         .align_x(alignment::Horizontal::Right)
         .into()
+}
+
+/// **The equaliser's door** — the owner, 2026-08-18: *"this is not something
+/// that should be buried in the settings. It should be accessible potentially
+/// from anywhere maybe on the top bar."*
+///
+/// It stands in the application cluster with the bell and the gear, because
+/// what it opens is a property of the *player* rather than of the place you
+/// are in — the same argument that moved the gear here, applied to a control
+/// that had been three scrolls into a settings section.
+///
+/// **No word beside it, and no lit state.** The mark is three faders that
+/// disagree, which is what the panel behind it contains; and lighting it while
+/// the equaliser is on would spend the lamp on something that is not playback
+/// truth, which is the one thing the accent is reserved for. The panel's own
+/// switch says whether it is on, in words, where the decision is made.
+fn equalizer(ink: Ink) -> Element<'static, Message> {
+    glyph_button(
+        icon::Glyph::Equalizer,
+        "Equaliser",
+        Message::ToggleEqualizer,
+        Control::Equalizer,
+        ink,
+    )
 }
 
 /// **The gear** — the route to the Settings place, moved off the Library strip

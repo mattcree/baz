@@ -429,6 +429,8 @@ pub enum Control {
     Shuffle,
     /// The bottom bar's Repeat current track property.
     RepeatOne,
+    /// The app bar's equaliser door.
+    Equalizer,
     /// The app bar's minimise button (ADR-0040 §3).
     WindowMinimise,
     /// The app bar's maximise/restore button — one control, two states.
@@ -450,13 +452,6 @@ pub enum Control {
     SettingsPreampUp,
     SettingsNoTagPreampDown,
     SettingsNoTagPreampUp,
-    /// The equaliser's own pre-amp.
-    SettingsEqPreampDown,
-    SettingsEqPreampUp,
-    /// **One identity per band mark**, by band index — `Ink` answers *which*
-    /// control the pointer is on, so twenty marks need twenty answers.
-    SettingsBandDown(usize),
-    SettingsBandUp(usize),
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is

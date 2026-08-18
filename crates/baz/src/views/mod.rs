@@ -83,6 +83,7 @@ pub(crate) mod bottom_bar;
 pub(crate) mod compose;
 pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
+pub(crate) mod equalizer;
 pub(crate) mod favourites;
 pub(crate) mod home;
 pub(crate) mod lane;

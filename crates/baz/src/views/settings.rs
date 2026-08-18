@@ -212,7 +212,6 @@ pub(crate) fn view<'a>(
     diagnostic_lines: Vec<String>,
     resources: Option<crate::resource::Reading>,
     sleep: Option<std::time::Duration>,
-    equalizer: crate::app::EqualizerSettings,
     ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -231,7 +230,6 @@ pub(crate) fn view<'a>(
             output_section(output, player),
             replay_gain_section(player, ink),
             sleep_section(sleep),
-            equalizer_section(equalizer, ink),
             shortcuts_section(),
         ],
     };
@@ -481,122 +479,6 @@ fn word_action(label: &'static str, message: Message) -> Element<'static, Messag
 /// Controls the amount of parallel local CLAP inference used by the first
 /// library scan. More sessions trade additional CPU and RAM for a shorter
 /// wait; the setting is persisted and applies to the next scan.
-/// **The sleep timer**: how long until Baz stops on its own.
-///
-/// A parity gap, and the plainest kind — every phone player has one, and it
-/// is the one thing a listener asks for at midnight and cannot improvise
-/// (`docs/design/18-feature-parity.md` §2.3).
-///
-/// It **pauses**, and does not stop, close or quit: pausing is the one ending
-/// that keeps the run, the position and the queue exactly where they were, so
-/// the morning's first press carries on rather than starting over. Nothing is
-/// faded — a fade would be baz changing the volume the listener set.
-/// **The equaliser** — a switch, ten bands and a stated attenuation.
-///
-/// The owner's own terms (2026-08-18): *"EQ should be something that can be
-/// enabled or disabled… without EQ it's just pure passthrough. with EQ it
-/// should be the highest quality possible."* The switch is therefore first and
-/// says what it costs, because turning it on is a decision about the signal
-/// path rather than a preference — `baz_core::equalizer` documents why off
-/// means *not in the path* instead of *at unity*.
-///
-/// **Stepper rows rather than a row of vertical faders**, which is what a
-/// graphic equaliser normally looks like. A fader row would be the fifth
-/// bespoke control in the product and the only one that is pointer-only, and
-/// this place already has an anatomy for *a number a listener nudges* — the
-/// same rows Pre-amp and Workers use, on the same lattice, already answering
-/// hover and already reachable. The picture a fader row draws is the curve,
-/// and the curve is drawn where it belongs: on Now playing, in the field.
-fn equalizer_section(eq: crate::app::EqualizerSettings, ink: Ink) -> Element<'static, Message> {
-    let room = theme::active();
-    let mut section = column![
-        section_heading(
-            "Equaliser",
-            "Off, baz plays the file untouched — the same bytes, not a flat filter.",
-        ),
-        container(
-            checkbox(eq.enabled)
-                .label("Shape the sound")
-                .size(theme::STEPPER_HIT)
-                .text_size(theme::SIZE_META)
-                .text_line_height(theme::LEADING_META)
-                .spacing(theme::GAP_SM)
-                .style(move |_theme, status| theme::check(room, status))
-                .on_toggle(Message::EqualizerEnabled),
-        )
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .align_y(alignment::Vertical::Center),
-    ]
-    .spacing(theme::GAP_SM);
-
-    // The bands are drawn whatever the switch says. A curve that vanished when
-    // the equaliser was switched off would make comparing the two a matter of
-    // memory, and the one thing a listener does with an equaliser is switch it
-    // on and off to hear the difference.
-    for (index, centre) in baz_core::equalizer::CENTRES.into_iter().enumerate() {
-        let db = f32::from(eq.bands_centidb[index]) / 100.0;
-        section = section.push(stepper_row(
-            band_label(centre),
-            format!("{db:+.1} dB"),
-            db > -baz_core::equalizer::LIMIT_DB,
-            db < baz_core::equalizer::LIMIT_DB,
-            Message::EqualizerBand(index, -100),
-            Message::EqualizerBand(index, 100),
-            Control::SettingsBandDown(index),
-            Control::SettingsBandUp(index),
-            ink,
-        ));
-    }
-
-    let preamp = f32::from(eq.preamp_centidb) / 100.0;
-    section = section
-        .push(stepper_row(
-            "Pre-amp",
-            format!("{preamp:+.1} dB"),
-            preamp > -baz_core::equalizer::LIMIT_DB,
-            preamp < baz_core::equalizer::LIMIT_DB,
-            Message::EqualizerPreamp(-100),
-            Message::EqualizerPreamp(100),
-            Control::SettingsEqPreampDown,
-            Control::SettingsEqPreampUp,
-            ink,
-        ))
-        .push(
-            // **Flat is a control, not a preset.** It is the only one baz
-            // ships: a list of named curves — Rock, Jazz, Vocal — is somebody
-            // else's taste sold as a feature, and the honest version of it is
-            // a listener moving ten numbers until their own records sound
-            // right. `Flat` exists because getting *back* from that should be
-            // one press rather than ten.
-            row![
-                word_action("Flat", Message::EqualizerFlat),
-                word_action("Suggest a pre-amp", Message::EqualizerSuggestPreamp),
-            ]
-            .spacing(theme::GAP_SM),
-        )
-        .push(
-            text(
-                "The bands are ±12 dB. A boost can clip a loud master; the pre-amp \
-                 is the room to give it back.",
-            )
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
-        );
-    section.into()
-}
-
-/// A band's own name: hertz under a thousand, kilohertz above it.
-fn band_label(centre: f32) -> String {
-    if centre >= 1000.0 {
-        format!("{:.0} kHz", centre / 1000.0)
-    } else if (centre - centre.round()).abs() < f32::EPSILON {
-        format!("{centre:.0} Hz")
-    } else {
-        format!("{centre:.1} Hz")
-    }
-}
-
 /// **The door to the shortcuts card**, and the reason it exists at all.
 ///
 /// `?` opens the card, and a key that is the *only* way to reach a card about
@@ -622,6 +504,16 @@ fn shortcuts_section() -> Element<'static, Message> {
     .into()
 }
 
+/// **The sleep timer**: how long until Baz stops on its own.
+///
+/// A parity gap, and the plainest kind — every phone player has one, and it
+/// is the one thing a listener asks for at midnight and cannot improvise
+/// (`docs/design/18-feature-parity.md` §2.3).
+///
+/// It **pauses**, and does not stop, close or quit: pausing is the one ending
+/// that keeps the run, the position and the queue exactly where they were, so
+/// the morning's first press carries on rather than starting over. Nothing is
+/// faded — a fade would be baz changing the volume the listener set.
 fn sleep_section(remaining: Option<std::time::Duration>) -> Element<'static, Message> {
     let room = theme::active();
     let mut choices = row![].spacing(theme::GAP_SM);

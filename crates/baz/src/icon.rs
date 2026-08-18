@@ -135,6 +135,15 @@ pub enum Glyph {
     Magnifier,
     /// Settings: the gear, the strip's one icon-only door (doc 10 §3.4).
     Gear,
+    /// **Equaliser**: three vertical faders at three different settings — the
+    /// universal mark for the thing, and self-depicting in the way the two
+    /// lane marks are. What it draws is what the panel behind it contains, so
+    /// the door needs no word beside it.
+    ///
+    /// The handles sit at three *different* heights on purpose. Three level
+    /// handles would read as a bar chart or a signal meter; the whole point of
+    /// a graphic equaliser's icon is that its faders disagree.
+    Equalizer,
     /// Add-to: the transfer slot's mark, on every row that can send a track
     /// toward the picker (doc 10 §3.6).
     Plus,
@@ -814,6 +823,47 @@ const LANE_COLLAPSED: &[Outline] = &[
 /// where it is a figure; in a control slot it was the accidental fourth
 /// vocabulary doc 10 §0.3 names). Sharing the plus's own bar is what makes
 /// the pair read as a pair.
+/// **The equaliser mark**: three rails, three handles, no two at the same
+/// height — see [`Glyph::Equalizer`] for why they disagree.
+const EQUALIZER: &[Outline] = &[
+    &[
+        (0.195, 0.145),
+        (0.245, 0.145),
+        (0.245, 0.855),
+        (0.195, 0.855),
+    ],
+    &[
+        (0.085, 0.285),
+        (0.355, 0.285),
+        (0.355, 0.395),
+        (0.085, 0.395),
+    ],
+    &[
+        (0.475, 0.145),
+        (0.525, 0.145),
+        (0.525, 0.855),
+        (0.475, 0.855),
+    ],
+    &[
+        (0.365, 0.565),
+        (0.635, 0.565),
+        (0.635, 0.675),
+        (0.365, 0.675),
+    ],
+    &[
+        (0.755, 0.145),
+        (0.805, 0.145),
+        (0.805, 0.855),
+        (0.755, 0.855),
+    ],
+    &[
+        (0.645, 0.405),
+        (0.915, 0.405),
+        (0.915, 0.515),
+        (0.645, 0.515),
+    ],
+];
+
 const MINUS: &[Outline] = &[&[
     (0.155, 0.425),
     (0.845, 0.425),
@@ -1406,10 +1456,11 @@ impl Glyph {
         Self::HeartFilled,
         Self::RepeatOne,
         Self::Repeat,
+        Self::Equalizer,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 40;
+    const COUNT: usize = 41;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1427,6 +1478,7 @@ impl Glyph {
             Self::WindowRestore => WINDOW_RESTORE,
             Self::Magnifier => MAGNIFIER,
             Self::Gear => GEAR,
+            Self::Equalizer => EQUALIZER,
             Self::Plus => PLUS,
             Self::Minus => MINUS,
             Self::ArrowUp => ARROW_UP,
@@ -1470,6 +1522,7 @@ impl Glyph {
             Self::Close => 6,
             Self::Magnifier => 7,
             Self::Gear => 8,
+            Self::Equalizer => 40,
             Self::Plus => 9,
             Self::Minus => 10,
             Self::ArrowUp => 11,
@@ -1934,6 +1987,83 @@ fn encloses(outline: Outline, x: f32, y: f32) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// **The sheet holds every glyph the product draws.**
+    ///
+    /// This is the test that was missing on 2026-08-18, and the shape of what
+    /// it missed is worth keeping: a new glyph was given an `index()` arm and
+    /// an outline, and left out of [`Glyph::ALL`]. `COUNT` still said 40, the
+    /// const assertion walked `ALL[0..40]` and found every pairing correct,
+    /// and all 29 icon tests passed — while `handle()` indexed 40 into a
+    /// 40-element sheet and the app **panicked on the first frame that drew
+    /// the mark**.
+    ///
+    /// Nothing in the module could catch that, because every check started
+    /// from `ALL` and the fault was a glyph that was not in it. So this starts
+    /// from the other end: it reads the views, finds every `Glyph::` a view
+    /// actually names, and asks the sheet for it.
+    #[test]
+    fn every_glyph_a_view_draws_is_in_the_sheet() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut drawn: Vec<String> = Vec::new();
+        let mut files = vec![root.clone()];
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                let Ok(entries) = std::fs::read_dir(&path) else {
+                    continue;
+                };
+                files.extend(entries.flatten().map(|entry| entry.path()));
+                continue;
+            }
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            // Shipped code only: this module's own tests name glyphs too.
+            let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+            for (at, _) in code.match_indices("Glyph::") {
+                let rest = &code[at + "Glyph::".len()..];
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                // Variants are CamelCase; `ALL` and `COUNT` are associated
+                // items on the same type and are not marks.
+                let is_variant = name.chars().next().is_some_and(char::is_uppercase)
+                    && name.chars().any(char::is_lowercase);
+                if is_variant && !drawn.contains(&name) {
+                    drawn.push(name);
+                }
+            }
+        }
+        assert!(
+            drawn.len() > 20,
+            "the scan found only {} glyph names, so it is not reading the \
+             views — a test that cannot fail is worse than none",
+            drawn.len()
+        );
+        let held: Vec<String> = Glyph::ALL
+            .iter()
+            .map(|glyph| format!("{glyph:?}"))
+            .collect();
+        for name in &drawn {
+            // `ALL` and `COUNT` are the two lists a new glyph has to join;
+            // this names the one that was forgotten rather than panicking
+            // inside `handle` on the first frame.
+            assert!(
+                held.contains(name),
+                "`Glyph::{name}` is drawn by a view and is not in `Glyph::ALL` \
+                 — add it there and bump `Glyph::COUNT`, or `handle` will \
+                 index past the sheet the moment the mark is drawn"
+            );
+        }
+        // And every glyph in the sheet can actually be asked for.
+        for glyph in Glyph::ALL {
+            let _ = handle(glyph);
+        }
+        assert_eq!(Glyph::ALL.len(), Glyph::COUNT);
+    }
+
     use super::*;
 
     /// Alpha of the pixel at `(column, row)` in a rasterized sprite.

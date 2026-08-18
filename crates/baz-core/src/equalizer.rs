@@ -448,6 +448,70 @@ impl Equalizer {
     }
 }
 
+/// The nominal rate a drawn curve is evaluated at.
+///
+/// A biquad's response depends on the sample rate, and the panel is open
+/// before a file is chosen — often with nothing playing at all. So the picture
+/// is drawn at CD rate rather than at whatever happens to be in the sink. The
+/// difference is confined to the top band: at 44.1 kHz the 16 kHz peak is
+/// close enough to Nyquist to lean slightly, and redrawing the whole panel
+/// when a 48 kHz file starts would move a curve nobody asked to move.
+pub const DRAWING_RATE: u32 = 44_100;
+
+/// **The response across the audible range, sampled log-evenly** — the shape
+/// the cascade actually imposes, ready to draw.
+///
+/// This exists because ten handles are not a curve. Neighbouring bands overlap
+/// — two adjacent +6 dB bands make about +9 dB between them, and no
+/// arrangement of ten separate handles shows that. Sampling the real magnitude
+/// response does, which is the difference between a row of controls and a
+/// picture of what they are doing.
+///
+/// `out` is filled edge to edge: `out[0]` is `from_hz`, the last is `to_hz`,
+/// and everything between is evenly spaced in *log* frequency, because that is
+/// how the ear spaces them and how [`CENTRES`] are spaced. Designing the
+/// sections is done once here rather than per sample — the panel redraws this
+/// on every drag frame.
+pub fn response_curve(bands: Bands, preamp_db: f32, from_hz: f32, to_hz: f32, out: &mut [f32]) {
+    let mut designed = Equalizer::default();
+    designed.set_enabled(true);
+    designed.set_bands(bands);
+    designed.set_preamp_db(preamp_db);
+    designed.ensure_rate(DRAWING_RATE);
+
+    let points = out.len();
+    if points == 0 {
+        return;
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a few hundred sample points; exact in f64 many times over"
+    )]
+    let last = (points.saturating_sub(1)) as f64;
+    let low = f64::from(from_hz).log10();
+    let high = f64::from(to_hz).log10();
+    // One point is a degenerate span; put it at the bottom rather than
+    // dividing by zero.
+    let span = if points > 1 { (high - low) / last } else { 0.0 };
+    for (index, slot) in out.iter_mut().enumerate() {
+        #[expect(clippy::cast_precision_loss, reason = "as above")]
+        let at = index as f64;
+        let hz = 10.0_f64.powf(span.mul_add(at, low));
+        let magnitude: f64 = designed
+            .sections
+            .iter()
+            .map(|section| section.magnitude(hz, f64::from(DRAWING_RATE)))
+            .product();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a decibel for a picture; f32 is the widget's own unit"
+        )]
+        {
+            *slot = (20.0 * (magnitude * designed.preamp).log10()) as f32;
+        }
+    }
+}
+
 #[cfg(test)]
 #[expect(
     clippy::cast_precision_loss,

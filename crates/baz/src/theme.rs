@@ -2706,7 +2706,14 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_H
 ///   which is the wider need.
 ///
 /// The expression takes the wider of those two, rounds it up onto the
-/// 4 px lattice, and names the result: 862 → **864**. `app.rs`'s `min_size`
+/// 4 px lattice, and names the result: 878 → **880**.
+///
+/// **It was 864 until 2026-08-18**, when the app bar gained the equaliser's
+/// door. Half of that door was paid for by [`APP_BAR_MARKS_W`] giving back the
+/// slot it had stopped being able to fill; the other half is here, as sixteen
+/// pixels of minimum window. That is the honest price of a control the owner
+/// asked to be reachable from anywhere, and it is recorded rather than
+/// absorbed. `app.rs`'s `min_size`
 /// reads this, and the app bar's budget test asserts both claims against it
 /// rather than trusting this prose.
 ///
@@ -2872,9 +2879,19 @@ pub fn app_bar_pad() -> Padding {
 }
 
 /// The app bar's reserved slot for the **display options** (logical px) — the
-/// widest tenant is Now Playing's three foreground choices, visualizer choice
-/// and fact-feed toggle: five [`STEPPER_HIT`] marks, **160**. The wall's four
-/// density detents right-align inside the same stable slot.
+/// widest tenant is the wall's four density detents: four [`STEPPER_HIT`]
+/// marks, **128**. Now Playing's marks right-align inside the same stable
+/// slot.
+///
+/// **It was five (160) until 2026-08-18**, sized for Now Playing's three
+/// foreground choices plus the visualizer and the fact feed. The three became
+/// one cycling control that same day (the owner: *"can we make the three album
+/// cover views into a toggle cycle"*), which left this slot holding three
+/// marks and reserving five — and a reservation nothing can fill is width the
+/// bar is spending on nothing. The 32 px it gives back is what the equaliser's
+/// door is paid for with; without it [`APP_BAR_LINE`] would exceed
+/// [`WINDOW_FLOOR_W`] and push the window controls off the trailing edge,
+/// which is the exact failure that budget exists to catch. It caught it.
 ///
 /// Reserved at every width and in **every place**, including the five that
 /// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism
@@ -2884,7 +2901,7 @@ pub fn app_bar_pad() -> Padding {
 /// buttons stand on the same two vertical lines in all eight places. A bar
 /// whose right cluster slid 120 px as you navigated would be the frame moving,
 /// which is the one thing the frame may not do.
-pub const APP_BAR_MARKS_W: f32 = 5.0 * STEPPER_HIT;
+pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
 
 /// The app bar's reserved slot for the **application's mark** (logical px) —
 /// [`SIDEBAR_GLYPH_PX`] **32**, the size the returns lane draws its own
@@ -2967,8 +2984,18 @@ pub const APP_BAR_HISTORY_W: f32 = 2.0 * TRANSPORT_HIT + CONTROL_CLUSTER_GAP;
 /// One constant because [`crate::views::app_bar`] builds them as one nested
 /// row, and a budget that enumerated two of the three was exactly the failure
 /// [`APP_BAR_LINE`] records.
-pub const APP_BAR_FURNITURE_W: f32 =
-    APP_BAR_MARKS_W + GAP_LG + TRANSPORT_HIT + CONTROL_CLUSTER_GAP + TRANSPORT_HIT;
+/// **Three tenants in zone 4 since 2026-08-18**, not two: the equaliser's door
+/// joined the bell and the gear. It is budgeted here rather than discovered on
+/// screen because this constant is what keeps the window controls on the bar —
+/// an unbudgeted mark pushes them off the trailing edge, which is the failure
+/// [`APP_BAR_LINE`] records and this sum exists to prevent.
+pub const APP_BAR_FURNITURE_W: f32 = APP_BAR_MARKS_W
+    + GAP_LG
+    + TRANSPORT_HIT
+    + CONTROL_CLUSTER_GAP
+    + TRANSPORT_HIT
+    + CONTROL_CLUSTER_GAP
+    + TRANSPORT_HIT;
 
 /// **The app bar's one line at its widest** (logical px) — the budget L9
 /// demands this bar state, summed with the fill at nothing: the leading
@@ -9019,7 +9046,14 @@ mod tests {
              trailing edge exactly as they were before 2026-08-14"
         );
         assert!(
-            bar.contains("let application = row![crate::views::status::bell(health), gear(ink)]")
+            // Matched on the three tenants rather than on one formatted line:
+            // `cargo fmt` wraps this row now that it holds three, and a test
+            // that pinned the wrapping would fail on a rustfmt release rather
+            // than on a design change.
+            bar.contains("let application = row![")
+                && bar.contains("equalizer(ink),")
+                && bar.contains("crate::views::status::bell(health),")
+                && bar.contains("gear(ink)")
                 && bar.contains("let furniture = row![marks(density, visualization), application]"),
             "the trailing furniture's tenants changed; `APP_BAR_FURNITURE_W` is \
              what the budget spends on them"
@@ -9030,16 +9064,19 @@ mod tests {
         // narrower than the line says, which is the class of error
         // `APP_BAR_LINE`'s own history records.
         assert!(
-            bar.contains(".spacing(theme::CONTROL_CLUSTER_GAP)\n        .align_y")
-                && bar.contains(".spacing(theme::GAP_LG)\n        .align_y"),
+            // Indentation-insensitive for the wrapped row's reason above: what
+            // is being pinned is which seam each zone spends, not how rustfmt
+            // laid the call out.
+            bar.contains(".spacing(theme::CONTROL_CLUSTER_GAP)")
+                && bar.contains(".spacing(theme::GAP_LG)"),
             "the furniture's two seams are no longer the cluster's and the zone's"
         );
 
-        const { assert!(APP_BAR_MARKS_W == 160.0) }
+        const { assert!(APP_BAR_MARKS_W == 128.0) }
         const { assert!(APP_BAR_BUTTONS_W == 136.0) }
         const { assert!(APP_BAR_HISTORY_W == 88.0) }
-        const { assert!(APP_BAR_FURNITURE_W == 264.0) }
-        const { assert!(APP_BAR_LINE == 854.0) }
+        const { assert!(APP_BAR_FURNITURE_W == 280.0) }
+        const { assert!(APP_BAR_LINE == 870.0) }
         assert!(
             (walked - APP_BAR_LINE).abs() < f32::EPSILON,
             "the drawn line walks to {walked}, the declared budget is {APP_BAR_LINE}"
@@ -9048,6 +9085,11 @@ mod tests {
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
         // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
+        // The slack is stated rather than left implicit, because it is the
+        // figure any future tenant of this bar is argued against — the same
+        // service `TOP_BAR_FLOOR`'s 160 does for the strip below. It is the
+        // lattice's own rounding and stayed at 10 across the equaliser door,
+        // which moved the floor rather than eating the margin.
         const { assert!(FLOOR - APP_BAR_LINE == 10.0) }
         const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 

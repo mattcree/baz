@@ -520,10 +520,17 @@ pub(crate) enum Message {
     /// sent to the engine as one `SetEqualizer`, because the curve and its
     /// pre-amp are one decision (`baz_core::protocol`).
     EqualizerEnabled(bool),
-    /// A band nudged, by index and centidecibels.
-    EqualizerBand(usize, i16),
-    /// The pre-amp nudged, in centidecibels.
-    EqualizerPreamp(i16),
+    /// **A band set to a stated value**, which is what a fader sends: a drag
+    /// reports where the handle *is*, not how far it moved.
+    EqualizerBandSet(usize, i16),
+    /// The pre-amp set to a stated value.
+    EqualizerPreampSet(i16),
+    /// **The gesture ended.** A drag publishes a value every frame and the
+    /// engine takes each one — the sound follows the hand — but the config is
+    /// written once, here, rather than a hundred times down a fader.
+    EqualizerCommitted,
+    /// Open or close the equaliser panel (the app bar's fader mark).
+    ToggleEqualizer,
     /// Every band back to flat. The pre-amp is left alone: it is the
     /// listener's headroom, not part of the curve.
     EqualizerFlat,
@@ -1463,6 +1470,9 @@ struct App {
     /// The equaliser, as the listener has it. The engine holds its own copy;
     /// this is what the controls draw and what is written to the config.
     equalizer: EqualizerSettings,
+    /// Whether the equaliser panel is up. Session state: a panel you opened
+    /// once is not a preference.
+    equalizer_open: bool,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -2087,6 +2097,7 @@ impl App {
             status_open: false,
             shortcuts_open: false,
             equalizer,
+            equalizer_open: false,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
@@ -2309,17 +2320,27 @@ impl App {
                 self.send_equalizer();
                 Task::none()
             }
-            Message::EqualizerBand(index, delta) => {
+            Message::EqualizerBandSet(index, centidb) => {
                 if let Some(band) = self.equalizer.bands_centidb.get_mut(index) {
-                    *band = (*band + delta).clamp(-1200, 1200);
+                    *band = centidb.clamp(-1200, 1200);
                 }
-                self.send_equalizer();
+                // **Sent, not written.** The engine hears every frame of the
+                // drag so the sound follows the hand; the config waits for
+                // the release.
+                self.send_equalizer_only();
                 Task::none()
             }
-            Message::EqualizerPreamp(delta) => {
-                self.equalizer.preamp_centidb =
-                    (self.equalizer.preamp_centidb + delta).clamp(-1200, 1200);
-                self.send_equalizer();
+            Message::EqualizerPreampSet(centidb) => {
+                self.equalizer.preamp_centidb = centidb.clamp(-1200, 1200);
+                self.send_equalizer_only();
+                Task::none()
+            }
+            Message::EqualizerCommitted => {
+                self.persist_equalizer();
+                Task::none()
+            }
+            Message::ToggleEqualizer => {
+                self.equalizer_open = !self.equalizer_open;
                 Task::none()
             }
             Message::EqualizerFlat => {
@@ -5780,14 +5801,24 @@ impl App {
     /// engine re-designs its filters once rather than three times, and a
     /// half-applied curve never reaches a block.
     fn send_equalizer(&mut self) {
+        self.send_equalizer_only();
+        self.persist_equalizer();
+    }
+
+    /// Hand the engine the current settings and nothing else.
+    fn send_equalizer_only(&mut self) {
         if !self.playback.send(Command::SetEqualizer {
             enabled: self.equalizer.enabled,
             bands_centidb: self.equalizer.bands_centidb,
             preamp_centidb: self.equalizer.preamp_centidb,
         }) {
             self.player.engine_closed();
-            return;
         }
+    }
+
+    /// Write the curve down. Separate from the send because a drag is a
+    /// hundred sends and one decision.
+    fn persist_equalizer(&mut self) {
         let settings = self.equalizer;
         persist(|config| {
             config.equalizer_enabled = settings.enabled;
@@ -6092,6 +6123,10 @@ impl App {
         // were trying to get back to.
         if self.shortcuts_open {
             self.shortcuts_open = false;
+            return Task::none();
+        }
+        if self.equalizer_open {
+            self.equalizer_open = false;
             return Task::none();
         }
         // The context menu is the outermost layer wherever it stands — it
@@ -7591,7 +7626,6 @@ impl App {
                     },
                     self.resource_reading,
                     self.sleep_remaining(),
-                    self.equalizer,
                     self.ink(),
                 )
             }
@@ -7801,6 +7835,15 @@ impl App {
             whole,
             if self.shortcuts_open {
                 views::shortcuts::layer(self.window)
+            } else {
+                nothing()
+            },
+        ]
+        .into();
+        let whole: Element<'_, Message> = iced::widget::stack![
+            whole,
+            if self.equalizer_open {
+                views::equalizer::layer(self.equalizer, self.window)
             } else {
                 nothing()
             },
@@ -13250,11 +13293,12 @@ mod tests {
             "a layer is falling back to the unstacked tree again, which resets \
              every widget under it"
         );
-        // Five layers — search, status, the shortcuts card, the context menu,
-        // the drag ghost — and every one of them has a resting form.
+        // Six layers — search, status, the shortcuts card, the equaliser
+        // panel, the context menu, the drag ghost — and every one of them has
+        // a resting form.
         assert_eq!(
             drawn.matches("nothing()").count(),
-            5,
+            6,
             "a floating layer has no empty form, or one has been added without one"
         );
     }
