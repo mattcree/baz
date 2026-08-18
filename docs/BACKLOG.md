@@ -229,7 +229,28 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Product decisions to honour later
 
-- **A long playlist has no filter of its own.**
+- ~~**A long playlist has no filter of its own.**~~ **Answered differently,
+  2026-08-18, on the owner's own reading**: *"playlist filter could simply be
+  the search being updated to show playlists if it doesn't"* — which is a
+  better answer than the one this entry proposed, because it fixes a second
+  gap at the same time. Playlists were deliberately outside the search corpus
+  (ADR-0024 §A2 deferred wall membership, rail sorting and corpus membership
+  together), so a listener with forty lists could not find one by name from
+  anywhere. The chooser has a third section now, under `TRACKS` and `ALBUMS`,
+  matched with `index::search_fold` so `Bells & Whistles` answers *bells and*
+  exactly as a track does.
+
+  **A playlist row is a door and not a play gesture.** It draws one control,
+  `Open`, where an album draws two: a list may point at files the library no
+  longer holds, and what *play this* should do to a partly-missing list is the
+  playlist page's decision — that page can show which entries are missing
+  while it does it. `Enter` opens too, so the keyboard means what the one
+  visible control means. Verified against the owner's real playlist folder:
+  `vibe` finds all eleven.
+
+  The original proposal — a filter box on the playlist page itself — is left
+  below, unbuilt, because it is a different feature: filtering *within* one
+  long list rather than finding a list. Worth having only if he asks.
   [ADR-0036](adr/0036-the-wells-one-meaning.md) decided that the search well
   keeps one meaning — it searches the collection — and refused a well scoped to
   the page you are standing in, because type-anywhere is a promise *about the

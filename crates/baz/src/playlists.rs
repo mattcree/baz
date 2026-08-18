@@ -823,6 +823,19 @@ impl Playlists {
     /// check on read is the whole mechanism; ADR-0024 refuses a watcher), so
     /// a file dropped into the folder appears the next time the panel is
     /// summoned: last writer wins, no prompt.
+    /// **Every list baz holds, by id and name** — the corpus the app-wide
+    /// search matches against (`Shelf::playlist_names`).
+    ///
+    /// The favourites row is included: it is a destination a listener names
+    /// and looks for like any other, and excluding it would make the one list
+    /// everybody has the one list search cannot find.
+    pub(crate) fn corpus(&self) -> Vec<(u64, String)> {
+        std::iter::once(&self.favourite)
+            .chain(self.rows.iter())
+            .map(|row| (row.id, row.name.clone()))
+            .collect()
+    }
+
     pub(crate) fn refresh(&mut self, library: Option<&Library>) {
         self.stamp = self.stamp.wrapping_add(1);
         self.favourite = favourites_row(library);

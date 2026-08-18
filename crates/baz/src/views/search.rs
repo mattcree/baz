@@ -201,6 +201,25 @@ fn results<'a>(
     }
     list = list.push(Space::new().height(Length::Fixed(rows(albums - end_album))));
 
+    // **Playlists, third** — the owner, 2026-08-18. They sit under the two
+    // library sections because a query is far more often for a song than for
+    // a list, and because this is the section a listener reaches for only
+    // when they already know the name.
+    let playlists = shelf.search_playlists.len();
+    list = list.push(section("Playlists", playlists, false));
+    let playlist_origin = album_origin + rows(albums) + SECTION_H;
+    let (first_list, end_list) = visible_range(
+        shelf.search_scroll_offset,
+        shelf.search_viewport_h,
+        playlist_origin,
+        playlists,
+    );
+    list = list.push(Space::new().height(Length::Fixed(rows(first_list))));
+    for index in first_list..end_list {
+        list = list.push(playlist_row(shelf, index));
+    }
+    list = list.push(Space::new().height(Length::Fixed(rows(playlists - end_list))));
+
     scrollable(list)
         .id(scroll_id())
         .on_scroll(Message::SearchScrolled)
@@ -417,6 +436,56 @@ fn album_row<'a>(shelf: &'a Shelf, player: &'a PlayerState, index: usize) -> Ele
     .padding(theme::pad(theme::GAP_XS, theme::GAP_MD))
     .style(move |_theme, status| {
         theme::selectable_track_row(room, room.plinth, status, playing, selected)
+    })
+    .on_press(Message::ContentPressed(content))
+    .into()
+}
+
+/// **A playlist the query matched.**
+///
+/// One control, `Open`, where an album row has two. A record can be played
+/// from the chooser because playing it is what the chooser's `Play` means
+/// everywhere else; a playlist's rows may point at files the library no longer
+/// holds, and deciding what *play this list* does to a partly-missing list is
+/// the playlist page's job — it is the surface that can show which entries are
+/// missing while it does it. So this is a door, and the page behind it has
+/// `Play` on it.
+fn playlist_row(shelf: &Shelf, index: usize) -> Element<'_, Message> {
+    let room = theme::active();
+    let id = shelf.search_playlists[index];
+    let Some((_, name)) = shelf.playlist_names.iter().find(|(known, _)| *known == id) else {
+        return Space::new().height(Length::Fixed(ROW_H)).into();
+    };
+    let content = Content::Playlist(id);
+    let selected = shelf.search_selection.is(content);
+    button(
+        row![
+            container(
+                text(name.as_str())
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper),
+            )
+            .width(Length::Fill)
+            .clip(true),
+            button(
+                text("Open")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META),
+            )
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+            .style(move |_theme, status| theme::segment(room, status, selected))
+            .on_press(Message::SearchAction(content, Action::End)),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(ROW_H))
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_MD))
+    .style(move |_theme, status| {
+        theme::selectable_track_row(room, room.plinth, status, false, selected)
     })
     .on_press(Message::ContentPressed(content))
     .into()

@@ -95,12 +95,19 @@ fn rows(count: usize) -> f32 {
 }
 
 #[must_use]
-pub(crate) fn result_top(index: usize, tracks: usize) -> f32 {
+pub(crate) fn result_top(index: usize, tracks: usize, albums: usize) -> f32 {
     if index < tracks {
-        SECTION_H + rows(index)
-    } else {
-        SECTION_H + rows(tracks) + SECTION_H + rows(index - tracks)
+        return SECTION_H + rows(index);
     }
+    let after_tracks = index - tracks;
+    let albums_origin = SECTION_H + rows(tracks) + SECTION_H;
+    if after_tracks < albums {
+        return albums_origin + rows(after_tracks);
+    }
+    // The third section — playlists. Its origin is everything above it plus
+    // its own heading, which is the same arithmetic one rung down; the view
+    // builds its spacers from the same three numbers.
+    albums_origin + rows(albums) + SECTION_H + rows(after_tracks - albums)
 }
 
 impl Action {
@@ -143,6 +150,42 @@ pub(crate) fn moved_index(selected: Option<usize>, len: usize, delta: i32) -> Op
 
 #[cfg(test)]
 mod tests {
+    use super::{ROW_H, SECTION_H, result_top, rows};
+
+    /// **Three sections, and every row sits where its section says it does.**
+    ///
+    /// The chooser virtualizes each section against an origin computed from
+    /// the ones above it, and the keyboard scrolls to `result_top`. If the two
+    /// arithmetics disagree, Up/Down reveals the wrong row — silently, because
+    /// nothing about it looks broken. Playlists joined on 2026-08-18, which is
+    /// the change that made a third origin exist at all.
+    #[test]
+    fn the_three_sections_stack_without_overlapping() {
+        let (tracks, albums, playlists) = (5_usize, 3_usize, 4_usize);
+        let top = |index| result_top(index, tracks, albums);
+        // Inside a section, rows advance by exactly one row.
+        for index in [0, 1, 2, 3] {
+            assert!((top(index + 1) - top(index) - ROW_H).abs() < f32::EPSILON);
+        }
+        // Each section head costs exactly one `SECTION_H`, and no row of a
+        // later section can land above a row of an earlier one.
+        assert!((top(tracks) - (top(tracks - 1) + ROW_H + SECTION_H)).abs() < f32::EPSILON);
+        assert!(
+            (top(tracks + albums) - (top(tracks + albums - 1) + ROW_H + SECTION_H)).abs()
+                < f32::EPSILON
+        );
+        let total = tracks + albums + playlists;
+        for index in 1..total {
+            assert!(
+                top(index) > top(index - 1),
+                "row {index} sits above the row before it"
+            );
+        }
+        // And the whole list is the three sections plus their three heads.
+        let expected = 3.0 * SECTION_H + rows(total) - ROW_H;
+        assert!((top(total - 1) - expected).abs() < f32::EPSILON);
+    }
+
     use super::{Action, Direction, NextAnchor, chooser_direction, moved_index};
     use iced::keyboard::{Key, Modifiers, key};
 

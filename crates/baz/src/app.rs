@@ -2099,6 +2099,7 @@ impl App {
         if let Screen::Shelf(state) = &app.screen {
             app.playlists.refresh(Some(&state.library));
         }
+        app.sync_playlist_corpus();
         app.restore_place(saved_place);
         app.place_history = PlaceHistory::new(app.place);
         let artist_image = match app.place {
@@ -2605,6 +2606,7 @@ impl App {
                     }
                     self.playlists.refresh(Some(&state.library));
                 }
+                self.sync_playlist_corpus();
                 self.request_playlist_art()
             }
             Message::FavouritesPlay => {
@@ -3177,6 +3179,18 @@ impl App {
                 } else {
                     Task::none()
                 }
+            }
+            // **A playlist row is a door**, whichever of the two the keyboard
+            // happens to be resting on: the row draws exactly one control and
+            // it says `Open`. The chooser's default action is `Play`, so this
+            // arm is what makes <kbd>Enter</kbd> mean the same thing the one
+            // visible control means.
+            (Content::Playlist(id), _) => {
+                let clear = match &mut self.screen {
+                    Screen::Shelf(state) => state.clear_query(),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
+                };
+                Task::batch([clear, self.open_playlist(id)])
             }
             (_, crate::search::Action::Play) => self.activate_content(content),
             (_, crate::search::Action::Next | crate::search::Action::End) => Task::none(),
@@ -5130,6 +5144,7 @@ impl App {
         {
             self.playlists.refresh(Some(&state.library));
         }
+        self.sync_playlist_corpus();
         self.was_scanning = scanning;
     }
 
@@ -5603,6 +5618,53 @@ impl App {
         if !opened {
             return Task::none();
         }
+        self.enter_playlist_place(id)
+    }
+
+    /// **Keep the searchable playlist corpus in step with the folder.**
+    ///
+    /// Called after every `playlists.refresh`, which is the only thing that
+    /// can change what lists exist — so there is one writer and no clock. It
+    /// re-filters as well, because a list renamed or deleted while a query
+    /// stands must not go on being offered by the chooser.
+    fn sync_playlist_corpus(&mut self) {
+        let corpus = self.playlists.corpus();
+        if let Screen::Shelf(state) = &mut self.screen {
+            if state.playlist_names == corpus {
+                return;
+            }
+            state.playlist_names = corpus;
+            state.refilter();
+        }
+    }
+
+    /// **Open a playlist's page by id**, from wherever asked.
+    ///
+    /// Added with the chooser's playlist section (2026-08-18), which needed a
+    /// door that was not also a play gesture: `activate_content` opens *and*
+    /// plays, which is right for a press on the Playlists place and wrong for
+    /// a search result labelled `Open`.
+    ///
+    /// Favourites is a playlist id with a place of its own, and that fork
+    /// lives here so every caller inherits it rather than each remembering.
+    fn open_playlist(&mut self, id: u64) -> Task<Message> {
+        if id == crate::playlists::FAVOURITES_ID {
+            return self.go(|_| Place::Favourites);
+        }
+        let opened = match &self.screen {
+            Screen::Shelf(state) => self.playlists.open_page(id, &state.library),
+            Screen::Setup(_) | Screen::Blocked(_) => false,
+        };
+        if !opened {
+            return Task::none();
+        }
+        self.enter_playlist_place(id)
+    }
+
+    /// Put the shell in the playlist's place, once the page is loaded. Shared
+    /// by the creation flow and [`Self::open_playlist`] so the two cannot
+    /// arrive in different states.
+    fn enter_playlist_place(&mut self, id: u64) -> Task<Message> {
         if let Screen::Shelf(state) = &mut self.screen {
             state.vibe.close();
             state.selection.select(Content::Playlist(id));
@@ -8295,6 +8357,15 @@ pub(crate) struct Shelf {
     pub(crate) songs: Vec<vm::SongVm>,
     /// Relevance-ordered album answers for the dropover, as stable wall ids.
     pub(crate) search_albums: Vec<u64>,
+    /// **Every playlist baz holds, by id and name** — the corpus the query is
+    /// matched against, kept here because the shelf is where searching
+    /// happens and the folder is the app's.
+    ///
+    /// Written by [`App`] after each `playlists.refresh`, which is the only
+    /// thing that can change it, so there is one writer and no clock.
+    pub(crate) playlist_names: Vec<(u64, String)>,
+    /// The playlists this query matches, in the panel's own order.
+    pub(crate) search_playlists: Vec<u64>,
     /// Whether the non-empty query's dropover is currently exposed.
     pub(crate) search_open: bool,
     /// The selected track row's inline action. Albums keep their established
@@ -8638,6 +8709,8 @@ impl Shelf {
             query: String::new(),
             songs: Vec::new(),
             search_albums: Vec::new(),
+            playlist_names: Vec::new(),
+            search_playlists: Vec::new(),
             search_open: false,
             search_action: crate::search::Action::Play,
             cover_action: CoverAction::Play,
@@ -8940,7 +9013,7 @@ impl Shelf {
     }
 
     pub(crate) fn search_result_count(&self) -> usize {
-        self.songs.len() + self.search_albums.len()
+        self.songs.len() + self.search_albums.len() + self.search_playlists.len()
     }
 
     pub(crate) fn search_result_content(&self, index: usize) -> Option<Content> {
@@ -8953,10 +9026,14 @@ impl Shelf {
                 row,
             });
         }
-        self.search_albums
-            .get(index.checked_sub(self.songs.len())?)
+        let after_songs = index.checked_sub(self.songs.len())?;
+        if let Some(album) = self.search_albums.get(after_songs) {
+            return Some(Content::Album(*album));
+        }
+        self.search_playlists
+            .get(after_songs.checked_sub(self.search_albums.len())?)
             .copied()
-            .map(Content::Album)
+            .map(Content::Playlist)
     }
 
     fn search_result_index(&self, content: Content) -> Option<usize> {
@@ -8979,7 +9056,7 @@ impl Shelf {
         self.search_selection.select(content);
         self.search_action = crate::search::Action::Play;
 
-        let top = crate::search::result_top(index, self.songs.len());
+        let top = crate::search::result_top(index, self.songs.len(), self.search_albums.len());
         let bottom = top + crate::search::ROW_H;
         let viewport = self.search_viewport_h;
         if viewport <= 0.0 {
@@ -9616,6 +9693,27 @@ impl Shelf {
         // this result set into one scroll surface.
         self.songs = vm::song_hits(&self.library, &self.query, vm::SEARCH_LIMIT);
         self.search_albums = vm::album_hits(&self.library, &self.query, vm::SEARCH_LIMIT);
+        // **Playlists are searchable** (the owner, 2026-08-18: *"playlist
+        // filter could simply be the search being updated to show playlists
+        // if it doesn't"*). They were deliberately outside the corpus —
+        // ADR-0024 §A2 deferred wall membership, rail sorting and
+        // search-corpus membership together — which meant a listener with
+        // forty lists had no way to find one by name.
+        //
+        // Matched with `baz_core::index::search_fold` rather than a plain
+        // lowercase, so a list called `Bells & Whistles` answers *bells and*
+        // for the same reason a track does.
+        self.search_playlists = if self.query.trim().is_empty() {
+            Vec::new()
+        } else {
+            let needle = baz_core::index::search_fold(self.query.trim());
+            self.playlist_names
+                .iter()
+                .filter(|(_, name)| baz_core::index::search_fold(name).contains(&needle))
+                .map(|(id, _)| *id)
+                .take(vm::SEARCH_LIMIT)
+                .collect()
+        };
         self.search_action = crate::search::Action::Play;
         // The shelves are contiguous slices of `albums` and `visible` is in
         // the same order, so each shelf's surviving count is one walk of the

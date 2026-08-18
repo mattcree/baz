@@ -3092,7 +3092,11 @@ impl Field {
 /// are `docs/WORK.md` item 80's remainder, deliberately not done here: each
 /// widens what matches, and they want their own measurement of what they let
 /// in.
-fn search_fold(text: &str) -> String {
+/// Public so the shell can fold a query the same way the index folds its
+/// haystack — a second spelling of this rule would be a search that answered
+/// differently depending on what it was searching.
+#[must_use]
+pub fn search_fold(text: &str) -> String {
     let lowered = text.to_lowercase();
     if lowered.contains('&') {
         lowered.replace('&', "and")
