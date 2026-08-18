@@ -1099,6 +1099,27 @@ pub const LINE_DISPLAY: f32 = 44.0;
 /// Leading for [`SIZE_DISPLAY`], derived from [`LINE_DISPLAY`].
 pub const LEADING_DISPLAY: f32 = LINE_DISPLAY / SIZE_DISPLAY;
 
+/// **Marquee: the sounding track's title on Now playing, and nothing else**
+/// (64 px).
+///
+/// The top of the scale, and the only rung above [`SIZE_DISPLAY`]. Now playing
+/// draws **one** work on a surface with no rows, no table and nothing else
+/// asking to be read, and the owner asked three times for a title that does
+/// not look like a caption. This is the size that answers it.
+///
+/// It is a *ceiling*, not a size: `views::now_playing` steps down to
+/// [`SIZE_DISPLAY`] and then [`SIZE_HERO`] as a title gets longer, because a
+/// 124-character title at 64 px is four lines of shouting. The ladder is
+/// three rungs so the steps are visible decisions rather than a continuous
+/// fit that lands anywhere.
+pub const SIZE_MARQUEE: f32 = 64.0;
+/// Line box of [`SIZE_MARQUEE`]: **68** on the 4 px lattice — the tightest
+/// ratio in the scale, because a marquee line is set once and wraps at most
+/// twice.
+pub const LINE_MARQUEE: f32 = 68.0;
+/// Leading for [`SIZE_MARQUEE`], derived from [`LINE_MARQUEE`].
+pub const LEADING_MARQUEE: f32 = LINE_MARQUEE / SIZE_MARQUEE;
+
 /// The UI face at Regular: baz's default font, and the family every weight
 /// below is a member of.
 ///
@@ -5687,18 +5708,26 @@ mod tests {
         users.sort();
         assert_eq!(
             users,
-            ["views/album.rs", "views/home.rs"],
+            ["views/album.rs", "views/home.rs", "views/now_playing.rs"],
             "the serif italic is the museum placard's convention for a \
-             *work's own title*, and it is set exactly where an album is the \
-             subject being labelled: Home's `CONTINUE` placard, and the \
-             record's own page. A third consumer arrives here on purpose or \
-             not at all — an unenumerated one is a display face coming by the \
-             back door, which is the thing `assets/fonts/README.md` records \
-             as deleted and staying deleted. In particular it is **not** the \
-             playlist page's hero (a label the owner typed, not a work), not \
-             `views/now_playing.rs` (a track's title, with the album under it \
-             as a fact about it), and not the wall or the lane, which are the \
-             owner's open question."
+             *work's own title*, and it is set exactly where the thing being \
+             labelled is the work: Home's `CONTINUE` placard, the record's own \
+             page, and Now playing's marquee. A fourth consumer arrives here \
+             on purpose or not at all — an unenumerated one is a display face \
+             coming by the back door, which is the thing \
+             `assets/fonts/README.md` records as deleted and staying deleted. \
+             In particular it is **not** the playlist page's hero (a label the \
+             owner typed, not a work), and not the wall or the lane, which are \
+             the owner's open question.\n\n\
+             **`views/now_playing.rs` was the third, and it was added on \
+             purpose.** This list said in as many words that it must not be — \
+             *a track's title, with the album under it as a fact about it* — \
+             and that reading treated `work` as a synonym for `album`. The \
+             owner chose the composition that overturns it (2026-08-18, from \
+             three drawn options): Now playing draws **one** thing, that thing \
+             is a track, and on that surface the track is the work being \
+             labelled. The album line beneath it is the fact about it, which \
+             is exactly the placard's own order."
         );
         assert!(
             names_family.is_empty(),
@@ -8008,6 +8037,16 @@ mod tests {
                 .expect("a source file baz ships")
                 .replace("\r\n", "\n");
             let name = path.file_name().unwrap_or_default().to_string_lossy();
+            // **Shipped code only**, the same distinction
+            // `the_serif_is_the_work_titles_and_nothing_else` draws: a test
+            // that *names* a size to assert which rung a title lands on is not
+            // a view setting type, and a check that could not tell the
+            // difference would punish a module for testing itself.
+            let source = source
+                .split("#[cfg(test)]")
+                .next()
+                .unwrap_or_default()
+                .to_owned();
             for (at, _) in source.match_indices("theme::SIZE_") {
                 let window = &source[at..source.len().min(at + 80)];
                 if window.contains("theme::LEADING_") || window.contains(".text_size(") {

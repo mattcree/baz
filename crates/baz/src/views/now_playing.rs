@@ -127,59 +127,6 @@ pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
     (theme::RUN_MEASURE * kiosk_scale(height)).clamp(theme::RUN_MEASURE, cap)
 }
 
-/// What the placard under the work needs with an album line: the gap off the
-/// sleeve, three identity lines, and every gap between them — **96**. The
-/// optional feed adds [`FACT_BELOW`] only while it has a real fact to draw.
-///
-/// It summed [`theme::TRANSPORT_HIT`] as well until the merge, which was the
-/// unspent half of ADR-0029's first step: the duplicated transport widget came
-/// off this surface (the bar carries it, in this place as in every other) and
-/// the 32 px it had reserved stayed in the arithmetic, so the sleeve was 32 px
-/// short at every height-bound size. Removing it was the whole of that fix.
-///
-/// # It was 130, and 130 was not what the column laid out
-///
-/// **Found by step A2, and it is the reason it had to be found then.** The old
-/// expression rolled the placard's internal gaps into `4 · GAP_LG` and came to
-/// 130; the column [`record_column`] built then came to **146**. The duplicate
-/// progress line and timestamps have since moved entirely to the persistent
-/// bar, leaving this placard at 96 without changing its identity readings.
-///
-/// Sixteen pixels of under-reservation, and `NOW_PLAYING_MAX` 720 was hiding
-/// it: at 1920 the clamp left 69 px of slack, so nothing overflowed. Delete
-/// the clamp and the work grows into that slack, the column overflows its
-/// container, and **iced dropped the last child — the two timestamps**. It bit
-/// only where the record is height-bound *and* the run is standing, because
-/// the run's branch is the one that spends a `HANG` of padding at each end.
-///
-/// So it is spelled as the layout, term by term, rather than as a total that
-/// has to be re-derived by hand every time a line moves.
-///
-/// The feed now spends its one line plus one gap through [`FACT_BELOW`]; no
-/// absent fact reserves a blank slot. The momentary meter remains unbuilt.
-const BELOW: f32 = theme::GAP_XL                                  // work → placard
-    + theme::LINE_HEADING + theme::GAP_XS                         // artist
-    + theme::LINE_DISPLAY + theme::GAP_XS                         // title
-    + theme::LINE_BODY; // album
-
-/// The album line and the one inter-child gap that exists only with it.
-const ALBUM_LINE_H: f32 = theme::LINE_BODY + theme::GAP_XS;
-
-fn placard_below(show_album: bool) -> f32 {
-    if show_album {
-        BELOW
-    } else {
-        BELOW - ALBUM_LINE_H
-    }
-}
-
-fn show_album_line(album: Option<&str>, source: Option<&Source>) -> bool {
-    album.is_some() && !matches!(source, Some(Source::Album { .. }))
-}
-
-/// The full-width source footer reserved at the bottom of the place.
-const SOURCE_CARD_H: f32 = 76.0;
-
 /// **The edge the record is actually drawn at**, whichever composition the
 /// body's width has put it in.
 ///
@@ -329,162 +276,255 @@ pub(crate) fn view<'a>(
     // assembled run can cross records, so its current track keeps the album
     // line where that distinction is useful.
     let show_album = show_album_line(now.album.as_deref(), source.as_ref());
-    if !visual.foreground.draws_art() {
-        return without_album_object(
-            now,
-            width,
-            height,
-            source,
-            show_album,
-            visual.audio,
-            visual.mode,
-            visual.history,
-            visual.favourite,
-            fact,
-            // The record's colours for the bars, read straight off the hero
-            // rather than by composing a `Work` this branch deliberately does
-            // not pay for. `None` is a record whose cover has not decoded yet
-            // or has no hue worth reading, and the fields fall back to the
-            // room's lamp — the one colour they all used to be.
-            now.album_id
-                .and_then(|id| shelf.hero(id))
-                .and_then(|hero| hero.field),
-        );
-    }
-    // **The source's own pixels**, which is what bounds the work now that
-    // `NOW_PLAYING_MAX` is gone. Resolved only for a foreground that draws it,
-    // so None pays neither hero composition nor jewel-case texture work.
-    let work = work(shelf, Some(now));
-    let below = placard_below(show_album) + fact.map_or(0.0, |_| FACT_BELOW);
-    let edge = art_edge_with_below(
-        width,
-        height,
-        0.0,
-        work.source,
-        below + if source.is_some() { SOURCE_CARD_H } else { 0.0 },
-    );
-    // **One `t` for the cover and the room**, resolved here and passed to both.
-    // See [`field_layer`] for why it is one number rather than two agreeing
-    // ones, and [`Work::dissolve_at`] for the one case that refuses it.
-    let t = work.dissolve_at(edge, width, height, false);
-    let field = field_layer(
-        work.from
-            .as_ref()
-            .and_then(|&(_, _, field)| field)
-            .filter(|_| t < 1.0),
-        work.field,
-        t,
-    );
-    let insert = rear_insert(shelf, now);
-    let layout = RecordLayout {
-        edge,
-        show_album,
-        insert: &insert,
-        visual,
-        fact: fact.map(String::as_str),
-    };
-    let song = container(record_column(&work, t, now, layout)).center(Length::Fill);
-    let body: Element<'a, Message> = match source {
-        Some(source) => column![song, source_link(source)]
-            .height(Length::Fill)
-            .into(),
-        None => song.into(),
-    };
-    // The spectrum is a background property, independent of which record
-    // object stands in front of it. With it off this is a zero-cost empty
-    // layer; with it on the bars fill the whole place beneath the centred
-    // composition instead of replacing the artwork.
-    let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
-        crate::visualizer::background(
-            visual.mode,
-            audio,
-            visual.history,
-            width,
-            height,
+
+    // **The record's own colours**, read off the hero. They light the artist
+    // line and the visualiser's bars, so the page is demonstrably about *this*
+    // record rather than tinted at random.
+    let hues = now
+        .album_id
+        .and_then(|id| shelf.hero(id))
+        .and_then(|hero| hero.field);
+
+    // **One composition, whether or not there is an album object.**
+    //
+    // The two branches used to be different layouts, which is why the
+    // objectless state kept getting designed last. Here the object is simply
+    // absent: the marquee is anchored to the place's own corner, not to the
+    // artwork, so it stands in exactly the same spot with a cover, with a
+    // jewel case, and with nothing at all.
+    let draws_art = visual.foreground.draws_art();
+    let work = draws_art.then(|| work(shelf, Some(now)));
+    let edge = work
+        .as_ref()
+        .map_or(0.0, |work| marquee_edge(width, height, work.source));
+    let t = work
+        .as_ref()
+        .map_or(1.0, |work| work.dissolve_at(edge, width, height, false));
+    let field = match &work {
+        Some(work) => field_layer(
+            work.from
+                .as_ref()
+                .and_then(|&(_, _, field)| field)
+                .filter(|_| t < 1.0),
             work.field,
-        )
+            t,
+        ),
+        // With no object there is no dissolve to ride, so the wash is simply
+        // the record's own field, settled.
+        None => field_layer(None, hues, 1.0),
+    };
+    let insert = rear_insert(shelf, now);
+    let object: Element<'a, Message> = match &work {
+        Some(work) => {
+            let cover = plain_cover(work, t, edge, insert.album_id);
+            let case = sleeve(work, t, edge, visual.rotation, &insert);
+            container(crate::visualizer::foreground(
+                visual.foreground,
+                edge,
+                cover,
+                case,
+            ))
+            .width(Length::Fill)
+            .align_x(alignment::Horizontal::Right)
+            .into()
+        }
+        None => Space::new().width(Length::Fill).height(Length::Fill).into(),
+    };
+
+    let body: Element<'a, Message> = {
+        let stage = column![
+            container(object)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Top),
+            marquee(
+                now,
+                show_album,
+                marquee_measure(width),
+                visual.favourite,
+                fact.map(String::as_str),
+                hues,
+            ),
+        ]
+        .spacing(theme::GAP_XL)
+        .padding(iced::Padding {
+            top: MARGIN,
+            right: MARGIN,
+            bottom: theme::GAP_XL,
+            left: MARGIN,
+        })
+        .height(Length::Fill);
+        match source {
+            Some(source) => column![container(stage).height(Length::Fill), source_link(source)]
+                .height(Length::Fill)
+                .into(),
+            None => container(stage).height(Length::Fill).into(),
+        }
+    };
+
+    let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
+        crate::visualizer::background(visual.mode, audio, visual.history, width, height, hues)
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
     stack![field, spectrum, body].into()
 }
 
-/// The spectrum-led composition: identity in one soft calm pocket, with no
-/// album object and therefore no square stage reserved above it.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the objectless branch receives the already-resolved visual composition facts"
-)]
-fn without_album_object<'a>(
+/// Whether the album line is worth drawing: an album source footer already
+/// names this exact record, so the line would be the same string twice. A
+/// playlist or an assembled run can cross records, and there it is the fact
+/// that says which one you are on.
+fn show_album_line(album: Option<&str>, source: Option<&Source>) -> bool {
+    album.is_some() && !matches!(source, Some(Source::Album { .. }))
+}
+
+/// The full-width source footer reserved at the bottom of the place.
+const SOURCE_CARD_H: f32 = 76.0;
+
+/// What the old centred composition reserved under the work. Kept because
+/// `art_edge` and its tests still speak in it; the marquee sizes its object
+/// with [`marquee_edge`] instead.
+const BELOW: f32 = theme::GAP_XL
+    + theme::LINE_HEADING
+    + theme::GAP_XS
+    + theme::LINE_DISPLAY
+    + theme::GAP_XS
+    + theme::LINE_BODY;
+
+/// **The place's own margin** — where the marquee's left edge stands.
+///
+/// [`theme::HANG`] and a half. The type is the largest thing on this surface
+/// and a 40 px margin under a 64 px line reads as a crop rather than a margin;
+/// this is the one place in the product that needs more air than the standard
+/// gutter, and it is stated here rather than by adding a token nothing else
+/// would use.
+const MARGIN: f32 = 1.5 * theme::HANG;
+
+/// **How wide the title may run.**
+///
+/// The body less both margins, capped: at 3840 px a title set across the whole
+/// window would be a line no eye tracks. The cap is [`theme::LIST_MEASURE`] and
+/// a quarter — wider than a reading measure, because this is one line of
+/// display type rather than a paragraph, and narrow enough to stay a line.
+fn marquee_measure(width: f32) -> f32 {
+    (width - 2.0 * MARGIN).clamp(1.0, theme::LIST_MEASURE * 1.25)
+}
+
+/// **How big the album object is** in the marquee composition.
+///
+/// A third of the body's shorter side, bounded — the object is no longer the
+/// subject of this page and does not want to be. Never larger than the source's
+/// own pixels, which is the rule the old composition had and the one thing
+/// about it that must not change: baz does not upscale a cover.
+fn marquee_edge(width: f32, height: f32, source: f32) -> f32 {
+    let room = width.min(height - SOURCE_CARD_H);
+    (room * 0.34)
+        .clamp(theme::CONTINUE_SLEEVE, theme::LIST_MEASURE * 0.5)
+        .min(source)
+        .max(1.0)
+}
+
+/// **The title ladder** — three rungs, chosen by how much there is to set.
+///
+/// A continuous fit would land anywhere; three rungs make each step a visible
+/// decision. The thresholds are characters rather than measured pixels because
+/// the measure changes with the window and the *decision* should not: a title
+/// that is set at the top rung on a laptop is set at the top rung on a
+/// monitor, and simply wraps sooner.
+fn marquee_type(title: &str) -> (f32, f32) {
+    match title.chars().count() {
+        0..=34 => (theme::SIZE_MARQUEE, theme::LEADING_MARQUEE),
+        35..=90 => (theme::SIZE_DISPLAY, theme::LEADING_DISPLAY),
+        _ => (theme::SIZE_HERO, theme::LEADING_HERO),
+    }
+}
+
+/// **The marquee**: who, the work, and what it is on — anchored to the place's
+/// bottom-left corner.
+///
+/// The owner picked this composition on 2026-08-18 from three drawn against
+/// all three foreground modes. What it answers, after two attempts that did
+/// not: the block **floated** because it was centred, and centring relates a
+/// thing to the room rather than to anything in it. Here every line starts on
+/// one vertical, and that vertical is the place's own margin — the one edge
+/// that cannot move when the artwork changes size, changes shape, or is not
+/// there at all.
+///
+/// And it **expands**. There is no ellipsis on this surface: the title wraps
+/// inside a measure far wider than the artwork ever was, and steps down the
+/// ladder as it grows. 647 of the owner's 8 602 titles are longer than the
+/// measure the old composition gave them.
+fn marquee<'a>(
     now: &'a crate::player::NowPlaying,
-    width: f32,
-    height: f32,
-    source: Option<Source>,
     show_album: bool,
-    audio: Option<&baz_core::engine::VisualizationFrame>,
-    mode: crate::visualizer::Mode,
-    history: &crate::visualizer::History,
+    measure: f32,
     favourite: Option<(&std::path::Path, bool)>,
-    fact: Option<&String>,
-    field: Option<field::Field>,
+    fact: Option<&str>,
+    hues: Option<field::Field>,
 ) -> Element<'a, Message> {
-    let (mask_width, identity_width) = objectless_measures(width);
-    let identity = identity(
-        now,
-        show_album,
-        identity_width,
-        favourite,
-        fact.map(String::as_str),
-    );
-    let calm = placard_mask(identity, mask_width);
-    let song = container(calm).center(Length::Fill);
-    let body: Element<'a, Message> = match source {
-        Some(source) => column![song, source_link(source)]
-            .height(Length::Fill)
-            .into(),
-        None => song.into(),
-    };
-    let spectrum: Element<'static, Message> = if let Some(audio) = audio {
-        crate::visualizer::background(mode, audio, history, width, height, field)
-    } else {
-        Space::new().width(Length::Fill).height(Length::Fill).into()
-    };
-    stack![spectrum, body].into()
-}
-
-/// Stable metadata measures for the objectless state. They depend only on the
-/// viewport, never on a track's title, cover source or decode arrival.
-fn objectless_measures(width: f32) -> (f32, f32) {
-    let available = (width - 2.0 * theme::HANG).max(1.0);
-    let mask = available.min(theme::LIST_MEASURE);
-    (mask, (mask - 4.0 * theme::GAP_XL).max(1.0))
-}
-
-/// A soft horizontal mask under the metadata, rather than an empty artwork
-/// panel. It fades to the room at both edges and spends no space outside the
-/// identity block it protects.
-fn placard_mask(content: Element<'_, Message>, width: f32) -> Element<'_, Message> {
     let room = theme::active();
-    let clear = iced::Color {
-        a: 0.0,
-        ..room.wall
-    };
-    let calm = iced::Color {
-        a: 0.94,
-        ..room.wall
-    };
-    let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
-        .add_stop(0.0, clear)
-        .add_stop(0.18, calm)
-        .add_stop(0.82, calm)
-        .add_stop(1.0, clear);
-    container(content)
-        .width(Length::Fixed(width))
-        .padding([theme::GAP_LG, 2.0 * theme::GAP_XL])
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Gradient(gradient.into())),
-            ..container::Style::default()
-        })
+    // The artist line takes the record's own colour where there is one. It is
+    // the smallest text in the composition and the only coloured thing in it,
+    // which is what makes a 10 px line hold its own under a 64 px one.
+    let accent = hues.map_or(room.paper_faint, |field| field.inks()[1]);
+    let (size, leading) = marquee_type(&now.title);
+    let mut block = column![
+        text(theme::tracked(
+            &now.artist_line().unwrap_or_default().to_uppercase()
+        ))
+        .size(theme::SIZE_HEADING)
+        .line_height(theme::LEADING_HEADING)
+        .font(theme::MEDIUM)
+        .color(accent),
+        row![
+            container(
+                // **The serif italic, for a track's title** — see
+                // `theme::WORK_TITLE`. This page draws one work and the work
+                // is a track.
+                text(now.title.clone())
+                    .size(size)
+                    .line_height(leading)
+                    .font(theme::WORK_TITLE)
+                    .color(room.paper)
+            )
+            .max_width(measure - theme::STEPPER_HIT - theme::GAP_MD),
+            match favourite {
+                Some((path, selected)) => crate::views::page::favourite_slot(path, selected),
+                None => Space::new().width(Length::Fixed(0.0)).into(),
+            },
+        ]
+        .spacing(theme::GAP_MD)
+        .align_y(iced::Alignment::Start),
+    ]
+    .spacing(theme::GAP_LG)
+    .width(Length::Fixed(measure));
+    if show_album && let Some(album) = &now.album {
+        block = block.push(
+            text(album.clone())
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .color(room.paper_dim),
+        );
+    }
+    if let Some(fact) = fact {
+        block = block.push(
+            button(
+                text(fact.to_owned())
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper_faint),
+            )
+            .padding(0)
+            .style(move |_theme, _status| button::Style {
+                text_color: room.paper_faint,
+                ..button::Style::default()
+            })
+            .on_press(Message::AdvanceFact),
+        );
+    }
+    container(block)
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Left)
         .into()
 }
 
@@ -761,229 +801,6 @@ fn field_layer(
         .into()
 }
 
-/// The record column: the work at `edge`, and the placard under it.
-#[derive(Clone, Copy)]
-struct RecordLayout<'a> {
-    edge: f32,
-    show_album: bool,
-    insert: &'a crate::jewel_case::Insert,
-    visual: Visual<'a>,
-    fact: Option<&'a str>,
-}
-
-fn record_column<'a>(
-    work: &Work,
-    t: f32,
-    now: &'a crate::player::NowPlaying,
-    layout: RecordLayout<'_>,
-) -> Element<'a, Message> {
-    let cover = plain_cover(work, t, layout.edge, layout.insert.album_id);
-    let jewel_case = sleeve(work, t, layout.edge, layout.visual.rotation, layout.insert);
-    let sleeve =
-        crate::visualizer::foreground(layout.visual.foreground, layout.edge, cover, jewel_case);
-
-    // **The type gets its own ground here too, and did not until
-    // 2026-08-17.** `placard_mask` was written for the objectless state and
-    // used only there, so in the ordinary state — an album object on screen,
-    // which is the state a listener is in nearly all the time — the placard's
-    // words sat straight on whatever the visualizer was drawing.
-    //
-    // That was a legibility defect before it was an obstacle: swept against
-    // the bars at their old ink, `paper_faint` fell under its 4.5 floor
-    // wherever a loud band reached the type. And it was the obstacle too —
-    // the reason the bars had to be nearly invisible was that they were the
-    // ground for text. With the mask under the words they are not, and the
-    // field behind them can be as strong as it deserves
-    // (`crate::visualizer`, and this module's own legibility test).
-    let placard = placard_mask(
-        identity(
-            now,
-            layout.show_album,
-            layout.edge,
-            layout.visual.favourite,
-            layout.fact,
-        ),
-        layout.edge,
-    );
-
-    // **No transport here.** The bar is under every place, this one included,
-    // and it already carries play/pause and the two skips — so the page drew
-    // the *same function* a second time, a few hundred pixels above the first
-    // (`bottom_bar::transport`, called from here). The owner: *"now playing
-    // does not need the play pause controls"*, and *"ensure the play next and
-    // previous controls are removed"*. It was a duplicate, not a choice.
-    //
-    // What this surface owes is the work at the size it deserves and who made
-    // it. Progress, timestamps and transport all live in the persistent bar.
-    column![sleeve, placard]
-        .spacing(theme::GAP_XL)
-        .align_x(alignment::Horizontal::Center)
-        .width(Length::Shrink)
-        .into()
-}
-
-const FACT_BELOW: f32 = theme::GAP_LG + theme::LINE_BODY;
-
-fn identity<'a>(
-    now: &'a crate::player::NowPlaying,
-    show_album: bool,
-    width: f32,
-    favourite: Option<(&std::path::Path, bool)>,
-    fact: Option<&str>,
-) -> Element<'a, Message> {
-    let mut identity = column![placard(now, show_album, width, favourite)]
-        .width(Length::Fixed(width))
-        .align_x(alignment::Horizontal::Center);
-    if let Some(fact) = fact {
-        identity = identity.push(fact_line(fact, width));
-    }
-    identity.spacing(theme::GAP_LG).into()
-}
-
-fn fact_line(fact: &str, width: f32) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        // Centred, on the same axis as everything above it. This was the most
-        // visible half of the misalignment: the fact took the *whole* measure
-        // and set its text from the far left of it, while the placard beside
-        // it was a shrunk box centred under the artwork — so the one line
-        // whose left edge a reader could compare with the title's did not
-        // match it.
-        container(
-            text(fact.to_owned())
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fill)
-        .align_x(alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(width))
-    .height(Length::Fixed(theme::LINE_BODY))
-    .padding(0)
-    .style(move |_theme, _status| button::Style {
-        text_color: room.paper_dim,
-        ..button::Style::default()
-    })
-    .on_press(Message::AdvanceFact)
-    .into()
-}
-
-fn placard<'a>(
-    now: &'a crate::player::NowPlaying,
-    show_album: bool,
-    width: f32,
-    favourite: Option<(&std::path::Path, bool)>,
-) -> Element<'a, Message> {
-    let room = theme::active();
-    // **The work's title at the display rung, fitted.**
-    //
-    // Two changes and they are one change. The size is the answer to *"it
-    // really needs to pop"* — 28 is what a record page gives an album title
-    // inside a dense two-column layout, and this page is one work alone with
-    // nothing else asking to be read.
-    //
-    // The fitting is what makes that size safe. It was a raw `Wrapping::None`
-    // inside a clipped container, so a long title stopped **mid-glyph with
-    // nothing to say it continues** — the exact defect the owner reported in
-    // the bottom bar and which `crate::views::fitted_line` was lifted out to
-    // answer. At 40 px a title runs out of measure far sooner than at 28, so
-    // raising the size without this would have shipped the same defect on a
-    // bigger surface.
-    let balance = theme::STEPPER_HIT + theme::GAP_SM;
-    let title_measure = if favourite.is_some() {
-        (width - 2.0 * balance).max(1.0)
-    } else {
-        width
-    };
-    let title = crate::views::fitted_line(&crate::views::Fitted {
-        content: now.title.as_str(),
-        face: &crate::views::FIT_SEMIBOLD,
-        size: theme::SIZE_DISPLAY,
-        leading: theme::LEADING_DISPLAY,
-        line_height: theme::LINE_DISPLAY,
-        font: theme::SEMIBOLD,
-        color: room.paper,
-        measure: title_measure,
-    });
-    // **The placard fits its content, up to `width`.** The owner: *"can you
-    // make the now-playing fit the content up to a max width and ensure the
-    // heart is snapped to the right hand side of that box so it doesn't
-    // appear to be off on its own."*
-    //
-    // It took `width` whatever was in it, so a two-word title left the heart
-    // stranded a long way to the right of the thing it belongs to — and a
-    // control that far from its subject reads as a control of the *page*.
-    // Shrinking the box is what puts them next to each other, and proximity
-    // is the whole of how a listener knows what a control acts on.
-    //
-    // A long title still stops at `width`: the title's own box is capped at
-    // what is left after the heart's slot and the gap between them, so the
-    // ellipsis lands where it always did.
-    // **The heart is balanced, so the title is centred and not merely
-    // centred-with-a-heart-on-it.** The owner, 2026-08-17: *"the alignment and
-    // general styling of the song title area of the now playing view is
-    // poor."*
-    //
-    // The composition above is centred on the artwork, and the title has to
-    // land on that axis. A row of `[title][heart]` centred as a unit puts the
-    // *pair* on the axis, which leaves the title itself half a heart to the
-    // left of the thing it names — visible, and exactly the kind of near-miss
-    // that reads as carelessness rather than as a decision.
-    //
-    // So the heart's slot is mirrored on the other side. The empty half costs
-    // nothing, cannot be pressed, and buys the one thing this page is for:
-    // the work's title on the work's centre line.
-    let title_line: Element<'_, Message> = if let Some((path, selected)) = favourite {
-        row![
-            Space::new().width(Length::Fixed(balance)),
-            title,
-            crate::views::page::favourite_slot(path, selected),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center)
-        .into()
-    } else {
-        title
-    };
-    let mut placard = column![
-        // The artist in letterspaced caps, over the work's title — the wall
-        // label's own order, at the far field's scale.
-        // **The artist reads as the title's pair, not as a footnote.** It was
-        // `paper_faint`, the quietest ink in the room, under a title three
-        // times its size — so the block had one voice and a whisper rather
-        // than a hierarchy. `paper_dim` is one rung up and is the ink the
-        // record page's own byline takes.
-        text(theme::tracked(
-            &now.artist_line().unwrap_or_default().to_uppercase()
-        ))
-        .size(theme::SIZE_HEADING)
-        .line_height(theme::LEADING_HEADING)
-        .font(theme::MEDIUM)
-        .color(room.paper_dim),
-        title_line,
-    ]
-    .spacing(theme::GAP_XS)
-    // **One axis for all of it.** The column shrinks to its content and was
-    // then left-aligning that content inside itself, so the eyebrow sat on the
-    // title's left edge while the block as a whole was centred under the
-    // artwork — three lines, and no two of them agreeing where the middle was.
-    .align_x(alignment::Horizontal::Center)
-    .max_width(width);
-    if show_album && let Some(album) = &now.album {
-        placard = placard.push(
-            text(album.clone())
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-
-    placard.into()
-}
-
 /// A quiet full-width footer at the bottom of Now playing, leading to the
 /// source's real page. It is a provenance statement first and a control
 /// second: one faint plane, no border, and no navigation chrome beyond the
@@ -1076,20 +893,97 @@ mod tests {
     /// (doc 12 §5.2's list, plus 240 and 3000 for the two ends it omits).
     const SOURCES: [f32; 6] = [120.0, 240.0, 320.0, 500.0, 1024.0, 3000.0];
 
+    /// **The marquee stands in the same place whether or not there is an
+    /// object** — which is the whole reason the two branches became one
+    /// composition. The measure depends on the window and on nothing else: not
+    /// on the artwork's size, not on its shape, not on whether it exists.
     #[test]
-    fn the_objectless_state_reserves_metadata_but_no_art_stage() {
-        for width in [320.0, 760.0, 1280.0, 1920.0, 3840.0] {
-            let (mask, identity) = objectless_measures(width);
-            let available = (width - 2.0 * theme::HANG).max(1.0);
-            assert!(mask <= available);
-            assert!(mask <= theme::LIST_MEASURE);
-            assert!(identity > 0.0 && identity <= mask);
+    fn the_marquee_is_anchored_to_the_place_and_not_to_the_artwork() {
+        for width in [320.0_f32, 760.0, 1280.0, 1920.0, 3840.0] {
+            let measure = marquee_measure(width);
+            assert!(measure > 0.0);
+            assert!(
+                measure <= (width - 2.0 * MARGIN).max(1.0),
+                "the marquee ran past the place's own margins at {width}"
+            );
+            assert!(
+                measure <= theme::LIST_MEASURE * 1.25,
+                "the title runs a line no eye tracks at {width}"
+            );
         }
-        assert_eq!(
-            objectless_measures(1920.0),
-            objectless_measures(3840.0),
-            "wide screens grow the spectrum field, not a hidden album pocket"
+        // Wider windows give the title more room, up to the cap — and the cap
+        // is reached rather than approached.
+        assert!(marquee_measure(1280.0) > marquee_measure(760.0));
+        assert!(
+            (marquee_measure(1920.0) - marquee_measure(3840.0)).abs() < f32::EPSILON,
+            "a 4K window sets a wider line instead of a longer one"
         );
+    }
+
+    /// **The ladder steps down and never off.** Three rungs, chosen by length,
+    /// and the longest title in the owner's library still lands on one of
+    /// them — there is no fourth case where the title is dropped or cut.
+    #[test]
+    fn the_title_ladder_has_a_rung_for_every_length() {
+        let rungs = [
+            ("Ochre", theme::SIZE_MARQUEE),
+            ("Aren't We All Running?", theme::SIZE_MARQUEE),
+            (
+                "I Am A Man Of Constant Sorrow (with band)",
+                theme::SIZE_DISPLAY,
+            ),
+            (
+                "Menus propos enfantins (Childish Chatter), for piano (from -Enfantines-)- \
+                 Chant guerrier du roi des haricots. Mouvt de Marche",
+                theme::SIZE_HERO,
+            ),
+        ];
+        for (title, expected) in rungs {
+            let (size, leading) = marquee_type(title);
+            assert!(
+                (size - expected).abs() < f32::EPSILON,
+                "{:?} ({} chars) set at {size}, not {expected}",
+                &title[..title.len().min(30)],
+                title.chars().count()
+            );
+            // Every rung carries its own leading rather than iced's default.
+            assert!(
+                leading > 1.0 && leading < 1.4,
+                "rung {size} has leading {leading}"
+            );
+        }
+        // The steps only ever go down as the title grows.
+        let mut previous = f32::MAX;
+        for length in [10_usize, 40, 100, 200] {
+            let (size, _) = marquee_type(&"a".repeat(length));
+            assert!(
+                size <= previous,
+                "the ladder went back up at {length} chars"
+            );
+            previous = size;
+        }
+    }
+
+    /// **The object is bounded by the room and by its own pixels**, and never
+    /// upscaled — the one rule the old composition had that this one keeps.
+    #[test]
+    fn the_object_never_outgrows_its_source_or_the_room() {
+        for width in [320.0_f32, 1280.0, 3840.0] {
+            for height in [384.0_f32, 860.0, 2160.0] {
+                for source in SOURCES {
+                    let edge = marquee_edge(width, height, source);
+                    assert!(
+                        edge <= source,
+                        "{width}x{height}: upscaled a {source} px source"
+                    );
+                    assert!(edge > 0.0);
+                    assert!(
+                        edge <= theme::LIST_MEASURE * 0.5,
+                        "{width}x{height}: the object took the page back"
+                    );
+                }
+            }
+        }
     }
 
     /// **The kiosk is this surface at a larger size**, and it is a property of
@@ -1249,7 +1143,6 @@ mod tests {
         assert!(show_album_line(Some("Record"), Some(&queue)));
         assert!(show_album_line(Some("Record"), None));
         assert!(!show_album_line(None, Some(&playlist)));
-        assert!((placard_below(true) - placard_below(false) - ALBUM_LINE_H).abs() < f32::EPSILON);
     }
 
     /// **The record column fits the space it was given**, at every window this
