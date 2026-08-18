@@ -27,6 +27,7 @@
 
 pub mod analysis;
 pub mod engine;
+pub mod equalizer;
 pub mod history;
 pub mod index;
 pub mod library;
