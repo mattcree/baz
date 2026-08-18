@@ -1082,6 +1082,14 @@ pub(crate) enum Message {
     WindowMaximiseToggled,
     /// F11: fill the window's current monitor, or return to its windowed size.
     ToggleFullscreen,
+    /// **Chromeless**: take the frame away from around Now playing.
+    ///
+    /// Distinct from [`Self::ToggleFullscreen`], and composes with it: that
+    /// one asks the *window manager* for the whole screen and leaves baz's
+    /// own bars where they are; this one is about what baz draws inside
+    /// whatever window it has. Both at once is the reading the owner's
+    /// *"really shows off the now playing view"* is after.
+    ToggleChromeless,
     /// The current mode read back before an F11 toggle.
     WindowModeRead(window::Mode),
     /// Begin the compositor's native resize gesture from one window edge or
@@ -1512,6 +1520,14 @@ struct App {
     window_maximized: bool,
     /// Whether Baz most recently placed its sole window in fullscreen mode.
     fullscreen: bool,
+    /// **Whether the frame is away from around Now playing.**
+    ///
+    /// Deliberately **not persisted**. Every other view preference here
+    /// survives a restart; this one would reopen baz into a window with no
+    /// app bar, no lane and — on the platforms where baz owns its chrome — no
+    /// close button, from a press the listener made days ago. A mode you take
+    /// the frame off for is a mode you enter on purpose each time.
+    chromeless: bool,
     /// When the app bar was last pressed, for the double-press that maximises
     /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
     /// double, so that three presses are a double and a single.
@@ -2111,6 +2127,7 @@ impl App {
             window: WINDOW,
             window_maximized: false,
             fullscreen: false,
+            chromeless: false,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
@@ -2832,6 +2849,10 @@ impl App {
             Message::WindowMinimised => latest_window(|id| window::minimize(id, true)),
             Message::WindowMaximiseToggled => latest_window(window::toggle_maximize),
             Message::ToggleFullscreen => latest_window(window::mode).map(Message::WindowModeRead),
+            Message::ToggleChromeless => {
+                self.chromeless = !self.chromeless;
+                Task::none()
+            }
             Message::WindowModeRead(mode) => {
                 let target = fullscreen_target(mode);
                 self.fullscreen = target == window::Mode::Fullscreen;
@@ -6132,6 +6153,16 @@ impl App {
     }
 
     fn escape(&mut self) -> Task<Message> {
+        // **Chromeless is the outermost layer there is**, because while it
+        // stands it is the only thing hiding the controls that would undo it.
+        // Esc brings the frame back before it does anything else — the same
+        // promise every other layer here makes, applied to the one whose
+        // absence is most alarming if you cannot remember which mark you
+        // pressed.
+        if self.chromeless {
+            self.chromeless = false;
+            return Task::none();
+        }
         // Fullscreen is a window layer around every place. Leave it before
         // changing the place or peeling any in-place layer, so the kiosk's
         // first Escape returns the same Now Playing composition to its prior
@@ -7619,6 +7650,7 @@ impl App {
                     self.body_height(),
                     self.now_playing_source(),
                     views::now_playing::Visual {
+                        chromeless: self.chromeless,
                         rotation: self.case_rotation,
                         foreground: self.visualization.foreground,
                         mode: self.visualization.mode,
@@ -7683,7 +7715,10 @@ impl App {
         // and the place's own strip resolves against `body_width` — the
         // window less the lane — rather than against the window.
         let screen: Element<'_, Message> = match &self.screen {
-            Screen::Shelf(state) if self.place.wears_lane() => row![
+            // Chromeless takes the lane with the bars. `wears_lane` is a fact
+            // about the *place*; this is a fact about the frame, and both have
+            // to be true for the lane to stand.
+            Screen::Shelf(state) if self.place.wears_lane() && !self.chromeless => row![
                 views::lane::view(
                     state,
                     &self.playlists,
@@ -7776,11 +7811,30 @@ impl App {
             (&self.screen, self.place),
             (Screen::Shelf(_), Place::NowPlaying)
         )
-        .then_some(self.visualization);
+        .then(|| crate::visualizer::State {
+            chromeless: self.chromeless,
+            ..self.visualization
+        });
         let Screen::Shelf(state) = &self.screen else {
             unreachable!("setup and blocked screens return before app-bar composition")
         };
-        let screen: Element<'_, Message> = column![
+        // **Chromeless keeps the tree's shape and empties the slot.**
+        //
+        // Not `if !chromeless { column![bar, screen] } else { screen }`, which
+        // is the obvious spelling and is the bug this file spends a long
+        // comment on thirty lines below: iced diffs the widget tree by
+        // position, so a column that loses its first child hands every widget
+        // under it a fresh state. Toggling the frame would scroll the run back
+        // to the top and drop whatever the place was holding.
+        //
+        // So the column always has two children and the first one is either
+        // the bar or nothing at all.
+        let bar: Element<'_, Message> = if self.chromeless {
+            iced::widget::Space::new()
+                .width(iced::Length::Fill)
+                .height(0.0)
+                .into()
+        } else {
             views::app_bar::view(
                 state,
                 self.window.width,
@@ -7792,16 +7846,21 @@ impl App {
                 owns_chrome(),
                 self.health_summary(),
                 ink,
-            ),
-            screen
-        ]
-        .into();
+            )
+        };
+        let screen: Element<'_, Message> = column![bar, screen].into();
         // The GUI is always an audio build, so the persistent bottom bar lives
         // under every place. A missing device is represented in the bar rather
         // than by changing the application's composition.
         let standing = self.bar_standing();
-        let whole: Element<'_, Message> = column![
-            screen,
+        let bottom: Element<'_, Message> = if self.chromeless {
+            // The same rule as the bar above: the slot stays, the tenant
+            // leaves.
+            iced::widget::Space::new()
+                .width(iced::Length::Fill)
+                .height(0.0)
+                .into()
+        } else {
             views::bottom_bar::view(
                 &self.player,
                 ink,
@@ -7833,9 +7892,9 @@ impl App {
                             })
                     })
                     .map(|path| (path, is_favourite(state, path))),
-            ),
-        ]
-        .into();
+            )
+        };
+        let whole: Element<'_, Message> = column![screen, bottom].into();
         // **Every floating layer is stacked always**, empty at rest.
         //
         // This is the drag ghost's rule below, applied to the three layers
@@ -11654,6 +11713,7 @@ mod tests {
             crate::visualizer::Foreground::None,
         ] {
             let still = crate::visualizer::State {
+                chromeless: false,
                 foreground,
                 mode: crate::visualizer::Mode::Off,
                 facts: false,
@@ -11679,6 +11739,7 @@ mod tests {
     #[test]
     fn focus_is_not_part_of_the_visible_visual_clock() {
         let state = crate::visualizer::State {
+            chromeless: false,
             foreground: crate::visualizer::Foreground::None,
             mode: crate::visualizer::Mode::Waveform,
             facts: false,

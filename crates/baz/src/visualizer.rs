@@ -260,6 +260,14 @@ pub(crate) struct State {
     pub(crate) foreground: Foreground,
     pub(crate) mode: Mode,
     pub(crate) facts: bool,
+    /// Whether the frame is currently away from around the picture.
+    ///
+    /// Not a property of the visualizer, and it lives here anyway: this struct
+    /// is what the app bar is handed for *Now playing's own marks*, and the
+    /// chromeless toggle is one of those. Splitting it out would mean a second
+    /// argument threaded through `app_bar::view` and `marks` to carry one
+    /// `bool` to the same row.
+    pub(crate) chromeless: bool,
 }
 
 impl Default for State {
@@ -268,6 +276,7 @@ impl Default for State {
             foreground: Foreground::JewelCase,
             mode: Mode::Off,
             facts: true,
+            chromeless: false,
         }
     }
 }
@@ -316,10 +325,66 @@ pub(crate) fn foreground(
 /// and is why he named that control as the one to match.
 pub(crate) fn marks(state: State) -> Element<'static, Message> {
     row![
+        chromeless_button(state.chromeless),
         foreground_button(state.foreground),
         mode_button(state.mode),
         facts_button(state.facts),
     ]
+    .into()
+}
+
+/// **The chromeless toggle** — the owner, 2026-08-18: *"we should consider
+/// adding a little toggle here which allows it to go into a sort of
+/// 'chromeless' mode which really shows off the now playing view."*
+///
+/// It stands with Now playing's own marks rather than in the application
+/// cluster, because it is a fact about *this place* — there is nothing to show
+/// off on the Library and the toggle is absent there, by the same rule that
+/// makes the density marks absent here.
+///
+/// **It lights when it is on**, which is the one place this row spends the
+/// lamp: on is a state a listener has to be able to see from the mark, because
+/// while it is on the mark is one of the only things left on the screen.
+///
+/// It composes with fullscreen (<kbd>F11</kbd>) rather than replacing it: that
+/// one is a *window* operation and this one is about what baz draws inside the
+/// window. Both at once is the reading the ask is really after, and neither
+/// needs to know about the other.
+fn chromeless_button(on: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let mark = container(
+        iced_image(crate::icon::inked(
+            crate::icon::Glyph::Chromeless,
+            if on { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleChromeless);
+    tooltip(
+        control,
+        text(if on {
+            "Bring the frame back"
+        } else {
+            "Hide everything but the record"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

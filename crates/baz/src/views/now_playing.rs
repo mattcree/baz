@@ -227,6 +227,8 @@ fn art_edge_with_below(width: f32, height: f32, run_w: f32, source: f32, below: 
 #[derive(Clone, Copy)]
 pub(crate) struct Visual<'a> {
     pub(crate) rotation: crate::jewel_case::Rotation,
+    /// Whether the frame is away, so the page draws its own way back.
+    pub(crate) chromeless: bool,
     pub(crate) foreground: crate::visualizer::Foreground,
     pub(crate) mode: crate::visualizer::Mode,
     /// Present only while the independently selected visualization is visible.
@@ -333,10 +335,16 @@ pub(crate) fn view<'a>(
 
     let body: Element<'a, Message> = {
         let stage = column![
+            // **Centred in its own region, not pinned to the corner.** The
+            // owner: *"cramped up into the corner"*. With the object sized
+            // from the region this is usually the same pixel — but a cover
+            // whose source runs out before the region does used to hang from
+            // the top edge with all its slack underneath, which is the reading
+            // that earned the word.
             container(object)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .align_y(alignment::Vertical::Top),
+                .align_y(alignment::Vertical::Center),
             marquee(
                 now,
                 show_album,
@@ -367,7 +375,65 @@ pub(crate) fn view<'a>(
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
-    stack![field, spectrum, body].into()
+    stack![field, spectrum, body, way_back(visual.chromeless)].into()
+}
+
+/// **The one control chromeless mode leaves on the page.**
+///
+/// With the frame away there is no app bar to press, and on the platforms
+/// where baz owns its own chrome there is no close button either — so a
+/// listener who cannot remember which mark they pressed would be looking at a
+/// beautiful window they could not get out of. <kbd>Esc</kbd> brings it back
+/// and this says so without words.
+///
+/// One quiet mark in the corner is **not** the frame coming back. It is the
+/// smallest thing that keeps the mode honest: every state baz can be put into
+/// has a visible way out of it, which is the same rule the menu and the
+/// keyboard both answer to elsewhere.
+///
+/// At rest it is [`theme::GLYPH_OPACITY`] like every other mark; the pointer
+/// brings it up. Absent entirely when the frame is standing, because then the
+/// app bar's own toggle is the control and two would be a lie about there
+/// being two.
+fn way_back(chromeless: bool) -> Element<'static, Message> {
+    if !chromeless {
+        return Space::new().width(Length::Fill).height(Length::Fill).into();
+    }
+    let room = theme::active();
+    // **Not the lamp**, though the app bar's own copy of this mark lights when
+    // it is on. The accent means playback truth — which record is sounding,
+    // which track, where the playhead is — and this is a statement about the
+    // window frame. `the_lamp_is_named_only_where_playback_truth_is_drawn`
+    // caught it, doing exactly its job: with the frame away, an amber mark
+    // would have been the brightest thing on the screen and would have meant
+    // nothing.
+    let mark = container(
+        iced_image(crate::icon::inked(
+            crate::icon::Glyph::Chromeless,
+            room.glyph(),
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(theme::GLYPH_OPACITY),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    container(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::ToggleChromeless),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Right)
+    .align_y(alignment::Vertical::Top)
+    .padding(theme::GAP_MD)
+    .into()
 }
 
 /// Whether the album line is worth drawing: an album source footer already
@@ -410,48 +476,73 @@ fn marquee_measure(width: f32) -> f32 {
     (width - 2.0 * MARGIN).clamp(1.0, theme::LIST_MEASURE * 1.25)
 }
 
+/// **How tall the marquee's own block stands**, reserved so the object above
+/// it can be sized against what is actually left.
+///
+/// The eyebrow, the title's tallest rung, and the meta line, on their gaps.
+/// The *tallest* rung deliberately: a title that steps down the ladder gets a
+/// shorter block, and an object that grew when the track changed would make
+/// the page twitch between songs for no reason a listener could name.
+const MARQUEE_BLOCK: f32 =
+    theme::LINE_HEADING + theme::GAP_XS + theme::LINE_MARQUEE + theme::GAP_XS + theme::LINE_BODY;
+
 /// **How big the album object is** in the marquee composition.
 ///
-/// # It was a third, and a third was too little
+/// # Twice too small, and the second time is the one that mattered
 ///
-/// The first draft of this composition took `room * 0.34` and capped at
-/// `LIST_MEASURE / 2`, with a comment saying *"the object is no longer the
-/// subject of this page and does not want to be"*. The owner, on the shipped
-/// page: *"can you also make sure the album is not tiny on the now playing
-/// screen!"*
+/// The first draft took `room * 0.34`. Told it was tiny, I made it `0.58` —
+/// and was told again: *"can you make the now playing album bigger though…
+/// it's just very small and cramped up into the corner."*
 ///
-/// He is right and the comment was the tell. Moving the title off the artwork
-/// meant the object stopped being the *anchor* of the composition; it did not
-/// mean the object should shrink. At 1920 × 1080 that arithmetic drew a
-/// 290 px box — and a jewel case is drawn *in perspective inside* its box, so
-/// what actually reached the glass was about 215 px of album in a 1688 × 854
-/// stage, with an 800 px cover sitting in the cache unused.
+/// A second telling means the *behaviour* is wrong, not the number, and the
+/// number was never the mistake. **A share is a guess.** The object has a
+/// region — the stage, less the source band, less the page's padding, less the
+/// gap to the marquee, less the marquee — and that region was sitting there
+/// being ignored while a fraction of something else decided the size. At
+/// 1920 × 1080 the share drew 451 px into a region 660 px tall, so a fifth of
+/// the room the composition had was empty on purpose and nobody could say why.
 ///
-/// **A cover a listener has to lean in at is not a picture of a record.** The
-/// share is `0.58` and the cap is most of a list measure, which at 1920 draws
-/// close to 500 px and at 2560 a little over 700 — a real object across the
-/// diagonal from the title, which is what the composition was for.
+/// So it is the region. `min(region_w, region_h)`, floored, and bounded by the
+/// source — the same shape as [`art_edge`], which is what the centred
+/// composition used before this page was rebuilt, and it was right.
+///
+/// # What a jewel case does to this
+///
+/// Worth knowing when reading a screenshot: the case is a **projected** object
+/// that yaws continuously inside its box, so what reaches the glass is
+/// narrower than `edge` and its apparent width breathes as it turns. A plain
+/// cover fills the box exactly. The box is the honest number for both, and it
+/// is why a case that measured 215 px on screen had a 290 px box behind it.
 ///
 /// # The one rule that does not move
 ///
-/// Never larger than the source's own pixels. That is the rule the old centred
-/// composition had, and it is a fact about the file rather than a preference
-/// about the layout: baz does not upscale a cover, at any size, in any
-/// composition.
+/// Never larger than the source's own pixels. That is a fact about the file
+/// rather than a preference about the layout: baz does not upscale a cover, at
+/// any size, in any composition.
 fn marquee_edge(width: f32, height: f32, source: f32) -> f32 {
-    let room = width.min(height - SOURCE_CARD_H);
-    (room * MARQUEE_OBJECT_SHARE)
-        .clamp(theme::CONTINUE_SLEEVE, theme::LIST_MEASURE * 0.9)
+    let (region_w, region_h) = object_region(width, height);
+    region_w
+        .min(region_h)
+        .max(theme::CONTINUE_SLEEVE)
         .min(source)
         .max(1.0)
 }
 
-/// How much of the stage's shorter side the album object takes.
+/// **The room the object actually has**, in the stage's own terms.
 ///
-/// Enough to be an object rather than an ornament, and short of the half that
-/// would have it competing with the title for the eye. See [`marquee_edge`]
-/// for the 0.34 this replaced and why it was wrong.
-const MARQUEE_OBJECT_SHARE: f32 = 0.58;
+/// Spelled out rather than folded into [`marquee_edge`] so the subtractions
+/// can be read against `view`'s `column!` — they are the same page in two
+/// notations, and a term added to one has to be added to the other.
+fn object_region(width: f32, height: f32) -> (f32, f32) {
+    let across = width - 2.0 * MARGIN;
+    let down = height
+        - SOURCE_CARD_H      // the footer band, reserved below the stage
+        - MARGIN             // the stage's padding, top
+        - theme::GAP_XL      // the stage's padding, bottom
+        - theme::GAP_XL      // the column's gap between object and marquee
+        - MARQUEE_BLOCK; // the marquee itself
+    (across.max(1.0), down.max(1.0))
+}
 
 /// **The title ladder** — three rungs, chosen by how much there is to set.
 ///
@@ -932,37 +1023,54 @@ mod tests {
         );
     }
 
-    /// **The album is an object, not an ornament.**
+    /// **The album takes the room the composition actually leaves it.**
     ///
-    /// The owner, on the shipped composition: *"can you also make sure the
-    /// album is not tiny on the now playing screen!"* It was drawn at a third
-    /// of the stage's shorter side and capped at half a list measure, which
-    /// put about 215 px of visible jewel case in a 1688 × 854 stage while an
-    /// 800 px cover sat unused.
+    /// Told twice that it was too small — *"not tiny on the now playing
+    /// screen"*, then *"very small and cramped up into the corner"* — and the
+    /// second telling is what says the fault is the method rather than the
+    /// constant. Both drafts picked a **share** of something that was not the
+    /// object's own region, so both left room on the page that nothing used.
     ///
-    /// This holds the floor at the sizes baz is actually used at. It is
-    /// deliberately a *ratio* test rather than a pixel one: what went wrong
-    /// was a share, and a share is what has to stay right.
+    /// This asserts against the region instead: whatever else changes, the
+    /// object fills what it is given unless its own pixels run out first. A
+    /// share test could be satisfied by a number that is still wrong; this one
+    /// cannot, because there is nothing left over for it to be wrong by.
     #[test]
-    fn the_album_takes_a_real_share_of_the_stage() {
-        // Body sizes, with the lane out of the width — the stage the object
-        // and the marquee actually divide between them.
-        for (width, height) in [(1048.0, 710.0), (1688.0, 854.0), (2328.0, 1214.0)] {
+    fn the_album_fills_the_room_the_page_leaves_it() {
+        for (width, height) in [(1048.0, 710.0), (1688.0, 952.0), (2328.0, 1312.0)] {
             let plenty = f32::INFINITY;
             let edge = marquee_edge(width, height, plenty);
-            let shorter = width.min(height - SOURCE_CARD_H);
-            let share = edge / shorter;
+            let (region_w, region_h) = object_region(width, height);
+            let room = region_w.min(region_h);
             assert!(
-                share > 0.45,
-                "at {width}x{height} the album takes {share:.2} of the stage's \
-                 shorter side ({edge:.0} px) — that is the ornament the owner \
-                 called tiny, not an object"
+                (edge - room).abs() < 0.5,
+                "at {width}x{height} the object is {edge:.0} px in a {room:.0} px \
+                 region — {:.0} px of the page is reserved for it and drawing \
+                 nothing",
+                room - edge
             );
+        }
+    }
+
+    /// **And the region is real** — it leaves the marquee and the footer their
+    /// own room rather than being the whole stage under another name.
+    ///
+    /// This is the other half: a region that quietly grew to the full body
+    /// height would satisfy the test above while pushing the title off the
+    /// bottom of the page.
+    #[test]
+    fn the_object_s_region_leaves_the_marquee_standing() {
+        for (width, height) in [(1048.0, 710.0), (1688.0, 952.0), (2328.0, 1312.0)] {
+            let (_, region_h) = object_region(width, height);
+            let reserved = height - region_h;
             assert!(
-                share < 0.72,
-                "at {width}x{height} the album takes {share:.2} of the stage — \
-                 it is now competing with the title rather than balancing it"
+                reserved >= SOURCE_CARD_H + MARQUEE_BLOCK,
+                "at {width}x{height} the object's region leaves only \
+                 {reserved:.0} px for a footer and a marquee that need \
+                 {:.0} px between them",
+                SOURCE_CARD_H + MARQUEE_BLOCK
             );
+            assert!(region_h > 0.0);
         }
     }
 
@@ -1099,12 +1207,13 @@ mod tests {
                         "{width}x{height}: upscaled a {source} px source"
                     );
                     assert!(edge > 0.0);
-                    let room = width.min(height - SOURCE_CARD_H).max(1.0);
+                    let (region_w, region_h) = object_region(width, height);
+                    let room = region_w.min(region_h);
                     assert!(
-                        edge <= room * 0.72 || edge <= theme::CONTINUE_SLEEVE,
+                        edge <= room.max(theme::CONTINUE_SLEEVE) + 0.5,
                         "{width}x{height}: the object took the page back — \
-                         {edge:.0} px of a {room:.0} px stage leaves the \
-                         marquee nowhere to stand"
+                         {edge:.0} px in a {room:.0} px region, so it is \
+                         drawing over the marquee or the footer"
                     );
                 }
             }

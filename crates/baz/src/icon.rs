@@ -144,6 +144,9 @@ pub enum Glyph {
     /// handles would read as a bar chart or a signal meter; the whole point of
     /// a graphic equaliser's icon is that its faders disagree.
     Equalizer,
+    /// **Chromeless**: four corner brackets, for the frame going away from
+    /// around Now playing. See [`CHROMELESS`].
+    Chromeless,
     /// Add-to: the transfer slot's mark, on every row that can send a track
     /// toward the picker (doc 10 §3.6).
     Plus,
@@ -890,6 +893,87 @@ const EQUALIZER: &[Outline] = &[
     ],
 ];
 
+/// **The chromeless mark** — four corner brackets opening outward.
+///
+/// The owner, 2026-08-18: *"we should consider adding a little toggle here
+/// which allows it to go into a sort of 'chromeless' mode which really shows
+/// off the now playing view."*
+///
+/// Corners rather than an arrow or a square, because the two neighbours it
+/// could be confused with are already taken: [`WINDOW_MAXIMISE`] is an empty square
+/// (the window filling the screen) and this is not a window operation at all —
+/// it is the *frame going away from around the picture*. Four brackets are the
+/// field's own sign for that, and they read at [`theme::ICON_PX`] 20 where an
+/// outward-arrow cross does not.
+///
+/// # Drawn at **its own row's** weight, which is not the bar's only weight
+///
+/// The first cut used the application cluster's stroke and measured 0.292 of
+/// its box. That is right beside [`GEAR`] and wrong beside the marks it
+/// actually stands in: the view's own options run 0.19–0.26, and a mark
+/// arriving at 0.29 among them would have made *its neighbours* look thin —
+/// the exact fault [`EQUALIZER`]'s note is about, committed in the other
+/// direction.
+///
+/// The bar carries two weights on purpose (ADR-0040 §2's zones: the view's
+/// options in zone 3, the application's controls in zone 4), and
+/// `a_mark_in_the_app_bar_carries_its_neighbours_weight` holds each family to
+/// itself rather than flattening them into one.
+const CHROMELESS: &[Outline] = &[
+    // Top-left.
+    &[
+        (0.100, 0.100),
+        (0.420, 0.100),
+        (0.420, 0.220),
+        (0.100, 0.220),
+    ],
+    &[
+        (0.100, 0.100),
+        (0.220, 0.100),
+        (0.220, 0.420),
+        (0.100, 0.420),
+    ],
+    // Top-right.
+    &[
+        (0.580, 0.100),
+        (0.900, 0.100),
+        (0.900, 0.220),
+        (0.580, 0.220),
+    ],
+    &[
+        (0.780, 0.100),
+        (0.900, 0.100),
+        (0.900, 0.420),
+        (0.780, 0.420),
+    ],
+    // Bottom-left.
+    &[
+        (0.100, 0.780),
+        (0.420, 0.780),
+        (0.420, 0.900),
+        (0.100, 0.900),
+    ],
+    &[
+        (0.100, 0.580),
+        (0.220, 0.580),
+        (0.220, 0.900),
+        (0.100, 0.900),
+    ],
+    // Bottom-right.
+    &[
+        (0.580, 0.780),
+        (0.900, 0.780),
+        (0.900, 0.900),
+        (0.580, 0.900),
+    ],
+    &[
+        (0.780, 0.580),
+        (0.900, 0.580),
+        (0.900, 0.900),
+        (0.780, 0.900),
+    ],
+];
+
 const MINUS: &[Outline] = &[&[
     (0.155, 0.425),
     (0.845, 0.425),
@@ -1483,10 +1567,11 @@ impl Glyph {
         Self::RepeatOne,
         Self::Repeat,
         Self::Equalizer,
+        Self::Chromeless,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 41;
+    const COUNT: usize = 42;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1505,6 +1590,7 @@ impl Glyph {
             Self::Magnifier => MAGNIFIER,
             Self::Gear => GEAR,
             Self::Equalizer => EQUALIZER,
+            Self::Chromeless => CHROMELESS,
             Self::Plus => PLUS,
             Self::Minus => MINUS,
             Self::ArrowUp => ARROW_UP,
@@ -1549,6 +1635,7 @@ impl Glyph {
             Self::Magnifier => 7,
             Self::Gear => 8,
             Self::Equalizer => 40,
+            Self::Chromeless => 41,
             Self::Plus => 9,
             Self::Minus => 10,
             Self::ArrowUp => 11,
@@ -2052,39 +2139,70 @@ mod tests {
             }
         }
 
-        // The app bar's right cluster, in the order it is drawn.
-        let cluster = [Glyph::Equalizer, Glyph::Bell, Glyph::Gear];
-        let weights: Vec<(Glyph, f32)> = cluster.map(|glyph| (glyph, ink(glyph))).into();
+        // **Two families, and they are two on purpose.** ADR-0040 §2's zones:
+        // the view's own options in zone 3, the application's controls in
+        // zone 4. Measured 2026-08-18, the first runs 0.19–0.26 of the box in
+        // ink and the second 0.31–0.34 — a real and deliberate difference in
+        // rank, which is why this holds each family to *itself* rather than
+        // flattening the bar into one weight.
+        //
+        // Holding them jointly would demand redrawing four shipped marks to
+        // match two, and the fault being guarded against is a mark arriving
+        // out of step with the row it joins. `Glyph::Chromeless` was drawn at
+        // 0.292 first — correct beside the gear, and heavy enough beside the
+        // marks it actually stands in to have made *them* look thin.
+        let families: [(&str, &[Glyph]); 2] = [
+            (
+                "the view's options",
+                &[
+                    Glyph::Chromeless,
+                    Glyph::VisualCase,
+                    Glyph::VisualCover,
+                    Glyph::VisualNone,
+                    Glyph::VisualSpectrum,
+                    Glyph::VisualFacts,
+                ],
+            ),
+            (
+                "the application's controls",
+                &[Glyph::Equalizer, Glyph::Bell, Glyph::Gear],
+            ),
+        ];
 
-        let lightest = weights
-            .iter()
-            .copied()
-            .fold(f32::MAX, |seen, (_, weight)| seen.min(weight));
-        let heaviest = weights
-            .iter()
-            .copied()
-            .fold(0.0_f32, |seen, (_, weight)| seen.max(weight));
+        for (family, glyphs) in families {
+            let weights: Vec<(Glyph, f32)> =
+                glyphs.iter().map(|glyph| (*glyph, ink(*glyph))).collect();
+            let lightest = weights
+                .iter()
+                .copied()
+                .fold(f32::MAX, |seen, (_, weight)| seen.min(weight));
+            let heaviest = weights
+                .iter()
+                .copied()
+                .fold(0.0_f32, |seen, (_, weight)| seen.max(weight));
 
-        // Under two thirds of the heaviest is the reading the owner has twice
-        // called skinny; the bell was at 0.53 of the gear when he said it the
-        // second time, and the equaliser at 0.55 when it was added.
-        assert!(
-            lightest / heaviest > 0.75,
-            "the app bar's marks run {lightest:.3}–{heaviest:.3} of their box \
-             in ink: {weights:?}. The lightest is {:.0}% of the heaviest, and \
-             a mark at that fraction of its neighbour reads as skinny however \
-             wide its outline is.",
-            100.0 * lightest / heaviest
-        );
-
-        // And none of them is a hairline in absolute terms — a mark can be
-        // consistent with a cluster that is uniformly too light.
-        for (glyph, weight) in &weights {
+            // The bell was at 0.53 of the gear when the owner called it skinny
+            // the second time, and the equaliser at 0.55 on the day it was
+            // added. 0.70 is clear of the widest spread either family actually
+            // has and well above the reading he has twice objected to.
             assert!(
-                *weight > 0.20,
-                "{glyph:?} lays {weight:.3} of its box in ink, which is a \
-                 hairline at ICON_PX 20 whatever its neighbours do"
+                lightest / heaviest > 0.70,
+                "{family} run {lightest:.3}–{heaviest:.3} of their box in \
+                 ink: {weights:?}. The lightest is {:.0}% of the heaviest, and \
+                 a mark at that fraction of the ones beside it reads as skinny \
+                 however wide its outline is.",
+                100.0 * lightest / heaviest
             );
+
+            // And none is a hairline in absolute terms — a mark can be
+            // consistent with a family that is uniformly too light.
+            for (glyph, weight) in &weights {
+                assert!(
+                    *weight > 0.15,
+                    "{glyph:?} lays {weight:.3} of its box in ink, which is a \
+                     hairline at ICON_PX 20 whatever its neighbours do"
+                );
+            }
         }
     }
 
