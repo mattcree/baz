@@ -403,6 +403,18 @@ pub(crate) const SLEEP_CHOICES: [SleepChoice; 6] = [
     },
 ];
 
+/// **The equaliser as the shell holds it** — the config's three fields, kept
+/// together because they travel to the engine as one command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct EqualizerSettings {
+    /// Whether it is in the path at all.
+    pub(crate) enabled: bool,
+    /// Ten band gains in centidecibels, low to high.
+    pub(crate) bands_centidb: [i16; 10],
+    /// The stated attenuation, in centidecibels.
+    pub(crate) preamp_centidb: i16,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     /// Setup screen: the folder text input changed.
@@ -504,6 +516,19 @@ pub(crate) enum Message {
     /// because the key is the only way in and the only way out besides `Esc`
     /// and a press outside — a control that toggles is honest about that.
     ToggleShortcuts,
+    /// **The equaliser's four gestures.** Each is a whole new settings value
+    /// sent to the engine as one `SetEqualizer`, because the curve and its
+    /// pre-amp are one decision (`baz_core::protocol`).
+    EqualizerEnabled(bool),
+    /// A band nudged, by index and centidecibels.
+    EqualizerBand(usize, i16),
+    /// The pre-amp nudged, in centidecibels.
+    EqualizerPreamp(i16),
+    /// Every band back to flat. The pre-amp is left alone: it is the
+    /// listener's headroom, not part of the curve.
+    EqualizerFlat,
+    /// Take the pre-amp the curve suggests — the largest boost, given back.
+    EqualizerSuggestPreamp,
     /// The app bar's browser-style place-history arrows, also Alt+Left/Right.
     HistoryBack,
     HistoryForward,
@@ -1435,6 +1460,9 @@ struct App {
     /// Whether the shortcuts card is up. Session state and deliberately not
     /// persisted: a card you asked for once is not a preference.
     shortcuts_open: bool,
+    /// The equaliser, as the listener has it. The engine holds its own copy;
+    /// this is what the controls draw and what is written to the config.
+    equalizer: EqualizerSettings,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -1971,6 +1999,24 @@ impl App {
             playback.send(Command::SetRepeat { repeat });
         }
         player.seed_repeat(repeat);
+        // **The equaliser is sent only when it is on.** A fresh install and a
+        // listener who has never touched it both reach the engine having sent
+        // no equaliser command at all, which is one fewer thing between the
+        // decoder and the sink on the path this product is judged by.
+        let equalizer = stored
+            .as_ref()
+            .map_or_else(EqualizerSettings::default, |config| EqualizerSettings {
+                enabled: config.equalizer_enabled,
+                bands_centidb: config.equalizer_bands_centidb,
+                preamp_centidb: config.equalizer_preamp_centidb,
+            });
+        if equalizer.enabled {
+            playback.send(Command::SetEqualizer {
+                enabled: true,
+                bands_centidb: equalizer.bands_centidb,
+                preamp_centidb: equalizer.preamp_centidb,
+            });
+        }
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -2040,6 +2086,7 @@ impl App {
             menu: None,
             status_open: false,
             shortcuts_open: false,
+            equalizer,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
@@ -2257,6 +2304,43 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::EqualizerEnabled(on) => {
+                self.equalizer.enabled = on;
+                self.send_equalizer();
+                Task::none()
+            }
+            Message::EqualizerBand(index, delta) => {
+                if let Some(band) = self.equalizer.bands_centidb.get_mut(index) {
+                    *band = (*band + delta).clamp(-1200, 1200);
+                }
+                self.send_equalizer();
+                Task::none()
+            }
+            Message::EqualizerPreamp(delta) => {
+                self.equalizer.preamp_centidb =
+                    (self.equalizer.preamp_centidb + delta).clamp(-1200, 1200);
+                self.send_equalizer();
+                Task::none()
+            }
+            Message::EqualizerFlat => {
+                self.equalizer.bands_centidb = [0; 10];
+                self.send_equalizer();
+                Task::none()
+            }
+            Message::EqualizerSuggestPreamp => {
+                let suggested =
+                    baz_core::equalizer::Bands::from_centidb(self.equalizer.bands_centidb)
+                        .suggested_preamp();
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "a suggestion derived from bands already clamped to ±12 dB"
+                )]
+                {
+                    self.equalizer.preamp_centidb = (suggested * 100.0).round() as i16;
+                }
+                self.send_equalizer();
+                Task::none()
+            }
             Message::ToggleShortcuts => {
                 self.shortcuts_open = !self.shortcuts_open;
                 Task::none()
@@ -5633,6 +5717,28 @@ impl App {
         self.enter_playlist_place(id)
     }
 
+    /// **Send the equaliser and write it down**, in that order.
+    ///
+    /// One command carries all three parts because they are one decision; the
+    /// engine re-designs its filters once rather than three times, and a
+    /// half-applied curve never reaches a block.
+    fn send_equalizer(&mut self) {
+        if !self.playback.send(Command::SetEqualizer {
+            enabled: self.equalizer.enabled,
+            bands_centidb: self.equalizer.bands_centidb,
+            preamp_centidb: self.equalizer.preamp_centidb,
+        }) {
+            self.player.engine_closed();
+            return;
+        }
+        let settings = self.equalizer;
+        persist(|config| {
+            config.equalizer_enabled = settings.enabled;
+            config.equalizer_bands_centidb = settings.bands_centidb;
+            config.equalizer_preamp_centidb = settings.preamp_centidb;
+        });
+    }
+
     /// **Keep the searchable playlist corpus in step with the folder.**
     ///
     /// Called after every `playlists.refresh`, which is the only thing that
@@ -7428,6 +7534,7 @@ impl App {
                     },
                     self.resource_reading,
                     self.sleep_remaining(),
+                    self.equalizer,
                     self.ink(),
                 )
             }

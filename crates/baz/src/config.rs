@@ -123,6 +123,13 @@ const REPEAT: &str = "repeat";
 /// The key the volume fader's control position is written under.
 const VOLUME: &str = "volume";
 
+/// Whether the equaliser is switched on.
+const EQ_ENABLED: &str = "equalizer_enabled";
+/// The ten band gains, in centidecibels, low to high.
+const EQ_BANDS: &str = "equalizer_bands_centidb";
+/// The equaliser's stated attenuation, in centidecibels.
+const EQ_PREAMP: &str = "equalizer_preamp_centidb";
+
 /// The shared-mode output endpoint, absent to follow the system default.
 const OUTPUT_DEVICE: &str = "output_device";
 
@@ -158,6 +165,13 @@ pub const MAX_VIBE_WORKERS: usize = 16;
 
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a settings record is a list of the listener's answers, and some \
+              of those questions are yes-or-no; grouping them into sub-structs \
+              to satisfy a count would put the config file's shape at the \
+              service of a lint"
+)]
 pub struct Config {
     /// The music folders baz scans and shelves, **in the listener's order**
     /// (ADR-0022). Empty before a first run has chosen one.
@@ -266,6 +280,18 @@ pub struct Config {
     /// read: `repeat_one = true` becomes [`baz_core::protocol::Repeat::One`], which is what that
     /// file meant.
     pub repeat: baz_core::protocol::Repeat,
+    /// **The equaliser**, exactly as the engine takes it: on or off, ten band
+    /// gains in centidecibels, and the stated attenuation.
+    ///
+    /// Centidecibels rather than a float per band, for
+    /// [`baz_core::protocol::Command::SetEqualizer`]'s reason — and because a
+    /// config file of `-3.0000001` would be a document nobody wants to read or
+    /// hand-edit.
+    pub equalizer_enabled: bool,
+    /// The ten band gains, low to high, in centidecibels.
+    pub equalizer_bands_centidb: [i16; 10],
+    /// The stated attenuation, in centidecibels.
+    pub equalizer_preamp_centidb: i16,
     /// The album object drawn on Now Playing: flat cover, jewel case or none.
     ///
     /// View state, persisted beside density rather than exposed as a Settings
@@ -301,6 +327,11 @@ impl Default for Config {
             output_device: None,
             shuffle: false,
             repeat: baz_core::protocol::Repeat::Off,
+            // Off, flat, and no attenuation — the state in which baz is the
+            // bit-exact player it promises to be.
+            equalizer_enabled: false,
+            equalizer_bands_centidb: [0; 10],
+            equalizer_preamp_centidb: 0,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -308,6 +339,78 @@ impl Default for Config {
             last_place: Place::Library,
         }
     }
+}
+
+/// Now playing's own two view-state keys: which album object it draws, and
+/// whether the fact feed is showing. Neither is a Settings row — they are the
+/// state of a surface, persisted so it opens as it was left.
+fn read_now_playing(table: &toml::Table) -> (crate::visualizer::Foreground, bool) {
+    let foreground = table
+        .get(VISUALIZATION_FOREGROUND)
+        .and_then(toml::Value::as_str)
+        .and_then(crate::visualizer::Foreground::from_code)
+        .unwrap_or(crate::visualizer::Foreground::JewelCase);
+    let facts = table
+        .get(NOW_PLAYING_FACTS)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true);
+    (foreground, facts)
+}
+
+/// Write the equaliser's three keys, with the sentence that says what `off`
+/// means — a config file is read by hand, and *off is not a flat filter* is
+/// the one thing about this feature worth knowing there.
+fn write_equalizer(out: &mut String, config: &Config) {
+    use std::fmt::Write as _;
+
+    let _ = writeln!(
+        out,
+        "# the equaliser: off is bit-exact passthrough, not a flat filter\n\
+         {EQ_ENABLED} = {}\n\
+         # ten bands at 31.5 · 63 · 125 · 250 · 500 Hz · 1 · 2 · 4 · 8 · 16 kHz,\n\
+         # in hundredths of a decibel, ±1200\n\
+         {EQ_BANDS} = {:?}\n\
+         # attenuation applied before the bands, in hundredths of a decibel\n\
+         {EQ_PREAMP} = {}",
+        config.equalizer_enabled, config.equalizer_bands_centidb, config.equalizer_preamp_centidb,
+    );
+}
+
+/// Read the equaliser back.
+///
+/// **A malformed curve is a flat one, never a partial one.** Ten values or
+/// none: a file with nine would otherwise silently shift every band up a
+/// frequency, which is the kind of degradation that sounds like a bug in the
+/// filters rather than a bad config. Each value is clamped through
+/// `equalizer::Band`, so a hand-edited ±9000 becomes ±1200 rather than a
+/// refusal to read the file at all.
+fn read_equalizer(table: &toml::Table) -> (bool, [i16; 10], i16) {
+    let enabled = table
+        .get(EQ_ENABLED)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    let bands = table
+        .get(EQ_BANDS)
+        .and_then(toml::Value::as_array)
+        .filter(|values| values.len() == 10)
+        .and_then(|values| {
+            let read: Vec<i16> = values
+                .iter()
+                .filter_map(toml::Value::as_integer)
+                .filter_map(|value| i16::try_from(value).ok())
+                .collect();
+            <[i16; 10]>::try_from(read).ok()
+        })
+        .map_or([0; 10], |read| {
+            baz_core::equalizer::Bands::from_centidb(read).to_centidb()
+        });
+    let preamp = table
+        .get(EQ_PREAMP)
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| i16::try_from(value).ok())
+        .unwrap_or(0)
+        .clamp(-1200, 1200);
+    (enabled, bands, preamp)
 }
 
 fn write_music_dirs(out: &mut String, music_dirs: &[PathBuf]) {
@@ -397,6 +500,7 @@ impl Config {
              {REPEAT} = {}",
             toml_string(repeat_code(self.repeat)),
         );
+        write_equalizer(&mut out, self);
         let _ = writeln!(
             out,
             "# Now Playing foreground: \"cover\", \"jewel-case\" or \"none\"\n\
@@ -520,15 +624,9 @@ impl Config {
                     })
             })
             .unwrap_or_default();
-        let visualization_foreground = table
-            .get(VISUALIZATION_FOREGROUND)
-            .and_then(toml::Value::as_str)
-            .and_then(crate::visualizer::Foreground::from_code)
-            .unwrap_or(crate::visualizer::Foreground::JewelCase);
-        let now_playing_facts = table
-            .get(NOW_PLAYING_FACTS)
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(true);
+        let (equalizer_enabled, equalizer_bands_centidb, equalizer_preamp_centidb) =
+            read_equalizer(&table);
+        let (visualization_foreground, now_playing_facts) = read_now_playing(&table);
         let vibe_workers = table
             .get(VIBE_WORKERS)
             .and_then(toml::Value::as_integer)
@@ -560,6 +658,9 @@ impl Config {
             output_device,
             shuffle,
             repeat,
+            equalizer_enabled,
+            equalizer_bands_centidb,
+            equalizer_preamp_centidb,
             visualization_foreground,
             now_playing_facts,
             vibe_workers,
@@ -735,6 +836,60 @@ pub fn store(path: &Path, config: &Config) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **The equaliser round-trips, and a broken curve is flat rather than
+    /// wrong.**
+    ///
+    /// The partial-array case is the one that matters: nine values would
+    /// otherwise shift every band up a frequency, which sounds like a bug in
+    /// the filters rather than a bad config file.
+    #[test]
+    fn the_equaliser_round_trips_and_degrades_to_flat() {
+        let config = Config {
+            equalizer_enabled: true,
+            equalizer_bands_centidb: [-300, 0, 250, 600, 0, 0, -150, 0, 400, 0],
+            equalizer_preamp_centidb: -600,
+            ..Config::default()
+        };
+        let read = Config::from_toml(&config.to_toml());
+        assert!(read.equalizer_enabled);
+        assert_eq!(read.equalizer_bands_centidb, config.equalizer_bands_centidb);
+        assert_eq!(read.equalizer_preamp_centidb, -600);
+
+        // Nine bands is not a curve. Flat, and the rest of the file survives.
+        let short = Config::from_toml(
+            "equalizer_enabled = true\n\
+             equalizer_bands_centidb = [100, 100, 100, 100, 100, 100, 100, 100, 100]\n\
+             sidebar_open = false\n",
+        );
+        assert_eq!(
+            short.equalizer_bands_centidb, [0; 10],
+            "a partial curve was used"
+        );
+        assert!(short.equalizer_enabled, "one bad key cost another key");
+        assert!(!short.sidebar_open);
+
+        // Hand-edited nonsense is clamped, not refused.
+        let wild = Config::from_toml(
+            "equalizer_bands_centidb = [9000, -9000, 0, 0, 0, 0, 0, 0, 0, 0]\n\
+             equalizer_preamp_centidb = -9000\n",
+        );
+        assert_eq!(wild.equalizer_bands_centidb[0], 1200);
+        assert_eq!(wild.equalizer_bands_centidb[1], -1200);
+        assert_eq!(wild.equalizer_preamp_centidb, -1200);
+    }
+
+    /// **A fresh config leaves the equaliser out of the path**, which is the
+    /// state the bit-exact promise is made in.
+    #[test]
+    fn a_fresh_config_has_no_equaliser() {
+        let fresh = Config::default();
+        assert!(!fresh.equalizer_enabled);
+        assert_eq!(fresh.equalizer_bands_centidb, [0; 10]);
+        assert_eq!(fresh.equalizer_preamp_centidb, 0);
+        assert_eq!(Config::from_toml("").equalizer_bands_centidb, [0; 10]);
+    }
+
     use super::*;
 
     fn settings(
@@ -910,6 +1065,9 @@ mod tests {
                 output_device: None,
                 shuffle: false,
                 repeat: baz_core::protocol::Repeat::Off,
+                equalizer_enabled: false,
+                equalizer_bands_centidb: [0; 10],
+                equalizer_preamp_centidb: 0,
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
                 now_playing_facts: true,
                 vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1261,6 +1419,9 @@ mod tests {
             output_device: None,
             shuffle: false,
             repeat: baz_core::protocol::Repeat::Off,
+            equalizer_enabled: false,
+            equalizer_bands_centidb: [0; 10],
+            equalizer_preamp_centidb: 0,
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1288,6 +1449,9 @@ mod tests {
             output_device: Some("USB DAC".to_owned()),
             shuffle: false,
             repeat: baz_core::protocol::Repeat::One,
+            equalizer_enabled: false,
+            equalizer_bands_centidb: [0; 10],
+            equalizer_preamp_centidb: 0,
             visualization_foreground: crate::visualizer::Foreground::None,
             now_playing_facts: false,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -1448,6 +1612,9 @@ mod tests {
             output_device: Some("Speakers (USB)".to_owned()),
             shuffle: false,
             repeat: baz_core::protocol::Repeat::Off,
+            equalizer_enabled: false,
+            equalizer_bands_centidb: [0; 10],
+            equalizer_preamp_centidb: 0,
             visualization_foreground: crate::visualizer::Foreground::Cover,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,

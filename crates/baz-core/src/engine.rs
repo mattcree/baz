@@ -1361,6 +1361,11 @@ struct Control<S: Sink> {
     /// together before they reach it, so the pump does one multiply per sample
     /// whether none, one or both are engaged (ADR-0013).
     fader: Fader,
+    /// **The equaliser.** Engine-thread state beside the fader, and read by
+    /// the pump for the same reason: both decide whether the transparent path
+    /// is available, and both are applied in the block the pump copies when it
+    /// is not (see [`crate::equalizer`] for why off means *not in the path*).
+    equalizer: crate::equalizer::Equalizer,
     /// Where the volume is currently being applied, as last reported.
     volume_path: VolumePath,
     /// ReplayGain state shared with [`EngineHandle`]. This thread is its only
@@ -1507,6 +1512,7 @@ impl<S: Sink> Control<S> {
             session: None,
             volume,
             fader: Fader::default(),
+            equalizer: crate::equalizer::Equalizer::default(),
             volume_path: VolumePath::Unity,
             replay_gain,
             rg_settings,
@@ -1748,6 +1754,7 @@ impl<S: Sink> Control<S> {
             chunk_samples,
             &self.delivered,
             &mut self.fader,
+            &mut self.equalizer,
             &mut self.scratch,
             &self.visualization,
         );
@@ -1901,6 +1908,19 @@ impl<S: Sink> Control<S> {
             }
             Command::SetTraversal { traversal } => self.set_traversal(traversal),
             Command::SetRepeat { repeat } => self.set_repeat(repeat),
+            Command::SetEqualizer {
+                enabled,
+                bands_centidb,
+                preamp_centidb,
+            } => {
+                // Applied whole. The three parts are one decision, and the
+                // filters are re-designed once rather than three times.
+                self.equalizer
+                    .set_bands(crate::equalizer::Bands::from_centidb(bands_centidb));
+                self.equalizer
+                    .set_preamp_db(f32::from(preamp_centidb) / 100.0);
+                self.equalizer.set_enabled(enabled);
+            }
         }
     }
 
@@ -3163,12 +3183,18 @@ impl Session {
     /// of the new one at the old one's gain. Capping costs one short block per
     /// boundary and nothing else; the samples delivered, and their order, are
     /// unchanged, which is why the bit-exactness fixtures are unaffected.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the pump takes each piece of the delivery path explicitly \
+                  rather than reaching back into the engine it belongs to"
+    )]
     fn pump(
         &mut self,
         sink: &mut dyn Sink,
         chunk_samples: usize,
         delivered: &AtomicUsize,
         fader: &mut Fader,
+        equalizer: &mut crate::equalizer::Equalizer,
         scratch: &mut [f32],
         visualization: &VisualizationTap,
     ) -> bool {
@@ -3176,7 +3202,11 @@ impl Session {
         if available == 0 {
             return false;
         }
-        let transparent = fader.is_transparent();
+        // **Both must be transparent for the short-circuit.** The fader has
+        // always decided this; the equaliser is the second tenant of the same
+        // rule, and it answers `false` when it is off *and* when it is on with
+        // nothing to do (`crate::equalizer::Equalizer::is_active`).
+        let transparent = fader.is_transparent() && !equalizer.is_active();
         // While scaling, never read more than the scratch can hold; the two
         // are equal by construction, and the `min` is what makes that a fact
         // rather than a comment.
@@ -3213,7 +3243,7 @@ impl Session {
             scratch[..split].copy_from_slice(a);
             scratch[split..n].copy_from_slice(b);
             let block = &mut scratch[..n];
-            visualize_then_fade(visualization, block, rate, fader);
+            visualize_then_shape(visualization, block, rate, fader, equalizer);
             sink.write(block);
         }
         chunk.commit_all();
@@ -3428,13 +3458,27 @@ impl Session {
 /// Publish the visualization's pre-volume reading, then apply the output
 /// fader in place. One function makes that ordering impossible to reverse by
 /// accident in the non-transparent pump branch.
-fn visualize_then_fade(
+/// **Capture, equalise, then fade** — in that order, and the order is the
+/// design.
+///
+/// The visualiser taps the stream *before* either stage, so the bars answer
+/// the music rather than the listener's own settings: a curve that boosts the
+/// bass must not make the bass bars taller, or the picture stops being about
+/// the record.
+///
+/// The equaliser runs before the fader because the fader is the last thing in
+/// the chain by definition — it is where the volume and ReplayGain land, and
+/// an equaliser applied after them would be shaping a signal that had already
+/// been scaled for the room.
+fn visualize_then_shape(
     visualization: &VisualizationTap,
     block: &mut [f32],
     rate: u32,
     fader: &mut Fader,
+    equalizer: &mut crate::equalizer::Equalizer,
 ) {
     visualization.capture(block, rate);
+    equalizer.apply(block, rate, CHANNELS);
     fader.apply(block, rate);
 }
 
@@ -3836,7 +3880,7 @@ mod tests {
     use super::{
         Arc, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig, Event, Fader,
         Instruments, Observable, Path, PathBuf, Sink, VisualizationFrame, VisualizationTap, mpsc,
-        thread, visualize_then_fade,
+        thread, visualize_then_shape,
     };
     use crate::protocol::{ConversionReason, SignalChain};
 
@@ -3873,7 +3917,11 @@ mod tests {
         let mut fader = Fader::default();
         fader.jump(0.0);
 
-        visualize_then_fade(&tap, &mut block, RATE, &mut fader);
+        // The equaliser is in the chain now and is passed switched off, which
+        // is the state this assertion is about: the visualiser reads the file,
+        // not the listener's settings.
+        let mut equalizer = crate::equalizer::Equalizer::default();
+        visualize_then_shape(&tap, &mut block, RATE, &mut fader, &mut equalizer);
 
         assert!(block.iter().all(|sample| *sample == 0.0));
         let frame = tap.snapshot();

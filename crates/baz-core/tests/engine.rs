@@ -1869,6 +1869,113 @@ fn unity_volume_is_indistinguishable_from_no_volume_control() {
     assert_samples_eq(&at_unity, &untouched, "unity vs. no volume command");
 }
 
+/// **The equaliser off is bit-exact, and enabled-but-flat is too.**
+///
+/// This is the owner's own requirement — *"without EQ it's just pure
+/// passthrough"* — asserted where it can actually be broken: through the whole
+/// engine, over real decoded audio, sample for sample with no tolerance. The
+/// second half matters as much as the first, because "enabled" is a thing a
+/// listener leaves switched on: a flat curve must cost nothing, not almost
+/// nothing.
+#[test]
+fn an_equaliser_that_does_nothing_costs_nothing() {
+    let f = fixtures();
+    let capacity = f.a_ref.len();
+    let untouched = play_with_volume(std::slice::from_ref(&f.a), capacity, &[]);
+
+    let off = play_with_volume(
+        std::slice::from_ref(&f.a),
+        capacity,
+        &[Command::SetEqualizer {
+            enabled: false,
+            bands_centidb: [600; 10],
+            preamp_centidb: -600,
+        }],
+    );
+    assert_samples_eq(&off, &untouched, "a disabled equaliser, curve and all");
+
+    let flat = play_with_volume(
+        std::slice::from_ref(&f.a),
+        capacity,
+        &[Command::SetEqualizer {
+            enabled: true,
+            bands_centidb: [0; 10],
+            preamp_centidb: 0,
+        }],
+    );
+    assert_samples_eq(&flat, &untouched, "an enabled equaliser with a flat curve");
+}
+
+/// **And when it is asked for something, it does it** — through the same
+/// path, on the same audio.
+///
+/// Not a spectrum measurement (that is `baz_core::equalizer`'s own suite, on
+/// tones it generates): this asserts the wiring. A preamp alone is the
+/// cleanest possible probe of it — one number, one multiply, no filters — so a
+/// failure here is the command, the engine field or the pump, never the DSP.
+#[test]
+fn a_preamp_alone_travels_the_whole_path() {
+    let f = fixtures();
+    let capacity = f.a_ref.len();
+    let untouched = play_with_volume(std::slice::from_ref(&f.a), capacity, &[]);
+    let cut = play_with_volume(
+        std::slice::from_ref(&f.a),
+        capacity,
+        &[Command::SetEqualizer {
+            enabled: true,
+            bands_centidb: [0; 10],
+            // −6.02 dB is exactly half, so the expected output is exact.
+            preamp_centidb: -602,
+        }],
+    );
+    assert_eq!(cut.len(), untouched.len(), "the cut dropped samples");
+    let loudest = untouched.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    let after = cut.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    assert!(loudest > 0.05, "the fixture is too quiet to measure");
+    let ratio = after / loudest;
+    assert!(
+        (ratio - 0.5).abs() < 0.01,
+        "a −6.02 dB preamp left {ratio:.4} of the peak, not half"
+    );
+}
+
+/// **A band changes the sound, and the transparent path notices.**
+///
+/// The bit-exact short-circuit is an `if` in the pump, and the failure mode it
+/// has is silence about itself: an equaliser wired in but never consulted
+/// would leave every sample untouched and every other test in this file green.
+/// So this asserts the audio *differs* — the one thing a skipped filter cannot
+/// fake.
+#[test]
+fn a_boosted_band_actually_reaches_the_sink() {
+    let f = fixtures();
+    let capacity = f.a_ref.len();
+    let untouched = play_with_volume(std::slice::from_ref(&f.a), capacity, &[]);
+    let mut bands = [0_i16; 10];
+    bands[5] = 900; // +9 dB at 1 kHz, where the fixture's tone lives
+    let shaped = play_with_volume(
+        std::slice::from_ref(&f.a),
+        capacity,
+        &[Command::SetEqualizer {
+            enabled: true,
+            bands_centidb: bands,
+            preamp_centidb: 0,
+        }],
+    );
+    assert_eq!(shaped.len(), untouched.len());
+    let moved = shaped
+        .iter()
+        .zip(&untouched)
+        .filter(|(a, b)| (*a - *b).abs() > 1e-6)
+        .count();
+    assert!(
+        moved * 10 > untouched.len(),
+        "only {moved} of {} samples moved — the equaliser is wired in but not \
+         consulted, which every other test in this file would call fine",
+        untouched.len()
+    );
+}
+
 /// **Half travel is exactly one eighth of the amplitude**, and every sample
 /// says so exactly — f32 multiplication is deterministic, so this is asserted
 /// with `==` and no tolerance.

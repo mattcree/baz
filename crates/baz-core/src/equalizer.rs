@@ -131,6 +131,23 @@ impl Bands {
         Self(db.map(Band::new))
     }
 
+    /// Build from the **centidecibels** the protocol carries
+    /// ([`crate::protocol::Command::SetEqualizer`]).
+    #[must_use]
+    pub fn from_centidb(centidb: [i16; 10]) -> Self {
+        Self(centidb.map(|hundredths| Band::new(f32::from(hundredths) / 100.0)))
+    }
+
+    /// The curve as centidecibels, for the protocol and for config.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a band is clamped to ±12 dB, so ±1200 fits i16 many times over"
+    )]
+    pub fn to_centidb(self) -> [i16; 10] {
+        self.0.map(|band| (band.db() * 100.0).round() as i16)
+    }
+
     /// Whether the curve is flat everywhere.
     ///
     /// **This is what lets an enabled equaliser still be transparent.** A

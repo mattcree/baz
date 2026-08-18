@@ -450,6 +450,13 @@ pub enum Control {
     SettingsPreampUp,
     SettingsNoTagPreampDown,
     SettingsNoTagPreampUp,
+    /// The equaliser's own pre-amp.
+    SettingsEqPreampDown,
+    SettingsEqPreampUp,
+    /// **One identity per band mark**, by band index — `Ink` answers *which*
+    /// control the pointer is on, so twenty marks need twenty answers.
+    SettingsBandDown(usize),
+    SettingsBandUp(usize),
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is

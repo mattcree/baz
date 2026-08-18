@@ -441,6 +441,27 @@ pub enum Command {
         /// What natural completion does.
         repeat: Repeat,
     },
+    /// **Set the equaliser** — the whole of it, in one message.
+    ///
+    /// Enabled, the curve and the preamp travel together rather than as three
+    /// commands, because they are one decision: a listener dragging a band has
+    /// changed the curve *and* possibly the suggested preamp, and applying
+    /// half of that for a block would be a filter nobody asked for.
+    SetEqualizer {
+        /// Whether the equaliser is in the path at all. `false` restores the
+        /// bit-exact short-circuit ([`crate::equalizer`]).
+        enabled: bool,
+        /// The ten band gains in **centidecibels**, low to high.
+        ///
+        /// Integers rather than floats, for the reason `SetVolume` carries a
+        /// control position and ReplayGain carries `centidb`: this enum is
+        /// `Eq` and is serialised across a boundary, and a protocol that
+        /// compares floats has a bug waiting in it. A hundredth of a decibel
+        /// is far below what a band control offers or an ear resolves.
+        bands_centidb: [i16; 10],
+        /// The stated attenuation, in centidecibels.
+        preamp_centidb: i16,
+    },
 }
 
 /// **What happens when the music runs out** — the three states every player
