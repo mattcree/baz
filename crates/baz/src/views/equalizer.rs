@@ -38,7 +38,9 @@
 //! headroom the bands are given back, and a listener reading the curve should
 //! not read it as an eleventh frequency.
 
-use iced::widget::{Space, button, checkbox, column, container, pick_list, row, rule, text};
+use iced::widget::{
+    Space, button, checkbox, column, container, pick_list, row, rule, text, text_input,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{EqualizerSettings, Message};
@@ -52,11 +54,40 @@ use crate::theme;
 /// of them plus their labels fit a panel that does not fill the window.
 const FADER_H: f32 = 168.0;
 
-/// The panel's own measure: eleven faders on their gaps, plus the padding.
-const PANEL_W: f32 = 11.0 * crate::fader::HIT_W + 10.0 * theme::GAP_XS + 4.0 * theme::GAP_LG;
+/// The panel's own measure: **the wider of the two things it holds.**
+///
+/// It used to be the fader row alone, which was right while the row above it
+/// held a switch and two words. Adding the preset picker and `Keep` made that
+/// row the wider of the two, and the panel did not know — so `Make room` wrapped
+/// onto a second line and the controls row grew a storey while the faders sat
+/// in a panel with space to spare.
+///
+/// A panel measured by one of its two rows will do that again the next time
+/// the other one gains a control, so it is measured by both.
+const PANEL_W: f32 = if FADER_ROW_W > CONTROLS_ROW_W {
+    FADER_ROW_W
+} else {
+    CONTROLS_ROW_W
+};
+
+/// Eleven faders on their gaps, plus the card's padding.
+const FADER_ROW_W: f32 = 11.0 * crate::fader::HIT_W + 10.0 * theme::GAP_XS + 4.0 * theme::GAP_LG;
+
+/// What the row of controls above them needs.
+///
+/// The switch and its label, the picker, and two words on their gaps. Stated
+/// as a number because text has no width until it is laid out — and held to
+/// the truth by `the_controls_row_fits_on_one_line`, which measures the
+/// strings this panel actually ships rather than trusting the arithmetic.
+const CONTROLS_ROW_W: f32 = 560.0;
 
 /// Draw the panel.
-pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'static, Message> {
+pub(crate) fn layer(
+    eq: EqualizerSettings,
+    saved: &[crate::config::SavedCurve],
+    naming: Option<&str>,
+    window: iced::Size,
+) -> Element<'static, Message> {
     let room = theme::active();
     let limit = baz_core::equalizer::LIMIT_DB;
 
@@ -85,7 +116,8 @@ pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'stati
                 .style(move |_theme, status| theme::check(room, status))
                 .on_toggle(Message::EqualizerEnabled),
             Space::new().width(Length::Fill),
-            presets(eq.bands_centidb, room),
+            presets(eq.bands_centidb, saved, room),
+            keeping(eq.bands_centidb, saved),
             word("Make room", Message::EqualizerSuggestPreamp),
         ]
         .spacing(theme::GAP_SM)
@@ -97,6 +129,7 @@ pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'stati
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_faint),
+        naming_row(naming, room),
         row![
             // **The curve, and the faders standing on it.** The picture is
             // behind the controls rather than beside them because they are
@@ -166,25 +199,42 @@ pub(crate) fn layer(eq: EqualizerSettings, window: iced::Size) -> Element<'stati
 /// it is nearest: the picker reports what the faders say, and there is no
 /// hidden state for it to disagree with. Drag back onto a preset's exact
 /// numbers and it is that preset again.
-fn presets(bands_centidb: [i16; 10], room: &'static theme::Palette) -> Element<'static, Message> {
-    let choices: Vec<Choice> = (0..baz_core::equalizer::PRESETS.len())
-        .map(Choice)
+fn presets(
+    bands_centidb: [i16; 10],
+    saved: &[crate::config::SavedCurve],
+    room: &'static theme::Palette,
+) -> Element<'static, Message> {
+    let mut choices: Vec<Choice> = (0..baz_core::equalizer::PRESETS.len())
+        .map(Choice::Builtin)
         .collect();
-    let selected = baz_core::equalizer::PRESETS
+    choices.extend(
+        saved
+            .iter()
+            .enumerate()
+            .map(|(at, curve)| Choice::Saved(at, curve.name.clone())),
+    );
+    // The listener's own curves are looked for **first**: a curve saved on top
+    // of an offered one is the one they named, and naming it is the stronger
+    // statement about what it is.
+    let selected = saved
         .iter()
-        .position(|preset| preset.bands_centidb == bands_centidb)
-        .map(Choice);
-    pick_list(choices, selected, |Choice(at)| {
-        Message::EqualizerPresetChosen(at)
-    })
-    .placeholder("Custom")
-    .width(Length::Fixed(PRESET_W))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .text_size(theme::SIZE_META)
-    .text_line_height(theme::LEADING_META)
-    .style(move |_theme, status| theme::picker(room, status))
-    .menu_style(move |_theme| theme::picker_menu(room))
-    .into()
+        .position(|curve| curve.bands_centidb == bands_centidb)
+        .map(|at| Choice::Saved(at, saved[at].name.clone()))
+        .or_else(|| {
+            baz_core::equalizer::PRESETS
+                .iter()
+                .position(|preset| preset.bands_centidb == bands_centidb)
+                .map(Choice::Builtin)
+        });
+    pick_list(choices, selected, Message::EqualizerPresetChosen)
+        .placeholder("Custom")
+        .width(Length::Fixed(PRESET_W))
+        .padding(theme::pad(0.0, theme::GAP_MD))
+        .text_size(theme::SIZE_META)
+        .text_line_height(theme::LEADING_META)
+        .style(move |_theme, status| theme::picker(room, status))
+        .menu_style(move |_theme| theme::picker_menu(room))
+        .into()
 }
 
 /// How wide the preset picker stands.
@@ -194,18 +244,89 @@ fn presets(bands_centidb: [i16; 10], room: &'static theme::Palette) -> Element<'
 /// faders below are what the panel is for.
 const PRESET_W: f32 = 150.0;
 
-/// One offered curve, by index, so the list carries no owned strings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Choice(usize);
+/// **One row of the picker** — an offered curve or one the listener saved.
+///
+/// Two variants rather than one flat index because the two lists change
+/// independently: saving a curve must not renumber the offered ones, and
+/// forgetting one must not silently select its neighbour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Choice {
+    /// An index into `baz_core::equalizer::PRESETS`.
+    Builtin(usize),
+    /// An index into the listener's own saved curves.
+    Saved(usize, String),
+}
 
 impl std::fmt::Display for Choice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            baz_core::equalizer::PRESETS
-                .get(self.0)
-                .map_or("Custom", |preset| preset.name),
-        )
+        match self {
+            Self::Builtin(at) => f.write_str(
+                baz_core::equalizer::PRESETS
+                    .get(*at)
+                    .map_or("Custom", |preset| preset.name),
+            ),
+            Self::Saved(_, name) => f.write_str(name),
+        }
     }
+}
+
+/// **One word slot whose meaning follows the curve.**
+///
+/// *Keep* when what is on the faders is not saved, *Forget* when it is one of
+/// the listener's own, and **nothing at all** when it is one baz offers —
+/// there is no sense in saving a copy of `More bass` under another name, and
+/// less in offering to delete something that is not the listener's to delete.
+///
+/// Absent rather than disabled, which is this product's rule everywhere: an
+/// inert control is a lie about what is available.
+fn keeping(
+    bands_centidb: [i16; 10],
+    saved: &[crate::config::SavedCurve],
+) -> Element<'static, Message> {
+    if saved
+        .iter()
+        .any(|curve| curve.bands_centidb == bands_centidb)
+    {
+        return word("Forget", Message::EqualizerForget);
+    }
+    if baz_core::equalizer::Preset::matching(bands_centidb).is_some() {
+        return Space::new().into();
+    }
+    word("Keep", Message::EqualizerSaveStart)
+}
+
+/// The name field's identity, so opening it can put the caret in it.
+pub(crate) fn name_id() -> iced::widget::Id {
+    iced::widget::Id::new("baz-equalizer-name")
+}
+
+/// **The name field**, when a curve is being kept.
+///
+/// It replaces nothing and pushes nothing aside: it is a row of its own under
+/// the sentence, present only while a name is being typed. <kbd>Enter</kbd>
+/// keeps it and <kbd>Esc</kbd> — the panel's own peel — puts the whole panel
+/// away, so the field's cancel is a word rather than a key a listener has to
+/// know.
+fn naming_row(naming: Option<&str>, room: &'static theme::Palette) -> Element<'static, Message> {
+    let Some(text_so_far) = naming else {
+        return Space::new().into();
+    };
+    row![
+        text_input("Name this curve", text_so_far)
+            .id(name_id())
+            .on_input(Message::EqualizerSaveName)
+            .on_submit(Message::EqualizerSaveCommit)
+            .width(Length::Fill)
+            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .style(move |_theme, status| theme::input(room, status)),
+        word("Keep", Message::EqualizerSaveCommit),
+        word("Cancel", Message::EqualizerSaveCancel),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 /// **The headroom control is named for what it does** — see [`sentence`].
@@ -355,8 +476,51 @@ mod tests {
             "the panel is narrower than the faders it holds"
         );
         assert!(
-            PANEL_W < faders + gaps + 8.0 * theme::GAP_LG,
+            PANEL_W < faders + gaps + 24.0 * theme::GAP_LG,
             "the panel has grown padding it does not draw"
+        );
+    }
+
+    /// **The controls row fits on one line.**
+    ///
+    /// It did not, and nothing failed: the picker and `Keep` joined the switch
+    /// and `Make room`, the row overflowed a panel measured by its *faders*,
+    /// and `Make room` quietly wrapped onto two lines. A wrap is what this
+    /// toolkit does instead of complaining, so it has to be measured.
+    ///
+    /// Measured in the crudest honest way — a per-character estimate for the
+    /// panel's own type size, against the strings the panel actually ships.
+    /// It cannot be exact without laying the text out, and it does not need to
+    /// be: the fault it guards against is a control being *added* to a full
+    /// row, which is tens of pixels, not ones.
+    #[test]
+    fn the_controls_row_fits_on_one_line() {
+        // A little over half the point size, which is a fair mean advance for
+        // this face at small sizes; generous rather than tight, because the
+        // cost of being wrong is a panel a few pixels wider than it needs.
+        let per_char = theme::SIZE_META * 0.58;
+        #[expect(clippy::cast_precision_loss, reason = "labels are a few dozen chars")]
+        let measure = |label: &str| label.chars().count() as f32 * per_char;
+
+        let switch = theme::STEPPER_HIT + theme::GAP_SM + measure("Shape the sound");
+        // Both words that can stand in the keeping slot, so neither the wider
+        // one nor a future third can overflow unnoticed.
+        let keeping = measure("Forget").max(measure("Keep")) + 2.0 * theme::GAP_MD;
+        let headroom = measure("Make room") + 2.0 * theme::GAP_MD;
+        let needed = switch
+            + theme::GAP_SM
+            + PRESET_W
+            + theme::GAP_SM
+            + keeping
+            + theme::GAP_SM
+            + headroom
+            + 2.0 * theme::GAP_LG;
+
+        assert!(
+            PANEL_W >= needed,
+            "the controls row needs about {needed:.0} px and the panel is \
+             {PANEL_W:.0} — the last control on the row will wrap onto a \
+             second line rather than saying so"
         );
     }
 

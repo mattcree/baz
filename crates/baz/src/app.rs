@@ -537,7 +537,17 @@ pub(crate) enum Message {
     /// there is one control for *choose a curve* rather than one button for
     /// the only curve baz was willing to name — see
     /// `baz_core::equalizer::PRESETS`.
-    EqualizerPresetChosen(usize),
+    EqualizerPresetChosen(crate::views::equalizer::Choice),
+    /// **Save the current curve**: open the name field.
+    EqualizerSaveStart,
+    /// The name field's text changed.
+    EqualizerSaveName(String),
+    /// Commit the name — the curve joins the picker and the config.
+    EqualizerSaveCommit,
+    /// Put the name field away without saving.
+    EqualizerSaveCancel,
+    /// Forget the saved curve currently showing in the picker.
+    EqualizerForget,
     /// **Make room**: take the headroom the curve needs — the largest boost,
     /// given back off the whole signal so it cannot clip.
     ///
@@ -1490,6 +1500,15 @@ struct App {
     /// Whether the equaliser panel is up. Session state: a panel you opened
     /// once is not a preference.
     equalizer_open: bool,
+    /// **Curves the listener saved**, loaded from the config and written back
+    /// whenever one is added or removed.
+    equalizer_presets: Vec<crate::config::SavedCurve>,
+    /// The name being typed for a curve about to be saved, if one is.
+    ///
+    /// `None` is the ordinary state. It is a field on the app rather than on
+    /// `EqualizerSettings` because that one is `Copy` and travels to the
+    /// engine; a half-typed name has no business crossing that boundary.
+    equalizer_naming: Option<String>,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -2123,6 +2142,11 @@ impl App {
             shortcuts_open: false,
             equalizer,
             equalizer_open: false,
+            equalizer_presets: stored
+                .as_ref()
+                .map(|config| config.equalizer_presets.clone())
+                .unwrap_or_default(),
+            equalizer_naming: None,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
@@ -2369,7 +2393,86 @@ impl App {
                 self.equalizer_open = !self.equalizer_open;
                 Task::none()
             }
-            Message::EqualizerPresetChosen(index) => {
+            Message::EqualizerPresetChosen(crate::views::equalizer::Choice::Saved(index, _)) => {
+                if let Some(curve) = self.equalizer_presets.get(index) {
+                    // **A saved curve brings its own headroom**, unlike an
+                    // offered one which derives it: this is what the listener
+                    // had set, and someone who deliberately left themselves
+                    // three decibels of room did not mean to save half of it.
+                    self.equalizer.bands_centidb = curve.bands_centidb;
+                    self.equalizer.preamp_centidb = curve.preamp_centidb;
+                    self.send_equalizer();
+                    self.persist_equalizer();
+                }
+                Task::none()
+            }
+            Message::EqualizerSaveStart => {
+                self.equalizer_naming = Some(String::new());
+                // **And the caret goes into it.** Without this the field opens
+                // unfocused and baz's type-anywhere rule takes the keystrokes
+                // to the app-bar search instead — a listener naming a curve
+                // would watch their words appear at the top of the window and
+                // filter their library.
+                iced::widget::operation::focus(crate::views::equalizer::name_id())
+            }
+            Message::EqualizerSaveName(text) => {
+                if self.equalizer_naming.is_some() {
+                    self.equalizer_naming = Some(crate::config::clip_curve_name(&text));
+                }
+                Task::none()
+            }
+            Message::EqualizerSaveCancel => {
+                self.equalizer_naming = None;
+                blur_search()
+            }
+            Message::EqualizerSaveCommit => {
+                let Some(name) = self.equalizer_naming.take() else {
+                    return Task::none();
+                };
+                let name = crate::config::settle_curve_name(&name);
+                // An empty name saves nothing and says nothing: the field
+                // simply closes, which is what pressing Enter on an empty
+                // field means everywhere else in this product.
+                if name.is_empty() {
+                    return Task::none();
+                }
+                let curve = crate::config::SavedCurve {
+                    name,
+                    bands_centidb: self.equalizer.bands_centidb,
+                    preamp_centidb: self.equalizer.preamp_centidb,
+                };
+                // **Saving a name you already used replaces that curve**
+                // rather than making a second entry with the same label. Two
+                // rows reading `Kitchen` in one picker is a list that cannot
+                // be used, and the listener's intent — *this is what Kitchen
+                // means now* — is the ordinary reading.
+                if let Some(existing) = self
+                    .equalizer_presets
+                    .iter_mut()
+                    .find(|saved| saved.name == curve.name)
+                {
+                    *existing = curve;
+                } else if self.equalizer_presets.len() < crate::config::MAX_SAVED_CURVES {
+                    self.equalizer_presets.push(curve);
+                } else {
+                    crate::baz_log!(
+                        "[equaliser] {} saved curves is the limit; {:?} was not kept",
+                        crate::config::MAX_SAVED_CURVES,
+                        curve.name
+                    );
+                    return Task::none();
+                }
+                self.persist_equalizer_presets();
+                Task::none()
+            }
+            Message::EqualizerForget => {
+                let bands = self.equalizer.bands_centidb;
+                self.equalizer_presets
+                    .retain(|saved| saved.bands_centidb != bands);
+                self.persist_equalizer_presets();
+                Task::none()
+            }
+            Message::EqualizerPresetChosen(crate::views::equalizer::Choice::Builtin(index)) => {
                 if let Some(preset) = baz_core::equalizer::PRESETS.get(index) {
                     self.equalizer.bands_centidb = preset.bands_centidb;
                     // **The headroom comes with the curve.** A preset that
@@ -5869,6 +5972,18 @@ impl App {
 
     /// Write the curve down. Separate from the send because a drag is a
     /// hundred sends and one decision.
+    /// Write the saved curves back to the config.
+    ///
+    /// Separate from [`Self::persist_equalizer`] because they change on
+    /// different gestures: the live curve is written when a drag ends, and
+    /// this when a curve is named or forgotten.
+    fn persist_equalizer_presets(&mut self) {
+        let curves = self.equalizer_presets.clone();
+        persist(|config| {
+            config.equalizer_presets = curves;
+        });
+    }
+
     fn persist_equalizer(&mut self) {
         let settings = self.equalizer;
         persist(|config| {
@@ -7944,7 +8059,12 @@ impl App {
         let whole: Element<'_, Message> = iced::widget::stack![
             whole,
             if self.equalizer_open {
-                views::equalizer::layer(self.equalizer, self.window)
+                views::equalizer::layer(
+                    self.equalizer,
+                    &self.equalizer_presets,
+                    self.equalizer_naming.as_deref(),
+                    self.window,
+                )
             } else {
                 nothing()
             },

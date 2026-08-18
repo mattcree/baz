@@ -124,11 +124,42 @@ const REPEAT: &str = "repeat";
 const VOLUME: &str = "volume";
 
 /// Whether the equaliser is switched on.
+/// **A curve under a name the listener gave it.**
+///
+/// The pre-amp travels with the bands, unlike the offered presets which derive
+/// theirs. A built-in states a situation and baz works out the headroom it
+/// needs; a saved curve is *what you had set*, and someone who deliberately
+/// left themselves 3 dB of room did not mean to save only half of that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedCurve {
+    /// What the listener called it.
+    pub name: String,
+    /// Ten band gains in centidecibels, low to high.
+    pub bands_centidb: [i16; 10],
+    /// The attenuation that was set when they saved it.
+    pub preamp_centidb: i16,
+}
+
+/// How many curves may be saved.
+///
+/// A picker long enough to scroll is a picker a listener reads instead of
+/// listening. Twenty-four is far past anyone's real set and short of a list
+/// that has stopped being a list.
+pub const MAX_SAVED_CURVES: usize = 24;
+
+/// The longest name a saved curve may carry.
+///
+/// It has to fit the picker, which is one control in a row of three. Longer
+/// names are cut rather than refused: a listener who pasted a sentence gets
+/// the beginning of it back, not an error about a limit nobody told them.
+pub const MAX_CURVE_NAME: usize = 32;
+
 const EQ_ENABLED: &str = "equalizer_enabled";
 /// The ten band gains, in centidecibels, low to high.
 const EQ_BANDS: &str = "equalizer_bands_centidb";
 /// The equaliser's stated attenuation, in centidecibels.
 const EQ_PREAMP: &str = "equalizer_preamp_centidb";
+const EQ_PRESET: &str = "equalizer_preset";
 
 /// The shared-mode output endpoint, absent to follow the system default.
 const OUTPUT_DEVICE: &str = "output_device";
@@ -292,6 +323,14 @@ pub struct Config {
     pub equalizer_bands_centidb: [i16; 10],
     /// The stated attenuation, in centidecibels.
     pub equalizer_preamp_centidb: i16,
+    /// **Curves the listener saved**, in the order they saved them.
+    ///
+    /// The other half of the owner's *"we probably want a way to allow users
+    /// to create and save EQ presets"*. `baz_core::equalizer::PRESETS` answers
+    /// the first half — a few offered situations — and this answers the one
+    /// that argument never covered: your own curve is not somebody else's
+    /// taste, it is yours, and there is nowhere to put it.
+    pub equalizer_presets: Vec<SavedCurve>,
     /// The album object drawn on Now Playing: flat cover, jewel case or none.
     ///
     /// View state, persisted beside density rather than exposed as a Settings
@@ -332,6 +371,7 @@ impl Default for Config {
             equalizer_enabled: false,
             equalizer_bands_centidb: [0; 10],
             equalizer_preamp_centidb: 0,
+            equalizer_presets: Vec::new(),
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
@@ -374,6 +414,101 @@ fn write_equalizer(out: &mut String, config: &Config) {
          {EQ_PREAMP} = {}",
         config.equalizer_enabled, config.equalizer_bands_centidb, config.equalizer_preamp_centidb,
     );
+    // **Saved curves, one table each**, so a hand-editor can add or remove one
+    // without counting commas in a nested array. The pre-amp is written with
+    // them because it was saved with them — see `SavedCurve`.
+    for curve in &config.equalizer_presets {
+        let _ = writeln!(
+            out,
+            "\n[[{EQ_PRESET}]]\nname = {}\nbands_centidb = {:?}\npreamp_centidb = {}",
+            toml_string(&curve.name),
+            curve.bands_centidb,
+            curve.preamp_centidb,
+        );
+    }
+}
+
+/// **Read the saved curves back**, refusing the malformed rather than the file.
+///
+/// Same rule as the live curve above: ten values or none, each clamped through
+/// `equalizer::Band`, and a table missing its name or its bands is skipped
+/// rather than taken as a partial curve. A hand-edited file with one bad entry
+/// keeps the other entries.
+fn read_saved_curves(table: &toml::Table) -> Vec<SavedCurve> {
+    let Some(entries) = table.get(EQ_PRESET).and_then(toml::Value::as_array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(toml::Value::as_table)
+        .filter_map(|entry| {
+            let name = entry.get("name").and_then(toml::Value::as_str)?;
+            let name = settle_curve_name(name);
+            if name.is_empty() {
+                return None;
+            }
+            let bands = entry
+                .get("bands_centidb")
+                .and_then(toml::Value::as_array)
+                .filter(|values| values.len() == 10)?;
+            let read: Vec<i16> = bands
+                .iter()
+                .filter_map(toml::Value::as_integer)
+                .filter_map(|value| i16::try_from(value).ok())
+                .map(clamp_centidb)
+                .collect();
+            let bands_centidb: [i16; 10] = read.try_into().ok()?;
+            let preamp = entry
+                .get("preamp_centidb")
+                .and_then(toml::Value::as_integer)
+                .and_then(|value| i16::try_from(value).ok())
+                .map_or(0, clamp_centidb);
+            Some(SavedCurve {
+                name,
+                bands_centidb,
+                preamp_centidb: preamp,
+            })
+        })
+        .take(MAX_SAVED_CURVES)
+        .collect()
+}
+
+/// A name cut to [`MAX_CURVE_NAME`] **characters**, and no more than that.
+///
+/// Characters rather than bytes: a limit that cut mid-codepoint would panic,
+/// and one counted in bytes would give a listener writing in Japanese a third
+/// of the name it gives one writing in English.
+///
+/// **It does not trim**, and that is the whole reason it is separate from
+/// [`settle_curve_name`]. This runs on every keystroke, and a trim on every
+/// keystroke eats the space the moment you type it: `Kitchen ` becomes
+/// `Kitchen`, the next letter lands against the `n`, and a listener typing
+/// two words gets one. It was written as one function doing both and cost a
+/// run to find, because the name that came out — `Kitchenspeakers` — looks
+/// like a font problem rather than a string one.
+#[must_use]
+pub fn clip_curve_name(name: &str) -> String {
+    name.chars().take(MAX_CURVE_NAME).collect()
+}
+
+/// The name as it is **kept** — clipped, and trimmed at the ends.
+///
+/// Trimming belongs here, at the one moment the listener has finished: a name
+/// of nothing but spaces is no name, and `  Kitchen  ` and `Kitchen` are the
+/// same shelf.
+#[must_use]
+pub fn settle_curve_name(name: &str) -> String {
+    clip_curve_name(name.trim())
+}
+
+/// One band or pre-amp value, clamped to what a fader can reach.
+fn clamp_centidb(value: i16) -> i16 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the limit is ±12 dB, so ±1200 fits i16 many times over"
+    )]
+    let limit = (baz_core::equalizer::LIMIT_DB * 100.0) as i16;
+    value.clamp(-limit, limit)
 }
 
 /// Read the equaliser back.
@@ -661,6 +796,7 @@ impl Config {
             equalizer_enabled,
             equalizer_bands_centidb,
             equalizer_preamp_centidb,
+            equalizer_presets: read_saved_curves(&table),
             visualization_foreground,
             now_playing_facts,
             vibe_workers,
@@ -836,6 +972,131 @@ pub fn store(path: &Path, config: &Config) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// **A saved curve survives the file**, name, bands and headroom.
+    #[test]
+    fn a_saved_curve_round_trips_through_the_document() {
+        let config = Config {
+            equalizer_presets: vec![
+                SavedCurve {
+                    name: "Kitchen speakers".to_owned(),
+                    bands_centidb: [600, 400, 0, -200, 0, 100, 0, 300, 450, 500],
+                    preamp_centidb: -600,
+                },
+                SavedCurve {
+                    name: "Headphones".to_owned(),
+                    bands_centidb: [0; 10],
+                    preamp_centidb: 0,
+                },
+            ],
+            ..Config::default()
+        };
+        let read = Config::from_toml(&config.to_toml());
+        assert_eq!(read.equalizer_presets, config.equalizer_presets);
+    }
+
+    /// **One bad entry does not cost the others.**
+    ///
+    /// The live curve's own rule, applied to the list: a hand-edited file with
+    /// a nine-band table keeps every table that is whole. Silently shifting
+    /// nine bands up a frequency would sound like a bug in the filters.
+    #[test]
+    fn a_malformed_saved_curve_is_skipped_and_the_rest_survive() {
+        let text = "\
+[[equalizer_preset]]
+name = \"Good\"
+bands_centidb = [100, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+preamp_centidb = -100
+
+[[equalizer_preset]]
+name = \"Nine bands\"
+bands_centidb = [100, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[[equalizer_preset]]
+bands_centidb = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[[equalizer_preset]]
+name = \"Also good\"
+bands_centidb = [0, 0, 0, 0, 0, 0, 0, 0, 0, 200]
+";
+        let read = Config::from_toml(text);
+        let names: Vec<&str> = read
+            .equalizer_presets
+            .iter()
+            .map(|curve| curve.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["Good", "Also good"]);
+        assert_eq!(read.equalizer_presets[0].preamp_centidb, -100);
+        // A table with no pre-amp saved is a curve with no headroom, not a
+        // curve that refuses to load.
+        assert_eq!(read.equalizer_presets[1].preamp_centidb, 0);
+    }
+
+    /// **A hand-edited value out of range is clamped, not refused** — the same
+    /// bargain the live curve strikes, so an over-enthusiastic edit reaches
+    /// the faders as something they can actually show.
+    #[test]
+    fn a_saved_curve_is_clamped_to_what_a_fader_can_reach() {
+        let text = "\
+[[equalizer_preset]]
+name = \"Loud\"
+bands_centidb = [9000, -9000, 0, 0, 0, 0, 0, 0, 0, 0]
+preamp_centidb = -9000
+";
+        let read = Config::from_toml(text);
+        let curve = &read.equalizer_presets[0];
+        #[expect(clippy::cast_possible_truncation, reason = "±1200 fits i16")]
+        let limit = (baz_core::equalizer::LIMIT_DB * 100.0) as i16;
+        assert_eq!(curve.bands_centidb[0], limit);
+        assert_eq!(curve.bands_centidb[1], -limit);
+        assert_eq!(curve.preamp_centidb, -limit);
+    }
+
+    /// **The list is bounded**, and a name is cut rather than refused.
+    #[test]
+    fn the_saved_list_is_bounded_and_names_are_cut() {
+        use std::fmt::Write as _;
+
+        let mut text = String::new();
+        for at in 0..(MAX_SAVED_CURVES + 10) {
+            let _ = writeln!(
+                text,
+                "[[equalizer_preset]]\nname = \"Curve {at}\"\nbands_centidb = [0,0,0,0,0,0,0,0,0,0]\n"
+            );
+        }
+        assert_eq!(
+            Config::from_toml(&text).equalizer_presets.len(),
+            MAX_SAVED_CURVES
+        );
+
+        let long = "a".repeat(MAX_CURVE_NAME * 3);
+        assert_eq!(clip_curve_name(&long).chars().count(), MAX_CURVE_NAME);
+        assert_eq!(settle_curve_name("  spaced  "), "spaced");
+        // **And the per-keystroke clip does not trim.** It did, and a name
+        // typed as two words arrived as one: the trailing space was eaten the
+        // moment it was typed, so the next letter landed against the last.
+        assert_eq!(clip_curve_name("Kitchen "), "Kitchen ");
+        assert_eq!(clip_curve_name(" "), " ");
+        // Counted in characters, so a name that is not ASCII gets the same
+        // number of them rather than a third as many.
+        let kana = "あ".repeat(MAX_CURVE_NAME * 2);
+        assert_eq!(clip_curve_name(&kana).chars().count(), MAX_CURVE_NAME);
+    }
+
+    /// **A name with a quote in it does not break the document it is written
+    /// into**, which is the one way a saved name could corrupt the config.
+    #[test]
+    fn a_curve_named_with_a_quote_survives_the_write() {
+        let config = Config {
+            equalizer_presets: vec![SavedCurve {
+                name: "Ol' \"loud\" one\\two".to_owned(),
+                bands_centidb: [0; 10],
+                preamp_centidb: 0,
+            }],
+            ..Config::default()
+        };
+        let read = Config::from_toml(&config.to_toml());
+        assert_eq!(read.equalizer_presets, config.equalizer_presets);
+    }
 
     /// **The equaliser round-trips, and a broken curve is flat rather than
     /// wrong.**
@@ -846,6 +1107,7 @@ mod tests {
     #[test]
     fn the_equaliser_round_trips_and_degrades_to_flat() {
         let config = Config {
+            equalizer_presets: Vec::new(),
             equalizer_enabled: true,
             equalizer_bands_centidb: [-300, 0, 250, 600, 0, 0, -150, 0, 400, 0],
             equalizer_preamp_centidb: -600,
@@ -913,6 +1175,7 @@ mod tests {
             "/home/user/# not a comment",
         ] {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from(dir)],
                 ..Config::default()
             };
@@ -927,6 +1190,7 @@ mod tests {
     fn round_trips_every_shape_of_volume_position() {
         for position in [0, 1, 618, MAX_POSITION - 1, MAX_POSITION] {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 volume: Volume::new(position),
                 ..Config::default()
             };
@@ -947,6 +1211,7 @@ mod tests {
             crate::visualizer::Foreground::None,
         ] {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 visualization_foreground: foreground,
                 ..Config::default()
             };
@@ -982,6 +1247,7 @@ mod tests {
     fn the_fact_feed_is_on_by_default_and_round_trips_off() {
         assert!(Config::from_toml("").now_playing_facts);
         let config = Config {
+            equalizer_presets: Vec::new(),
             now_playing_facts: false,
             ..Config::default()
         };
@@ -1018,6 +1284,7 @@ mod tests {
             Place::Settings,
         ] {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 last_place: place,
                 ..Config::default()
             };
@@ -1056,6 +1323,7 @@ mod tests {
         ];
         for replay_gain in cases {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 replay_gain,
                 group_key: GroupKey::Year,
@@ -1091,6 +1359,7 @@ mod tests {
         ] {
             assert_eq!(mode_key(mode), word);
             let config = Config {
+                equalizer_presets: Vec::new(),
                 replay_gain: settings(mode, 0, 0, true),
                 ..Config::default()
             };
@@ -1112,6 +1381,7 @@ mod tests {
     fn round_trips_every_group_key_as_its_own_word() {
         for key in GroupKey::ALL {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 group_key: key,
                 ..Config::default()
@@ -1194,6 +1464,7 @@ mod tests {
     fn round_trips_every_density_step_as_its_own_word() {
         for density in Density::ALL {
             let config = Config {
+                equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
                 density,
                 ..Config::default()
@@ -1410,6 +1681,7 @@ mod tests {
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from(raw)],
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
             group_key: GroupKey::Genre,
@@ -1440,6 +1712,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
+            equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/Music")],
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
             group_key: GroupKey::Played,
@@ -1475,6 +1748,7 @@ mod tests {
             PathBuf::from("/home/user/My \"Music\""),
         ];
         let config = Config {
+            equalizer_presets: Vec::new(),
             music_dirs: dirs.clone(),
             ..Config::default()
         };
@@ -1584,6 +1858,7 @@ mod tests {
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            equalizer_presets: Vec::new(),
             music_dirs: vec![
                 PathBuf::from("/first"),
                 PathBuf::from(raw),
@@ -1603,6 +1878,7 @@ mod tests {
     #[test]
     fn the_written_document_parses_as_toml() {
         let config = Config {
+            equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/My \"Music\"")],
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
             group_key: GroupKey::Added,
