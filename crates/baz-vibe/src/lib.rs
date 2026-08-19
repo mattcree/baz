@@ -424,6 +424,29 @@ impl Candidate {
     }
 }
 
+/// **Fold a beat-tracker reading into the band a listener would tap**, by
+/// halving or doubling — see [`Features::FELT_LOW`] for the evidence and the
+/// cost.
+///
+/// An absence (`0.0`, the tracker finding no periodicity) and anything not
+/// finite pass through untouched: doubling zero is zero forever, and a caller
+/// describing a collection is meant to drop these with
+/// [`Features::tempo_detected`] rather than receive a fabricated tempo for
+/// them.
+fn fold_tempo(bpm: f32) -> f32 {
+    if !bpm.is_finite() || bpm < Features::TEMPO_FLOOR {
+        return bpm;
+    }
+    let mut felt = bpm;
+    while felt >= Features::FELT_HIGH {
+        felt /= 2.0;
+    }
+    while felt < Features::FELT_LOW {
+        felt *= 2.0;
+    }
+    felt
+}
+
 impl Features {
     /// Build one from an already-normalized vector, in the same spirit as
     /// [`Candidate::from_parts`]: for the measurement bins, and for the
@@ -438,22 +461,104 @@ impl Features {
         Self { values, semantic }
     }
 
-    /// Estimated beats per minute, derived from bliss' documented 0–206 BPM
-    /// normalization.
+    /// **The felt tempo in beats per minute**, folded into the band a
+    /// listener would tap.
+    ///
+    /// Derived from bliss' documented 0–206 BPM normalization, then folded —
+    /// see [`Self::FELT_LOW`] for why that fold is the difference between a
+    /// number and a wrong number.
     #[must_use]
     pub fn tempo_bpm(&self) -> f32 {
+        fold_tempo(self.raw_tempo_bpm())
+    }
+
+    /// The analyser's reading before the fold, for callers that want to know
+    /// what was actually measured — the measurement bins, and the tests that
+    /// pin the fold itself.
+    #[must_use]
+    pub fn raw_tempo_bpm(&self) -> f32 {
         (self.values[AnalysisIndex::Tempo as usize] + 1.0) * 103.0
     }
+
+    /// **Whether a tempo was detected at all.**
+    ///
+    /// The three slowest readings in a five-thousand-track library are
+    /// `0.0` BPM, which is not a tempo: it is the beat tracker finding no
+    /// periodicity and saying so in the same channel it says everything else
+    /// in. A caller describing a collection has to drop these rather than
+    /// average them, or a handful of failures drag the low end of the library
+    /// toward a tempo no record in it has.
+    ///
+    /// The floor is deliberately a whole BPM rather than an epsilon: nothing
+    /// human is under one beat a minute, so anything that low is an absence
+    /// however it arrived.
+    #[must_use]
+    pub fn tempo_detected(&self) -> bool {
+        let raw = self.raw_tempo_bpm();
+        raw.is_finite() && raw >= Self::TEMPO_FLOOR
+    }
+
+    /// Below this many BPM a reading is an absence, not a measurement.
+    pub const TEMPO_FLOOR: f32 = 1.0;
+
+    /// **The bottom of the band a felt tempo is folded into.**
+    ///
+    /// The owner, 2026-08-17, on the *what baz heard* block: *"the 'what baz
+    /// heard' classified Day & Night by thundercat as the fastest… it really
+    /// isn't."* He was right, and the top of the tempo ranking on his own
+    /// 5 076 tracks says why:
+    ///
+    /// ```text
+    /// 194.9  Thundercat — Day & Night
+    /// 192.2  Walk On By
+    /// 191.5  Maurice Jarre — Lara's Theme (Swing Version)
+    /// 191.4  Orlando di Lasso — Matona mia cara
+    /// 190.6  Klára Körmendi — Childish Chatter, for piano
+    /// ```
+    ///
+    /// A Renaissance madrigal and a solo piano miniature are not at 190 BPM.
+    /// These are **octave errors**: a beat tracker locks onto a subdivision or
+    /// a half-bar and reports double or half the felt pulse. It is the
+    /// standard failure of the technique, not a bug in this one, and an
+    /// argmax ranking is exactly where the doubled readings collect.
+    ///
+    /// So a reading above [`Self::FELT_HIGH`] is halved and one below this is
+    /// doubled, until it lands in the band — which is what beat-tracking
+    /// libraries do, and what makes the tempo *axis* better and not just the
+    /// sentence about it. 60–180 is wide on purpose: a real 168 BPM record
+    /// stays 168, and only readings outside a range that holds essentially
+    /// all recorded music are touched.
+    ///
+    /// **What it deliberately does not fix.** A track genuinely at 190 folds
+    /// to 95, and drum and bass at 174 stays at 174 rather than becoming the
+    /// 87 it is danced to. Both are the cost of a rule with no downbeat model
+    /// behind it; both are a smaller error than the one being fixed, because
+    /// a folded reading is at worst an octave out from the felt pulse and an
+    /// unfolded one puts a madrigal at the top of the library.
+    pub const FELT_LOW: f32 = 60.0;
+
+    /// The top of the band — see [`Self::FELT_LOW`].
+    pub const FELT_HIGH: f32 = 180.0;
 
     /// A collection-relative input for energy ranking. This is intentionally
     /// a transparent combination, not a learned emotion label.
     #[must_use]
     pub fn energy(&self) -> f32 {
         mean(&[
-            self.at(AnalysisIndex::Tempo),
+            // The **folded** tempo, for the same reason [`Self::FELT_LOW`]
+            // gives: an octave error does not stop being one because it was
+            // averaged with two loudness terms, and a doubled reading pushes
+            // a quiet solo piano a third of the way up the energy axis.
+            self.tempo_axis(),
             self.at(AnalysisIndex::MeanLoudness),
             self.at(AnalysisIndex::StdDeviationLoudness),
         ])
+    }
+
+    /// The tempo dimension's reading, folded, back in the analyser's own
+    /// −1…1 scale so it composes with every other feature unchanged.
+    fn tempo_axis(&self) -> f32 {
+        self.tempo_bpm() / 103.0 - 1.0
     }
 
     /// A spectral brightness input: high-frequency crossings, centroid and
@@ -474,7 +579,7 @@ impl Features {
     pub fn value(&self, dimension: Dimension) -> f32 {
         match dimension {
             Dimension::Energy => self.energy(),
-            Dimension::Tempo => self.at(AnalysisIndex::Tempo),
+            Dimension::Tempo => self.tempo_axis(),
             Dimension::Brightness => self.brightness(),
             Dimension::Dynamics => self.at(AnalysisIndex::StdDeviationLoudness),
             Dimension::Texture => self.at(AnalysisIndex::MeanSpectralFlatness),
@@ -1829,6 +1934,108 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **The octave error the fold exists for.**
+    ///
+    /// The five fastest readings in the owner's own library, which he read in
+    /// one second as wrong: *"the 'what baz heard' classified Day & Night by
+    /// thundercat as the fastest… it really isn't."* Every one of them is a
+    /// beat tracker reporting double the felt pulse, and every one lands
+    /// somewhere a listener would recognise once folded.
+    #[test]
+    fn the_librarys_impossible_tempos_fold_into_ones_a_listener_would_tap() {
+        for (raw, felt) in [
+            (194.9_f32, 97.45_f32), // Thundercat — Day & Night
+            (192.2, 96.1),          // Walk On By
+            (191.5, 95.75),         // Lara's Theme (Swing Version)
+            (191.4, 95.7),          // Orlando di Lasso — Matona mia cara
+            (190.6, 95.3),          // Childish Chatter, for piano
+        ] {
+            assert!(
+                (super::fold_tempo(raw) - felt).abs() < 0.01,
+                "{raw} BPM folded to {} rather than {felt}",
+                super::fold_tempo(raw)
+            );
+        }
+    }
+
+    /// **Everything a listener actually taps is left alone.**
+    ///
+    /// The band is wide on purpose. A rule that moved a real 168 BPM record
+    /// would be trading one wrong number for another, so the fold has to be
+    /// provably inert across the range essentially all recorded music sits in.
+    #[test]
+    fn a_tempo_already_in_the_felt_band_is_not_touched() {
+        let mut bpm = Features::FELT_LOW;
+        while bpm < Features::FELT_HIGH {
+            assert!(
+                (super::fold_tempo(bpm) - bpm).abs() < f32::EPSILON,
+                "{bpm} BPM was folded, and it is a tempo people dance to"
+            );
+            bpm += 0.5;
+        }
+    }
+
+    /// **Every reading the analyser can produce lands inside the band**, or is
+    /// an absence and is left exactly as it is.
+    ///
+    /// Swept rather than sampled because the fold is two `while` loops and the
+    /// interesting failure is one that does not terminate or one that walks
+    /// past an edge — 0–206 BPM is bliss' whole documented output range.
+    #[test]
+    fn the_fold_lands_in_the_band_or_says_nothing_was_heard() {
+        let mut raw = 0.0_f32;
+        while raw <= 206.0 {
+            let felt = super::fold_tempo(raw);
+            if raw < Features::TEMPO_FLOOR {
+                assert!(
+                    (felt - raw).abs() < f32::EPSILON,
+                    "{raw} BPM is an absence and was turned into {felt}"
+                );
+            } else {
+                assert!(
+                    (Features::FELT_LOW..Features::FELT_HIGH).contains(&felt),
+                    "{raw} BPM folded to {felt}, outside the felt band"
+                );
+            }
+            raw += 0.1;
+        }
+        for absent in [0.0_f32, f32::NAN, f32::INFINITY, -1.0] {
+            let felt = super::fold_tempo(absent);
+            let unchanged = if absent.is_nan() {
+                felt.is_nan()
+            } else {
+                felt.to_bits() == absent.to_bits()
+            };
+            assert!(
+                unchanged,
+                "{absent} was not passed through as the absence it is"
+            );
+        }
+    }
+
+    /// **The tempo axis and the tempo sentence are the same number.**
+    ///
+    /// The whole point of folding at the reading rather than in the displayed
+    /// string: if `value(Tempo)` still ranked the raw reading, the block would
+    /// print a sensible BPM for a record it had just called the fastest in the
+    /// library. Stated as a round trip through the analyser's own scale.
+    #[test]
+    fn the_ranked_tempo_is_the_tempo_that_is_printed() {
+        for raw_bpm in [0.0_f32, 45.0, 92.0, 140.0, 179.0, 190.6, 206.0] {
+            let normalized = raw_bpm / 103.0 - 1.0;
+            let mut values = vec![0.0; 20];
+            values[AnalysisIndex::Tempo as usize] = normalized;
+            let features = Features::from_values(values, vec![0.0; 8]);
+            let printed = features.tempo_bpm();
+            let ranked = features.value(Dimension::Tempo);
+            assert!(
+                ((ranked + 1.0) * 103.0 - printed).abs() < 0.01,
+                "{raw_bpm} BPM prints {printed} and ranks as {}",
+                (ranked + 1.0) * 103.0
+            );
+        }
+    }
     use super::*;
 
     fn synthetic(path: &str, album: u64, artist: &str, energy: f32, bright: f32) -> Candidate {

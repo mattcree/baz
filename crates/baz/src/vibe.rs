@@ -1652,10 +1652,22 @@ impl State {
             ..Profile::default()
         };
 
-        // Tempo, in the one unit a listener already has.
+        // Tempo, in the one unit a listener already has — the **felt** tempo,
+        // folded into a band a listener would tap, and only from the tracks
+        // where a tempo was found at all.
+        //
+        // Both halves are the same correction. `baz_vibe` folds octave errors
+        // (see `Features::FELT_LOW`: the five fastest records in the owner's
+        // library were led by a Renaissance madrigal at 190 BPM), and the
+        // filter here drops the readings that are an *absence* rather than a
+        // measurement — the three slowest in that same library read 0.0 BPM,
+        // which is the beat tracker finding no periodicity, and averaging
+        // those into a quantile drags the low end toward a tempo no record in
+        // the collection has.
         let mut tempos: Vec<f32> = self
             .features
             .values()
+            .filter(|features| features.tempo_detected())
             .map(baz_vibe::Features::tempo_bpm)
             .collect();
         tempos.sort_by(f32::total_cmp);
@@ -1673,8 +1685,16 @@ impl State {
             let index = ((tempos.len() - 1) as f32).mul_add(fraction, 0.5) as usize;
             tempos[index.min(tempos.len() - 1)].round().max(0.0) as u32
         };
-        profile.tempo_range = Some((at(0.05), at(0.95)));
-        profile.tempo_median = Some(at(0.50));
+        // **A collection with no detected tempo says nothing about tempo.**
+        // The filter above can empty this list — a library of field
+        // recordings, or one small enough that its only analysed track
+        // failed detection — and `Profile`'s `None` already means *not
+        // measured*, which is the truth here. Stating a range from an empty
+        // list would be inventing one; it would also index past the end.
+        if !tempos.is_empty() {
+            profile.tempo_range = Some((at(0.05), at(0.95)));
+            profile.tempo_median = Some(at(0.50));
+        }
 
         // **The named extremes**, which are the part a listener can grade.
         for (dimension, low_word, high_word) in [
@@ -1682,9 +1702,16 @@ impl State {
             (Dimension::Tempo, "Slowest", "Fastest"),
         ] {
             let engine = engine_dimension(dimension);
+            // A track with no detected tempo cannot be this collection's
+            // slowest record, for the same reason it cannot be in its
+            // quantiles: `0.0` BPM is the beat tracker saying it found
+            // nothing, and the low end of the tempo ranking is exactly where
+            // those collect. Energy reads the same folded tempo, so it is
+            // held to the same admission.
             let mut ranked: Vec<(f32, &PathBuf)> = self
                 .features
                 .iter()
+                .filter(|(_, features)| features.tempo_detected())
                 .map(|(path, features)| (features.value(engine), path))
                 .collect();
             ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
@@ -3032,11 +3059,19 @@ mod tests {
         album.editions[0].tracks =
             vec![named(1, "Still"), named(2, "Middling"), named(3, "Racing")];
 
+        // **Tempos a listener could tap**, which is now load-bearing rather
+        // than decorative. The ends of the analyser's normalized range are
+        // 10 and 196 BPM, and neither is a tempo: `baz_vibe` folds octave
+        // errors into the felt band, so a fixture written at the extremes was
+        // asking which of two folded readings was larger. 70, 110 and 165 BPM
+        // are slow, middling and fast and stay that way through the fold.
+        // Loudness keeps the full range, because it is what energy is made of
+        // and nothing folds it.
         let mut state = State {
             features: [
-                (PathBuf::from("/m/Still.flac"), heard(-0.9, -0.9)),
-                (PathBuf::from("/m/Middling.flac"), heard(0.0, 0.0)),
-                (PathBuf::from("/m/Racing.flac"), heard(0.9, 0.9)),
+                (PathBuf::from("/m/Still.flac"), heard(-0.320, -0.9)),
+                (PathBuf::from("/m/Middling.flac"), heard(0.068, 0.0)),
+                (PathBuf::from("/m/Racing.flac"), heard(0.602, 0.9)),
             ]
             .into_iter()
             .collect(),
@@ -3071,14 +3106,15 @@ mod tests {
         let (low, high) = profile.tempo_range.expect("a tempo range");
         let middle = profile.tempo_median.expect("a median tempo");
         assert!(low <= middle && middle <= high, "{low} {middle} {high}");
-        // bliss normalizes tempo over 0–206 BPM, so the middle track's 0.0 is
-        // 103 — the conversion, checked in the unit a listener reads.
-        assert_eq!(middle, 103);
+        // The conversion, checked in the unit a listener reads: bliss
+        // normalizes tempo over 0–206 BPM, so the middling track's 0.068 is
+        // 110, and it is the one in the middle.
+        assert_eq!(middle, 110);
         // The ends are the 5th and 95th percentile rather than the minimum
         // and maximum, so a single mastering artefact cannot set the range a
         // whole library is described by — which over three tracks is the same
-        // as the ends: 0.9 normalized is 196 BPM, and −0.9 is 10.
-        assert_eq!((low, high), (10, 196));
+        // as the ends: the slow one at 70 BPM and the fast one at 165.
+        assert_eq!((low, high), (70, 165));
 
         // **The axes this collection cannot answer**, and only those. Tempo,
         // loudness and its variance were given a spread, so the three
@@ -3228,7 +3264,13 @@ mod tests {
                         clippy::cast_precision_loss,
                         reason = "a bounded track index into a normalized tempo"
                     )]
-                    let tempo = index as f32 / count as f32;
+                    // Spread across the **felt band** (67–175 BPM) rather
+                    // than across the normalized range, whose top half is
+                    // above the octave fold: a ladder that crossed it would
+                    // put its fastest fifty tracks back down beside its
+                    // slowest, and this test is about where a *named* end
+                    // sits in a ladder, not about the fold.
+                    let tempo = (index as f32 / count as f32).mul_add(1.05, -0.35);
                     (PathBuf::from(format!("/m/{index:03}.flac")), heard(tempo))
                 })
                 .collect();
@@ -3249,6 +3291,74 @@ mod tests {
         // Twenty-four: a hundredth is nothing, so the true end is named.
         let mut state = State::default();
         assert_eq!(fastest(&mut state, 24), "023");
+    }
+
+    /// **A detection failure is never this collection's slowest record.**
+    ///
+    /// Measured on the owner's own library: 206 of 5 076 analysed tracks read
+    /// `0.0` BPM, which is the beat tracker finding no periodicity rather than
+    /// a tempo. The named ends already stepped a hundredth in from each end so
+    /// one outlier could not describe a library — and a hundredth of 5 076 is
+    /// 50, which is *inside* a block of 206 absences, so the block still named
+    /// a failed reading as the slowest thing he owns. A margin cannot fix a
+    /// population; the absences have to leave the ranking.
+    ///
+    /// With them gone the same library names *DJ Yoda — Lonely Piano* slowest
+    /// and *The Andrews Sisters — The Jumpin' Jive* fastest, which are both
+    /// recognisable in one second, which is the whole point of naming them.
+    #[test]
+    fn a_track_with_no_detected_tempo_is_named_at_neither_end() {
+        fn heard(tempo: f32) -> SonicFeatures {
+            let mut values = vec![0.0_f32; 30];
+            values[bliss_index::TEMPO] = tempo;
+            SonicFeatures::from_values(values, vec![0.0; 512])
+        }
+        let named = |number: u32, title: &str| TrackVm {
+            disc: None,
+            number: Some(number),
+            title: title.to_owned(),
+            artist: None,
+            duration: None,
+            path: PathBuf::from(format!("/m/{title}.flac")),
+            bytes: None,
+        };
+        let mut album = album();
+        album.editions[0].tracks = vec![
+            named(1, "Nothing heard"),
+            named(2, "Slow"),
+            named(3, "Quick"),
+        ];
+        let mut state = State {
+            features: [
+                // −1.0 normalized is 0.0 BPM: the analyser saying it found no
+                // beat, in the same channel it says everything else in.
+                (PathBuf::from("/m/Nothing heard.flac"), heard(-1.0)),
+                (PathBuf::from("/m/Slow.flac"), heard(-0.320)),
+                (PathBuf::from("/m/Quick.flac"), heard(0.602)),
+            ]
+            .into_iter()
+            .collect(),
+            ..State::default()
+        };
+        state.rebuild_profile(&[album], &HashMap::new());
+
+        let ends: Vec<(&str, &str)> = state
+            .profile
+            .extremes
+            .iter()
+            .map(|(label, title, _)| (*label, title.as_str()))
+            .collect();
+        assert!(
+            !ends.iter().any(|(_, title)| *title == "Nothing heard"),
+            "a track with no detected tempo was named as an end: {ends:?}"
+        );
+        assert!(
+            ends.contains(&("Slowest", "Slow")),
+            "the slowest record with a tempo was not named: {ends:?}"
+        );
+        // And it is out of the range too, or the low end of the library is a
+        // tempo no record in it has.
+        assert_eq!(state.profile.tempo_range, Some((70, 165)));
     }
 
     /// **The field's example is made of their music**, and declines rather

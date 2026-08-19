@@ -584,9 +584,32 @@ Newest first. Each was asked for in conversation and is now in the product.
   (`Beyoncé` against `Beyonce`), which the module docs already admit are
   folded by `to_lowercase` alone.
 
-- **A named extreme can be the analyser's worst reading rather than the
-  library's.** **Written up as `docs/WORK.md` item 79**, which the owner has
-  named the most important thing outstanding. *(The owner, 2026-08-17: "the 'what baz heard' classified Day &
+- ~~**A named extreme can be the analyser's worst reading rather than the
+  library's.**~~ **Shipped 2026-08-19.** All three wanted forms are built.
+  The extremes step a hundredth in from each end (shipped earlier); tempo now
+  folds octave errors into a 60–180 BPM felt band before anything ranks it
+  (`baz_vibe::Features::FELT_LOW` states the evidence and the cost); and a
+  reading below one BPM is treated as the absence it is
+  (`Features::tempo_detected`) and dropped from the quantiles, the median and
+  both named ends.
+
+  **The margin alone was not enough, which is why the fold mattered.** 206 of
+  his 5 076 tracks read 0.0 BPM, and a hundredth of 5 076 is 50 — inside that
+  block — so the shipped block still named a detection failure as the slowest
+  record he owns. On the same library it now reads:
+
+  | | before | after |
+  |---|---|---|
+  | Slowest | *(a 0.0 BPM reading)* | DJ Yoda — Lonely Piano, 91 |
+  | Fastest | Frank Zappa — Stevie's Spanking, 180 | The Andrews Sisters — The Jumpin' Jive, 178 |
+  | p05–p95 | 91–167 | 98–165 |
+  | median | 127 | 128 |
+
+  The median barely moves, which is the point: 54 tracks were above 180 BPM
+  and the fold only reaches those. The entry below is kept for the reasoning.
+
+  *Originally: written up as `docs/WORK.md` item 79, which the owner named the
+  most important thing outstanding.* *(The owner, 2026-08-17: "the 'what baz heard' classified Day &
   Night by thundercat as the fastest… it really isn't.")*
 
   He is right, and the cause is measurable. The top of the tempo ranking on
