@@ -8078,13 +8078,17 @@ impl App {
         //
         // So the column always has two children and the first one is either
         // the bar or nothing at all.
-        let bar: Element<'_, Message> = if self.chromeless {
-            // **Emptied, not removed** — and not entirely empty: the window's
-            // own controls stay, because hiding baz's title bar on the
-            // platforms where baz draws it takes minimise, maximise and close
-            // with it. See `views::app_bar::chromeless`.
-            views::app_bar::chromeless(self.window_maximized, owns_chrome(), false, ink)
-        } else {
+        // **A field behind the bar means the bar can be glass.**
+        //
+        // On Now playing the page is a wash of the record's own colour, and
+        // that is also where chromeless is used. The bar draws no ground in
+        // either case; what changes is whether anything is drawn *under* it —
+        // see the composition below.
+        let over_field = matches!(
+            (&self.screen, self.place),
+            (Screen::Shelf(_), Place::NowPlaying)
+        );
+        let bar: Element<'_, Message> = {
             views::app_bar::view(
                 state,
                 self.window.width,
@@ -8094,16 +8098,28 @@ impl App {
                 self.place_history.can_forward(),
                 self.window_maximized,
                 owns_chrome(),
-                // Only where a field is drawn behind it — see the note on the
-                // band's own ground.
-                matches!(
-                    (&self.screen, self.place),
-                    (Screen::Shelf(_), Place::NowPlaying)
-                ),
+                over_field,
                 self.health_summary(),
                 ink,
             )
         };
+        // **Over the page, not above it, wherever the bar is glass.**
+        //
+        // The owner, on chromeless: *"make sure the top bar is transparent
+        // essentially… all the same icons as the normal one, but the
+        // visualiser and background colour etc should be showing where it is
+        // currently black."*
+        //
+        // The bar had been transparent since the field arrived behind it —
+        // and read black anyway, because a `column!` gives the page the
+        // window *less* the bar's height, so there was nothing under the glass
+        // but the window's own ground. Stacking puts the page's full height
+        // beneath it; `body_height` stops subtracting the bar to match.
+        //
+        // Chromeless carries the **same** bar rather than a reduced strip. It
+        // asks for the lane and the bottom band to go, not for the doors to;
+        // an immersive mode you cannot change the visualiser from is a mode
+        // you leave to change the visualiser.
         let screen: Element<'_, Message> = column![bar, screen].into();
         // The GUI is always an audio build, so the persistent bottom bar lives
         // under every place. A missing device is represented in the bar rather
@@ -8151,6 +8167,42 @@ impl App {
             )
         };
         let whole: Element<'_, Message> = column![screen, bottom].into();
+        // **The record's wash runs behind everything, the bar included.**
+        //
+        // On Now playing the field and the spectrum are the window's backdrop
+        // rather than the page's, so the glass bar has something under it —
+        // see `views::now_playing::backdrop` for the version of this that
+        // stacked the *bar* over the page instead and pushed the lane off the
+        // top of the window.
+        let whole: Element<'_, Message> = if over_field {
+            let Screen::Shelf(state) = &self.screen else {
+                unreachable!("over_field is a shelf place")
+            };
+            let audio = self
+                .visualization
+                .mode
+                .active()
+                .then(|| self.playback.visualization());
+            iced::widget::stack![
+                views::now_playing::backdrop(
+                    state,
+                    &self.player,
+                    views::now_playing::Visual {
+                        rotation: self.case_rotation,
+                        foreground: self.visualization.foreground,
+                        mode: self.visualization.mode,
+                        audio: audio.as_ref(),
+                        history: &self.visualization_history,
+                        favourite: None,
+                    },
+                    self.window,
+                ),
+                whole,
+            ]
+            .into()
+        } else {
+            whole
+        };
         // **Every floating layer is stacked always**, empty at rest.
         //
         // This is the drag ghost's rule below, applied to the three layers

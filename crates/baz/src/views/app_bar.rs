@@ -525,58 +525,6 @@ fn gear(ink: Ink) -> Element<'static, Message> {
     )
 }
 
-/// **The bar with the frame off**: the window's own controls, and nothing else.
-///
-/// The owner, on the first cut of chromeless mode: *"we should still keep the
-/// window controls when we go into the 'full screen' mode."* He is right, and
-/// the first version's answer to it — a lone mark drawn on the Now playing
-/// page — was solving the wrong half. The problem was never *how do I get
-/// back*; it was that on the platforms where baz draws its own title bar,
-/// hiding that bar takes minimise, maximise and close with it, and a window
-/// with no close button is not a mode, it is a trap.
-///
-/// So the strip stays and empties instead. What is left is the window's own
-/// furniture plus the toggle that brought you here, which keeps the way out
-/// where the way in was rather than somewhere new to learn.
-///
-/// It is **not** the ordinary bar with its tenants hidden: this is a separate,
-/// shorter strip with no ground of its own, so the field and the sleeve run
-/// under it and the only ink is the marks themselves.
-pub(crate) fn chromeless(
-    maximized: bool,
-    owns_chrome: bool,
-    near: bool,
-    ink: Ink,
-) -> Element<'static, Message> {
-    let mut controls = row![crate::visualizer::chromeless_mark(true)]
-        .spacing(theme::CONTROL_CLUSTER_GAP)
-        .align_y(iced::Alignment::Center);
-    if owns_chrome {
-        controls = controls.push(window_controls(maximized, ink));
-    }
-    // `theme::app_bar_pad` rather than a spelling of its own, so the marks sit
-    // on exactly the verticals the framed bar puts them on and taking the
-    // frame away moves nothing sideways — the owner's *"make sure the padding
-    // is the same for the window controls"*.
-    //
-    // **The fade-in on approach is not built yet.** `near` is threaded and
-    // ignored: the same ask says these should be invisible until the pointer
-    // comes near, and doing that honestly means an opacity factor down through
-    // every mark's own `iced_image`, because iced has no opacity wrapper for a
-    // container. Half of it — a conditional that removed the row — would move
-    // everything under it on every approach, which is the one thing this file
-    // spends its longest comment forbidding.
-    let _ = near;
-    container(
-        row![Space::new().width(Length::Fill), controls]
-            .align_y(iced::Alignment::Center)
-            .padding(theme::app_bar_pad()),
-    )
-    .height(Length::Fixed(theme::APP_BAR_H))
-    .width(Length::Fill)
-    .into()
-}
-
 /// **The three window controls** — minimise, maximise, close, in that order,
 /// at the bar's right end.
 ///
@@ -1053,10 +1001,11 @@ mod tests {
         );
         assert_eq!(
             code.matches("spacing(theme::CONTROL_CLUSTER_GAP)").count(),
-            4,
-            "the bar's clusters — history, the application's doors, the window \
-             buttons, and the chromeless strip that keeps those buttons when \
-             the rest of the bar goes — no longer all stand on the cluster seam"
+            3,
+            "the bar's three clusters — history, the application's doors, the \
+             window buttons — no longer all stand on the cluster seam. (A \
+             fourth lived here briefly: a reduced strip for chromeless mode, \
+             deleted when chromeless started carrying the ordinary bar.)"
         );
     }
 }

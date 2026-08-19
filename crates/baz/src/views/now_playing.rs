@@ -361,12 +361,75 @@ pub(crate) fn view<'a>(
         source,
     );
 
+    // **The field and the spectrum are not here.** They are the window's
+    // backdrop now, drawn by `App::view` behind the app bar as well as behind
+    // this page — see [`backdrop`]. What stays is the page itself, which is
+    // transparent over them.
+    let _ = field;
+    body
+}
+
+/// **The record's wash and its spectrum, sized to the whole window.**
+///
+/// The owner, of chromeless mode: *"make sure the top bar is transparent
+/// essentially… the visualiser and background colour etc should be showing
+/// where it is currently black."*
+///
+/// The bar had been transparent for a while and read black anyway, because
+/// these two layers lived *inside* the page — and the page is the window less
+/// the bar and the lane. There was nothing under the glass but the window's
+/// own ground.
+///
+/// Stacking the bar over the page instead was tried and was wrong: it moves
+/// every place up under the bar, and the lane, which has no margin of its own,
+/// ran off the top of the window. The layers that want to be behind the bar
+/// are these two, so it is these two that leave the page. The lane keeps its
+/// own ground and stays readable over them.
+pub(crate) fn backdrop<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    visual: Visual<'_>,
+    window: iced::Size,
+) -> Element<'a, Message> {
+    let Some(now) = player.now_playing() else {
+        return field_layer(None, None, 1.0);
+    };
+    let hues = now
+        .album_id
+        .and_then(|id| shelf.hero(id))
+        .and_then(|hero| hero.field);
+    let work = visual
+        .foreground
+        .draws_art()
+        .then(|| work(shelf, Some(now)));
+    let t = work.as_ref().map_or(1.0, |work| {
+        let edge = marquee_edge(window.width, window.height, f32::INFINITY);
+        work.dissolve_at(edge, window.width, window.height, false)
+    });
+    let field = match &work {
+        Some(work) => field_layer(
+            work.from
+                .as_ref()
+                .and_then(|&(_, _, field)| field)
+                .filter(|_| t < 1.0),
+            work.field,
+            t,
+        ),
+        None => field_layer(None, hues, 1.0),
+    };
     let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
-        crate::visualizer::background(visual.mode, audio, visual.history, width, height, hues)
+        crate::visualizer::background(
+            visual.mode,
+            audio,
+            visual.history,
+            window.width,
+            window.height,
+            hues,
+        )
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
-    stack![field, spectrum, body].into()
+    stack![field, spectrum].into()
 }
 
 /// Whether the album line is worth drawing: an album source footer already
