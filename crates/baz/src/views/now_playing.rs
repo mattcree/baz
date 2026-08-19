@@ -642,7 +642,14 @@ fn marquee<'a>(
             },
         ]
         .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::Start),
+        // **Level with the title, not hung above it.** `Start` put a 32 px
+        // heart against the top of a line box up to 80 px tall, so on the
+        // common one-line title it floated a clear 30 px over the cap height
+        // with nothing beside it — a mark about the title, drawn as though it
+        // were about the air. Centred, it stands level with the words it
+        // belongs to, which is the same reading the lane's destination rows
+        // are built on.
+        .align_y(iced::Alignment::Center),
     ]
     .spacing(theme::GAP_LG)
     .width(Length::Fixed(measure));
@@ -1001,42 +1008,50 @@ fn stage<'a>(
     .into()
 }
 
-/// **The fade the title is read against.**
+/// **The fade the title is read against — down to the room's own floor.**
 ///
-/// The marquee is drawn over the artwork now, and 64 px of paper-coloured
-/// serif over a record sleeve is a contrast gamble taken once per album — some
-/// covers are dark and some are a photograph of a sunlit wall. This is the
-/// page fading to black toward its bottom edge, which it was already doing for
-/// the source band; the band is the last inch of the same fade, and this is the
-/// rest of it.
+/// The marquee is drawn over the artwork, and 64 px of paper-coloured serif
+/// over a record sleeve is a contrast gamble taken once per album: some covers
+/// are dark and some are a photograph of a sunlit wall. So the page fades to
+/// an opaque ground toward its bottom edge, and the title is read against
+/// that rather than against whatever the record happened to be.
+///
+/// # Which ground, and why it is not black
+///
+/// It **was** black, because the owner asked for black — *"maybe just make it
+/// fade to black?"* — while looking at Closing Time, where the room's own
+/// floor is very nearly black and the two answers are the same picture. In
+/// every light room they are not: Plaster faded a light grey page into a solid
+/// black band across its bottom third, and the source band's dark ink went
+/// with it into a plane it could not be read on. That is what the owner then
+/// read as *"the now playing view still doesn't have the right styling for the
+/// text and the gradient area"*, and what *"the colours on the now playing need
+/// to be part of the theme"* asked for in the first place.
+///
+/// [`theme::Palette::wall`] is the answer rather than any other plane because
+/// it is what this page **is**: the wall is the ground every place stands on,
+/// so the fade ends where the page would have been with no record at all, and
+/// the ink written over it is the same [`theme::Palette::paper`] ladder that
+/// reads on the wall everywhere else in the product. In a dark room that is
+/// still, correctly, almost the black that was asked for.
 ///
 /// Clear across the top three fifths so the sleeve is untouched where nothing
-/// is written on it, and it does not reach solid — the source band beneath is
-/// where solid is, and reaching it early would draw a horizon across the page.
+/// is written on it, and solid only at the very bottom — the source band is
+/// the last inch of this one fade, and reaching solid early would draw a
+/// horizon across the page.
 fn scrim() -> Element<'static, Message> {
+    let floor = theme::active().wall;
     container(Space::new().width(Length::Fill).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(|_theme| container::Style {
+        .style(move |_theme| container::Style {
             background: Some(iced::Background::Gradient(
                 iced::gradient::Linear::new(std::f32::consts::PI)
-                    .add_stop(0.0, iced::Color::TRANSPARENT)
-                    .add_stop(0.42, iced::Color::TRANSPARENT)
-                    .add_stop(
-                        0.72,
-                        iced::Color {
-                            a: 0.42,
-                            ..iced::Color::BLACK
-                        },
-                    )
-                    .add_stop(
-                        0.9,
-                        iced::Color {
-                            a: 0.86,
-                            ..iced::Color::BLACK
-                        },
-                    )
-                    .add_stop(1.0, iced::Color::BLACK)
+                    .add_stop(0.0, iced::Color { a: 0.0, ..floor })
+                    .add_stop(0.42, iced::Color { a: 0.0, ..floor })
+                    .add_stop(0.72, iced::Color { a: 0.42, ..floor })
+                    .add_stop(0.9, iced::Color { a: 0.86, ..floor })
+                    .add_stop(1.0, floor)
                     .into(),
             )),
             ..container::Style::default()
@@ -1116,17 +1131,22 @@ fn source_link(source: Source) -> Element<'static, Message> {
     // stopped is what the owner saw as *"two gradients going on… can we
     // instead just have one."* What is left is the press feedback, which a
     // band still owes a pointer that is over it.
+    //
+    // **The press feedback is a plane, not a white veil.** A 6 % white wash
+    // brightens a dark room and does nothing at all to a light one, so the
+    // band answered the pointer in six rooms out of sixteen. The page's fade
+    // ends on [`theme::Palette::wall`], so one step up from the wall is what a
+    // hovered row stands on everywhere else in the product, and it is a
+    // *colour the room chose* rather than an amount of white.
     .style(move |_theme, status| {
-        let wash = match status {
-            button::Status::Hovered => 0.06,
-            button::Status::Pressed => 0.12,
-            button::Status::Active | button::Status::Disabled => 0.0,
+        let lit = room.step_up(room.wall);
+        let ground = match status {
+            button::Status::Hovered => Some(lit),
+            button::Status::Pressed => Some(room.step_up(lit)),
+            button::Status::Active | button::Status::Disabled => None,
         };
         button::Style {
-            background: (wash > 0.0).then_some(iced::Background::Color(iced::Color {
-                a: wash,
-                ..iced::Color::WHITE
-            })),
+            background: ground.map(iced::Background::Color),
             text_color: room.paper,
             border: iced::Border::default(),
             ..button::Style::default()
@@ -1138,6 +1158,74 @@ fn source_link(source: Source) -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    /// **Nothing on this page picks its own colour.**
+    ///
+    /// Twice now the same class of fault has shipped here, and both times it
+    /// looked correct in the room it was written in. The scrim faded to
+    /// `Color::BLACK` because the owner asked for black while looking at
+    /// Closing Time, whose floor *is* nearly black; in Plaster the same line
+    /// laid a solid black band across the bottom third of a light page and
+    /// took the source band's ink down with it. The band's press wash was
+    /// `Color::WHITE` at 6 %, which lights a dark room and is invisible in a
+    /// light one. Both read as *"the colours on the now playing need to be
+    /// part of the theme otherwise it looks weird"*.
+    ///
+    /// So the pin is on the class rather than on either instance: this page
+    /// draws over artwork, which is the one surface in the product where a
+    /// literal can look deliberate, and every colour it draws has to come from
+    /// [`theme::Palette`] or from the record's own [`crate::field::Field`].
+    /// The exception is a **zero** alpha, where the colour is not drawn at all
+    /// and only names the ramp's other end.
+    #[test]
+    fn every_colour_on_this_page_comes_from_the_room_or_the_record() {
+        let source = include_str!("now_playing.rs").replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        for (line_no, line) in shipped.lines().enumerate() {
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with("///") {
+                continue;
+            }
+            for literal in ["Color::BLACK", "Color::WHITE", "Color::from_rgb"] {
+                assert!(
+                    !code.contains(literal),
+                    "now_playing.rs:{}: `{literal}` is a colour this page chose \
+                     for itself. Every plane here has to come from the room \
+                     (`theme::active()`) or from the record (`Field::inks`), or \
+                     it is right in one room and wrong in the other fifteen.",
+                    line_no + 1
+                );
+            }
+        }
+    }
+
+    /// **The page fades to the room's floor, and the floor is the wall.**
+    ///
+    /// Stated against [`theme::Palette::wall`] by name rather than against the
+    /// pixels, because the point is *which plane* — the wall is the ground
+    /// every place in the product stands on, so the fade ends where this page
+    /// would have been with no record at all, and the `paper` ladder written
+    /// over it is the ladder that reads on the wall everywhere else.
+    #[test]
+    fn the_scrim_fades_to_the_rooms_own_wall() {
+        let source = include_str!("now_playing.rs").replace("\r\n", "\n");
+        let rest = source.split_once("fn scrim()").expect("the scrim").1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            body.contains("theme::active().wall"),
+            "the scrim no longer ends on the room's own wall"
+        );
+        assert_eq!(
+            body.matches("add_stop").count(),
+            5,
+            "the fade's shape changed; if that is intended, restate the ramp \
+             here — the top three fifths are clear on purpose and solid \
+             arrives only at the very bottom edge"
+        );
+    }
+
     /// **The source band's type stands on the marquee's own margin.**
     ///
     /// The owner: *"the text alignment between the title text and the source
@@ -1579,7 +1667,8 @@ mod tests {
                     let budget = height - 2.0 * theme::HANG;
                     assert!(
                         edge + BELOW <= budget.max(theme::ART_MIN + BELOW),
-                        "{width}×{height} source {source}: the work {edge} plus the                          placard {BELOW} overflows {budget}"
+                        "{width}×{height} source {source}: the work {edge} plus the \
+                     placard {BELOW} overflows {budget}"
                     );
                 }
             }
