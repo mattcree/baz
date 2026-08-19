@@ -4105,6 +4105,26 @@ pub fn sleeve(p: &Palette, warmth: f32) -> container::Style {
     };
     container::Style {
         background: Some(Background::Color(p.recess)),
+        // **Every sleeve has an edge**, which is a correctness argument before
+        // it is a design one. A record sleeve is a rectangle of ink on a wall,
+        // and where that ink happens to match the wall there is *no boundary at
+        // all* — a white Arvo Pärt cover on Reading Room's cream, an ECM sleeve
+        // on Plaster — so the object stops having a size and the wall stops
+        // having a grid. The bare bitmap was never a style choice; it was the
+        // dark rooms, where a sleeve is nearly always lighter than the wall,
+        // making the missing line invisible to the person who wrote it.
+        //
+        // A drawn line rather than a shadow, and that is the module's own rule
+        // rather than a preference (see the depth strategy above): four surface
+        // steps and hairlines, no elevation. It is also the reading that
+        // survives the owner's colour vision — a boundary carried only by a
+        // difference in hue or lightness between artwork and wall is exactly
+        // the reading that fails when the two happen to agree.
+        border: Border {
+            color: p.hairline(p.wall),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
         shadow,
         ..container::Style::default()
     }

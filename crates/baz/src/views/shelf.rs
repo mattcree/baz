@@ -7,7 +7,8 @@
 //! grid it is handed; it computes none of it.
 
 use iced::widget::{
-    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, stack, text,
+    Space, button, column, container, image as iced_image, mouse_area, row, rule, scrollable,
+    stack, text,
 };
 use iced::{Element, Length, alignment};
 
@@ -393,7 +394,32 @@ pub(crate) fn group_band<'a>(
             .align_y(alignment::Vertical::Center)
             .into(),
     };
-    container(line)
+    // **The rule that carries the letter across the wall.**
+    //
+    // The owner, 2026-08-19: *"how can we make our cd cover lists look a bit
+    // nicer? a bit more designed?"* A section marker on a wall of artwork was
+    // one short word of dim type with a quarter of a screen of nothing beside
+    // it — worst under A–Z, where a letter with a single record leaves the
+    // heading floating over an empty row. The rule is the oldest device an
+    // index has: it says *this band is a section and it runs to here*, it
+    // gives the wall a horizontal beat between runs of squares, and it turns
+    // the void beside a short section into the thing that states its extent.
+    //
+    // Drawn at the room's faintest line, because the heading is already the
+    // loud part and a rule that competes with the type is furniture rather
+    // than structure. It takes what the word leaves, so it is never a fixed
+    // length and never collides — a long artist name simply gets a short
+    // rule, and a name that fills the block gets none.
+    let banded = row![
+        line,
+        container(rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)))
+            .width(Length::Fill)
+            .height(Length::Fixed(hang.header_h()))
+            .align_y(alignment::Vertical::Center),
+    ]
+    .spacing(theme::GAP_MD)
+    .align_y(iced::Alignment::Center);
+    container(banded)
         .width(Length::Fixed(block))
         .height(Length::Fixed(hang.header_h()))
         .clip(true)
@@ -749,14 +775,31 @@ pub(crate) fn tile<'a>(
     if playing {
         title_row = title_row.push(lamp_dot());
     }
-    title_row = title_row.push(
-        text(title)
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .font(theme::MEDIUM)
-            .color(room.paper)
-            .wrapping(text::Wrapping::None),
-    );
+    // **Cut with a measured ellipsis, not clipped mid-letter.** `Now That
+    // I've Found You: A Col` was the wall's answer to a long title — the
+    // glyph run simply ran out of lane, which reads as a rendering failure
+    // rather than as a title that did not fit. [`crate::views::fitted_line`]
+    // is the reading the lane and the bottom bar already use: the prefix
+    // measured in the real face at the real size, and the ellipsis in a slot
+    // the fitting reserved.
+    //
+    // The lamp's dot and its seam come out of the measure when this is the
+    // sounding record, or the mark would push the cut off the tile.
+    let title_measure = if playing {
+        edge - theme::DOT - theme::GAP_XS
+    } else {
+        edge
+    };
+    title_row = title_row.push(crate::views::fitted_line(&crate::views::Fitted {
+        content: title,
+        face: &crate::views::FIT_MEDIUM,
+        size: theme::SIZE_BODY,
+        leading: theme::LEADING_BODY,
+        line_height: theme::LINE_BODY,
+        font: theme::MEDIUM,
+        color: room.paper,
+        measure: title_measure,
+    }));
     // **The selected record**, through the product-wide content state. The
     // rule is paper-toned rather than amber: selection is intent, not playback
     // truth, and it composes with the independent sounding halo/dot.
@@ -782,14 +825,16 @@ pub(crate) fn tile<'a>(
     let caption_ink = theme::caption_ink(room, hovered);
     let caption_block = column![
         caption_lane(title_row.into()),
-        caption_lane(
-            text(caption)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(caption_ink)
-                .wrapping(text::Wrapping::None)
-                .into(),
-        ),
+        caption_lane(crate::views::fitted_line(&crate::views::Fitted {
+            content: &caption,
+            face: &crate::views::FIT_REGULAR,
+            size: theme::SIZE_META,
+            leading: theme::LEADING_META,
+            line_height: theme::LINE_META,
+            font: theme::SANS,
+            color: caption_ink,
+            measure: edge,
+        })),
     ]
     .width(Length::Fixed(edge))
     .height(Length::Fixed(theme::CAPTION_H));
@@ -1076,6 +1121,93 @@ fn lamp_dot() -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **Every sleeve on the wall has an edge, and it is a line rather than a
+    /// shadow.**
+    ///
+    /// The correctness half first: artwork whose own ink matches the wall has
+    /// no boundary without one — a white ECM sleeve on Plaster, Arvo Pärt's
+    /// *Alina* on Reading Room — so the object stops having a size and the
+    /// grid stops being a grid. That was invisible for as long as the product
+    /// had only dark rooms, where a sleeve is almost always lighter than the
+    /// wall behind it.
+    ///
+    /// The primitive half second, and it is the module's own rule rather than
+    /// a preference: four surface steps and hairlines, no elevation. A drop
+    /// shadow on `#0C0D0E` composites to a contrast ratio of 1.04 : 1, which
+    /// is a rounding error and not a design tool — so the edge cannot be
+    /// reintroduced as one the next time a light room makes shadows tempting.
+    #[test]
+    fn a_sleeve_is_bounded_by_a_line_and_never_by_an_elevation() {
+        for room in theme::Room::ALL {
+            let palette = room.palette();
+            let style = theme::sleeve(palette, 0.0);
+            assert!(
+                style.border.width > 0.0,
+                "{room:?}: a sleeve has no edge, so artwork the colour of the \
+                 wall has no boundary at all"
+            );
+            assert_eq!(
+                style.border.radius,
+                0.0.into(),
+                "{room:?}: a sleeve has been rounded — artwork is square, like \
+                 the object"
+            );
+            assert!(
+                style.shadow.blur_radius == 0.0 && style.shadow.color.a == 0.0,
+                "{room:?}: a resting sleeve casts a shadow. Elevation is not \
+                 this product's depth primitive; the halo below is light, not \
+                 height"
+            );
+        }
+        // The halo is the exception, and it is the *playing* record's only.
+        let lit = theme::sleeve(theme::Room::ClosingTime.palette(), 1.0);
+        assert!(
+            lit.shadow.blur_radius > 0.0,
+            "the sounding record no longer carries its halo"
+        );
+    }
+
+    /// **A section heading runs a rule to the end of its block.**
+    ///
+    /// The owner, 2026-08-19: *"how can we make our cd cover lists look a bit
+    /// nicer? a bit more designed?"* A marker over a wall of artwork was one
+    /// short word of dim type with a quarter of a screen of nothing beside it,
+    /// worst under A–Z where a letter holding one record leaves the heading
+    /// floating over an empty row.
+    ///
+    /// Pinned in [`group_band`] rather than at either call site, because the
+    /// Library's shelves and the saved-playlist wall are one object — the
+    /// owner's *"use the exact same pattern as the library please"* — and a
+    /// rule added to one of them would be the second heading this product has
+    /// had.
+    #[test]
+    fn a_section_heading_carries_a_rule_to_the_end_of_its_block() {
+        let source = include_str!("shelf.rs").replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let rest = shipped
+            .split_once("pub(crate) fn group_band<'a>(")
+            .expect("the one heading band")
+            .1;
+        let band = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            band.contains("rule::horizontal(1)"),
+            "the heading band no longer draws its rule"
+        );
+        assert!(
+            band.contains("theme::hairline("),
+            "the heading rule is drawn at something other than the room's \
+             faintest line, which makes it compete with the word it follows"
+        );
+        assert!(
+            band.contains(".width(Length::Fill)"),
+            "the heading rule has a length of its own instead of taking what \
+             the word leaves, so a long name will collide with it"
+        );
+    }
     use super::RULE_LANE_H;
     use crate::shelf::{Density, Grid};
     use crate::theme;
