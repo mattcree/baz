@@ -28,7 +28,7 @@ pub(crate) fn scroll_id() -> iced::widget::Id {
 }
 
 /// The one full search well, resident in the app bar at every width/place.
-pub(crate) fn well(shelf: &Shelf) -> Element<'_, Message> {
+pub(crate) fn well(shelf: &Shelf, ground: iced::Color) -> Element<'_, Message> {
     let room = theme::active();
     let filtering = !shelf.query.trim().is_empty();
     let input = text_input(SCOPE, &shelf.query)
@@ -48,7 +48,7 @@ pub(crate) fn well(shelf: &Shelf) -> Element<'_, Message> {
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(theme::SIDEBAR_MEASURE))
-        .style(move |_theme, status| theme::input(room, status));
+        .style(move |_theme, status| theme::well(room, ground, status));
     let mark: Element<'_, Message> = if filtering {
         container(crate::views::clear_mark(room.recess))
             .height(Length::Fixed(theme::TRANSPORT_HIT))

@@ -195,7 +195,11 @@ pub(crate) fn view(
     ink: Ink,
 ) -> Element<'_, Message> {
     let room = theme::active();
-    let search = crate::views::search::well(shelf);
+    // **The ground the well's hairline is drawn on.** Over the field the bar
+    // is transparent, so what the well actually stands on is the record's own
+    // wash — [`crate::views::now_playing`] derives that from the wall's
+    // lightness, so the wall is the right answer in both states.
+    let search = crate::views::search::well(shelf, room.wall);
     // **Two zones, two seams.** The display options are the *view's*
     // (ADR-0040 §2 zone 3) and the bell and the gear are the *application's*
     // (zone 4), so the pair is one cluster on
