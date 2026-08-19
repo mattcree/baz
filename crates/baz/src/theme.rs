@@ -2723,8 +2723,31 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_H
 /// [`APP_BAR_LINE`] records which, and how a number nothing could reach came
 /// to be enforced as a floor. The floor did not move because the bar grew —
 /// it moved because the bar was finally measured.
-pub const WINDOW_FLOOR_W: f32 =
-    ((TOP_BAR_FLOOR + SIDEBAR_RAIL_W).max(APP_BAR_LINE + GAP_SM) / GAP_XS).ceil() * GAP_XS;
+pub const WINDOW_FLOOR_W: f32 = ((TOP_BAR_FLOOR + SIDEBAR_RAIL_W)
+    .max(APP_BAR_LINE + GAP_SM)
+    .max(BOTTOM_BAR_LINE)
+    / GAP_XS)
+    .ceil()
+    * GAP_XS;
+
+/// **What the now-playing bar needs to draw its own line**, title lane
+/// included.
+///
+/// A term in [`WINDOW_FLOOR_W`] since 2026-08-19, and it should have been one
+/// before: this bar's needs were *covered* by the app bar's line rather than
+/// counted, and the moment the app bar gave 152 px of tenants to the lane the
+/// floor fell below what the bottom bar could draw —
+/// `bar_title_lane_w(WINDOW_FLOOR_W)` went to zero and the sounding track had
+/// nowhere to be written. A floor that holds one bar by coincidence is not a
+/// floor.
+pub const BOTTOM_BAR_LINE: f32 = 2.0 * BAR_EDGE_PAD
+    + BAR_TRAILING_W
+    + GAP_LG
+    + BAR_COVER
+    + GAP_MD
+    + STEPPER_HIT
+    + GAP_SM
+    + BAR_TITLE_MIN_W;
 
 /// **Strip width** below which the Library strip splits into its two lines
 /// (logical px) — **680**, an exact sum rather than a rounded one.
@@ -2961,14 +2984,13 @@ pub const APP_MARK_PX: f32 = SIDEBAR_GLYPH_PX;
 /// which is the opposite of what declaring a slot is for.
 pub const APP_BAR_NAME_W: f32 = APP_MARK_PX;
 
-/// The app bar's **place history** (logical px) — two [`TRANSPORT_HIT`] boxes
-/// on the [`CONTROL_CLUSTER_GAP`] rhythm, **88**.
-///
-/// Declared for [`APP_BAR_BUTTONS_W`]'s reason, and declared *now* because it
-/// was not: the Back/Forward pair shipped into this bar on 2026-08-13 and
-/// never entered [`APP_BAR_LINE`]. See that constant for what the omission
-/// cost.
-pub const APP_BAR_HISTORY_W: f32 = 2.0 * TRANSPORT_HIT + CONTROL_CLUSTER_GAP;
+// **`APP_BAR_HISTORY_W` was here** — two `TRANSPORT_HIT` boxes on the cluster
+// rhythm, 88 px, declared in 2026-08-14 because the Back/Forward pair had
+// shipped into the bar unbudgeted a day earlier. The pair moved into the
+// lane's head on 2026-08-19 and the lane sizes it from `TRANSPORT_HIT` and
+// `CONTROL_CLUSTER_GAP` directly, so the constant is deleted rather than left
+// unused: a budget line for a tenant that is not in the room is the same kind
+// of wrong as the omission it was written to fix.
 
 /// The app bar's **trailing furniture** (logical px) — the display options'
 /// reserved slot, then the bell and the gear as one cluster:
@@ -3017,7 +3039,7 @@ pub const APP_BAR_FURNITURE_W: f32 = APP_BAR_MARKS_W
 /// on 2026-08-13 and neither was ever added here:
 ///
 /// ```text
-/// APP_BAR_HISTORY_W    84   Back/Forward
+/// the history pair      84   Back/Forward
 ///   + GAP_LG           16   its seam
 /// the bell             40   inside the trailing furniture
 ///   + GAP_LG           16   its seam
@@ -3044,11 +3066,12 @@ pub const APP_BAR_FURNITURE_W: f32 = APP_BAR_MARKS_W
 /// the one app-wide control on a measure that changes underneath the query in
 /// it, to buy widths a desktop window is rarely dragged to. ADR-0040 §4 makes
 /// the buttons unconditional, so they are not what may yield.
+///
+/// **The mark and the history pair left on 2026-08-19** — into the lane's
+/// head, when the lane grew to the window's full height. This bar is the
+/// *body's* now, and it starts at the search. The line is 152 px shorter for
+/// it, which is the one direction a floor may move without argument.
 pub const APP_BAR_LINE: f32 = APP_BAR_EDGE
-    + APP_BAR_NAME_W
-    + GAP_LG
-    + APP_BAR_HISTORY_W
-    + GAP_LG
     + SIDEBAR_MEASURE
     + 2.0 * GAP_LG
     + APP_BAR_FURNITURE_W
@@ -9023,19 +9046,17 @@ mod tests {
         // not spent at all — that is the fix of 2026-08-10, and it is asserted
         // below rather than left to a reader to notice that the constant has
         // two values.
-        const TENANTS: [f32; 6] = [
-            APP_BAR_NAME_W,
-            APP_BAR_HISTORY_W,
-            SIDEBAR_MEASURE,
-            0.0,
-            APP_BAR_FURNITURE_W,
-            APP_BAR_BUTTONS_W,
-        ];
+        // **The mark and the history pair are not here any more.** They moved
+        // into the lane's head when the lane grew to the window's full height
+        // (the owner's *"make the left hand bar go to the top and include the
+        // back and forward icons in it"*), so this bar is the **body's** and
+        // its budget starts at the search.
+        const TENANTS: [f32; 4] = [SIDEBAR_MEASURE, 0.0, APP_BAR_FURNITURE_W, APP_BAR_BUTTONS_W];
         /// One seam between every pair of children, so one fewer than there
         /// are children. Written out rather than derived from `TENANTS.len()`
         /// so it stays a float the whole way; the two are pinned equal below.
-        const SEAMS: f32 = 5.0;
-        const { assert!(TENANTS.len() == 6) }
+        const SEAMS: f32 = 3.0;
+        const { assert!(TENANTS.len() == 4) }
         let walked = APP_BAR_EDGE + TENANTS.iter().sum::<f32>() + SEAMS * GAP_LG + APP_BAR_HANG_R;
 
         // **The walk is answerable to the drawing.** Without this, the array
@@ -9045,7 +9066,7 @@ mod tests {
         // and the views assert those against themselves.
         let bar = include_str!("views/app_bar.rs").replace("\r\n", "\n");
         assert!(
-            bar.contains("let mut line = row![name, history, search, gap, furniture];"),
+            bar.contains("let mut line = row![search, gap, furniture];"),
             "the app bar's tenants changed; add the new one to `TENANTS` with a \
              declared width, or the window controls will be pushed off the \
              trailing edge exactly as they were before 2026-08-14"
@@ -9079,23 +9100,22 @@ mod tests {
 
         const { assert!(APP_BAR_MARKS_W == 128.0) }
         const { assert!(APP_BAR_BUTTONS_W == 136.0) }
-        const { assert!(APP_BAR_HISTORY_W == 88.0) }
         const { assert!(APP_BAR_FURNITURE_W == 280.0) }
-        const { assert!(APP_BAR_LINE == 870.0) }
+        // 718 since the mark and the history pair moved into the lane's
+        // head; it was 870 while this bar carried them.
+        const { assert!(APP_BAR_LINE == 718.0) }
         assert!(
             (walked - APP_BAR_LINE).abs() < f32::EPSILON,
             "the drawn line walks to {walked}, the declared budget is {APP_BAR_LINE}"
         );
         const { assert!(APP_BAR_LINE <= FLOOR) }
-        // The slack is stated rather than left implicit, because it is the
-        // figure any future tenant of this bar is argued against — the same
-        // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
-        // The slack is stated rather than left implicit, because it is the
-        // figure any future tenant of this bar is argued against — the same
-        // service `TOP_BAR_FLOOR`'s 160 does for the strip below. It is the
-        // lattice's own rounding and stayed at 10 across the equaliser door,
-        // which moved the floor rather than eating the margin.
-        const { assert!(FLOOR - APP_BAR_LINE == 10.0) }
+        // **The bar no longer sets the window's floor.** It did while it
+        // carried the mark, the history pair and the search — 870 against a
+        // 880 floor, ten pixels of slack. With 152 px of tenants gone into the
+        // lane the binding term is the other one (`TOP_BAR_FLOOR +
+        // SIDEBAR_RAIL_W`), so the slack is whatever that leaves and stating a
+        // fixed figure for it would be pinning the wrong constraint.
+        const { assert!(FLOOR - APP_BAR_LINE > 0.0) }
         const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == TRANSPORT_HIT) }
 
         // **The display options' slot is held in every place**, which is what

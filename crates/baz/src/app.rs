@@ -7963,12 +7963,26 @@ impl App {
         // frame is the frame: navigating cannot slide the lane by a pixel,
         // and the place's own strip resolves against `body_width` — the
         // window less the lane — rather than against the window.
-        let screen: Element<'_, Message> = match &self.screen {
-            // Chromeless takes the lane with the bars. `wears_lane` is a fact
-            // about the *place*; this is a fact about the frame, and both have
-            // to be true for the lane to stand.
-            Screen::Shelf(state) if self.place.wears_lane() && !self.chromeless => row![
-                views::lane::view(
+        // **The lane runs the whole height of the window**, and the bar is the
+        // *body's* bar rather than the window's.
+        //
+        // The owner: *"make the left hand bar go to the top and include the
+        // back and forward icons in it. the search then becomes part of the
+        // main area's top bar."* So the frame is a `row!` of lane and
+        // everything-else, and the everything-else is a `column!` of bar over
+        // body — where it used to be a `column!` of bar over a `row!` of lane
+        // and body.
+        //
+        // The app's mark and the history pair moved into the lane's head with
+        // that change: the mark's centre was already on the lane's own glyph
+        // column (`SIDEBAR_HEAD_GLYPH_X`), which is why it lands where it
+        // already looked like it was.
+        let lane: Option<Element<'_, Message>> = match &self.screen {
+            // Chromeless takes the lane with the bottom band. `wears_lane` is
+            // a fact about the *place*; this is a fact about the frame, and
+            // both have to be true for the lane to stand.
+            Screen::Shelf(state) if self.place.wears_lane() && !self.chromeless => {
+                Some(views::lane::view(
                     state,
                     &self.playlists,
                     self.place,
@@ -7991,11 +8005,12 @@ impl App {
                         self.player.playing_album(),
                     ),
                     self.window.width,
-                ),
-                screen
-            ]
-            .into(),
-            _ => screen,
+                    self.place_history.can_back(),
+                    self.place_history.can_forward(),
+                    ink,
+                ))
+            }
+            _ => None,
         };
         // **The playlist panel**, floated over the place by ADR-0016's
         // verified mechanics: a `stack`, the panel wrapped in `opaque` so a
@@ -8094,8 +8109,6 @@ impl App {
                 self.window.width,
                 hangs_works,
                 visualization,
-                self.place_history.can_back(),
-                self.place_history.can_forward(),
                 self.window_maximized,
                 owns_chrome(),
                 over_field,
@@ -8120,7 +8133,12 @@ impl App {
         // asks for the lane and the bottom band to go, not for the doors to;
         // an immersive mode you cannot change the visualiser from is a mode
         // you leave to change the visualiser.
+        // The bar belongs to the body now, and the lane stands beside both.
         let screen: Element<'_, Message> = column![bar, screen].into();
+        let screen: Element<'_, Message> = match lane {
+            Some(lane) => row![lane, screen].into(),
+            None => screen,
+        };
         // The GUI is always an audio build, so the persistent bottom bar lives
         // under every place. A missing device is represented in the bar rather
         // than by changing the application's composition.

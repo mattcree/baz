@@ -51,12 +51,14 @@
 //! a hovered row lands on the wall's own colour.
 
 use iced::widget::{
-    Space, button, column, container, image as iced_image, row, rule, scrollable, text,
+    Space, button, column, container, image as iced_image, mouse_area, row, rule, scrollable, text,
+    tooltip,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::lane::{Destination, Subject, Touched};
+use crate::motion::{Control, Ink};
 use crate::place::Place;
 use crate::playlists::Playlists;
 use crate::{icon, theme};
@@ -66,6 +68,12 @@ use crate::{icon, theme};
 /// `lane` is already resolved, split and ordered by [`crate::lane::resolve`] —
 /// this function decides nothing about membership, which is what keeps the
 /// ordering testable without a window.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shell owns the lane's facts, and the window's own head joined \
+              them on 2026-08-19; keeping them explicit makes the composition \
+              auditable, which is the same bargain `app_bar::view` strikes"
+)]
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
@@ -74,6 +82,9 @@ pub(crate) fn view<'a>(
     sounding: bool,
     sounding_row: Option<Subject>,
     window_w: f32,
+    can_back: bool,
+    can_forward: bool,
+    ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let open = theme::sidebar_w(window_w, shelf.lane_open) >= theme::SIDEBAR_W;
@@ -84,7 +95,44 @@ pub(crate) fn view<'a>(
     // word.
     // The head's four destinations, on the lane's one row rhythm — the same
     // seam the list below the rule stands on ([`theme::SIDEBAR_ROW_GAP`]).
-    let mut head = column![]
+    // **The window's own head, above the destinations.** The app's mark and
+    // the history pair moved here from the app bar when the lane grew to the
+    // full height of the window — the mark's centre was already on
+    // [`theme::SIDEBAR_HEAD_GLYPH_X`], which is why it lands where it always
+    // looked like it was.
+    // Collapsed, the lane is one glyph wide, and a mark with two arrows beside
+    // it is three — so the pair stacks under the mark rather than being
+    // clipped off the edge. Losing them there would leave `Alt+←`/`Alt+→` as
+    // the only route to history, which is the one thing the keyboard rule
+    // forbids: every binding is a press some visible control also makes.
+    let chrome: Element<'a, Message> = if open {
+        row![mark(), history(can_back, can_forward, ink)]
+            .spacing(theme::CONTROL_CLUSTER_GAP)
+            .align_y(iced::Alignment::Center)
+            .into()
+    } else {
+        column![
+            mark(),
+            history_button(
+                icon::Glyph::HistoryBack,
+                "Back",
+                can_back.then_some(Message::HistoryBack),
+                Control::HistoryBack,
+                ink,
+            ),
+            history_button(
+                icon::Glyph::HistoryForward,
+                "Forward",
+                can_forward.then_some(Message::HistoryForward),
+                Control::HistoryForward,
+                ink,
+            ),
+        ]
+        .spacing(theme::CONTROL_CLUSTER_GAP)
+        .align_x(alignment::Horizontal::Center)
+        .into()
+    };
+    let mut head = column![chrome]
         .width(Length::Fill)
         .spacing(theme::SIDEBAR_ROW_GAP);
     for to in Destination::ALL {
@@ -684,8 +732,175 @@ fn lane_toggle(open: bool, can_expand: bool) -> Element<'static, Message> {
     .into()
 }
 
+/// **Zone 1 — the application's mark**, hanging from the window's leading
+/// gutter in its [`theme::APP_BAR_NAME_W`] slot.
+///
+/// The owner, 2026-08-10: *"we probably want an icon for our app to show in the
+/// bar"*. It replaces the word `baz`, which stood here at the metadata size in
+/// the faintest readout ink — and *replaces* rather than joins, which is the
+/// choice worth stating because the other one was available:
+///
+/// - **The slot declares the larger mark.** It is 32 for a 24 px mark and one
+///   `GAP_SM`; the minimum-width budget still retains 96 px of drag slack.
+/// - **They would say the same thing twice.** On a single-window product this
+///   zone's content never varies — it is `baz` in every place, in every state,
+///   forever — so it carries identity and nothing else, and a mark carries
+///   identity better than a three-letter lowercase word at the faintest ink in
+///   the room. It is the same reading that put a gear where the word `Settings`
+///   used to be (doc 10 §3.4), arrived at from the other direction: there the
+///   symbol had to earn a *door's* label, here there is no door and no label,
+///   only a statement.
+/// - **It is what the reference does.** The owner named it — *"similar to stuff
+///   like spotify"* — and that window's chrome carries the mark, not the word.
+///
+/// **It is still a statement and not a control** (L8.5): no button, no tooltip,
+/// no press of its own, which means it is 16 px more of the band that drags the
+/// window rather than 16 px less. That is also why the icon-only law (doc 10
+/// §3.1) does not reach it — the law is about a *control* naming itself with a
+/// symbol, and this names nothing because it does nothing. The same reasoning
+/// ADR-0040 §3 used to admit the three window buttons without a new licence.
+///
+/// What it costs is one accent that is not playback truth; [`icon::app_mark`]
+/// states the exception and its boundary, and ADR-0040's amendment states the
+/// reversal.
+fn mark() -> Element<'static, Message> {
+    container(
+        iced_image(icon::app_mark())
+            .width(Length::Fixed(theme::APP_MARK_PX))
+            .height(Length::Fixed(theme::APP_MARK_PX)),
+    )
+    .width(Length::Fixed(theme::APP_BAR_NAME_W))
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    // **No lead of its own.** It carried a `GAP_MD`, which put the mark's ink
+    // 12 px inside law L1's gutter — the one thing the doc comment above
+    // claimed it did not do — and put its optical centre 10 px off the four
+    // destination glyphs in the returns lane. The owner asked for that
+    // alignment back (*"can we make the icon for the app align with the icons
+    // in the sidebar"*), and with the slot now the mark's own size
+    // ([`theme::APP_BAR_NAME_W`]) the container's edge *is* the ink's edge, so
+    // the centre is `APP_BAR_EDGE + APP_MARK_PX / 2` = 32 — the lane's
+    // [`theme::SIDEBAR_HEAD_GLYPH_X`] exactly, and asserted as such.
+    .align_x(alignment::Horizontal::Left)
+    .align_y(alignment::Vertical::Center)
+    .into()
+}
+
+/// Browser-style place history sits at the top-left beside the application
+/// mark. It is intentionally separate from the bottom bar's track transport:
+/// these arrows revisit pages, never audio.
+fn history(can_back: bool, can_forward: bool, ink: Ink) -> Element<'static, Message> {
+    row![
+        history_button(
+            icon::Glyph::HistoryBack,
+            "Back",
+            can_back.then_some(Message::HistoryBack),
+            Control::HistoryBack,
+            ink,
+        ),
+        history_button(
+            icon::Glyph::HistoryForward,
+            "Forward",
+            can_forward.then_some(Message::HistoryForward),
+            Control::HistoryForward,
+            ink,
+        ),
+    ]
+    .spacing(theme::CONTROL_CLUSTER_GAP)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn history_button(
+    glyph: icon::Glyph,
+    word: &'static str,
+    message: Option<Message>,
+    named: Control,
+    ink: Ink,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    let enabled = message.is_some();
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_ink(
+                enabled,
+                false,
+                ink.hover(named),
+                ink.pressed(named),
+            )),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::TRANSPORT_HIT))
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press_maybe(message);
+    let named_control = tooltip(
+        control,
+        text(word)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named_control)
+        .on_enter(Message::ControlEntered(named))
+        .on_exit(Message::ControlLeft(named))
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// **Zone 1 is the application's mark, and it is not a control.**
+    ///
+    /// The owner, 2026-08-10: *"we probably want an icon for our app to show in
+    /// the bar"*. Two things are worth pinning and they are both about what
+    /// zone 1 *is not*:
+    ///
+    /// 1. **It is not on the glyph sheet.** [`icon::app_mark`] is the
+    ///    launcher's own full-colour PNG, decoded once; `icon::handle` is a
+    ///    coverage sprite the room inks. Drawing zone 1 through `handle` would
+    ///    mean somebody had flattened the mark to a monochrome outline and made
+    ///    a second master of it.
+    /// 2. **It is not a button.** L8.5's statement/control split is the whole
+    ///    reason this zone can be a bare symbol with no tooltip, and it is also
+    ///    what keeps those 16 px part of the band that drags the window. A
+    ///    `button` here would take the press the title bar needs.
+    #[test]
+    fn the_windows_name_is_the_applications_mark_and_not_a_control() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/lane.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let code = source.split("#[cfg(test)]").next().expect("a head");
+        let rest = code.split_once("fn mark()").expect("zone 1").1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            body.contains("icon::app_mark()"),
+            "zone 1 no longer draws the application's own mark"
+        );
+        assert!(
+            !body.contains("icon::handle(") && !body.contains("Glyph::"),
+            "zone 1 draws a sheet glyph: the application's icon is a \
+             full-colour asset with one master (packaging/icons), and a \
+             monochrome outline of it would be a second"
+        );
+        assert!(
+            !body.contains("button(") && !body.contains("tooltip("),
+            "zone 1 has become a control, which takes a press the band needs \
+             to drag the window and spends a licence L8.5 does not require"
+        );
+    }
+
     use crate::theme;
 
     /// This file's own source, for the pins below.

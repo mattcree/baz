@@ -42,34 +42,34 @@
 //!
 //! The owner, approving the right-hand placement: *"I don't mind if we have
 //! the controls on the right hand side as long as we have **a sensible
-//! consistent pattern**"*. So the bar is seven named zones, in this order at
+//! consistent pattern**"*. So the bar is five named zones, in this order at
 //! every width and in every place:
 //!
 //! ```text
-//!   ▧ ‹›  [ Search library ]  ··········  ▤▤▤▤   🔔⚙   ─□✕
-//!   1  2           3                4        5      6     7
-//!  mark hist     search            handle   view   app   window
+//!   [ Search library ]  ··············  ▤▤▤▤   🔔⚙   ─□✕
+//!           1                2             3      4     5
+//!        search           handle          view   app   window
 //! ```
 //!
-//! 1. **The application's mark.** What this window *is* — the one thing a title
-//!    bar says that nothing else in baz says, and the only zone that is a
-//!    statement rather than a control (L8.5). It was the word `baz` until the
-//!    owner asked for the icon on 2026-08-10; [`mark`] records why it replaced
-//!    the word rather than joining it.
-//! 2. **History.** Browser-style Back/Forward over visited places, never
-//!    track transport.
-//! 3. **Search.** The application-wide chooser, resident and place-preserving.
-//! 4. **The handle.** Never a tenant. It is the gesture surface: press and
+//! **Two zones left on 2026-08-19.** The application's mark and the history
+//! pair opened this line until the lane grew to the window's full height —
+//! the owner's *"make the left hand bar go to the top and include the back
+//! and forward icons in it. the search then becomes part of the main area's
+//! top bar."* They are `views::lane`'s head now, and their guards went with
+//! them. This bar is the **body's**, which is why it starts at the search.
+//!
+//! 1. **Search.** The application-wide chooser, resident and place-preserving.
+//! 2. **The handle.** Never a tenant. It is the gesture surface: press and
 //!    travel moves the window, press twice maximises it. A control admitted
 //!    here would be a control that eats the window's own gesture.
-//! 5. **The view** — controls that change *how the place you are in is shown*.
+//! 3. **The view** — controls that change *how the place you are in is shown*.
 //!    The display options today.
-//! 6. **The application** — doors to what the application holds rather than
+//! 4. **The application** — doors to what the application holds rather than
 //!    what a place does: the health bell and the gear, one cluster on
 //!    [`theme::CONTROL_CLUSTER_GAP`]. They stood a `GAP_LG` apart — the seam
 //!    *between* zones, spent inside one — until the owner read the bar:
 //!    *"the top bar has weird spacing as well for icons/controls."*
-//! 7. **The window** — controls that act on the window as an object of the
+//! 5. **The window** — controls that act on the window as an object of the
 //!    desktop. Minimise, maximise, close, in that order, always.
 //!
 //! **The pattern is that scope widens rightward**: the view you are in, then
@@ -181,7 +181,6 @@ use crate::{icon, theme};
 /// in for them. Both are fixed above; the claim is now the one that is true.
 #[expect(
     clippy::too_many_arguments,
-    clippy::fn_params_excessive_bools,
     reason = "the shell owns the app-bar facts and keeping them explicit makes its composition auditable"
 )]
 pub(crate) fn view(
@@ -189,8 +188,6 @@ pub(crate) fn view(
     window_w: f32,
     density: Option<crate::shelf::Density>,
     visualization: Option<crate::visualizer::State>,
-    can_back: bool,
-    can_forward: bool,
     maximized: bool,
     owns_chrome: bool,
     over_field: bool,
@@ -198,8 +195,6 @@ pub(crate) fn view(
     ink: Ink,
 ) -> Element<'_, Message> {
     let room = theme::active();
-    let name = mark();
-    let history = history(can_back, can_forward, ink);
     let search = crate::views::search::well(shelf);
     // **Two zones, two seams.** The display options are the *view's*
     // (ADR-0040 §2 zone 3) and the bell and the gear are the *application's*
@@ -241,7 +236,13 @@ pub(crate) fn view(
     // arrangement rather than a mirrored pair: the owner's *"as long as we
     // have a sensible consistent pattern"* is better served by one layout
     // everywhere than by two that are each correct on one platform.
-    let mut line = row![name, history, search, gap, furniture];
+    // **Zones, in order, at every width and in every place.** The app's mark
+    // and the history pair used to open this line; they live in the lane's
+    // head now — the owner's *"make the left hand bar go to the top and
+    // include the back and forward icons in it. the search then becomes part
+    // of the main area's top bar."* This bar is the **body's**, so it starts
+    // with the search that belongs to the body.
+    let mut line = row![search, gap, furniture];
     if let Some(buttons) = buttons {
         line = line.push(buttons);
     }
@@ -318,130 +319,6 @@ pub(crate) fn view(
         band,
         rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
-    .into()
-}
-
-/// Browser-style place history sits at the top-left beside the application
-/// mark. It is intentionally separate from the bottom bar's track transport:
-/// these arrows revisit pages, never audio.
-fn history(can_back: bool, can_forward: bool, ink: Ink) -> Element<'static, Message> {
-    row![
-        history_button(
-            icon::Glyph::HistoryBack,
-            "Back",
-            can_back.then_some(Message::HistoryBack),
-            Control::HistoryBack,
-            ink,
-        ),
-        history_button(
-            icon::Glyph::HistoryForward,
-            "Forward",
-            can_forward.then_some(Message::HistoryForward),
-            Control::HistoryForward,
-            ink,
-        ),
-    ]
-    .spacing(theme::CONTROL_CLUSTER_GAP)
-    .align_y(iced::Alignment::Center)
-    .into()
-}
-
-fn history_button(
-    glyph: icon::Glyph,
-    word: &'static str,
-    message: Option<Message>,
-    named: Control,
-    ink: Ink,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    let enabled = message.is_some();
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_ink(
-                enabled,
-                false,
-                ink.hover(named),
-                ink.pressed(named),
-            )),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let control = button(mark)
-        .width(Length::Fixed(theme::TRANSPORT_HIT))
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press_maybe(message);
-    let named_control = tooltip(
-        control,
-        text(word)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Bottom,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room));
-    mouse_area(named_control)
-        .on_enter(Message::ControlEntered(named))
-        .on_exit(Message::ControlLeft(named))
-        .into()
-}
-
-/// **Zone 1 — the application's mark**, hanging from the window's leading
-/// gutter in its [`theme::APP_BAR_NAME_W`] slot.
-///
-/// The owner, 2026-08-10: *"we probably want an icon for our app to show in the
-/// bar"*. It replaces the word `baz`, which stood here at the metadata size in
-/// the faintest readout ink — and *replaces* rather than joins, which is the
-/// choice worth stating because the other one was available:
-///
-/// - **The slot declares the larger mark.** It is 32 for a 24 px mark and one
-///   `GAP_SM`; the minimum-width budget still retains 96 px of drag slack.
-/// - **They would say the same thing twice.** On a single-window product this
-///   zone's content never varies — it is `baz` in every place, in every state,
-///   forever — so it carries identity and nothing else, and a mark carries
-///   identity better than a three-letter lowercase word at the faintest ink in
-///   the room. It is the same reading that put a gear where the word `Settings`
-///   used to be (doc 10 §3.4), arrived at from the other direction: there the
-///   symbol had to earn a *door's* label, here there is no door and no label,
-///   only a statement.
-/// - **It is what the reference does.** The owner named it — *"similar to stuff
-///   like spotify"* — and that window's chrome carries the mark, not the word.
-///
-/// **It is still a statement and not a control** (L8.5): no button, no tooltip,
-/// no press of its own, which means it is 16 px more of the band that drags the
-/// window rather than 16 px less. That is also why the icon-only law (doc 10
-/// §3.1) does not reach it — the law is about a *control* naming itself with a
-/// symbol, and this names nothing because it does nothing. The same reasoning
-/// ADR-0040 §3 used to admit the three window buttons without a new licence.
-///
-/// What it costs is one accent that is not playback truth; [`icon::app_mark`]
-/// states the exception and its boundary, and ADR-0040's amendment states the
-/// reversal.
-fn mark() -> Element<'static, Message> {
-    container(
-        iced_image(icon::app_mark())
-            .width(Length::Fixed(theme::APP_MARK_PX))
-            .height(Length::Fixed(theme::APP_MARK_PX)),
-    )
-    .width(Length::Fixed(theme::APP_BAR_NAME_W))
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    // **No lead of its own.** It carried a `GAP_MD`, which put the mark's ink
-    // 12 px inside law L1's gutter — the one thing the doc comment above
-    // claimed it did not do — and put its optical centre 10 px off the four
-    // destination glyphs in the returns lane. The owner asked for that
-    // alignment back (*"can we make the icon for the app align with the icons
-    // in the sidebar"*), and with the slot now the mark's own size
-    // ([`theme::APP_BAR_NAME_W`]) the container's edge *is* the ink's edge, so
-    // the centre is `APP_BAR_EDGE + APP_MARK_PX / 2` = 32 — the lane's
-    // [`theme::SIDEBAR_HEAD_GLYPH_X`] exactly, and asserted as such.
-    .align_x(alignment::Horizontal::Left)
-    .align_y(alignment::Vertical::Center)
     .into()
 }
 
@@ -774,44 +651,6 @@ mod tests {
         );
     }
 
-    /// **Zone 1 is the application's mark, and it is not a control.**
-    ///
-    /// The owner, 2026-08-10: *"we probably want an icon for our app to show in
-    /// the bar"*. Two things are worth pinning and they are both about what
-    /// zone 1 *is not*:
-    ///
-    /// 1. **It is not on the glyph sheet.** [`icon::app_mark`] is the
-    ///    launcher's own full-colour PNG, decoded once; `icon::handle` is a
-    ///    coverage sprite the room inks. Drawing zone 1 through `handle` would
-    ///    mean somebody had flattened the mark to a monochrome outline and made
-    ///    a second master of it.
-    /// 2. **It is not a button.** L8.5's statement/control split is the whole
-    ///    reason this zone can be a bare symbol with no tooltip, and it is also
-    ///    what keeps those 16 px part of the band that drags the window. A
-    ///    `button` here would take the press the title bar needs.
-    #[test]
-    fn the_windows_name_is_the_applications_mark_and_not_a_control() {
-        let source = source();
-        let code = source.split("#[cfg(test)]").next().expect("a head");
-        let rest = code.split_once("fn mark()").expect("zone 1").1;
-        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
-        assert!(
-            body.contains("icon::app_mark()"),
-            "zone 1 no longer draws the application's own mark"
-        );
-        assert!(
-            !body.contains("icon::handle(") && !body.contains("Glyph::"),
-            "zone 1 draws a sheet glyph: the application's icon is a \
-             full-colour asset with one master (packaging/icons), and a \
-             monochrome outline of it would be a second"
-        );
-        assert!(
-            !body.contains("button(") && !body.contains("tooltip("),
-            "zone 1 has become a control, which takes a press the band needs \
-             to drag the window and spends a licence L8.5 does not require"
-        );
-    }
-
     /// **The bar's admission rule, asserted rather than merely written.**
     ///
     /// The owner's own words, 2026-08-10: *"adding controls that apply to all
@@ -944,14 +783,16 @@ mod tests {
     /// consistent pattern"*, and the thing that would quietly break it is a
     /// second arrangement — a mirror for one platform, a variant for one
     /// place. So what is pinned is that the line is built **unconditionally**,
-    /// in the order the module documents: mark, history, search, handle, view,
-    /// application, window.
+    /// in the order the module documents: search, handle, view, application,
+    /// window. The mark and the history pair opened this line until
+    /// 2026-08-19; they are the lane's head now, and `views::lane` carries
+    /// their guards with them.
     #[test]
     fn the_bar_has_one_arrangement_and_it_is_the_stated_order() {
         let source = source();
         let code = source.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            code.contains("let mut line = row![name, history, search, gap, furniture]")
+            code.contains("let mut line = row![search, gap, furniture]")
                 && code.contains("line = line.push(buttons)"),
             "the bar's zones are no longer in the order the pattern states"
         );
@@ -1001,11 +842,11 @@ mod tests {
         );
         assert_eq!(
             code.matches("spacing(theme::CONTROL_CLUSTER_GAP)").count(),
-            3,
-            "the bar's three clusters — history, the application's doors, the \
-             window buttons — no longer all stand on the cluster seam. (A \
-             fourth lived here briefly: a reduced strip for chromeless mode, \
-             deleted when chromeless started carrying the ordinary bar.)"
+            2,
+            "the bar's two clusters — the application's doors and the window \
+             buttons — no longer both stand on the cluster seam. There were \
+             three while the history pair lived here; it is the lane's now, \
+             and `views::lane` carries its seam with it."
         );
     }
 }
