@@ -140,7 +140,7 @@ pub(crate) const CEILING_L: f32 = 0.22;
 /// accent states playback truth and the field must never be mistaken for it.
 pub(crate) const CHROMA: f32 = 0.024;
 
-/// **The largest chroma this hue can take at [`INK_L`] without clipping.**
+/// **The largest chroma this hue can take at `lightness` without clipping.**
 ///
 /// Binary search over the sRGB round trip rather than a table, for the reason
 /// [`CHROMA`] was measured rather than chosen: a constant transcribed from
@@ -157,20 +157,47 @@ pub(crate) const CHROMA: f32 = 0.024;
 /// nothing for a rounding difference between this arithmetic and the
 /// compositor's.
 #[must_use]
-pub(crate) fn safe_chroma(hue: f32) -> f32 {
+pub(crate) fn safe_chroma(lightness: f32, hue: f32) -> f32 {
     /// How far inside the measured ceiling to sit.
     const MARGIN: f32 = 0.94;
-    /// Wider than any hue's ceiling at this lightness, so the search brackets.
-    const CEILING: f32 = 0.4;
+    /// Wider than any hue's ceiling at any lightness this is called at.
+    const CEILING: f32 = 0.45;
+    /// How finely the walk looks for the first crossing. Small enough that it
+    /// cannot step over the dip described below, coarse enough to reach the
+    /// ceiling in a hundred tries.
+    const STEP: f32 = 0.004;
 
     let clips = |chroma: f32| {
-        let color = from_oklch(INK_L, chroma, hue);
+        let color = from_oklch(lightness, chroma, hue);
         [color.r, color.g, color.b]
             .into_iter()
             .any(|channel| !(0.001..=0.999).contains(&channel))
     };
-    let (mut lo, mut hi) = (0.0_f32, CEILING);
-    for _ in 0..20 {
+
+    // **Walk up to the first crossing, then refine — do not bisect.**
+    //
+    // A plain binary search over `clips` assumes it is monotone in chroma, and
+    // it is not. Past the gamut boundary `from_oklch` clamps, and the clamped
+    // channel can come back *inside* the range as chroma keeps rising: at
+    // L 0.45, hue 264, red reads 0.0004 at c 0.28, 0.0000 at 0.29, and 0.0084
+    // again at 0.311. A bisection lands in that dip and returns a chroma that
+    // is out of gamut with a straight face — which is exactly what the room
+    // sweep caught, and what a search that had only ever been run at one
+    // lightness could not.
+    //
+    // The gamut boundary is the *first* crossing, so this scans for it and
+    // then bisects the one step it is inside.
+    let mut last_good = 0.0_f32;
+    let mut probe = STEP;
+    while probe <= CEILING {
+        if clips(probe) {
+            break;
+        }
+        last_good = probe;
+        probe += STEP;
+    }
+    let (mut lo, mut hi) = (last_good, (last_good + STEP).min(CEILING));
+    for _ in 0..12 {
         let mid = f32::midpoint(lo, hi);
         if clips(mid) {
             hi = mid;
@@ -181,9 +208,46 @@ pub(crate) fn safe_chroma(hue: f32) -> f32 {
     lo * MARGIN
 }
 
-/// The lightness [`Field::inks`] draws at — bright enough to read as colour
-/// over the room, and short of white so a hue survives at full scale.
-pub(crate) const INK_L: f32 = 0.72;
+/// **How far the ink stands from the room's own ground.**
+///
+/// The owner: *"the colours on the now playing need to be part of the theme
+/// otherwise it looks weird."* They were not. The wash under them already
+/// reconciles — [`Field::colors`] starts at the room's `wall` lightness and
+/// climbs by [`rise`], in the direction that room's own ladder climbs — but
+/// the **ink** was a flat 0.72 in every room. That is a bright colour over
+/// Closing Time's near-black wall and a pale one over Plaster's, where it
+/// needs to be dark.
+///
+/// So the ink keeps its *distance* rather than its value: 0.562 is
+/// `0.72 − lightness(CLOSING_TIME.wall)`, the gap the shipped ink already had
+/// from the room it was chosen in, and every other room gets the same gap in
+/// its own direction. A room needs no edit here to be drawn correctly, which
+/// is the same bargain [`rise`] strikes and the reason a seventh room can be
+/// added as data.
+const INK_RISE: f32 = 0.562;
+
+/// The lightness [`Field::inks`] draws at **in this room** — see [`INK_RISE`].
+///
+/// Clamped well inside the range where a hue survives: at the very top a
+/// colour washes out to white and at the very bottom it goes to mud, and
+/// neither is the record's colour any more.
+#[must_use]
+pub(crate) fn ink_l(room: &theme::Palette) -> f32 {
+    let ground = lightness(room.wall);
+    let up = lightness(room.plinth) - lightness(room.wall);
+    let ink = if up < 0.0 {
+        ground - INK_RISE
+    } else {
+        ground + INK_RISE
+    };
+    // **The floor is where colour stops existing, not where contrast does.**
+    // A light room would put the ink at L 0.36 by the rise alone, and the sRGB
+    // gamut is *narrow* down there for warm hues — a dark yellow is an olive,
+    // and the tightest hue's ceiling falls to 0.045, which is grey. 0.45 keeps
+    // it above 0.076 while still standing 0.47 clear of a plaster wall, which
+    // is far more separation than the eye needs.
+    ink.clamp(0.45, 0.80)
+}
 
 /// A pixel needs at least this much oklch chroma to have a hue worth reading.
 ///
@@ -386,7 +450,7 @@ impl Field {
     ///   mistaken for the lamp's playback truth.
     /// - Bars are neither. They sit over the wash, under a placard that has
     ///   its own mask, and they state nothing but themselves — so they take
-    ///   [`INK_L`] at [`safe_chroma`]'s per-hue ceiling, which is a colour a
+    ///   [`ink_l`] at [`safe_chroma`]'s per-hue ceiling, which is a colour a
     ///   person can see.
     ///
     /// **The reading is still the height.** Hue carries nothing here — a bar
@@ -402,7 +466,7 @@ impl Field {
     /// number doing a job that needed twelve.
     ///
     /// `INK_CHROMA` was a **single** chroma safe at every hue, so it was
-    /// pinned by the *worst* one. Measured at [`INK_L`], the ceiling runs from
+    /// pinned by the *worst* one. Measured at [`ink_l`], the ceiling runs from
     /// 0.1245 at hue 210 — a cyan-blue, the tightest corner of sRGB up here —
     /// to 0.2854 at hue 330. A 2.3× spread, and every record was paying the
     /// blue's price whatever its own colour was.
@@ -412,10 +476,11 @@ impl Field {
     /// unchanged, and nothing clips — which is the same guarantee as before,
     /// charged fairly.
     #[must_use]
-    pub(crate) fn inks(self) -> [Color; 3] {
+    pub(crate) fn inks(self, room: &theme::Palette) -> [Color; 3] {
+        let lightness = ink_l(room);
         std::array::from_fn(|index| {
             let hue = self.hues[index];
-            from_oklch(INK_L, safe_chroma(hue), hue)
+            from_oklch(lightness, safe_chroma(lightness, hue), hue)
         })
     }
 
@@ -809,51 +874,71 @@ mod tests {
     /// display could manage, without saying so. Swept at one-degree steps
     /// across the whole ladder in both rooms; the check is that a round trip
     /// through sRGB comes back to the hue that went in.
-    /// **And the visualizer's ink survives too** — at every hue, each drawn
-    /// at its own ceiling.
+    /// **And the visualizer's ink survives too** — at every hue, in every
+    /// room.
     ///
-    /// The guarantee used to be about one constant: `INK_CHROMA` 0.11, which
-    /// was the largest chroma safe at *every* hue and therefore the price the
-    /// worst hue charged the rest. [`safe_chroma`] finds each hue's own
-    /// ceiling now, so the claim to hold is the same one stated per hue —
-    /// nothing clips, and nobody pays for a colour they are not drawing.
+    /// Two generalisations live in this one test now. The chroma was a single
+    /// constant safe at *every* hue, so it was the price the worst hue charged
+    /// the rest; [`safe_chroma`] finds each hue's own ceiling. And the
+    /// lightness was a single constant for every **room**, so the ink was
+    /// bright over Closing Time's near-black wall and pale over Plaster's,
+    /// where it needs to be dark — the owner's *"the colours on the now
+    /// playing need to be part of the theme otherwise it looks weird."*
+    /// [`ink_l`] keeps the ink's *distance* from the room's own ground
+    /// instead.
+    ///
+    /// So the sweep is hues × rooms, and it asserts what has to be true of
+    /// every pair: nothing clips, the ink stands clear of the wall it is drawn
+    /// on, and the per-hue mechanism is still buying real saturation
+    /// somewhere.
     #[test]
     fn every_hue_survives_the_visualizers_ink() {
-        let clips = |chroma: f32, hue: f32| {
-            let color = from_oklch(INK_L, chroma, hue);
+        let clips = |lightness: f32, chroma: f32, hue: f32| {
+            let color = from_oklch(lightness, chroma, hue);
             [color.r, color.g, color.b]
                 .into_iter()
                 .any(|channel| !(0.001..=0.999).contains(&channel))
         };
 
-        let mut lowest = f32::MAX;
-        let mut highest = 0.0_f32;
-        for step in 0..3600_u16 {
-            let hue = f32::from(step) / 10.0;
-            let chroma = safe_chroma(hue);
+        for room in theme::Room::ALL {
+            let room = room.palette();
+            let ink = ink_l(room);
+            let ground = lightness(room.wall);
             assert!(
-                !clips(chroma, hue),
-                "hue {hue} leaves sRGB at its own ceiling {chroma:.4}"
+                (ink - ground).abs() > 0.3,
+                "{}: the ink sits at L {ink:.3} on a wall at {ground:.3}, \
+                 which is not a colour anyone will see",
+                room.name
             );
-            lowest = lowest.min(chroma);
-            highest = highest.max(chroma);
-        }
 
-        // **And it is worth having done.** The old single constant was 0.11;
-        // if the per-hue ceiling did not beat that comfortably somewhere,
-        // this whole mechanism would be arithmetic for nothing.
-        assert!(
-            highest > 0.20,
-            "the most saturated hue only reaches {highest:.4}, which is barely \
-             past the 0.11 one constant already gave every hue"
-        );
-        // The tightest corner of the gamut is still respected rather than
-        // dragged up to meet the rest.
-        assert!(
-            lowest > 0.10 && lowest < 0.13,
-            "the tightest hue draws at {lowest:.4}, which is not where the \
-             gamut is at this lightness"
-        );
+            let mut lowest = f32::MAX;
+            let mut highest = 0.0_f32;
+            for step in 0..3600_u16 {
+                let hue = f32::from(step) / 10.0;
+                let chroma = safe_chroma(ink, hue);
+                assert!(
+                    !clips(ink, chroma, hue),
+                    "{}: hue {hue} leaves sRGB at its own ceiling {chroma:.4}",
+                    room.name
+                );
+                lowest = lowest.min(chroma);
+                highest = highest.max(chroma);
+            }
+
+            // **And the per-hue ceiling is still worth having.** The constant
+            // it replaced was 0.11 for every hue; if the widest hue in a room
+            // did not beat that, the search would be arithmetic for nothing.
+            assert!(
+                highest > 0.16,
+                "{}: the most saturated hue only reaches {highest:.4}",
+                room.name
+            );
+            assert!(
+                lowest > 0.07,
+                "{}: the tightest hue draws at {lowest:.4}, which is grey",
+                room.name
+            );
+        }
     }
 
     #[test]

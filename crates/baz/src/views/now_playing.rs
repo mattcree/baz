@@ -614,7 +614,7 @@ fn marquee<'a>(
     // The artist line takes the record's own colour where there is one. It is
     // the smallest text in the composition and the only coloured thing in it,
     // which is what makes a 10 px line hold its own under a 64 px one.
-    let accent = hues.map_or(room.paper_faint, |field| field.inks()[1]);
+    let accent = hues.map_or(room.paper_faint, |field| field.inks(room)[1]);
     let (size, leading) = marquee_type(&now.title);
     let mut block = column![
         text(theme::tracked(

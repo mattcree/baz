@@ -52,7 +52,7 @@ const INK_RANGE: f32 = 0.62;
 /// the wrong answer for everything else, which is why it is a fallback now
 /// rather than the rule.
 fn inks(field: Option<crate::field::Field>, room: &theme::Palette) -> [iced::Color; 3] {
-    field.map_or([room.lamp; 3], crate::field::Field::inks)
+    field.map_or([room.lamp; 3], |field| field.inks(room))
 }
 
 /// `index` as a fraction of `count - 1`, for walking a ramp across a field.
@@ -75,7 +75,7 @@ fn across(index: usize, count: usize) -> f32 {
 /// answers the level, so a field is a picture of *this* record moving rather
 /// than one flat colour changing height. Interpolating in sRGB is honest here
 /// for the reason it usually is not: the three ends are the same lightness and
-/// chroma by construction ([`crate::field::INK_L`], and [`crate::field::safe_chroma`]),
+/// chroma by construction ([`crate::field::ink_l`], and [`crate::field::safe_chroma`]),
 /// so a straight mix travels between them without the grey sag a mix of
 /// unequal colours would have.
 fn level_ink(level: f32, position: f32, inks: [iced::Color; 3]) -> iced::Color {
