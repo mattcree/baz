@@ -15,13 +15,33 @@ use serde::{Deserialize, Serialize};
 use crate::theme::{self, Palette, Room};
 
 pub const DEFAULT_SELECTION: &str = "closing-time";
-pub const BUILTINS: [(&str, &str); 6] = [
+
+/// **Every built-in room, in the order Settings lists them** — the six the
+/// product shipped with, the six added on 2026-08-19, then the four throwbacks.
+///
+/// This list is the *only* way a listener reaches a room. [`resolve`] knew all
+/// sixteen and [`crate::theme`]'s `BAZ_ROOM` hatch knew all sixteen, but this
+/// array still held six, so ten rooms existed and none of them could be picked
+/// — the owner's *"I did not see most rooms"*. `every_room_is_offered` now
+/// fails the build if a [`Room`] variant is ever added without an entry here,
+/// because a room nobody can select is not a room.
+pub const BUILTINS: [(&str, &str); 16] = [
     ("closing-time", "Closing Time"),
     ("blue-hour", "Blue Hour"),
     ("stone", "Stone"),
     ("sea-glass", "Sea Glass"),
     ("plaster", "Plaster"),
     ("reading-room", "Reading Room"),
+    ("ember", "Ember"),
+    ("fernlight", "Fernlight"),
+    ("amethyst", "Amethyst"),
+    ("rosewater", "Rosewater"),
+    ("harbour", "Harbour"),
+    ("meadow", "Meadow"),
+    ("redmond", "Redmond"),
+    ("phosphor", "Phosphor"),
+    ("platinum", "Platinum"),
+    ("workbench", "Workbench"),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +101,16 @@ pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
         "reading-room" => Ok(&theme::READING_ROOM),
         "blue-hour" => Ok(&theme::BLUE_HOUR),
         "sea-glass" => Ok(&theme::SEA_GLASS),
+        "ember" => Ok(&theme::EMBER),
+        "fernlight" => Ok(&theme::FERNLIGHT),
+        "amethyst" => Ok(&theme::AMETHYST),
+        "rosewater" => Ok(&theme::ROSEWATER),
+        "harbour" => Ok(&theme::HARBOUR),
+        "meadow" => Ok(&theme::MEADOW),
+        "redmond" => Ok(&theme::REDMOND),
+        "phosphor" => Ok(&theme::PHOSPHOR),
+        "platinum" => Ok(&theme::PLATINUM),
+        "workbench" => Ok(&theme::WORKBENCH),
         other => {
             let id = custom_id(other).ok_or_else(|| format!("unknown selected theme {other:?}"))?;
             if let Some(known) = RESOLVED
@@ -450,6 +480,47 @@ fn document_from_palette(id: &str, p: &Palette) -> Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A room nobody can select is not a room.** Ten rooms shipped resolvable
+    /// by id and reachable through `BAZ_ROOM`, and absent from Settings, because
+    /// [`BUILTINS`] was the one list that was not extended with them. The class
+    /// of fault is *a room added in one place and not the other*, so the guard
+    /// sweeps [`Room::ALL`] rather than counting entries: adding a variant
+    /// without a Settings entry now fails here.
+    #[test]
+    fn every_room_is_offered_in_settings() {
+        for room in Room::ALL {
+            // By value, not by address: the palettes are `const`, so `&X` at
+            // two sites is two promoted temporaries and `ptr::eq` answers
+            // `false` for a room that is plainly offered.
+            let offered = BUILTINS
+                .iter()
+                .any(|(id, _)| resolve(id).is_ok_and(|palette| palette == room.palette()));
+            assert!(
+                offered,
+                "{room:?} has no entry in BUILTINS, so Settings cannot offer it"
+            );
+        }
+        assert_eq!(
+            BUILTINS.len(),
+            Room::ALL.len(),
+            "BUILTINS and Room::ALL must name the same set of rooms"
+        );
+    }
+
+    #[test]
+    fn every_builtin_names_a_distinct_room() {
+        for (index, (id, name)) in BUILTINS.iter().enumerate() {
+            let palette = resolve(id).unwrap_or_else(|error| panic!("{id}: {error}"));
+            for (other, other_name) in BUILTINS.iter().skip(index + 1) {
+                let against = resolve(other).unwrap_or_else(|error| panic!("{other}: {error}"));
+                assert!(
+                    palette != against,
+                    "{name} and {other_name} resolve to the same palette"
+                );
+            }
+        }
+    }
 
     #[test]
     fn every_builtin_round_trips_through_the_public_document() {

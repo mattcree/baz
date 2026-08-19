@@ -426,7 +426,7 @@ fn appearance_section<'a>(view: &ThemeView<'a>) -> Element<'a, Message> {
     let mut section = column![
         section_heading(
             "Visual room",
-            "Six coordinated rooms, or a validated local JSON one. A room you pick stands the moment you press it.",
+            "Sixteen coordinated rooms, or a validated local JSON one. A room you pick stands the moment you press it.",
         ),
         choices,
         preview,
