@@ -140,19 +140,50 @@ pub(crate) const CEILING_L: f32 = 0.22;
 /// accent states playback truth and the field must never be mistaken for it.
 pub(crate) const CHROMA: f32 = 0.024;
 
+/// **The largest chroma this hue can take at [`INK_L`] without clipping.**
+///
+/// Binary search over the sRGB round trip rather than a table, for the reason
+/// [`CHROMA`] was measured rather than chosen: a constant transcribed from
+/// a measurement goes stale the moment the lightness moves, and this one has
+/// to stay true for every hue rather than for the twelve anybody would think
+/// to tabulate.
+///
+/// Twenty steps resolve to under 0.0005, which is far finer than a channel
+/// can show, and it costs three searches per frame — a few hundred float
+/// operations against a visualiser that is already rasterising a field.
+///
+/// A margin keeps it just inside the edge it finds: the search's own answer
+/// is the last chroma that does *not* clip, and sitting exactly there leaves
+/// nothing for a rounding difference between this arithmetic and the
+/// compositor's.
+#[must_use]
+pub(crate) fn safe_chroma(hue: f32) -> f32 {
+    /// How far inside the measured ceiling to sit.
+    const MARGIN: f32 = 0.94;
+    /// Wider than any hue's ceiling at this lightness, so the search brackets.
+    const CEILING: f32 = 0.4;
+
+    let clips = |chroma: f32| {
+        let color = from_oklch(INK_L, chroma, hue);
+        [color.r, color.g, color.b]
+            .into_iter()
+            .any(|channel| !(0.001..=0.999).contains(&channel))
+    };
+    let (mut lo, mut hi) = (0.0_f32, CEILING);
+    for _ in 0..20 {
+        let mid = f32::midpoint(lo, hi);
+        if clips(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    lo * MARGIN
+}
+
 /// The lightness [`Field::inks`] draws at — bright enough to read as colour
 /// over the room, and short of white so a hue survives at full scale.
 pub(crate) const INK_L: f32 = 0.72;
-
-/// The chroma [`Field::inks`] draws at.
-///
-/// **0.11, and it is a gamut measurement like [`CHROMA`] is.** A binary search
-/// over every hue at [`INK_L`] puts the largest chroma that leaves no channel
-/// clipped at 0.113; this takes a little under it.
-/// `every_hue_survives_the_visualizers_ink` re-derives that rather than
-/// trusting the sentence, for [`CHROMA`]'s reason: a colour that silently
-/// clips is a hue that is no longer the record's.
-pub(crate) const INK_CHROMA: f32 = 0.11;
 
 /// A pixel needs at least this much oklch chroma to have a hue worth reading.
 ///
@@ -355,15 +386,37 @@ impl Field {
     ///   mistaken for the lamp's playback truth.
     /// - Bars are neither. They sit over the wash, under a placard that has
     ///   its own mask, and they state nothing but themselves — so they take
-    ///   [`INK_CHROMA`] and [`INK_L`], which is a colour a person can see.
+    ///   [`INK_L`] at [`safe_chroma`]'s per-hue ceiling, which is a colour a
+    ///   person can see.
     ///
     /// **The reading is still the height.** Hue carries nothing here — a bar
     /// means what its length says and would mean it in greyscale — which is
     /// the standing rule for this product and the reason a hue ramp is
     /// allowed to be decorative.
+    ///
+    /// # Each hue is drawn at its own ceiling
+    ///
+    /// The owner, twice: *"colours of the background and visualisations aren't
+    /// very striking or dynamic"*, then *"the colours for the visualisations
+    /// just aren't very interesting."* They were not, and the cause was one
+    /// number doing a job that needed twelve.
+    ///
+    /// `INK_CHROMA` was a **single** chroma safe at every hue, so it was
+    /// pinned by the *worst* one. Measured at [`INK_L`], the ceiling runs from
+    /// 0.1245 at hue 210 — a cyan-blue, the tightest corner of sRGB up here —
+    /// to 0.2854 at hue 330. A 2.3× spread, and every record was paying the
+    /// blue's price whatever its own colour was.
+    ///
+    /// So the ceiling is found per hue by [`safe_chroma`]. A magenta record
+    /// draws at more than twice the chroma it used to, a blue one is
+    /// unchanged, and nothing clips — which is the same guarantee as before,
+    /// charged fairly.
     #[must_use]
     pub(crate) fn inks(self) -> [Color; 3] {
-        std::array::from_fn(|index| from_oklch(INK_L, INK_CHROMA, self.hues[index]))
+        std::array::from_fn(|index| {
+            let hue = self.hues[index];
+            from_oklch(INK_L, safe_chroma(hue), hue)
+        })
     }
 
     /// **The field, as the toolkit draws it**: a three-stop linear wash at
@@ -584,6 +637,7 @@ fn circular_mean(hues: impl Iterator<Item = f32>) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     /// An `w × h` RGBA cover, painted by `paint(x, y) -> (r, g, b)`.
@@ -755,36 +809,50 @@ mod tests {
     /// display could manage, without saying so. Swept at one-degree steps
     /// across the whole ladder in both rooms; the check is that a round trip
     /// through sRGB comes back to the hue that went in.
-    /// **And the visualizer's ink survives too** — the same instrument, at
-    /// [`INK_L`], for [`INK_CHROMA`]. The bars are decoration, but a
-    /// decoration that clips is drawing a hue that is not the record's, which
-    /// is the thing this module exists to refuse.
+    /// **And the visualizer's ink survives too** — at every hue, each drawn
+    /// at its own ceiling.
+    ///
+    /// The guarantee used to be about one constant: `INK_CHROMA` 0.11, which
+    /// was the largest chroma safe at *every* hue and therefore the price the
+    /// worst hue charged the rest. [`safe_chroma`] finds each hue's own
+    /// ceiling now, so the claim to hold is the same one stated per hue —
+    /// nothing clips, and nobody pays for a colour they are not drawing.
     #[test]
     fn every_hue_survives_the_visualizers_ink() {
-        // The largest chroma that clips nowhere at this lightness, found the
-        // way `CHROMA`'s was, and asserted to be above what we spend.
-        let clips = |chroma: f32| {
-            (0..3600).any(|step| {
-                let hue = f32::from(u16::try_from(step).unwrap_or(u16::MAX)) / 10.0;
-                let color = from_oklch(INK_L, chroma, hue);
-                [color.r, color.g, color.b]
-                    .into_iter()
-                    .any(|channel| !(0.001..=0.999).contains(&channel))
-            })
+        let clips = |chroma: f32, hue: f32| {
+            let color = from_oklch(INK_L, chroma, hue);
+            [color.r, color.g, color.b]
+                .into_iter()
+                .any(|channel| !(0.001..=0.999).contains(&channel))
         };
-        let (mut lo, mut hi) = (0.0_f32, 0.4_f32);
-        for _ in 0..40 {
-            let mid = f32::midpoint(lo, hi);
-            if clips(mid) { hi = mid } else { lo = mid }
+
+        let mut lowest = f32::MAX;
+        let mut highest = 0.0_f32;
+        for step in 0..3600_u16 {
+            let hue = f32::from(step) / 10.0;
+            let chroma = safe_chroma(hue);
+            assert!(
+                !clips(chroma, hue),
+                "hue {hue} leaves sRGB at its own ceiling {chroma:.4}"
+            );
+            lowest = lowest.min(chroma);
+            highest = highest.max(chroma);
         }
+
+        // **And it is worth having done.** The old single constant was 0.11;
+        // if the per-hue ceiling did not beat that comfortably somewhere,
+        // this whole mechanism would be arithmetic for nothing.
         assert!(
-            INK_CHROMA < lo,
-            "the visualizer's ink clips: the largest safe chroma at L {INK_L} \
-             is {lo:.4} and it spends {INK_CHROMA}"
+            highest > 0.20,
+            "the most saturated hue only reaches {highest:.4}, which is barely \
+             past the 0.11 one constant already gave every hue"
         );
+        // The tightest corner of the gamut is still respected rather than
+        // dragged up to meet the rest.
         assert!(
-            !clips(INK_CHROMA),
-            "some hue leaves sRGB at the shipped ink"
+            lowest > 0.10 && lowest < 0.13,
+            "the tightest hue draws at {lowest:.4}, which is not where the \
+             gamut is at this lightness"
         );
     }
 

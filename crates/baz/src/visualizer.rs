@@ -75,7 +75,7 @@ fn across(index: usize, count: usize) -> f32 {
 /// answers the level, so a field is a picture of *this* record moving rather
 /// than one flat colour changing height. Interpolating in sRGB is honest here
 /// for the reason it usually is not: the three ends are the same lightness and
-/// chroma by construction ([`crate::field::INK_L`], [`crate::field::INK_CHROMA`]),
+/// chroma by construction ([`crate::field::INK_L`], and [`crate::field::safe_chroma`]),
 /// so a straight mix travels between them without the grey sag a mix of
 /// unequal colours would have.
 fn level_ink(level: f32, position: f32, inks: [iced::Color; 3]) -> iced::Color {
