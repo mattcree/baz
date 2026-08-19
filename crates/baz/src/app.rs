@@ -1100,6 +1100,11 @@ pub(crate) enum Message {
     WindowMaximiseToggled,
     /// F11: fill the window's current monitor, or return to its windowed size.
     ToggleFullscreen,
+    /// **Move the keyboard's ring to the next focus stop**, in the order the
+    /// place builds its controls — see [`crate::focus`].
+    FocusNext,
+    /// The same, backwards: <kbd>Shift</kbd>+<kbd>Tab</kbd>.
+    FocusPrevious,
     /// **Chromeless**: take the frame away from around Now playing.
     ///
     /// Distinct from [`Self::ToggleFullscreen`], and composes with it: that
@@ -3036,6 +3041,17 @@ impl App {
             Message::WindowMinimised => latest_window(|id| window::minimize(id, true)),
             Message::WindowMaximiseToggled => latest_window(window::toggle_maximize),
             Message::ToggleFullscreen => latest_window(window::mode).map(Message::WindowModeRead),
+            // **The traversal is iced's own operation, over baz's own stops.**
+            // The order is the widget tree's (see [`crate::focus`]), so
+            // nothing here has to know what is on screen — which is the point:
+            // a per-place focus index would be a second statement of the
+            // layout, kept by hand, free to disagree with the first.
+            Message::FocusNext => iced::advanced::widget::operate(
+                iced::advanced::widget::operation::focusable::focus_next(),
+            ),
+            Message::FocusPrevious => iced::advanced::widget::operate(
+                iced::advanced::widget::operation::focusable::focus_previous(),
+            ),
             Message::ToggleChromeless => {
                 self.chromeless = !self.chromeless;
                 Task::none()

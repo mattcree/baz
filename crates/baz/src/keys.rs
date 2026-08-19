@@ -470,6 +470,22 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
             Message::EscapePressed
         });
     }
+    // **Tab traverses, everywhere, including out of a text field.** It is the
+    // third exception and the plainest: it is the only key on the board whose
+    // meaning is *leave here and go to the next thing*, so a field that kept
+    // it would be a room with no door — the search well is exactly where a
+    // listener starts, and it was the one control the keyboard could already
+    // reach. `text_input` does not consume Tab, so this reads it before the
+    // focus rule below rather than in spite of it.
+    if key == &Key::Named(key::Named::Tab)
+        && (modifiers.is_empty() || modifiers == Modifiers::SHIFT)
+    {
+        return Some(if modifiers == Modifiers::SHIFT {
+            Message::FocusPrevious
+        } else {
+            Message::FocusNext
+        });
+    }
     // The focused text field already had this key and made its decision.
     if focus == Focus::TextField {
         return None;
@@ -909,6 +925,44 @@ mod tests {
                 binding_for(&named(key::Named::Escape), modifiers, Focus::Elsewhere).is_none(),
                 "only a bare Esc peels"
             );
+        }
+    }
+
+    /// **Tab is the one key that also works inside the well.**
+    ///
+    /// It is the third exception to the focus rule, after F11 and Esc, and the
+    /// plainest of the three: Tab means *leave here and go to the next thing*,
+    /// so a field that kept it would be a room with no door. That matters more
+    /// here than in most products, because until 2026-08-19 the search well
+    /// was the **only** control in baz a keyboard could reach — it is exactly
+    /// where a listener starts, and Tab is how they get out.
+    ///
+    /// Modified past Shift it is nobody's: Ctrl+Tab and Alt+Tab belong to the
+    /// desktop, and taking them would be baz answering a press meant for the
+    /// window manager.
+    #[test]
+    fn tab_traverses_from_anywhere_including_the_well() {
+        for focus in [Focus::TextField, Focus::Elsewhere] {
+            assert_eq!(
+                bind_with(&named(key::Named::Tab), none(), focus),
+                Some("FocusNext".to_owned()),
+                "Tab does not traverse from {focus:?}"
+            );
+            assert_eq!(
+                bind_with(&named(key::Named::Tab), Modifiers::SHIFT, focus),
+                Some("FocusPrevious".to_owned()),
+                "Shift+Tab does not traverse backwards from {focus:?}"
+            );
+            for modifiers in [
+                Modifiers::COMMAND,
+                Modifiers::ALT,
+                Modifiers::COMMAND | Modifiers::SHIFT,
+            ] {
+                assert!(
+                    binding_for(&named(key::Named::Tab), modifiers, focus).is_none(),
+                    "baz took a modified Tab, which belongs to the desktop"
+                );
+            }
         }
     }
 
@@ -1482,7 +1536,11 @@ mod tests {
     #[test]
     fn unknown_keys_map_to_nothing() {
         let unbound = [
-            named(key::Named::Tab),
+            // Tab left this list on 2026-08-19: it traverses the focus order
+            // now (`tab_traverses_from_anywhere_including_the_well`). It was
+            // honestly unbound before that, because there was no order for it
+            // to walk — iced has no focusable button and every control in the
+            // product was pointer-only.
             named(key::Named::Backspace),
             named(key::Named::Delete),
             named(key::Named::Home),

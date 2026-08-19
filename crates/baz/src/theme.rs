@@ -2292,6 +2292,19 @@ pub fn tracked(text: &str) -> String {
 /// **4**, down from 6.
 pub const RADIUS_CTRL: f32 = 4.0;
 
+/// **The keyboard's ring: its width, and the air it stands in.**
+///
+/// Two px rather than the hairline every other edge in this product is drawn
+/// at, and that is the one place a focus indicator is allowed to be louder
+/// than its neighbours: it is the answer to *where am I*, asked by somebody
+/// who cannot see a pointer, and a ring you have to hunt for has failed at the
+/// only thing it does. The gap keeps it off the control's own ink — see
+/// `crate::focus`.
+pub const FOCUS_RING_W: f32 = 2.0;
+
+/// The air between a control and its ring — see [`FOCUS_RING_W`].
+pub const FOCUS_RING_GAP: f32 = 2.0;
+
 /// **A pill's radius**: half the height a chip of one meta line and
 /// [`GAP_XS`] of padding stands at, so the ends are true semicircles and the
 /// shape says *press me* before the words are read.

@@ -57,6 +57,7 @@ mod drop;
 mod facts;
 mod fader;
 mod field;
+mod focus;
 mod font;
 mod groove;
 mod health;

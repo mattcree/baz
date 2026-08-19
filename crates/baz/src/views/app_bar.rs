@@ -533,7 +533,7 @@ fn glyph_button(
         // rather than from the wall — every row-shaped control names the
         // surface it stands on, and so does every box-shaped one.
         .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press(message);
+        .on_press(message.clone());
     let named_control = tooltip(
         control,
         text(word)
@@ -546,10 +546,15 @@ fn glyph_button(
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room));
-    mouse_area(named_control)
-        .on_enter(Message::ControlEntered(named))
-        .on_exit(Message::ControlLeft(named))
-        .into()
+    // A focus stop, on this bar's own ground — see `crate::focus`.
+    crate::focus::stop(
+        mouse_area(named_control)
+            .on_enter(Message::ControlEntered(named))
+            .on_exit(Message::ControlLeft(named)),
+        Some(message),
+    )
+    .on(room.recess)
+    .into()
 }
 
 #[cfg(test)]

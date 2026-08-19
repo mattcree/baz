@@ -378,11 +378,18 @@ fn destination_row(
         .padding(0)
         .style(move |_theme, status| theme::dest_row(room, here, status))
         .on_press(Message::GoTo(to));
-    if !open {
+    // **A focus stop, in both states.** These four are the product's
+    // navigation, so they are the first thing a keyboard has to be able to
+    // reach — and the stop wraps the tooltip rather than sitting inside it, so
+    // the ring lands on the row in either state and the collapsed rail's tip
+    // is unaffected.
+    let named: Element<'static, Message> = if open {
+        dest.into()
+    } else {
         // Collapsed, the word is the tooltip — the icon-only law (doc 10
         // §3.1): a control with no visible label carries its name where a
         // pointer can find it.
-        return iced::widget::tooltip(
+        iced::widget::tooltip(
             dest,
             text(to.label())
                 .size(theme::SIZE_CAPTION)
@@ -392,9 +399,11 @@ fn destination_row(
         .gap(theme::GAP_XS)
         .padding(theme::GAP_XS)
         .style(move |_theme| theme::tooltip(room))
-        .into();
-    }
-    dest.into()
+        .into()
+    };
+    crate::focus::stop(named, Some(Message::GoTo(to)))
+        .on(room.recess)
+        .into()
 }
 
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
@@ -887,7 +896,7 @@ fn history_button(
         .height(Length::Fixed(size.box_px))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press_maybe(message);
+        .on_press_maybe(message.clone());
     let named_control = tooltip(
         control,
         text(word)
@@ -898,10 +907,17 @@ fn history_button(
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room));
-    mouse_area(named_control)
-        .on_enter(Message::ControlEntered(named))
-        .on_exit(Message::ControlLeft(named))
-        .into()
+    // A focus stop on the lane's own ground — see `crate::focus`. The pair is
+    // disabled at the ends of the history, and a disabled stop is skipped
+    // rather than focused, so Tab never rests on an arrow that does nothing.
+    crate::focus::stop(
+        mouse_area(named_control)
+            .on_enter(Message::ControlEntered(named))
+            .on_exit(Message::ControlLeft(named)),
+        message,
+    )
+    .on(room.recess)
+    .into()
 }
 
 #[cfg(test)]

@@ -844,8 +844,30 @@ Newest first. Each was asked for in conversation and is now in the product.
   prune flow already handle the **permanent** case, and must not be reached by
   this one — a share that is merely unmounted has not been deleted.
 
-- **Nothing in baz can be reached by keyboard except the search well.**
-  *(WORK.md item 78, opened 2026-08-15.)* There is no focus traversal at all:
+- **The window's frame is keyboard-reachable; the collection is not yet.**
+  **Half shipped 2026-08-19.** `crates/baz/src/focus.rs` is the missing
+  primitive: a wrapper that gives any `Element` a place in iced's traversal, a
+  ring, and an <kbd>Enter</kbd>/<kbd>Space</kbd> press. <kbd>Tab</kbd> and
+  <kbd>Shift</kbd>+<kbd>Tab</kbd> walk it, from anywhere including inside the
+  search well. The order is the widget tree's, so it is the order each place
+  builds its controls in and there is no second list to keep.
+
+  **Applied to the frame** — the lane's four destinations and its history
+  pair, the app bar's marks, the bottom bar's transport — because that is what
+  is on screen in every place. One edit per bar covers each bar completely,
+  since every glyph on it comes from one helper, and `focus.rs`'s own test
+  scans those four helpers rather than counting call sites.
+
+  **Not applied to the wall, deliberately.** A grid wants arrow keys: fifty
+  tiles in a Tab order between the app bar and the transport would be a worse
+  product than none, and the answer is a *typed* traversal — Tab between
+  regions, arrows within one — rather than more stops. That is the next piece
+  of this and it wants designing, not just wrapping. The panels (queue, album,
+  settings) and the context menus are the same shape of question at smaller
+  scale.
+
+  *The original entry, which remains the argument:* there was no focus
+  traversal at all:
   `text_input` and — since the composing page — `crate::contour` are the only
   widgets a key press can be routed to, and both take focus from a pointer.
   So every button, chip, tile and row in the product is pointer-only. The

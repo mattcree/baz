@@ -836,7 +836,7 @@ fn glyph_button(
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
-        .on_press_maybe(enabled.then_some(message));
+        .on_press_maybe(enabled.then_some(message.clone()));
     let named = tooltip(
         control_widget,
         text(label)
@@ -847,10 +847,18 @@ fn glyph_button(
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room));
-    mouse_area(named)
-        .on_enter(Message::ControlEntered(control))
-        .on_exit(Message::ControlLeft(control))
-        .into()
+    // **Every glyph on this bar is a focus stop**, in one place rather than
+    // five: the transport, the shuffle, the mute. `crate::focus::stop` adds
+    // the traversal, the ring and the press, and takes nothing from the
+    // pointer route that was already here.
+    crate::focus::stop(
+        mouse_area(named)
+            .on_enter(Message::ControlEntered(control))
+            .on_exit(Message::ControlLeft(control)),
+        enabled.then_some(message),
+    )
+    .on(room.recess)
+    .into()
 }
 
 /// **The player's shuffle property**: the crossed arrows, lit when it is on.
