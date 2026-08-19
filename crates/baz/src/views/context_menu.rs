@@ -35,6 +35,7 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
     let room = theme::active();
     let size = crate::menu::extent(menu.items.len());
     let at = crate::menu::anchor(menu.at, size, window);
+    let lit = menu.cursor;
     let mut listed = column![];
     for (index, item) in menu.items.iter().enumerate() {
         // The verb, and — where one exists — the gesture that accelerates
@@ -72,7 +73,16 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
             .width(Length::Fill)
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(theme::pad(0.0, theme::GAP_MD))
-            .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
+            // **Where the keyboard is, in the paint the product already
+            // has.** A menu row lit by the arrows is a *selected* row, which
+            // is what `selectable_track_row`'s wash means everywhere else, so
+            // the menu gains no mark of its own — and a row the pointer is
+            // over still lifts independently, because the two can be in
+            // different places at once and the listener is entitled to see
+            // both.
+            .style(move |_theme, status| {
+                theme::selectable_track_row(room, room.plinth, status, false, lit == Some(index))
+            })
             .on_press(Message::MenuItemPressed(index)),
         );
     }

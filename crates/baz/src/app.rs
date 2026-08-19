@@ -180,6 +180,105 @@ fn app_theme(_app: &App) -> iced::Theme {
 }
 
 /// Run an action against baz's sole application window, if it still exists.
+fn event_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: window::Id,
+) -> Option<Message> {
+    match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+            keys::binding_for(&key, modifiers, keys::Focus::from(status))
+        }
+        // The press an icon button's own wrapper can never see: a
+        // `button` with an `on_press` captures `ButtonPressed`, so the
+        // only place left to hear it is the raw stream — and here the
+        // *captured* status is the point rather than a problem, since a
+        // press on a control is exactly a press a control took.
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
+            Some(Message::PointerPressed)
+        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+            Some(Message::PointerReleased)
+        }
+        // The zoom's pointer half. iced 0.13 reports no modifiers on a
+        // wheel event and its `scrollable` does not consult them
+        // either, so both halves have to be assembled here.
+        iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+            Some(Message::ModifiersChanged(modifiers))
+        }
+        iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+            Some(Message::Wheel(match delta {
+                iced::mouse::ScrollDelta::Lines { y, .. }
+                | iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+            }))
+        }
+        iced::Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
+        iced::Event::Window(window::Event::FileHovered(_)) => Some(Message::FileHovered),
+        iced::Event::Window(window::Event::FilesHoveredLeft) => Some(Message::FileHoverLeft),
+        iced::Event::Window(window::Event::Focused) => Some(Message::WindowFocused(true)),
+        iced::Event::Window(window::Event::Unfocused) => Some(Message::WindowFocused(false)),
+        _ => None,
+    }
+}
+
+fn search_event_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    window: window::Id,
+) -> Option<Message> {
+    if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
+        // The visible chooser, not the caret, owns its advertised bare
+        // arrow grammar. This is resolved before capture status so a
+        // focused well cannot swallow Left/Right.
+        if let Some(direction) = crate::search::chooser_direction(key, *modifiers) {
+            return Some(Message::Direction(direction));
+        }
+        // `text_input` captures Escape after blurring itself. Search
+        // owns that first press while its chooser stands, so dismissal
+        // must be heard before the focused-field filter drops it.
+        if key == &keyboard::Key::Named(keyboard::key::Named::Escape) {
+            return Some(Message::DismissSearch);
+        }
+    }
+    event_message(event, status, window)
+}
+
+/// **While a menu stands, the keyboard is the menu's.**
+///
+/// The same shape as `search_event_message` above and for the same
+/// reason: a modal thing on screen owns the keys its shape implies,
+/// and it owns them *before* the capture rule, because nothing under
+/// the backdrop should answer while it is up. Up and Down walk the
+/// verbs, Enter presses the lit one, and Escape closes — which is the
+/// grammar every desktop menu has had for forty years, so it is the
+/// one a listener will try first.
+fn menu_event_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    window: window::Id,
+) -> Option<Message> {
+    if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event
+        && modifiers.is_empty()
+    {
+        match key {
+            keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                return Some(Message::MenuMoved(1));
+            }
+            keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                return Some(Message::MenuMoved(-1));
+            }
+            keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                return Some(Message::MenuActivated);
+            }
+            keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                return Some(Message::CloseMenu);
+            }
+            _ => {}
+        }
+    }
+    event_message(event, status, window)
+}
+
 fn latest_window<T: Send + 'static>(
     action: impl Fn(window::Id) -> Task<T> + Send + 'static,
 ) -> Task<T> {
@@ -1386,6 +1485,13 @@ pub(crate) enum Message {
     /// the presses the item mirrors (§5.2's rule — every one a message
     /// some visible control also sends; [`crate::menu::Item`]).
     MenuItemPressed(usize),
+    /// **Move the open menu's cursor**, +1 or −1, wrapping — see
+    /// [`crate::menu::Menu::moved`].
+    MenuMoved(isize),
+    /// **Press the item the keyboard is on**, or do nothing when it is on
+    /// none: a menu that opens with nothing lit must not answer a stray
+    /// Enter with its first verb.
+    MenuActivated,
     /// A folder (or file) was dropped on the window — the first-run screen's
     /// drop target (doc 11 §5 P1: see-and-point; the era's window-as-target
     /// since drag and drop existed).
@@ -4040,12 +4146,26 @@ impl App {
                 self.menu = (!listed.is_empty()).then(|| menu::Menu {
                     at: *at,
                     items: listed,
+                    cursor: None,
                 });
                 Some(Task::none())
             }
             Message::CloseMenu => {
                 self.menu = None;
                 Some(Task::none())
+            }
+            Message::MenuMoved(delta) => {
+                if let Some(menu) = &mut self.menu {
+                    menu.cursor = menu.moved(*delta);
+                }
+                Some(Task::none())
+            }
+            Message::MenuActivated => {
+                let index = self.menu.as_ref().and_then(|menu| menu.cursor);
+                index.map_or_else(
+                    || Some(Task::none()),
+                    |index| Some(self.update(Message::MenuItemPressed(index))),
+                )
             }
             Message::MenuItemPressed(index) => {
                 let Some(open) = self.menu.take() else {
@@ -8548,78 +8668,9 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        fn event_message(
-            event: iced::Event,
-            status: iced::event::Status,
-            _window: window::Id,
-        ) -> Option<Message> {
-            match event {
-                iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                    keys::binding_for(&key, modifiers, keys::Focus::from(status))
-                }
-                // The press an icon button's own wrapper can never see: a
-                // `button` with an `on_press` captures `ButtonPressed`, so the
-                // only place left to hear it is the raw stream — and here the
-                // *captured* status is the point rather than a problem, since a
-                // press on a control is exactly a press a control took.
-                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                    iced::mouse::Button::Left,
-                )) => Some(Message::PointerPressed),
-                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                    iced::mouse::Button::Left,
-                )) => Some(Message::PointerReleased),
-                // The zoom's pointer half. iced 0.13 reports no modifiers on a
-                // wheel event and its `scrollable` does not consult them
-                // either, so both halves have to be assembled here.
-                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                    Some(Message::ModifiersChanged(modifiers))
-                }
-                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
-                    Some(Message::Wheel(match delta {
-                        iced::mouse::ScrollDelta::Lines { y, .. }
-                        | iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-                    }))
-                }
-                iced::Event::Window(window::Event::FileDropped(path)) => {
-                    Some(Message::FileDropped(path))
-                }
-                iced::Event::Window(window::Event::FileHovered(_)) => Some(Message::FileHovered),
-                iced::Event::Window(window::Event::FilesHoveredLeft) => {
-                    Some(Message::FileHoverLeft)
-                }
-                iced::Event::Window(window::Event::Focused) => Some(Message::WindowFocused(true)),
-                iced::Event::Window(window::Event::Unfocused) => {
-                    Some(Message::WindowFocused(false))
-                }
-                _ => None,
-            }
-        }
-
-        fn search_event_message(
-            event: iced::Event,
-            status: iced::event::Status,
-            window: window::Id,
-        ) -> Option<Message> {
-            if let iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) =
-                &event
-            {
-                // The visible chooser, not the caret, owns its advertised bare
-                // arrow grammar. This is resolved before capture status so a
-                // focused well cannot swallow Left/Right.
-                if let Some(direction) = crate::search::chooser_direction(key, *modifiers) {
-                    return Some(Message::Direction(direction));
-                }
-                // `text_input` captures Escape after blurring itself. Search
-                // owns that first press while its chooser stands, so dismissal
-                // must be heard before the focused-field filter drops it.
-                if key == &keyboard::Key::Named(keyboard::key::Named::Escape) {
-                    return Some(Message::DismissSearch);
-                }
-            }
-            event_message(event, status, window)
-        }
-
-        let events = if matches!(&self.screen, Screen::Shelf(state) if state.search_open) {
+        let events = if self.menu.is_some() {
+            iced::event::listen_with(menu_event_message)
+        } else if matches!(&self.screen, Screen::Shelf(state) if state.search_open) {
             iced::event::listen_with(search_event_message)
         } else {
             iced::event::listen_with(event_message)

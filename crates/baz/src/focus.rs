@@ -146,6 +146,48 @@ fn direction_of(key: &keyboard::Key) -> Option<crate::search::Direction> {
     }
 }
 
+impl<Message: Clone> Stop<'_, Message> {
+    /// **Answer a key this stop owns**, reporting whether it did.
+    ///
+    /// Only reached while the stop is focused (see `update`), which is what
+    /// makes taking these keys safe: focus is exclusive, so a field with a
+    /// caret in it is the focused thing and this is not.
+    fn take_key(&self, event: &Event, shell: &mut Shell<'_, Message>) -> bool {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+            return false;
+        };
+        // **The arrows, for a region.** Bare only: the modified arrows are the
+        // transport's and the history's, and a region that took them would
+        // make where the keyboard happens to be change what Ctrl+→ means.
+        if let Some(steer) = &self.steer
+            && modifiers.is_empty()
+            && let Some(direction) = direction_of(key)
+        {
+            shell.publish(steer(direction));
+            shell.capture_event();
+            return true;
+        }
+        // **Enter and Space, and nothing else.** They are the two presses
+        // every desktop makes on a focused control, and baz spends Space on
+        // play/pause globally — which is exactly why the ring has to take it
+        // first: a key press belongs to the thing the keyboard is on, and
+        // `crate::keys` reads iced's capture report, so capturing here is the
+        // whole of telling it so.
+        let Some(activate) = &self.activate else {
+            return false;
+        };
+        if matches!(
+            key,
+            keyboard::Key::Named(key::Named::Enter | key::Named::Space)
+        ) {
+            shell.publish(activate.clone());
+            shell.capture_event();
+            return true;
+        }
+        false
+    }
+}
+
 impl<Message> Stop<'_, Message> {
     /// State the ground the ring is drawn on, where it is not the wall — the
     /// bar, the lane's recess, a panel.
@@ -272,10 +314,42 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        // **The control first.** It owns the pointer, and a press inside it
-        // must reach it unchanged — this wrapper adds a route, it does not
-        // take the existing one. It also means a text field inside a stop
-        // keeps every key it captures, and the block below never sees them.
+        // **The keys this stop owns come first, and only while it is
+        // focused.**
+        //
+        // The first landing delegated to the child before looking, on the
+        // reasoning that a wrapper adds a route rather than taking one. That
+        // is right for the pointer and wrong for the keyboard, and the
+        // difference showed on the wall: pressing Down with the ring on the
+        // collection turned the **volume** down. Something under the
+        // scrollable answered the arrow, `shell.is_event_captured()` came back
+        // true, and the region — the thing the keyboard was actually on —
+        // never saw its own key.
+        //
+        // Focus is exclusive, so this cannot take a key from a field: if a
+        // `text_input` inside a stop has the caret then this stop does not
+        // have focus, and the branch below is skipped entirely. Everything
+        // else — every pointer event, every key while unfocused — still
+        // reaches the child untouched.
+        //
+        // **The arrival is announced here too, once per arrival.** `operate`
+        // is where focus moves and it has no shell to publish through, so the
+        // announcement is made on the next event this stop sees — the same
+        // frame, because the press that moved the focus is itself an event.
+        let state = tree.state.downcast_mut::<Focused>();
+        if state.now {
+            if !state.told
+                && let Some(arrival) = &self.on_focus
+            {
+                state.told = true;
+                shell.publish(arrival.clone());
+            }
+            if self.take_key(event, shell) {
+                return;
+            }
+        } else {
+            state.told = false;
+        }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -286,56 +360,6 @@ where
             shell,
             viewport,
         );
-        if shell.is_event_captured() {
-            return;
-        }
-        // **The arrival, once per arrival.** `operate` is where focus moves and
-        // it has no shell to publish through, so the announcement is made on
-        // the next event this stop sees — which is the same frame, because the
-        // press that moved the focus is itself an event.
-        let state = tree.state.downcast_mut::<Focused>();
-        if !state.now {
-            state.told = false;
-            return;
-        }
-        if !state.told
-            && let Some(arrival) = &self.on_focus
-        {
-            state.told = true;
-            shell.publish(arrival.clone());
-        }
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
-            return;
-        };
-        // **The arrows, for a region.** Bare only: the modified arrows are
-        // the transport's and the history's, and a region that took them
-        // would make where the keyboard happens to be change what
-        // Ctrl+→ means.
-        if let Some(steer) = &self.steer
-            && modifiers.is_empty()
-            && let Some(direction) = direction_of(key)
-        {
-            shell.publish(steer(direction));
-            shell.capture_event();
-            return;
-        }
-        let Some(activate) = &self.activate else {
-            return;
-        };
-        // **Enter and Space, and nothing else.** They are the two presses
-        // every desktop makes on a focused control, and baz already spends
-        // Space on play/pause globally — which is exactly why the ring has to
-        // take it first: a key press belongs to the thing the keyboard is on,
-        // and `crate::keys` reads iced's capture report, so capturing here is
-        // the whole of telling it so.
-        let pressed = matches!(
-            key,
-            keyboard::Key::Named(key::Named::Enter | key::Named::Space)
-        );
-        if pressed {
-            shell.publish(activate.clone());
-            shell.capture_event();
-        }
     }
 
     fn mouse_interaction(

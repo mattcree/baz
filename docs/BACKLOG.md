@@ -881,8 +881,17 @@ Newest first. Each was asked for in conversation and is now in the product.
   the join between them compiles and has never been pressed. A real keyboard
   closes it in one press.
 
-  **Still to do:** the panels (queue, album, settings) and the context menus
-  are the same shape of question at smaller scale, and the wall's *list*
+  **The context menu takes the keyboard while it stands** (2026-08-20). Up and
+  Down walk the verbs, Enter presses the lit one, Escape closes — the grammar
+  every desktop menu has had for forty years, so it is the one a listener will
+  try first. It opens with **nothing** lit, which is load-bearing rather than
+  conventional: the first verb in a tile's menu is `Play`, and a menu that
+  opened with it lit would answer a stray Enter by starting the music. A menu
+  wraps at its ends where the wall does not — a menu is short and closed, and a
+  wall of four hundred records has a top and a bottom a listener is navigating
+  *towards*.
+
+  **Still to do:** the panels (queue, album, settings), and the wall's *list*
   densities want the same treatment as its grid.
 
   *The original entry, which remains the argument:* there was no focus

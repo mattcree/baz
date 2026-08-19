@@ -141,6 +141,40 @@ pub(crate) struct Menu {
     pub(crate) at: Point,
     /// The items, in §5.2's table order.
     pub(crate) items: Vec<Item>,
+    /// **The item the keyboard is on**, or `None` while it is on none.
+    ///
+    /// `None` at open, deliberately, and it is the convention every desktop
+    /// menu follows: a menu that opened with its first verb already lit would
+    /// make a stray Enter destructive, and the first verb here is `Play`.
+    /// The first Down lights the first item and the first Up lights the last,
+    /// which is how a listener reaches the bottom of a menu in one press.
+    pub(crate) cursor: Option<usize>,
+}
+
+impl Menu {
+    /// Move the cursor by one item, wrapping.
+    ///
+    /// **A menu wraps where the wall does not**, and the difference is that a
+    /// menu is short and closed: four verbs with two ends is a ring you can
+    /// feel, where a collection of four hundred records has a top and a bottom
+    /// a listener is navigating *towards*. Wrapping there would lose their
+    /// place; wrapping here is how you get to the last verb from the first.
+    pub(crate) fn moved(&self, delta: isize) -> Option<usize> {
+        let count = self.items.len();
+        if count == 0 {
+            return None;
+        }
+        let count_i = isize::try_from(count).unwrap_or(isize::MAX);
+        let next = match self.cursor {
+            None if delta > 0 => 0,
+            None => count_i - 1,
+            Some(at) => {
+                let at = isize::try_from(at).unwrap_or(0);
+                (at + delta).rem_euclid(count_i)
+            }
+        };
+        usize::try_from(next).ok().filter(|next| *next < count)
+    }
 }
 
 /// The readings a menu is decided against — a snapshot of the facts, never
@@ -617,6 +651,68 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **A menu opens with nothing lit, and the first press reaches an end.**
+    ///
+    /// Nothing lit is the convention every desktop menu follows, and here it
+    /// is load-bearing rather than decorative: the first verb in a tile's menu
+    /// is `Play`, so a menu that opened with its first item already lit would
+    /// make a stray Enter start the music.
+    ///
+    /// The first Down lights the first item and the first Up lights the
+    /// **last**, which is how a listener reaches the bottom of a menu in one
+    /// press rather than in as many presses as the menu is long.
+    #[test]
+    fn a_menu_opens_on_nothing_and_the_first_press_reaches_an_end() {
+        let menu = menu_of(4);
+        assert_eq!(menu.cursor, None, "a fresh menu lights a verb");
+        assert_eq!(menu.moved(1), Some(0), "the first Down misses the first");
+        assert_eq!(menu.moved(-1), Some(3), "the first Up misses the last");
+    }
+
+    /// **A menu wraps where the collection does not.**
+    ///
+    /// The difference is that a menu is short and closed: four verbs with two
+    /// ends is a ring you can feel. A wall of four hundred records has a top
+    /// and a bottom a listener is navigating *towards*, and wrapping there
+    /// would lose their place — which is why `crate::grid` answers `None` at
+    /// its ends and this answers the other end.
+    #[test]
+    fn a_menu_is_a_ring_and_the_wall_is_not() {
+        let mut menu = menu_of(3);
+        menu.cursor = Some(2);
+        assert_eq!(menu.moved(1), Some(0), "the last verb does not wrap round");
+        menu.cursor = Some(0);
+        assert_eq!(menu.moved(-1), Some(2), "the first verb does not wrap back");
+        menu.cursor = Some(1);
+        assert_eq!(menu.moved(1), Some(2));
+        assert_eq!(menu.moved(-1), Some(0));
+    }
+
+    /// **A menu with no items answers nothing**, rather than dividing by its
+    /// own length. It cannot be opened — `OpenMenu` builds no `Menu` from an
+    /// empty list — but the type permits one, and the arithmetic should not
+    /// depend on a caller elsewhere remembering that.
+    #[test]
+    fn an_empty_menu_has_nowhere_to_move() {
+        let menu = menu_of(0);
+        assert_eq!(menu.moved(1), None);
+        assert_eq!(menu.moved(-1), None);
+    }
+
+    fn menu_of(count: usize) -> Menu {
+        Menu {
+            at: Point::ORIGIN,
+            items: (0..count)
+                .map(|index| Item {
+                    label: format!("Verb {index}"),
+                    presses: Vec::new(),
+                    accelerator: None,
+                })
+                .collect(),
+            cursor: None,
+        }
+    }
     use super::*;
 
     /// Every fact state the sweep below visits: both engine states, both
