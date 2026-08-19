@@ -97,7 +97,9 @@ fn vs_main(@builtin(vertex_index) vertex: u32) -> VertexOut {
     let world = turn(positions[face * 4u + corner]);
     let normal = turn(normals[face]);
     let view_z = 2.55 - world.z;
-    // **The lens is computed per frame, not fixed** — see `Pipeline::upload`.
+    // **The lens is a constant, uploaded rather than spelled here** — see
+    // `LENS` in `jewel_case.rs` for the round trip it went on and why it is
+    // derived from the angle at which the case projects widest.
     //
     // The projected half-extent is `lens · bounds / (4 · view_z)`, and `view_z`
     // depends on the *yaw*: a turned case brings one edge nearer the camera, so
@@ -134,11 +136,25 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
 
     var color: vec4<f32>;
-    if (in.face == 0u) {
+    // **Both flat faces are the front.** The owner: *"when it rotates to show
+    // the back, instead just show the frontal view with the same front of the
+    // CD box… essentially just make it look like it rotates to show the front
+    // again and again because that's all that's really interesting anyway."*
+    //
+    // The rear inlay was a generated card — a track list in small grey type —
+    // and half of every turn was spent on it. The front is the reason anyone
+    // put a sleeve on this page.
+    //
+    // It costs nothing to map: `POS`'s rear corners are already wound *as seen
+    // from behind*, so the same UVs land un-mirrored on it, and the lid,
+    // booklet inset and glints below are written against `in.normal`, which
+    // points the right way on each face by construction.
+    if (in.face == 0u || in.face == 1u) {
+        var face_uv = in.uv;
         // A front booklet is 120 × 120 mm inside the fitted 135 × 124 mm case. Keeping
         // this mapping physical prevents the cover being stretched merely to
         // fill the case's wider silhouette.
-        let physical_uv = in.uv * vec2<f32>(CASE_WIDTH_MM, CASE_HEIGHT_MM);
+        let physical_uv = face_uv * vec2<f32>(CASE_WIDTH_MM, CASE_HEIGHT_MM);
         let cover_low = vec2<f32>(INSERT_LEFT_MM, INSERT_TOP_MM);
         let cover_high = cover_low + vec2<f32>(INSERT_EDGE_MM);
         let cover_uv = clamp((physical_uv - cover_low) / vec2<f32>(INSERT_EDGE_MM),
@@ -162,17 +178,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // The black rear tray is visible through the clear lid along the hinge.
         // The opaque tray occupies only the inner part of the wider clear
         // hinge bay; making the whole 20 mm booklet margin black overstates it.
-        let hinge = 1.0 - smoothstep(0.068, 13.0 / CASE_WIDTH_MM, in.uv.x);
-        let hinge_seam = band(in.uv.x, 13.0 / CASE_WIDTH_MM, 0.0015, 0.003);
+        let hinge = 1.0 - smoothstep(0.068, 13.0 / CASE_WIDTH_MM, face_uv.x);
+        let hinge_seam = band(face_uv.x, 13.0 / CASE_WIDTH_MM, 0.0015, 0.003);
         // Fine ribs run with the hinge. They are moulded into the tray rather
         // than being two horizontal clips painted across it.
-        let hinge_ribs = band(in.uv.x, 0.0140, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0233, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0327, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0420, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0513, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0607, 0.0008, 0.0014)
-            + band(in.uv.x, 0.0700, 0.0008, 0.0014);
+        let hinge_ribs = band(face_uv.x, 0.0140, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0233, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0327, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0420, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0513, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0607, 0.0008, 0.0014)
+            + band(face_uv.x, 0.0700, 0.0008, 0.0014);
         let tray = vec3<f32>(0.018, 0.020, 0.023);
         color = vec4<f32>(mix(color.rgb, tray, hinge * 0.92), color.a);
         color = vec4<f32>(color.rgb, max(color.a, hinge * 0.96));
@@ -184,7 +200,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
         // Three layers of clear plastic: the case rim, a raised bevel around the
         // booklet window, and two separated reflections on the lid's surface.
-        let edge = case_edge(in.uv);
+        let edge = case_edge(face_uv);
         let outer_rim = 1.0 - smoothstep(0.003, 0.012, edge);
         let cover_edge = min(min(cover_uv.x, 1.0 - cover_uv.x),
             min(cover_uv.y, 1.0 - cover_uv.y));
@@ -197,15 +213,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         // Until the lid is separate geometry, keep the environment streaks
         // at its perimeter where a thin clear layer can plausibly catch them.
         let edge_reflection = 1.0 - smoothstep(0.018, 0.075, cover_edge);
-        let diagonal = band(in.uv.x + in.uv.y * 0.20, 0.24, 0.025, 0.07);
+        let diagonal = band(face_uv.x + face_uv.y * 0.20, 0.24, 0.025, 0.07);
         let reflected_diagonal = band(
-            in.uv.x + in.uv.y * 0.20 + view.x * 0.035,
+            face_uv.x + face_uv.y * 0.20 + view.x * 0.035,
             0.27,
             0.010,
             0.035,
         );
         let fine_glint = band(
-            in.uv.x - in.uv.y * 0.11 - view.x * 0.025,
+            face_uv.x - face_uv.y * 0.11 - view.x * 0.025,
             0.76,
             0.006,
             0.018,
@@ -227,30 +243,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             mix(color.rgb, vec3<f32>(0.94, 0.975, 1.0), min(glass, 0.58)),
             color.a,
         );
-    } else if (in.face == 1u) {
-        color = textureSample(rear_texture, case_sampler, in.uv);
-
-        let edge = case_edge(in.uv);
-        let outer_rim = 1.0 - smoothstep(0.006, 0.024, edge);
-        let inner_lip = band(edge, 0.031, 0.0015, 0.0035);
-        let reflection = band(in.uv.x + in.uv.y * 0.16, 0.88, 0.035, 0.08);
-        let view = normalize(camera - in.world);
-        let grazing = pow(1.0 - abs(dot(normalize(in.normal), view)), 3.0);
-        color = vec4<f32>(
-            mix(color.rgb, vec3<f32>(0.90, 0.95, 0.98),
-                min(outer_rim * 0.24 + inner_lip * 0.12
-                    + reflection * 0.035 + grazing * 0.09, 0.42)),
-            color.a,
-        );
     } else if (in.face == 2u || in.face == 3u) {
         // Both outside edges carry the rear inlay's printed spine beneath the
         // clear shell. The black tray is the front hinge bay, not a substitute
         // for the artist/title strip on the case's outer edge.
-        var spine_uv = in.uv;
-        if (in.face == 3u) {
-            spine_uv = vec2<f32>(1.0 - in.uv.x, in.uv.y);
-        }
-        color = textureSample(spine_texture, case_sampler, spine_uv);
+        // **Neither edge is flipped, and that is the fix.** The owner: *"the
+        // text on the edge of the box… on the left hand side it's actually
+        // back to front."*
+        //
+        // `POS` already winds the two spines in **opposite world directions** —
+        // one runs front-to-back and the other back-to-front — and each is
+        // seen from the opposite side. Those two reversals cancel, so the
+        // printing runs the same way across the screen on both without any
+        // help. The old conditional flip added a third reversal and left
+        // whichever edge it touched reading backwards; swapping *which* edge
+        // it touched only moved the fault to the other one, which is how this
+        // was diagnosed.
+        color = textureSample(spine_texture, case_sampler, in.uv);
         let edge_glint = band(in.uv.x, 0.10, 0.035, 0.08)
             + band(in.uv.x, 0.90, 0.035, 0.08);
         color = vec4<f32>(

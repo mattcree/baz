@@ -193,6 +193,7 @@ pub(crate) fn view(
     can_forward: bool,
     maximized: bool,
     owns_chrome: bool,
+    over_field: bool,
     health: crate::health::Summary,
     ink: Ink,
 ) -> Element<'_, Message> {
@@ -279,7 +280,25 @@ pub(crate) fn view(
             // are one surface interrupted by the places between them, and
             // giving the top band a plane of its own would have made them two
             // ideas.
-            .style(move |_theme| theme::bar(room)),
+            //
+            // **Except where a field runs behind it.** The owner: *"for the
+            // top bar can you make sure it's transparent as well, or rather
+            // not black."* On Now playing the page is a wash of the record's
+            // own colour, and an opaque band across the top of it is a black
+            // stripe laid over a picture — the bar reading as a lid rather
+            // than as the top of the same room. Transparent there, and the
+            // wash carries the whole height of the window.
+            //
+            // Everywhere else it keeps its ground: over a scrolling wall of
+            // sleeves, a transparent bar is marks on top of artwork, and the
+            // legibility that band is *for* goes with it.
+            .style(move |_theme| {
+                if over_field {
+                    container::Style::default()
+                } else {
+                    theme::bar(room)
+                }
+            }),
     )
     // Press and drag moves the window; press twice quickly maximises or
     // restores it. Both are one message, because iced 0.13's `mouse_area` has
@@ -289,6 +308,12 @@ pub(crate) fn view(
     .on_press(Message::WindowDragged)
     // The platform's own window menu, where the platform has one.
     .on_right_press(Message::WindowMenuRequested);
+    // The seam belongs to the ground: with none, there is nothing for a
+    // hairline to divide, and drawing one anyway would put the stripe back a
+    // pixel at a time.
+    if over_field {
+        return band.into();
+    }
     column![
         band,
         rule::horizontal(1).style(move |_theme| theme::hairline(room, room.wall)),

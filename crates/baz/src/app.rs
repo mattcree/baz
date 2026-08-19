@@ -5060,12 +5060,18 @@ impl App {
         // turning it off returns to ([`Self::send_run`]). ADR-0024 §1's honesty
         // clause is amended to say so: the file is still verbatim, and what the
         // mode re-orders is the run, never the list.
-        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
-            self.player.note_transport_sent();
-        } else {
-            self.player.engine_closed();
-        }
-        self.publish_mpris(false);
+        //
+        // **And it shows Now playing**, which it did not until the owner said
+        // so: *"when the play button is pressed for a playlist it does not go
+        // to the now playing screen."* It had its own copy of
+        // [`Self::start_and_show`]'s four lines minus the one that matters —
+        // which is the whole argument for the shared tail existing, and the
+        // reason the duplicate was worth deleting rather than adding a `go`
+        // beside it. Pressing Play on a record and pressing Play on a playlist
+        // are the same gesture and now take the same path, confirmation
+        // boundary included: the place changes when a track actually starts,
+        // not when the channel accepts the command.
+        self.start_and_show(queue);
     }
 
     /// Play the available members of the built-in Favourites list. Missing
@@ -5078,11 +5084,21 @@ impl App {
         if queue.is_empty() || lead.is_some_and(|row| row >= queue.items.len()) {
             return;
         }
-        let Some(position) = self.send_run(queue, lead) else {
+        // **The whole-list Play shows Now playing; a row press does not**, and
+        // that difference is the product's, not an accident of which function
+        // was written first. Pressing `Play` on a list is a decision to listen
+        // to it; pressing one of its rows is a decision made *while browsing*,
+        // and taking the browser away from the list they are reading would be
+        // answering a question they did not ask. `play_track` on a record's
+        // page draws the same line.
+        let Some(lead) = lead else {
+            self.start_and_show(queue);
             return;
         };
-        let command = lead.map_or(Command::Play, |_| Command::JumpTo { position });
-        if self.playback.send(command) {
+        let Some(position) = self.send_run(queue, Some(lead)) else {
+            return;
+        };
+        if self.playback.send(Command::JumpTo { position }) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -7274,12 +7290,10 @@ impl App {
     /// Send an implicit list's run and start it — the tail both `All songs`
     /// gestures share, so their one difference stays their scope.
     fn start(&mut self, list: crate::implicit::ImplicitList) {
-        if self.send_run(list.queue, None).is_some() && self.playback.send(Command::Play) {
-            self.player.note_transport_sent();
-        } else {
-            self.player.engine_closed();
-        }
-        self.publish_mpris(false);
+        // Both `All songs` gestures are whole-list plays, so both show — the
+        // same rule `play_album` and `play_playlist` keep. See
+        // [`Self::start_and_show`] for the confirmation boundary they share.
+        self.start_and_show(list.queue);
     }
 
     /// Play the queue from `position` — a click on a row of **Queue**
@@ -7574,6 +7588,18 @@ impl App {
     /// navigation, or the run ending").
     ///
     fn note_place_left(&mut self, from: Place) -> Task<Message> {
+        // **Chromeless is a Now playing mode, and going anywhere ends it.**
+        //
+        // The owner asked for it of one control — *"when we click the source
+        // link it should take it out of full screen mode as well"* — and the
+        // general form is the honest one: every route off this page lands
+        // somewhere that needs the lane and the bars, so singling out the
+        // source link would leave the same trap behind the next one. The
+        // marks in the strip are the exception by construction: they change
+        // nothing about the place.
+        if self.chromeless && self.place != Place::NowPlaying {
+            self.chromeless = false;
+        }
         if from == self.place {
             return Task::none();
         }
@@ -8068,6 +8094,12 @@ impl App {
                 self.place_history.can_forward(),
                 self.window_maximized,
                 owns_chrome(),
+                // Only where a field is drawn behind it — see the note on the
+                // band's own ground.
+                matches!(
+                    (&self.screen, self.place),
+                    (Screen::Shelf(_), Place::NowPlaying)
+                ),
                 self.health_summary(),
                 ink,
             )
@@ -12983,8 +13015,12 @@ mod tests {
             );
         }
         assert!(
-            body("start").contains("self.send_run("),
-            "the shared tail stopped going through the arranger"
+            // Through `start_and_show`, which the assertion below holds to the
+            // arranger in turn. Two hops rather than one because the tail now
+            // shares the confirmation boundary with the album and the playlist
+            // — that is the point of it, not a layer to see past.
+            body("start").contains("self.start_and_show("),
+            "the shared tail stopped going through the confirmed start"
         );
         assert!(
             body("start_and_show").contains("self.send_run("),
@@ -13064,6 +13100,62 @@ mod tests {
         }
     }
 
+    /// **Every whole-list Play shows Now playing**, and it took the owner to
+    /// notice one that did not: *"when the play button is pressed for a
+    /// playlist it does not go to the now playing screen."*
+    ///
+    /// A separate test from `every_play_gesture_arranges_its_run_through_one_function`
+    /// because it is a different question about the same list of gestures.
+    /// That one asks whether the run goes through the arranger —
+    /// `play_playlist` satisfied it while carrying its own copy of
+    /// `start_and_show`'s four lines minus the one that changes the place.
+    /// Two others were the same: `play_favourites` with no lead, and the
+    /// `All songs` tail.
+    #[test]
+    fn a_whole_list_play_shows_now_playing_and_a_row_press_does_not() {
+        // Normalised the same way its sibling normalises, and for the same
+        // reason: every scan below matches on "\n    }\n", which a CRLF file
+        // never contains.
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let body = |name: &str| {
+            let at = source
+                .find(&format!("fn {name}("))
+                .unwrap_or_else(|| panic!("`{name}` is gone"));
+            let tail = &source[at..];
+            let end = tail.find("\n    }\n").expect("the function's end");
+            tail[..end].to_owned()
+        };
+
+        for gesture in ["play_album", "play_playlist", "start"] {
+            assert!(
+                body(gesture).contains("self.start_and_show("),
+                "`{gesture}` is a whole-list Play that does not show Now \
+                 playing — it has its own copy of the tail, or it forgot the \
+                 line that changes the place"
+            );
+        }
+        assert!(
+            body("play_favourites").contains("self.start_and_show(queue)"),
+            "the Favourites Play button no longer shows Now playing"
+        );
+
+        // **A row press is deliberately not on that list.** Pressing `Play` on
+        // a list is a decision to listen to it; pressing one of its rows is a
+        // decision made *while browsing*, and taking the reader away from the
+        // list they are reading would answer a question they did not ask.
+        for gesture in ["play_track", "play_playlist_track"] {
+            assert!(
+                !body(gesture).contains("self.start_and_show("),
+                "`{gesture}` is a row press and has started navigating away \
+                 from the list the listener is reading"
+            );
+        }
+    }
+
     /// **S6 — the `All songs` gesture reifies its scope and plays from the
     /// top** (doc 09 §7.1).
     ///
@@ -13137,7 +13229,10 @@ mod tests {
         let rest = &source[start..];
         let tail = &rest[..rest.find("\n    }\n").expect("a function ends")];
         assert!(
-            tail.contains("self.send_run(") && tail.contains("Command::Play"),
+            // `start_and_show` is where both halves live now — the arranger
+            // and the `Play` — so the tail names it instead of spelling them.
+            // The gesture is unchanged: one press, and the first track sounds.
+            tail.contains("self.start_and_show("),
             "one press, and the first track sounds"
         );
     }

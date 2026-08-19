@@ -294,9 +294,32 @@ pub(crate) fn view<'a>(
     // jewel case, and with nothing at all.
     let draws_art = visual.foreground.draws_art();
     let work = draws_art.then(|| work(shelf, Some(now)));
+    // **The case is an object; the cover is a picture**, and the source's own
+    // pixels bound only one of them.
+    //
+    // The owner: *"in some cases the spinning CD is quite small — I think this
+    // might be due to the artwork size? we probably want to scale the artwork
+    // to a consistent size."* It was: a 300 px insert drew a 300 px case, and
+    // the next record's 1000 px one drew a 792 px case, so the CD changed size
+    // between tracks for a reason nothing on screen explained.
+    //
+    // The never-upscale rule stands where it means something. A **plain
+    // cover** is the file, drawn: enlarging it past its own pixels is baz
+    // claiming detail the file does not have, which is ADR-0029 §Context 2 and
+    // story S7's *"drawn at its own pixel size, centred, never scaled up"*. A
+    // **jewel case** is not the file — it is a rendered object whose front is
+    // a *texture*, and a real CD does not come in a smaller box because its
+    // insert was printed at lower resolution. A low-res cover there is a
+    // softer print on a case of the ordinary size, which is the truthful
+    // reading and the one the owner is asking for.
+    let bound = if visual.foreground.draws_case() {
+        f32::INFINITY
+    } else {
+        work.as_ref().map_or(0.0, |work| work.source)
+    };
     let edge = work
         .as_ref()
-        .map_or(0.0, |work| marquee_edge(width, height, work.source));
+        .map_or(0.0, |_| marquee_edge(width, height, bound));
     let t = work
         .as_ref()
         .map_or(1.0, |work| work.dissolve_at(edge, width, height, false));
@@ -325,59 +348,18 @@ pub(crate) fn view<'a>(
         None => Space::new().width(0.0).height(Length::Fill).into(),
     };
 
-    let body: Element<'a, Message> = {
-        // **Beside, not above.** The marquee hangs from the bottom-left corner
-        // and the object stands to its right, so the two share the stage's
-        // height rather than dividing it — see [`object_region`] for the
-        // subtraction that treated them as stacked and cost the art a third of
-        // its size.
-        let stage = row![
-            column![
-                Space::new().width(Length::Fill).height(Length::Fill),
-                marquee(
-                    now,
-                    show_album,
-                    marquee_measure(width, height),
-                    visual.favourite,
-                    fact.map(String::as_str),
-                    hues,
-                ),
-            ]
-            .width(Length::Fill),
-            // Centred against the title's column rather than pinned to a
-            // corner: a cover whose own pixels run out before the stage does
-            // used to hang from the top edge with all its slack underneath,
-            // which is what earned the owner's *"cramped up into the corner"*.
-            // **`height(Fill)` is what makes `align_y` mean anything.** A
-            // container that shrinks to its content has no spare height to
-            // centre within, so the row placed it at the top and the owner saw
-            // *"at less wide widths the cd is weirdly positioned up in the top
-            // right."* It only showed at narrow widths because that is where
-            // the object is width-bound and therefore shorter than the stage —
-            // at 1920 it fills the height and top and centre are the same
-            // pixel.
-            container(object)
-                .height(Length::Fill)
-                .align_y(alignment::Vertical::Center),
-        ]
-        .spacing(theme::GAP_XL)
-        .padding(iced::Padding {
-            top: MARGIN,
-            right: MARGIN,
-            bottom: theme::GAP_XL,
-            left: MARGIN,
-        })
-        .height(Length::Fill);
-        match source {
-            Some(source) => column![
-                container(stage).height(Length::Fill),
-                source_link(source, hues)
-            ]
-            .height(Length::Fill)
-            .into(),
-            None => container(stage).height(Length::Fill).into(),
-        }
-    };
+    let body = stage(
+        object,
+        marquee(
+            now,
+            show_album,
+            marquee_measure(width, height),
+            visual.favourite,
+            fact.map(String::as_str),
+            hues,
+        ),
+        source,
+    );
 
     let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
         crate::visualizer::background(visual.mode, audio, visual.history, width, height, hues)
@@ -437,15 +419,11 @@ fn marquee_measure(width: f32, height: f32) -> f32 {
     //
     // Floored at [`MARQUEE_MIN_W`], and still capped: a title set across a 4K
     // window is a line no eye tracks.
-    let usable = (width - 2.0 * MARGIN).max(1.0);
-    let reserved = object_column(width, height);
-    // The floor cannot exceed the stage: on a window narrow enough that the
-    // title's own minimum will not fit, there is nothing to protect it *from*
-    // and the object has already given way to nothing.
-    let floor = MARQUEE_MIN_W.min(usable);
-    (usable - reserved - theme::GAP_XL)
-        .max(floor)
-        .clamp(1.0, theme::LIST_MEASURE * 1.25)
+    // The window's own measure, capped — the object takes no width from it
+    // now that the two overlap, so this is once again a function of the window
+    // and of nothing else.
+    let _ = height;
+    (width - 2.0 * MARGIN).clamp(1.0, theme::LIST_MEASURE * 1.25)
 }
 
 /// **The column the stage keeps for the album**, whatever is drawn in it.
@@ -501,14 +479,6 @@ fn marquee_edge(width: f32, height: f32, source: f32) -> f32 {
     object_column(width, height).min(source).max(1.0)
 }
 
-/// **The narrowest the title may be squeezed to** before the object gives way.
-///
-/// Half of [`theme::LIST_MEASURE`] — the figure the run column is built on,
-/// and about eleven words of the display face. Below it a long title stops
-/// being a line and becomes a paragraph in a corner, and at that point the
-/// record is better served by a smaller sleeve.
-const MARQUEE_MIN_W: f32 = theme::LIST_MEASURE * 0.5;
-
 /// **The room the object actually has**, in the stage's own terms.
 ///
 /// # The height term was subtracting something that is not above it
@@ -531,10 +501,7 @@ const MARQUEE_MIN_W: f32 = theme::LIST_MEASURE * 0.5;
 /// be read against `view`'s own `row!`: the same page in two notations, and a
 /// term added to one has to be added to the other.
 fn object_region(width: f32, height: f32) -> (f32, f32) {
-    let across = width
-        - 2.0 * MARGIN        // the stage's padding, both sides
-        - MARQUEE_MIN_W       // the title's floor, which the object may not take
-        - theme::GAP_XL; // the gap between them
+    let across = width - 2.0 * MARGIN; // the stage's padding, both sides
     let down = height
         - SOURCE_CARD_H       // the footer band, reserved below the stage
         - MARGIN              // the stage's padding, top
@@ -646,28 +613,17 @@ fn marquee<'a>(
         .into()
 }
 
-fn rear_insert(shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_case::Insert {
-    let album = now.album_id.and_then(|id| shelf.album(id));
-    let tracks = album
-        .and_then(|album| {
-            let chosen = shelf.edition_choice.get(&album.id).copied();
-            crate::vm::selected_edition(album, chosen)
-        })
-        .map_or_else(
-            || vec![now.title.clone()],
-            |edition| {
-                edition
-                    .tracks
-                    .iter()
-                    .map(|track| track.title.clone())
-                    .collect()
-            },
-        );
+/// What the case's printing needs to know about the record.
+///
+/// It used to gather the edition's whole track list as well, for the inlay
+/// printed on the back. Both flat faces draw the front now, so nothing reads
+/// that list — and gathering it meant resolving the edition and cloning every
+/// title on each record change, for an image no one saw.
+fn rear_insert(_shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_case::Insert {
     crate::jewel_case::Insert {
         album_id: now.album_id.unwrap_or_default(),
         title: now.album.clone().unwrap_or_else(|| now.title.clone()),
         artist: now.artist_line().unwrap_or_default().to_owned(),
-        tracks,
     }
 }
 
@@ -919,30 +875,117 @@ fn field_layer(
         .into()
 }
 
-/// **A little of the record's colour, over the room's own surface.**
+/// **The whole page, in three layers**: the object, the fade, and everything
+/// written on it.
 ///
-/// A low weight on purpose: the band is a provenance statement, not a second
-/// field, and it sits directly under a 64 px title whose contrast against it
-/// has to hold whatever the record's hue happens to be.
-fn tinted(ground: iced::Color, ink: iced::Color) -> iced::Color {
-    // **Muted, and still the record's.** The owner: *"ensure the background
-    // colour is a bit more muted, yet still based on the album."* 0.22 read as
-    // a coloured bar; this is the record's hue arriving as a cast on the
-    // room's own surface, which is what a tint is.
-    const WEIGHT: f32 = 0.12;
-    iced::Color {
-        r: ground.r.mul_add(1.0 - WEIGHT, ink.r * WEIGHT),
-        g: ground.g.mul_add(1.0 - WEIGHT, ink.g * WEIGHT),
-        b: ground.b.mul_add(1.0 - WEIGHT, ink.b * WEIGHT),
-        a: ground.a,
+/// # Over, not beside
+///
+/// The marquee hangs from the bottom-left corner and the object stands at the
+/// right, and the two **overlap** rather than dividing the width. They divided
+/// it for a day, which is how the owner found the fault: *"the album art seems
+/// to be quite small when the window is narrower. instead it should just go
+/// behind the text surely?"* It should — a reserved column for the title took
+/// width off the sleeve at exactly the sizes where the sleeve had least to
+/// spare, and the title never wanted that width at the corner it occupies.
+///
+/// So the object is bound by the stage's **height** alone at every width.
+///
+/// # One fade, not two
+///
+/// [`scrim`] is a single layer under all the type and over all the artwork,
+/// spanning the body from the top of the object to the bottom of the source
+/// band. It began as two — a fade behind the title and the source band's own —
+/// and the owner saw the seam where they met: *"it looks like we have two
+/// gradients going on… can we instead just have one."* The band draws no
+/// ground of its own now; it is the bottom inch of this one.
+///
+/// The padding belongs to the **tenants**, not to the stack. A scrim inset by
+/// the page's margin draws its own edges — a lighter rectangle with two
+/// verticals and a horizon, which is worse than the contrast it was put there
+/// to fix.
+fn stage<'a>(
+    object: Element<'a, Message>,
+    marquee: Element<'a, Message>,
+    source: Option<Source>,
+) -> Element<'a, Message> {
+    let margins = iced::Padding {
+        top: MARGIN,
+        right: MARGIN,
+        bottom: theme::GAP_XL,
+        left: MARGIN,
+    };
+    let mut written = column![
+        Space::new().width(Length::Fill).height(Length::Fill),
+        container(marquee).padding(margins),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill);
+    if let Some(source) = source {
+        written = written.push(source_link(source));
     }
+    iced::widget::stack![
+        container(object)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(margins)
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+        scrim(),
+        written,
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// **The fade the title is read against.**
+///
+/// The marquee is drawn over the artwork now, and 64 px of paper-coloured
+/// serif over a record sleeve is a contrast gamble taken once per album — some
+/// covers are dark and some are a photograph of a sunlit wall. This is the
+/// page fading to black toward its bottom edge, which it was already doing for
+/// the source band; the band is the last inch of the same fade, and this is the
+/// rest of it.
+///
+/// Clear across the top three fifths so the sleeve is untouched where nothing
+/// is written on it, and it does not reach solid — the source band beneath is
+/// where solid is, and reaching it early would draw a horizon across the page.
+fn scrim() -> Element<'static, Message> {
+    container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Gradient(
+                iced::gradient::Linear::new(std::f32::consts::PI)
+                    .add_stop(0.0, iced::Color::TRANSPARENT)
+                    .add_stop(0.42, iced::Color::TRANSPARENT)
+                    .add_stop(
+                        0.72,
+                        iced::Color {
+                            a: 0.42,
+                            ..iced::Color::BLACK
+                        },
+                    )
+                    .add_stop(
+                        0.9,
+                        iced::Color {
+                            a: 0.86,
+                            ..iced::Color::BLACK
+                        },
+                    )
+                    .add_stop(1.0, iced::Color::BLACK)
+                    .into(),
+            )),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// A quiet full-width footer at the bottom of Now playing, leading to the
 /// source's real page. It is a provenance statement first and a control
 /// second: one faint plane, no border, and no navigation chrome beyond the
 /// arrow.
-fn source_link(source: Source, hues: Option<field::Field>) -> Element<'static, Message> {
+fn source_link(source: Source) -> Element<'static, Message> {
     let room = theme::active();
     let message = source.open_message();
     let (kind, name) = match source {
@@ -1005,23 +1048,22 @@ fn source_link(source: Source, hues: Option<field::Field>) -> Element<'static, M
     // from, so a record's page is one colour family rather than a coloured
     // line on a grey band. A record with no field falls back to the plain
     // step, which is what this always was.
+    // **No ground of its own.** The page's single fade ([`scrim`]) reaches
+    // solid black exactly here, so a second gradient starting where that one
+    // stopped is what the owner saw as *"two gradients going on… can we
+    // instead just have one."* What is left is the press feedback, which a
+    // band still owes a pointer that is over it.
     .style(move |_theme, status| {
-        let ground = room.step_up(room.wall);
-        let solid = match status {
-            button::Status::Hovered => room.step_up(ground),
-            button::Status::Pressed => room.ink_wash(ground),
-            button::Status::Active | button::Status::Disabled => ground,
+        let wash = match status {
+            button::Status::Hovered => 0.06,
+            button::Status::Pressed => 0.12,
+            button::Status::Active | button::Status::Disabled => 0.0,
         };
-        let solid = hues.map_or(solid, |field| tinted(solid, field.inks()[2]));
         button::Style {
-            background: Some(iced::Background::Gradient(
-                iced::gradient::Linear::new(std::f32::consts::PI)
-                    .add_stop(0.0, iced::Color { a: 0.0, ..solid })
-                    .add_stop(0.45, iced::Color { a: 0.35, ..solid })
-                    .add_stop(0.78, iced::Color { a: 0.86, ..solid })
-                    .add_stop(1.0, solid)
-                    .into(),
-            )),
+            background: (wash > 0.0).then_some(iced::Background::Color(iced::Color {
+                a: wash,
+                ..iced::Color::WHITE
+            })),
             text_color: room.paper,
             border: iced::Border::default(),
             ..button::Style::default()
@@ -1092,30 +1134,39 @@ mod tests {
         }
     }
 
-    /// **And the region leaves the title a measure to stand in.**
+    /// **A narrower window does not make the album smaller.**
     ///
-    /// The other half, and the half that moved: the object and the marquee
-    /// share the stage's *height* now, so what protects the title is the
-    /// **width** they divide. A region that quietly took the whole width would
-    /// satisfy the test above while squeezing the title to nothing.
+    /// The premise this replaces was the opposite one: the object and the
+    /// title divided the width, and this held the title's share from below.
+    /// The owner found what that cost — *"the album art seems to be quite
+    /// small when the window is narrower. instead it should just go behind the
+    /// text surely?"* — and he is right, because the title occupies the
+    /// bottom-left corner and never wanted the width it was being given.
+    ///
+    /// So they overlap, and the object is bound by the stage's **height**
+    /// alone. This is that claim: at a fixed height, narrowing the window
+    /// leaves the album exactly where it was, until the window is narrow
+    /// enough that width is genuinely the smaller of the two.
     #[test]
-    fn the_object_leaves_the_title_its_measure() {
-        for (width, height) in [(1048.0, 710.0), (1688.0, 952.0), (2328.0, 1312.0)] {
+    fn narrowing_the_window_does_not_shrink_the_album() {
+        let height = 952.0;
+        let (_, down) = object_region(3000.0, height);
+        for width in [1200.0_f32, 1688.0, 2328.0, 3000.0] {
             let edge = marquee_edge(width, height, f32::INFINITY);
-            let measure = marquee_measure(width, height);
             assert!(
-                measure >= MARQUEE_MIN_W - 0.5,
-                "at {width}x{height} the object leaves the title {measure:.0} px, \
-                 under its {MARQUEE_MIN_W:.0} px floor"
+                (edge - down).abs() < 0.5,
+                "at {width}x{height} the album is {edge:.0} px where the height \
+                 alone allows {down:.0} — something is still taking width off it"
             );
-            // And the two of them plus their gap actually fit the stage.
-            let used = edge + measure + theme::GAP_XL + 2.0 * MARGIN;
-            assert!(
-                used <= width + 0.5,
-                "at {width}x{height} the object and the title want {used:.0} px \
-                 of a {width:.0} px stage — one of them is drawing over the other"
-            );
-            // The footer keeps its own band whatever the object does.
+        }
+        // And the title's measure is the window's again, not what the object
+        // left over: it depends on the window and on nothing else.
+        assert!(
+            marquee_measure(1688.0, height) > marquee_measure(1200.0, height),
+            "the title stopped growing with the window"
+        );
+        // The footer keeps its own band whatever the object does.
+        for (width, height) in [(1048.0, 710.0), (1688.0, 952.0), (2328.0, 1312.0)] {
             let (_, region_h) = object_region(width, height);
             assert!(
                 height - region_h >= SOURCE_CARD_H,

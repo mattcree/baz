@@ -27,11 +27,15 @@ use crate::vm;
 /// each step; the timer does not exist away from Now Playing or when neither
 /// the case nor spectrum needs it.
 pub(crate) const TICK: Duration = Duration::from_millis(33);
-const TURN: Duration = Duration::from_secs(32);
+/// **How long one full turn takes.**
+///
+/// The owner: *"can we make the album rotation half the speed."* It was 32
+/// seconds; it is 64. Nothing else changes — [`TICK`] still steps the uniform
+/// at the same cadence, so the motion is as smooth as it was and simply covers
+/// half the angle in the same time.
+const TURN: Duration = Duration::from_secs(64);
 const DRAG_YAW_PER_PX: f32 = 0.012;
 const GENERATED_EDGE: u32 = 512;
-const GENERATED_REAR_W: u32 = 540;
-const GENERATED_REAR_H: u32 = 496;
 const SPINE_W: u32 = 96;
 const GENERATED_CACHE_ENTRIES: usize = 12;
 /// The case silhouette after removing the unused clear bay exposed by the
@@ -104,7 +108,6 @@ pub(crate) struct Insert {
     pub(crate) album_id: u64,
     pub(crate) title: String,
     pub(crate) artist: String,
-    pub(crate) tracks: Vec<String>,
 }
 
 /// Render-ready pictures supplied by the existing artwork pipeline.
@@ -146,7 +149,14 @@ pub(crate) fn view(
         .unwrap_or_else(|| generated_front(insert.album_id));
     let textures = Textures {
         from: art.from.unwrap_or_else(|| front.clone()),
-        rear: art.back.unwrap_or_else(|| generated_rear(&front, insert)),
+        // **The rear slot carries the front.** Both flat faces draw the front
+        // now (`jewel_case.wgsl`), so the generated inlay — a blur of the
+        // cover with a track list printed over it — was a texture nothing
+        // sampled, rendered once per record for nobody to see. It is deleted
+        // rather than left behind a `#[expect(dead_code)]`: git has it if the
+        // back is ever wanted again, and code kept for a hypothetical is code
+        // the next reader has to rule out.
+        rear: art.back.unwrap_or_else(|| front.clone()),
         front,
         spine: generated_spine(insert),
     };
@@ -160,43 +170,51 @@ pub(crate) fn view(
     .into()
 }
 
-/// How much of its own box the case is drawn at.
-///
-/// Short of 1.0 so the soft edge and the shadow the fragment shader lays
-/// around the silhouette have somewhere to go.
-const CASE_FILL: f32 = 0.94;
-
-/// **The lens that keeps the case one size through a whole turn.**
+/// **The lens, and why it is a constant after all.**
 ///
 /// The projected half-extent is `lens · bounds / (4 · view_z)`, and `view_z`
-/// is `2.55 − z'` where `z'` is the vertex's depth *after* the yaw. A turned
-/// case brings one edge nearer the camera, so a **fixed** lens draws it larger
-/// edge-on than flat-on — which is why the original 4.0 had to be sized for
-/// the worst angle and therefore drew the case at 0.78 of its box at rest,
-/// and why raising it to 4.75 filled the box at rest and clipped the corners
-/// at 90°.
+/// is `2.55 − z'` — the vertex's depth *after* the yaw. A turned case brings
+/// one edge nearer the camera, so the same lens draws that edge larger. That
+/// swell **is the rotation**: it is the only cue that the thing turning has a
+/// front and a side rather than being a picture on a spinning card.
 ///
-/// Solving for the lens each frame removes the compromise. The nearest any
-/// vertex comes is `0.5·|sin θ| + D·|cos θ|` — the half-width swinging toward
-/// the camera, plus what is left of the half-depth — so:
+/// # The round trip this went on, because the middle of it was wrong
+///
+/// It was 4.0, which drew the case at 0.79 of its box at rest and the owner
+/// called the album too small. Raising it to 4.75 filled the box at rest and
+/// clipped the corners edge-on — *"cut off at the top and bottom when it
+/// spins"*. Solving for the lens per frame fixed the clipping by holding the
+/// case one size through the whole turn, and that took the swell out with it:
+/// *"the way it's rotating now isn't nice."*
+///
+/// He is right, and the second complaint reveals the first diagnosis as the
+/// real mistake. **The constant was never the problem — the box was.** The
+/// case had 0.79 of a box that `object_region` had shrunk by a third; with
+/// the layout corrected, 0.79 of the region is a large album, and the
+/// perspective is left alone to do its job.
+///
+/// So: fixed, and derived from the angle where the projection is largest
+/// rather than guessed. `view_z` bottoms out edge-on, where the half-width has
+/// swung fully toward the camera:
 ///
 /// ```text
-/// view_z_min = 2.55 − (0.5·|sin θ| + D·|cos θ|)
+/// view_z_min = 2.55 − 0.5      (θ = 90°, the depth term contributing nothing)
 /// lens       = 2 · CASE_FILL · view_z_min
 /// ```
 ///
-/// At rest that is 4.83 and edge-on 3.94, and the case fills the same share of
-/// its box at both. The owner found the fixed version as *"the 3d cd case is
-/// being cut off at the top and bottom when it spins."*
-fn lens_for(yaw: f32) -> f32 {
-    // The half-depth the shader draws the case at, kept in step with `D` in
-    // `jewel_case.wgsl`; `the_lens_never_lets_the_case_leave_its_box` is what
-    // notices if the two drift apart.
-    const HALF_DEPTH: f32 = 0.035;
-    const CAMERA_Z: f32 = 2.55;
-    let nearest = 0.5f32.mul_add(yaw.sin().abs(), HALF_DEPTH * yaw.cos().abs());
-    2.0 * CASE_FILL * (CAMERA_Z - nearest)
-}
+/// which is 4.02 at `CASE_FILL` 0.98 — the case exactly reaching its bounds at
+/// the angle it is widest, and 0.80 of them at rest.
+const CASE_FILL: f32 = 0.98;
+
+/// The camera's distance, matching `jewel_case.wgsl`.
+const CAMERA_Z: f32 = 2.55;
+
+/// The nearest a vertex comes to the camera over a whole turn: the half-width
+/// swung fully round. The half-depth contributes nothing at that angle.
+const NEAREST: f32 = 0.5;
+
+/// See [`CASE_FILL`].
+const LENS: f32 = 2.0 * CASE_FILL * (CAMERA_Z - NEAREST);
 
 impl shader::Program<Message> for Case {
     type State = ();
@@ -468,7 +486,7 @@ impl Pipeline {
             bounds.width / screen.width,
             bounds.height / screen.height,
             front_opacity,
-            lens_for(yaw),
+            LENS,
             0.0,
         ];
         queue.write_buffer(&self.uniform, 0, &f32_bytes(values));
@@ -665,38 +683,6 @@ fn generated_front(album_id: u64) -> Handle {
     })
 }
 
-fn generated_rear(front: &Handle, insert: &Insert) -> Handle {
-    let key = texture_key("rear", &(insert.album_id, front.id(), &insert.tracks));
-    cached(key, || {
-        let mut image = blurred_rear(front)
-            .unwrap_or_else(|| gradient_image(insert.album_id, GENERATED_REAR_W, GENERATED_REAR_H));
-        draw_track_list(&mut image, &insert.tracks);
-        Handle::from_rgba(GENERATED_REAR_W, GENERATED_REAR_H, image.into_raw())
-    })
-}
-
-fn blurred_rear(front: &Handle) -> Option<image::RgbaImage> {
-    let (width, height, pixels) = rgba(front)?;
-    let source = image::RgbaImage::from_raw(width, height, pixels.to_vec())?;
-    let fitted = image::DynamicImage::ImageRgba8(source)
-        .resize_to_fill(
-            GENERATED_REAR_W,
-            GENERATED_REAR_H,
-            image::imageops::FilterType::Lanczos3,
-        )
-        .to_rgba8();
-    let mut blurred = image::imageops::blur(&fitted, 18.0);
-    // The blurred cover supplies colour and continuity; the veil supplies a
-    // predictable contrast floor for the white track list over every sleeve.
-    for pixel in blurred.pixels_mut() {
-        for channel in &mut pixel.0[..3] {
-            let veiled = u16::from(*channel) * 9 / 20;
-            *channel = u8::try_from(veiled).unwrap_or(u8::MAX);
-        }
-    }
-    Some(blurred)
-}
-
 fn generated_spine(insert: &Insert) -> Handle {
     let key = texture_key("spine", &(insert.album_id, &insert.artist, &insert.title));
     cached(key, || {
@@ -747,40 +733,6 @@ fn gradient_image(album_id: u64, width: u32, height: u32) -> image::RgbaImage {
             |index: usize| (f32::from(a[index]) * (1.0 - t) + f32::from(b[index]) * t) as u8;
         image::Rgba([channel(0), channel(1), channel(2), 255])
     })
-}
-
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "the number of visible rows and columns is bounded by the generated insert"
-)]
-fn draw_track_list(image: &mut image::RgbaImage, tracks: &[String]) {
-    let Ok(font) =
-        FontRef::try_from_slice(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"))
-    else {
-        return;
-    };
-    let columns = usize::from(tracks.len() > 18) + 1;
-    let rows = tracks.len().div_ceil(columns).max(1);
-    let inset_x = image.width() as f32 * 0.078;
-    let inset_y = image.height() as f32 * 0.115;
-    let content_w = image.width() as f32 - 2.0 * inset_x;
-    let content_h = image.height() as f32 - 2.0 * inset_y;
-    let line_h = (content_h / rows as f32).min(28.0);
-    let scale = PxScale::from((line_h * 0.68).max(10.0));
-    let column_w = content_w / columns as f32;
-    for (index, title) in tracks.iter().enumerate() {
-        let column = index / rows;
-        if column >= columns {
-            break;
-        }
-        let row = index % rows;
-        let x = inset_x + column as f32 * column_w;
-        let y = inset_y + row as f32 * line_h;
-        let prefix = format!("{:02}  ", index + 1);
-        let prefix_w = text_width(&font, scale, &prefix);
-        let fitted = fit_text(&font, scale, title, column_w - prefix_w - 12.0);
-        draw_text(image, &font, scale, &format!("{prefix}{fitted}"), x, y);
-    }
 }
 
 fn fit_text(font: &impl Font, scale: PxScale, text: &str, width: f32) -> String {
@@ -866,61 +818,62 @@ fn in_bounds_mut(image: &mut image::RgbaImage, x: u32, y: u32) -> Option<&mut im
 
 #[cfg(test)]
 mod tests {
-    /// **The case never leaves its box, at any angle** — and always fills the
-    /// same share of it.
+    /// **The case never leaves its box, at any angle** — and still swells as
+    /// it turns, because that swell is the rotation.
     ///
-    /// The fault this holds shut, in the owner's words: *"the 3d cd case is
-    /// being cut off at the top and bottom when it spins."* A fixed lens
-    /// cannot do both jobs, because the projected size depends on how near the
-    /// nearest vertex is and a yaw changes that: `lens 4.0` was sized for the
-    /// worst angle and so drew the case at 0.78 of its box at rest, and `4.75`
-    /// filled the box at rest and overflowed it by 16% edge-on.
+    /// Two faults, and the second is why this test asserts a *range* rather
+    /// than a constant. `lens 4.75` overflowed the bounds by 16% edge-on:
+    /// *"the 3d cd case is being cut off at the top and bottom when it
+    /// spins."* Solving for the lens per frame stopped that by holding the
+    /// case one size through the whole turn — and took the perspective with
+    /// it: *"the way it's rotating now isn't nice."*
     ///
-    /// This sweeps a whole turn and checks the projected extent both ways —
-    /// never past the bounds, and never so far short that the box is mostly
-    /// empty. Nothing here needs a GPU: it is the same arithmetic the vertex
-    /// shader does, which is the point of solving for the lens on the CPU.
+    /// So the ceiling is a hard bound and the floor is deliberately loose: the
+    /// case must fit at every angle, and must **not** be the same size at all
+    /// of them.
     #[test]
-    fn the_lens_never_lets_the_case_leave_its_box() {
+    fn the_case_fills_its_box_and_never_leaves_it() {
         const HALF_DEPTH: f32 = 0.035;
-        const CAMERA_Z: f32 = 2.55;
 
         let mut lowest = f32::MAX;
         let mut highest = 0.0_f32;
         for step in 0..=720 {
             #[expect(clippy::cast_precision_loss, reason = "a sweep of 721 angles")]
             let yaw = (step as f32) * std::f32::consts::TAU / 720.0;
-            let lens = lens_for(yaw);
-
-            // The nearest a vertex comes to the camera at this angle, which is
-            // where the projection is largest.
+            // Where the projection is largest at this angle: the half-width
+            // swung toward the camera plus what is left of the half-depth.
             let nearest = 0.5f32.mul_add(yaw.sin().abs(), HALF_DEPTH * yaw.cos().abs());
             let view_z = CAMERA_Z - nearest;
             assert!(view_z > 0.5, "the case reached the camera at yaw {yaw}");
 
-            // `out.position.y = centre·view_z + 0.5·lens·scale_y`, divided by
-            // `view_z` — so as a fraction of the box's own height:
-            let extent = lens / (2.0 * view_z);
+            let extent = LENS / (2.0 * view_z);
             assert!(
                 extent <= 1.0,
-                "at yaw {yaw:.2} the case projects {extent:.3} of its box and \
-                 is clipped top and bottom"
+                "at yaw {yaw:.2} the case projects {extent:.3} of its box and is \
+                 clipped top and bottom"
             );
             lowest = lowest.min(extent);
             highest = highest.max(extent);
         }
 
-        // And it is the *same* share throughout: a case that swelled and shrank
-        // as it turned would be the old fault wearing the other face.
         assert!(
-            (highest - lowest) < 0.01,
-            "the case breathes between {lowest:.3} and {highest:.3} of its box \
-             over one turn"
+            highest > 0.97,
+            "the case never reaches its bounds — its widest angle is \
+             {highest:.3} of the box, so the box is bigger than anything drawn \
+             in it"
         );
         assert!(
-            lowest > 0.85,
-            "the case fills only {lowest:.3} of its box, which is the postage \
-             stamp the owner asked twice to be rid of"
+            lowest > 0.75,
+            "the case shrinks to {lowest:.3} of its box, which is the postage \
+             stamp the owner asked three times to be rid of"
+        );
+        // **And it is not the same size throughout.** A case that held one
+        // size through a turn would be a picture on a spinning card; the swell
+        // toward the camera is the only cue that it has a side at all.
+        assert!(
+            (highest - lowest) > 0.1,
+            "the case is {lowest:.3}–{highest:.3} of its box over a whole turn, \
+             which is flat enough that the rotation has stopped reading as one"
         );
     }
 
@@ -960,27 +913,6 @@ mod tests {
         assert!((rotation.yaw - yaw).abs() < f32::EPSILON);
         rotation.drag(Point::new(120.0, 10_000.0));
         assert!((rotation.yaw - yaw).abs() > f32::EPSILON);
-    }
-
-    #[test]
-    fn generated_rear_contains_only_fitted_track_rows() {
-        let insert = Insert {
-            album_id: 7,
-            title: "A title that must not be printed on the rear".into(),
-            artist: "An artist that must not be printed on the rear".into(),
-            tracks: vec![
-                "One".into(),
-                "A very long title that has to fit inside its column without escaping the insert"
-                    .into(),
-            ],
-        };
-        let front = generated_front(insert.album_id);
-        let rear = generated_rear(&front, &insert);
-        let Some((width, height, pixels)) = rgba(&rear) else {
-            panic!("generated rear is RGBA");
-        };
-        assert_eq!((width, height), (GENERATED_REAR_W, GENERATED_REAR_H));
-        assert_eq!(pixels.len(), (width * height * 4) as usize);
     }
 
     #[test]
