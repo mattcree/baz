@@ -63,6 +63,35 @@ use crate::place::Place;
 use crate::playlists::Playlists;
 use crate::{icon, theme};
 
+/// **The two anatomies a lane glyph is drawn at**, named so the choice is a
+/// decision at each call site rather than a constant reached for by habit.
+///
+/// A control's size is not a free parameter: it says what the control belongs
+/// to. [`Anatomy::CLUSTER`] is the horizontal furniture size shared with the
+/// bottom bar's transport; [`Anatomy::LADDER`] is the lane's own rung, the
+/// tile every destination stands in. Anything stacked into the lane's vertical
+/// run takes the ladder's, or it reads as a different kind of thing.
+#[derive(Clone, Copy)]
+struct Anatomy {
+    /// The pressable square.
+    box_px: f32,
+    /// The ink inside it.
+    glyph: f32,
+}
+
+impl Anatomy {
+    /// Furniture beside furniture — the transport's size.
+    const CLUSTER: Self = Self {
+        box_px: theme::TRANSPORT_HIT,
+        glyph: theme::ICON_PX,
+    };
+    /// A rung of the lane's own ladder — the destination tile's size.
+    const LADDER: Self = Self {
+        box_px: theme::SIDEBAR_GLYPH_BOX,
+        glyph: theme::SIDEBAR_GLYPH_PX,
+    };
+}
+
 /// The lane, at the width its state says.
 ///
 /// `lane` is already resolved, split and ordered by [`crate::lane::resolve`] —
@@ -111,6 +140,16 @@ pub(crate) fn view<'a>(
             .align_y(iced::Alignment::Center)
             .into()
     } else {
+        // **Collapsed, the arrows join the destinations' ladder rather than
+        // keeping the cluster's.** Stacked, the pair had the horizontal
+        // cluster's anatomy — a 40 px box around a 20 px glyph on
+        // [`theme::CONTROL_CLUSTER_GAP`] — directly above four 48 px boxes
+        // around 32 px glyphs on [`theme::SIDEBAR_ROW_GAP`]. Six icons in one
+        // vertical run then sat on two columns 4 px apart and two pitches
+        // 4 px apart, which is what the owner read as *"the alignment
+        // vertically of the icons in the collapsed sidebar mode is not
+        // good"*. A cluster set beside something is a cluster; a cluster set
+        // **above** a ladder is part of the ladder, and takes its rungs.
         column![
             mark(),
             history_button(
@@ -119,6 +158,7 @@ pub(crate) fn view<'a>(
                 can_back.then_some(Message::HistoryBack),
                 Control::HistoryBack,
                 ink,
+                Anatomy::LADDER,
             ),
             history_button(
                 icon::Glyph::HistoryForward,
@@ -126,9 +166,10 @@ pub(crate) fn view<'a>(
                 can_forward.then_some(Message::HistoryForward),
                 Control::HistoryForward,
                 ink,
+                Anatomy::LADDER,
             ),
         ]
-        .spacing(theme::CONTROL_CLUSTER_GAP)
+        .spacing(theme::SIDEBAR_ROW_GAP)
         .align_x(alignment::Horizontal::Center)
         .into()
     };
@@ -769,18 +810,22 @@ fn mark() -> Element<'static, Message> {
             .width(Length::Fixed(theme::APP_MARK_PX))
             .height(Length::Fixed(theme::APP_MARK_PX)),
     )
-    .width(Length::Fixed(theme::APP_BAR_NAME_W))
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    // **No lead of its own.** It carried a `GAP_MD`, which put the mark's ink
-    // 12 px inside law L1's gutter — the one thing the doc comment above
-    // claimed it did not do — and put its optical centre 10 px off the four
-    // destination glyphs in the returns lane. The owner asked for that
-    // alignment back (*"can we make the icon for the app align with the icons
-    // in the sidebar"*), and with the slot now the mark's own size
-    // ([`theme::APP_BAR_NAME_W`]) the container's edge *is* the ink's edge, so
-    // the centre is `APP_BAR_EDGE + APP_MARK_PX / 2` = 32 — the lane's
-    // [`theme::SIDEBAR_HEAD_GLYPH_X`] exactly, and asserted as such.
-    .align_x(alignment::Horizontal::Left)
+    .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
+    .height(Length::Fixed(theme::SIDEBAR_DEST_H))
+    // **No lead of its own, and a rung for a slot.** It carried a `GAP_MD`,
+    // which put the mark's ink 12 px inside law L1's gutter and its optical
+    // centre 10 px off the four destination glyphs below it; the owner asked
+    // for that alignment back (*"can we make the icon for the app align with
+    // the icons in the sidebar"*) and it was fixed by shrinking the slot to
+    // the mark's own 32 — which fixed the lead and left the centre 8 px shy,
+    // because a 32 px slot hung at the lane's pad centres on 24 and a
+    // destination tile centres on [`theme::SIDEBAR_HEAD_GLYPH_X`] = 32.
+    //
+    // The slot is now the destination tile itself ([`Anatomy::LADDER`]), so
+    // the centre *is* `SIDEBAR_PAD + SIDEBAR_GLYPH_BOX / 2` by construction
+    // rather than by an arithmetic coincidence that had to be re-derived every
+    // time either size moved — open and collapsed alike, and asserted as such.
+    .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center)
     .into()
 }
@@ -796,6 +841,7 @@ fn history(can_back: bool, can_forward: bool, ink: Ink) -> Element<'static, Mess
             can_back.then_some(Message::HistoryBack),
             Control::HistoryBack,
             ink,
+            Anatomy::CLUSTER,
         ),
         history_button(
             icon::Glyph::HistoryForward,
@@ -803,6 +849,7 @@ fn history(can_back: bool, can_forward: bool, ink: Ink) -> Element<'static, Mess
             can_forward.then_some(Message::HistoryForward),
             Control::HistoryForward,
             ink,
+            Anatomy::CLUSTER,
         ),
     ]
     .spacing(theme::CONTROL_CLUSTER_GAP)
@@ -816,13 +863,14 @@ fn history_button(
     message: Option<Message>,
     named: Control,
     ink: Ink,
+    size: Anatomy,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let enabled = message.is_some();
     let mark = container(
         iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
+            .width(Length::Fixed(size.glyph))
+            .height(Length::Fixed(size.glyph))
             .opacity(theme::glyph_ink(
                 enabled,
                 false,
@@ -835,8 +883,8 @@ fn history_button(
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
     let control = button(mark)
-        .width(Length::Fixed(theme::TRANSPORT_HIT))
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .width(Length::Fixed(size.box_px))
+        .height(Length::Fixed(size.box_px))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
         .on_press_maybe(message);
@@ -901,6 +949,7 @@ mod tests {
         );
     }
 
+    use super::Anatomy;
     use crate::theme;
 
     /// This file's own source, for the pins below.
@@ -915,6 +964,67 @@ mod tests {
             .unwrap_or_else(|| panic!("`{signature}` exists"))
             .1;
         rest[..rest.find("\n}\n").expect("a function ends")].to_owned()
+    }
+
+    /// **Collapsed, every glyph in the lane's head stands on one column and
+    /// one pitch.**
+    ///
+    /// The owner, 2026-08-19: *"the alignment vertically of the icons in the
+    /// collapsed sidebar mode is not good"*. Measured off a shot of the rail,
+    /// the mark and the two arrows sat at x 27.5 on a 48 px pitch and the four
+    /// destinations at x 31.5 on a 52 px pitch — two columns 4 px apart and
+    /// two ladders 4 px apart, in one unbroken vertical run of seven icons.
+    ///
+    /// The cause was a size reached for by habit: the history pair is built
+    /// from the *cluster's* anatomy, which is right where it sits beside the
+    /// mark in a row and wrong the moment it is stacked above a ladder. So the
+    /// pin is on the arithmetic, not on the call — a rung's centre and a
+    /// rung's pitch, whatever any of the three constants becomes next.
+    #[test]
+    fn the_collapsed_heads_glyphs_share_one_column_and_one_pitch() {
+        // Every box in the collapsed head is a rung, so every centre is the
+        // lane's one glyph column and every step is the destinations' own.
+        let column = theme::SIDEBAR_PAD + Anatomy::LADDER.box_px / 2.0;
+        assert!(
+            (column - theme::SIDEBAR_HEAD_GLYPH_X).abs() < f32::EPSILON,
+            "a rung no longer centres on the lane's glyph column"
+        );
+        assert!(
+            (Anatomy::LADDER.box_px - theme::SIDEBAR_DEST_H).abs() < f32::EPSILON,
+            "the rung and the destination row have drifted apart in height, so \
+             the head's ladder and the destinations' no longer share a pitch"
+        );
+        assert!(
+            (Anatomy::CLUSTER.box_px - Anatomy::LADDER.box_px).abs() > f32::EPSILON,
+            "the two anatomies have converged, which makes the distinction \
+             this type exists to state unreadable"
+        );
+
+        // And the collapsed branch is built from the ladder, not the cluster:
+        // arithmetic alone cannot catch a call site that reaches for the wrong
+        // one, which is the fault that happened.
+        let source = source();
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        let collapsed = view
+            .split_once("} else {")
+            .expect("the collapsed chrome branch")
+            .1;
+        let collapsed = &collapsed[..collapsed.find("};").expect("the branch ends")];
+        assert!(
+            !collapsed.contains("Anatomy::CLUSTER"),
+            "the stacked history pair is drawn at the horizontal cluster's \
+             size again, which puts it on its own column and its own pitch"
+        );
+        assert_eq!(
+            collapsed.matches("Anatomy::LADDER").count(),
+            2,
+            "both stacked arrows stand in a rung"
+        );
+        assert!(
+            collapsed.contains("theme::SIDEBAR_ROW_GAP"),
+            "the collapsed head has a spacing of its own again, so its rungs \
+             no longer step with the destinations below them"
+        );
     }
 
     /// **A lane row's sleeve is [`theme::SIDEBAR_SLEEVE`] in both states.**
