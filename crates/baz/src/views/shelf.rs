@@ -176,11 +176,18 @@ pub(crate) fn view<'a>(
     // the bare arrows while the ring is on it, and [`crate::grid::step`]
     // deciding where each one lands.
     //
-    // **The ring is the region's, not a tile's.** Which record is chosen is
-    // already drawn — the selected tile carries `theme::tile`'s card and its
-    // own rule — so a second ring inside the wall would be two marks for one
-    // fact. What was missing is *the keyboard is in the collection now*, and
-    // that is a statement about the region.
+    // **The region draws no ring**, and the first try did. A two-pixel
+    // rectangle at the inside edge of the whole collection is what a browser
+    // draws around a focused iframe: the owner read it in one look — *"eh…
+    // what is that… looks goofy"* — and he is right, because a rectangle that
+    // large stops being a mark on something and becomes a border on
+    // everything.
+    //
+    // The mark a region needs was already drawn: **the selected tile**, with
+    // its card and its rule. So arriving here selects the first record when
+    // nothing is selected yet ([`focus::Stop::announced`]), and the record you
+    // would move from is the record that is lit. One mark, and it is the mark
+    // that says which one — which is the fact a listener actually needs.
     //
     // **Enter opens, rather than pressing.** A tile press is a two-stage
     // gesture — the first selects, the second within a moment activates — and
@@ -199,7 +206,7 @@ pub(crate) fn view<'a>(
         },
     )
     .steered(Message::WallStep)
-    .radius(0.0)
+    .announced(Message::WallReached)
     .into();
     // **The rail is the layer under the body**, right-aligned in its own lane,
     // at the same x it occupied as a `row!` sibling — see this function's docs

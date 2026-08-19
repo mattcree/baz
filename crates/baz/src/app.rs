@@ -1110,6 +1110,11 @@ pub(crate) enum Message {
     /// the binding table, which is what keeps the arrows' global meanings
     /// (volume, seek) untouched everywhere the keyboard has not been put.
     WallStep(crate::search::Direction),
+    /// **The keyboard has arrived at the collection.** The wall draws no ring
+    /// of its own, so this is what makes its arrival visible: it lights the
+    /// first record when nothing is lit, and the lit record is the one the
+    /// arrows move from.
+    WallReached,
     /// **Chromeless**: take the frame away from around Now playing.
     ///
     /// Distinct from [`Self::ToggleFullscreen`], and composes with it: that
@@ -3058,6 +3063,15 @@ impl App {
                 iced::advanced::widget::operation::focusable::focus_previous(),
             ),
             Message::WallStep(direction) => self.wall_step(direction),
+            Message::WallReached => {
+                if let Screen::Shelf(state) = &mut self.screen
+                    && state.selection.selected().is_none()
+                    && let Some(album) = state.albums.first()
+                {
+                    state.selection.select(Content::Album(album.id));
+                }
+                Task::none()
+            }
             Message::ToggleChromeless => {
                 self.chromeless = !self.chromeless;
                 Task::none()

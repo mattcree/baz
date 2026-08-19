@@ -65,19 +65,24 @@ use crate::theme;
 /// remembered anything else would be a control, and the control is the thing
 /// inside it.
 #[derive(Debug, Default, Clone, Copy)]
-struct Focused(bool);
+struct Focused {
+    now: bool,
+    /// Whether [`Stop::announced`]'s message has been published for the
+    /// *current* arrival. Reset on leaving, so re-entering announces again.
+    told: bool,
+}
 
 impl iced::advanced::widget::operation::Focusable for Focused {
     fn is_focused(&self) -> bool {
-        self.0
+        self.now
     }
 
     fn focus(&mut self) {
-        self.0 = true;
+        self.now = true;
     }
 
     fn unfocus(&mut self) {
-        self.0 = false;
+        self.now = false;
     }
 }
 
@@ -91,12 +96,21 @@ pub(crate) struct Stop<'a, Message> {
     /// The ground the ring is drawn against, because a ring is an opaque
     /// colour rather than an alpha (see [`theme::Palette::ink_over`]).
     ground: iced::Color,
-    /// The corner the wrapped control already has, so the ring follows its
-    /// shape instead of boxing a rounded thing in a square.
+    /// The corner the ring follows, so it does not box a rounded control in a
+    /// square. Every stop that draws a ring is a control today and every
+    /// control in baz is [`theme::RADIUS_CTRL`]; this is a field rather than
+    /// that constant inlined because the *ring* has to know the shape, and a
+    /// setter with no caller would be speculative API pretending to be one.
     radius: f32,
     /// **What the arrows do while the ring is here**, for a stop that is a
     /// *region* rather than a control — see [`Stop::steered`].
     steer: Option<Box<dyn Fn(crate::search::Direction) -> Message + 'a>>,
+    /// Published once each time the keyboard arrives — see
+    /// [`Stop::announced`].
+    on_focus: Option<Message>,
+    /// Whether this stop draws the ring itself. A region does not: see
+    /// [`Stop::announced`].
+    ring: bool,
 }
 
 /// **Wrap a control in a focus stop.**
@@ -115,6 +129,8 @@ pub(crate) fn stop<'a, Message>(
         ground: theme::active().wall,
         radius: theme::RADIUS_CTRL,
         steer: None,
+        on_focus: None,
+        ring: true,
     }
 }
 
@@ -138,14 +154,6 @@ impl<Message> Stop<'_, Message> {
         self.ground = ground;
         self
     }
-
-    /// State the corner radius, where the wrapped control is not the
-    /// product's ordinary control shape — a square tile, a round dot.
-    #[must_use]
-    pub(crate) fn radius(mut self, radius: f32) -> Self {
-        self.radius = radius;
-        self
-    }
 }
 
 impl<'a, Message> Stop<'a, Message> {
@@ -167,6 +175,28 @@ impl<'a, Message> Stop<'a, Message> {
         steer: impl Fn(crate::search::Direction) -> Message + 'a,
     ) -> Self {
         self.steer = Some(Box::new(steer));
+        self
+    }
+
+    /// **Say when the keyboard arrives, and draw no ring of your own.**
+    ///
+    /// For a region, which is why the two go together. The first try drew the
+    /// ring a *control* wears around the whole collection — a two-pixel
+    /// rectangle at the window's inside edge — and the owner's reading was the
+    /// correct one: *"eh… what is that… looks goofy"*. It is what a browser
+    /// draws around a focused iframe, and it reads as chrome rather than as
+    /// design, because a rectangle that large stops being a mark on something
+    /// and becomes a border on everything.
+    ///
+    /// A region already had a better mark and it was drawn the whole time:
+    /// **the selected tile**, with its card and its rule. So the region says
+    /// nothing itself and instead makes sure there *is* a selection the moment
+    /// the keyboard arrives — one message, once per arrival — and the record
+    /// you would move from is the record that is lit.
+    #[must_use]
+    pub(crate) fn announced(mut self, arrival: Message) -> Self {
+        self.on_focus = Some(arrival);
+        self.ring = false;
         self
     }
 }
@@ -259,8 +289,20 @@ where
         if shell.is_event_captured() {
             return;
         }
-        if !tree.state.downcast_ref::<Focused>().0 {
+        // **The arrival, once per arrival.** `operate` is where focus moves and
+        // it has no shell to publish through, so the announcement is made on
+        // the next event this stop sees — which is the same frame, because the
+        // press that moved the focus is itself an event.
+        let state = tree.state.downcast_mut::<Focused>();
+        if !state.now {
+            state.told = false;
             return;
+        }
+        if !state.told
+            && let Some(arrival) = &self.on_focus
+        {
+            state.told = true;
+            shell.publish(arrival.clone());
         }
         let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
             return;
@@ -332,7 +374,8 @@ where
             cursor,
             viewport,
         );
-        if !tree.state.downcast_ref::<Focused>().0 {
+        // A region draws no ring at all — see [`Stop::announced`].
+        if !self.ring || !tree.state.downcast_ref::<Focused>().now {
             return;
         }
         // **The ring is drawn outside the control, not over it.** A ring
@@ -341,16 +384,7 @@ where
         // reads as a thing around the control, which is what it is. The
         // product's own gutter is more than [`theme::FOCUS_RING_GAP`]
         // everywhere a stop is used, so it never collides with a neighbour.
-        //
-        // **A region draws its ring inside itself**, because a region reaches
-        // the window's own edges and there is no outside: grown outward, the
-        // wall's ring landed under the bars and off the screen, and the first
-        // proof shot of the collection having focus showed nothing at all.
-        let bounds = if self.steer.is_some() {
-            layout.bounds().shrink(theme::FOCUS_RING_GAP)
-        } else {
-            layout.bounds().expand(theme::FOCUS_RING_GAP)
-        };
+        let bounds = layout.bounds().expand(theme::FOCUS_RING_GAP);
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
@@ -405,11 +439,9 @@ mod tests {
     /// coverage, and what would make a hand-rolled button beside one of them
     /// visible as the second kind of control it is.
     ///
-    /// **What this deliberately does not claim.** The wall's tiles are not
-    /// stops yet, and that is a design question rather than an omission: a
-    /// grid wants arrow keys, and fifty tiles in a Tab order between the bar
-    /// and the transport would be a worse product than none. Recorded in
-    /// `docs/BACKLOG.md` rather than half-built here.
+    /// **What this deliberately does not claim.** The wall is one *steered*
+    /// stop rather than a tile-per-stop Tab order, and it draws no ring —
+    /// see [`Stop::announced`].
     #[test]
     fn every_control_in_the_frame_is_a_focus_stop() {
         for (module, source, helper) in [
@@ -450,6 +482,38 @@ mod tests {
                  it is an opaque colour picked against the wrong surface"
             );
         }
+    }
+
+    /// **A region announces and does not ring; a control rings and does not
+    /// announce.**
+    ///
+    /// They are one decision, so [`Stop::announced`] sets both. The first
+    /// landing gave the collection a control's ring — a two-pixel rectangle
+    /// around the whole wall — and the owner read it in one look as chrome
+    /// rather than design. Pinned so the pair cannot drift back apart: a
+    /// region that started drawing a ring again would be the same picture.
+    #[test]
+    fn a_region_announces_instead_of_drawing_a_ring() {
+        let source = include_str!("focus.rs").replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let rest = shipped
+            .split_once("fn announced(")
+            .expect("the region's arrival")
+            .1;
+        let body = &rest[..rest.find("\n    }\n").expect("a method ends")];
+        assert!(
+            body.contains("self.ring = false"),
+            "a region that announces still draws a control's ring"
+        );
+        let rest = shipped.split_once("fn draw(").expect("the ring").1;
+        let draw = &rest[..rest.find("\n    }\n").expect("a method ends")];
+        assert!(
+            draw.contains("!self.ring"),
+            "the ring is drawn without asking whether this stop owns one"
+        );
     }
 
     /// **A disabled control is not a stop.**

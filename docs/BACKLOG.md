@@ -866,11 +866,20 @@ Newest first. Each was asked for in conversation and is now in the product.
   in a partial row and `index ± columns` walks into the gap — and it is
   exhaustively unit-tested without a window.
 
+  **The region draws no ring.** The first landing gave it a control's ring —
+  a two-pixel rectangle around the whole collection — and the owner read it in
+  one look: *"eh… what is that… looks goofy"*. It is what a browser draws
+  around a focused iframe, and a rectangle that large stops being a mark on
+  something and becomes a border on everything. The mark a region needs was
+  already drawn: the **selected tile**. So arriving lights the first record
+  when nothing is lit, and the record you would move from is the record you
+  can see.
+
   **One thing is unverified end to end.** The proof harness is Xvfb, whose
   keymap binds no bare arrow keysyms, so `xdotool` cannot deliver an arrow to
-  the window: the region ring is photographed, `grid::step` is swept in tests,
-  and the join between them is five lines that compile and have never been
-  pressed. A real keyboard would close it in one press.
+  the window: the arrival is photographed, `grid::step` is swept in tests, and
+  the join between them compiles and has never been pressed. A real keyboard
+  closes it in one press.
 
   **Still to do:** the panels (queue, album, settings) and the context menus
   are the same shape of question at smaller scale, and the wall's *list*
