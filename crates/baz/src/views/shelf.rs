@@ -168,7 +168,39 @@ pub(crate) fn view<'a>(
         .and_then(|index| runs.get(index))
         .copied();
     let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
-    let body: Element<'a, Message> = wall.into();
+    // **The collection is one Tab stop, and the arrows move inside it.**
+    //
+    // `crate::focus`'s first landing made the frame reachable and stopped
+    // here, because a grid is not a Tab order. This is the other half of that
+    // pattern: one stop for the whole wall, [`focus::Stop::steered`] taking
+    // the bare arrows while the ring is on it, and [`crate::grid::step`]
+    // deciding where each one lands.
+    //
+    // **The ring is the region's, not a tile's.** Which record is chosen is
+    // already drawn — the selected tile carries `theme::tile`'s card and its
+    // own rule — so a second ring inside the wall would be two marks for one
+    // fact. What was missing is *the keyboard is in the collection now*, and
+    // that is a statement about the region.
+    //
+    // **Enter opens, rather than pressing.** A tile press is a two-stage
+    // gesture — the first selects, the second within a moment activates — and
+    // that is right for a pointer, where selecting *is* moving there. The
+    // arrows have already done the selecting by the time Enter is pressed, so
+    // routing it through the press machinery would make the first Enter do
+    // nothing visible and the second open the record. `AlbumClicked` is the
+    // explicit-open route the hover options already use, and it carries the
+    // shift accelerator with it, so Shift+Enter queues exactly as shift-click
+    // does.
+    let body: Element<'a, Message> = crate::focus::stop(
+        wall,
+        match shelf.selection.selected() {
+            Some(crate::selection::Content::Album(id)) => Some(Message::AlbumClicked(id)),
+            _ => None,
+        },
+    )
+    .steered(Message::WallStep)
+    .radius(0.0)
+    .into();
     // **The rail is the layer under the body**, right-aligned in its own lane,
     // at the same x it occupied as a `row!` sibling — see this function's docs
     // for why it is under rather than over, and what the 4 px it yields to the

@@ -858,13 +858,23 @@ Newest first. Each was asked for in conversation and is now in the product.
   since every glyph on it comes from one helper, and `focus.rs`'s own test
   scans those four helpers rather than counting call sites.
 
-  **Not applied to the wall, deliberately.** A grid wants arrow keys: fifty
-  tiles in a Tab order between the app bar and the transport would be a worse
-  product than none, and the answer is a *typed* traversal — Tab between
-  regions, arrows within one — rather than more stops. That is the next piece
-  of this and it wants designing, not just wrapping. The panels (queue, album,
-  settings) and the context menus are the same shape of question at smaller
-  scale.
+  **The wall is one steered region**, also 2026-08-19: one Tab stop for the
+  whole collection, the bare arrows moving the selection inside it while the
+  ring is there, and Enter opening the selected record (Shift+Enter queues it,
+  as shift-click does). `crates/baz/src/grid.rs` is the arithmetic —
+  shelf-aware, because a shelf that is not a multiple of the column count ends
+  in a partial row and `index ± columns` walks into the gap — and it is
+  exhaustively unit-tested without a window.
+
+  **One thing is unverified end to end.** The proof harness is Xvfb, whose
+  keymap binds no bare arrow keysyms, so `xdotool` cannot deliver an arrow to
+  the window: the region ring is photographed, `grid::step` is swept in tests,
+  and the join between them is five lines that compile and have never been
+  pressed. A real keyboard would close it in one press.
+
+  **Still to do:** the panels (queue, album, settings) and the context menus
+  are the same shape of question at smaller scale, and the wall's *list*
+  densities want the same treatment as its grid.
 
   *The original entry, which remains the argument:* there was no focus
   traversal at all:

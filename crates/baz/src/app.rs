@@ -1105,6 +1105,11 @@ pub(crate) enum Message {
     FocusNext,
     /// The same, backwards: <kbd>Shift</kbd>+<kbd>Tab</kbd>.
     FocusPrevious,
+    /// **An arrow, while the ring is on the collection** — see
+    /// [`crate::grid`]. Published by the wall's own focus stop rather than by
+    /// the binding table, which is what keeps the arrows' global meanings
+    /// (volume, seek) untouched everywhere the keyboard has not been put.
+    WallStep(crate::search::Direction),
     /// **Chromeless**: take the frame away from around Now playing.
     ///
     /// Distinct from [`Self::ToggleFullscreen`], and composes with it: that
@@ -3052,6 +3057,7 @@ impl App {
             Message::FocusPrevious => iced::advanced::widget::operate(
                 iced::advanced::widget::operation::focusable::focus_previous(),
             ),
+            Message::WallStep(direction) => self.wall_step(direction),
             Message::ToggleChromeless => {
                 self.chromeless = !self.chromeless;
                 Task::none()
@@ -3606,6 +3612,73 @@ impl App {
     /// volume/seek meaning everywhere else. The open chooser's raw-event seam
     /// deliberately delivers Left/Right even while the query field owns the
     /// caret, then this blur makes subsequent arrows unambiguous.
+    /// **Move the wall's selection by one tile**, and bring it into view.
+    ///
+    /// The arithmetic is [`crate::grid::step`]'s and is tested without a
+    /// window; what is here is the join — the shelves' ends, the grid's
+    /// column count, and the scroll that has to follow, because a selection
+    /// that moved off screen would be the keyboard losing its own place.
+    ///
+    /// **The first press selects rather than moves.** Tab to a wall nobody has
+    /// clicked on and there is no selection to step from, so the honest answer
+    /// to the first arrow is the first record — an arrow that did nothing
+    /// would read as the ring being decorative.
+    fn wall_step(&mut self, direction: crate::search::Direction) -> Task<Message> {
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        let ends: Vec<usize> = state.groups.iter().map(|group| group.end).collect();
+        let columns = state.grid().columns;
+        let at = match state.selection.selected() {
+            Some(Content::Album(id)) => state.albums.iter().position(|album| album.id == id),
+            _ => None,
+        };
+        let to = match at {
+            Some(at) => crate::grid::step(at, direction, columns, &ends),
+            None => (!state.albums.is_empty()).then_some(0),
+        };
+        let Some(to) = to else {
+            return Task::none();
+        };
+        let Some(album) = state.albums.get(to) else {
+            return Task::none();
+        };
+        state.selection.select(Content::Album(album.id));
+
+        // **And bring it into view**, or the keyboard has lost its own place:
+        // the ring says the collection has focus, the selection says which
+        // record, and a record you cannot see says neither. Only when it is
+        // actually off screen — an arrow that scrolled a visible row would
+        // make the wall lurch under a listener stepping across one line.
+        let hang = state.grid();
+        let shelves = state.shelves();
+        let runs = shelves.runs();
+        let shelf_index = ends.iter().position(|end| to < *end).unwrap_or(0);
+        let start = if shelf_index == 0 {
+            0
+        } else {
+            ends[shelf_index - 1]
+        };
+        let Some(run) = runs.get(shelf_index) else {
+            return Task::none();
+        };
+        let row = (to - start) / columns.max(1);
+        let top = run.rows_top(hang) + hang.spacer_height(row);
+        let bottom = top + hang.row_h;
+        let viewport = state.grid_size.height;
+        let offset = state.scroll_offset;
+        let target = if top < offset {
+            top
+        } else if bottom > offset + viewport {
+            bottom - viewport
+        } else {
+            return Task::none();
+        };
+        let target = target.max(0.0);
+        state.scroll_offset = target;
+        iced::widget::operation::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: target })
+    }
+
     fn direction(&mut self, direction: crate::search::Direction) -> Task<Message> {
         let searching = matches!(&self.screen, Screen::Shelf(state) if state.search_open);
         if searching {

@@ -82,7 +82,7 @@ impl iced::advanced::widget::operation::Focusable for Focused {
 }
 
 /// One stop on a place's keyboard order.
-pub struct Stop<'a, Message> {
+pub(crate) struct Stop<'a, Message> {
     content: Element<'a, Message, Theme, iced::Renderer>,
     /// What <kbd>Enter</kbd> and <kbd>Space</kbd> do here, or `None` while the
     /// control is disabled — a stop with nothing to press is skipped rather
@@ -94,6 +94,9 @@ pub struct Stop<'a, Message> {
     /// The corner the wrapped control already has, so the ring follows its
     /// shape instead of boxing a rounded thing in a square.
     radius: f32,
+    /// **What the arrows do while the ring is here**, for a stop that is a
+    /// *region* rather than a control — see [`Stop::steered`].
+    steer: Option<Box<dyn Fn(crate::search::Direction) -> Message + 'a>>,
 }
 
 /// **Wrap a control in a focus stop.**
@@ -102,7 +105,7 @@ pub struct Stop<'a, Message> {
 /// to be focused *by name*, and nothing in baz does that yet — Tab walks the
 /// tree and never asks what anything is called. Adding ids before there is a
 /// caller would be two hundred string constants maintained against nothing.
-pub fn stop<'a, Message>(
+pub(crate) fn stop<'a, Message>(
     content: impl Into<Element<'a, Message, Theme, iced::Renderer>>,
     activate: Option<Message>,
 ) -> Stop<'a, Message> {
@@ -111,6 +114,19 @@ pub fn stop<'a, Message>(
         activate,
         ground: theme::active().wall,
         radius: theme::RADIUS_CTRL,
+        steer: None,
+    }
+}
+
+/// The arrow a key press is, or `None` for every other key.
+fn direction_of(key: &keyboard::Key) -> Option<crate::search::Direction> {
+    use crate::search::Direction;
+    match key {
+        keyboard::Key::Named(key::Named::ArrowUp) => Some(Direction::Up),
+        keyboard::Key::Named(key::Named::ArrowDown) => Some(Direction::Down),
+        keyboard::Key::Named(key::Named::ArrowLeft) => Some(Direction::Left),
+        keyboard::Key::Named(key::Named::ArrowRight) => Some(Direction::Right),
+        _ => None,
     }
 }
 
@@ -118,7 +134,7 @@ impl<Message> Stop<'_, Message> {
     /// State the ground the ring is drawn on, where it is not the wall — the
     /// bar, the lane's recess, a panel.
     #[must_use]
-    pub fn on(mut self, ground: iced::Color) -> Self {
+    pub(crate) fn on(mut self, ground: iced::Color) -> Self {
         self.ground = ground;
         self
     }
@@ -126,8 +142,31 @@ impl<Message> Stop<'_, Message> {
     /// State the corner radius, where the wrapped control is not the
     /// product's ordinary control shape — a square tile, a round dot.
     #[must_use]
-    pub fn radius(mut self, radius: f32) -> Self {
+    pub(crate) fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
+        self
+    }
+}
+
+impl<'a, Message> Stop<'a, Message> {
+    /// **Make this stop a region the arrows steer inside.**
+    ///
+    /// One Tab stop for a whole grid, and the arrows move within it. That is
+    /// the pattern every grid uses — Tab between regions, arrows inside one —
+    /// and the alternative is what `crate::focus`'s first landing declined to
+    /// build: fifty tiles in a Tab order between the app bar and the
+    /// transport, which is a worse product than no traversal at all.
+    ///
+    /// The arrows are only taken **while the ring is here**, so their global
+    /// meanings — the volume on the vertical pair, the seek on the horizontal
+    /// — are untouched everywhere else, which is everywhere the keyboard has
+    /// not deliberately been put.
+    #[must_use]
+    pub(crate) fn steered(
+        mut self,
+        steer: impl Fn(crate::search::Direction) -> Message + 'a,
+    ) -> Self {
+        self.steer = Some(Box::new(steer));
         self
     }
 }
@@ -181,8 +220,9 @@ where
     ) {
         // A disabled control is not a stop. Skipping it here rather than
         // graying a ring is the honest reading: the ring means *press this*,
-        // and there is nothing to press.
-        if self.activate.is_some() {
+        // and there is nothing to press. A steered region is a stop even
+        // without one, because the arrows are the thing it offers.
+        if self.activate.is_some() || self.steer.is_some() {
             let state = tree.state.downcast_mut::<Focused>();
             operation.focusable(None, layout.bounds(), state);
         }
@@ -219,13 +259,25 @@ where
         if shell.is_event_captured() {
             return;
         }
-        let Some(activate) = &self.activate else {
-            return;
-        };
         if !tree.state.downcast_ref::<Focused>().0 {
             return;
         }
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event else {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+            return;
+        };
+        // **The arrows, for a region.** Bare only: the modified arrows are
+        // the transport's and the history's, and a region that took them
+        // would make where the keyboard happens to be change what
+        // Ctrl+→ means.
+        if let Some(steer) = &self.steer
+            && modifiers.is_empty()
+            && let Some(direction) = direction_of(key)
+        {
+            shell.publish(steer(direction));
+            shell.capture_event();
+            return;
+        }
+        let Some(activate) = &self.activate else {
             return;
         };
         // **Enter and Space, and nothing else.** They are the two presses
@@ -289,7 +341,16 @@ where
         // reads as a thing around the control, which is what it is. The
         // product's own gutter is more than [`theme::FOCUS_RING_GAP`]
         // everywhere a stop is used, so it never collides with a neighbour.
-        let bounds = layout.bounds().expand(theme::FOCUS_RING_GAP);
+        //
+        // **A region draws its ring inside itself**, because a region reaches
+        // the window's own edges and there is no outside: grown outward, the
+        // wall's ring landed under the bars and off the screen, and the first
+        // proof shot of the collection having focus showed nothing at all.
+        let bounds = if self.steer.is_some() {
+            layout.bounds().shrink(theme::FOCUS_RING_GAP)
+        } else {
+            layout.bounds().expand(theme::FOCUS_RING_GAP)
+        };
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
@@ -408,7 +469,7 @@ mod tests {
         let rest = shipped.split_once("fn operate(").expect("the traversal").1;
         let body = &rest[..rest.find("\n    }\n").expect("a method ends")];
         assert!(
-            body.contains("if self.activate.is_some()"),
+            body.contains("if self.activate.is_some() || self.steer.is_some()"),
             "a stop publishes itself whether or not it has anything to press"
         );
         assert!(
