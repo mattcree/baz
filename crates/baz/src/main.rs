@@ -89,6 +89,7 @@ mod replaygain;
 mod resource;
 mod response;
 mod scan;
+mod scope;
 mod search;
 mod selection;
 mod session;

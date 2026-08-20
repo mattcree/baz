@@ -61,7 +61,7 @@ fn inks(field: Option<crate::field::Field>, room: &theme::Palette) -> [iced::Col
     clippy::cast_precision_loss,
     reason = "band and history counts are fixed below 256"
 )]
-fn across(index: usize, count: usize) -> f32 {
+pub(crate) fn across(index: usize, count: usize) -> f32 {
     let last = count.saturating_sub(1);
     if last == 0 {
         return 0.0;
@@ -78,7 +78,7 @@ fn across(index: usize, count: usize) -> f32 {
 /// chroma by construction ([`crate::field::ink_l`], and [`crate::field::safe_chroma`]),
 /// so a straight mix travels between them without the grey sag a mix of
 /// unequal colours would have.
-fn level_ink(level: f32, position: f32, inks: [iced::Color; 3]) -> iced::Color {
+pub(crate) fn level_ink(level: f32, position: f32, inks: [iced::Color; 3]) -> iced::Color {
     let position = position.clamp(0.0, 1.0) * 2.0;
     let (from, to, t) = if position <= 1.0 {
         (inks[0], inks[1], position)
@@ -166,6 +166,10 @@ pub(crate) enum Mode {
     Spectrum,
     Waveform,
     Spectrogram,
+    /// **The delivered waveform itself** — see [`crate::scope`]. Last in the
+    /// ring because it is the odd one out: the other three are measurements
+    /// of the signal and this is the signal.
+    Scope,
 }
 
 impl Mode {
@@ -174,7 +178,8 @@ impl Mode {
             Self::Off => Self::Spectrum,
             Self::Spectrum => Self::Waveform,
             Self::Waveform => Self::Spectrogram,
-            Self::Spectrogram => Self::Off,
+            Self::Spectrogram => Self::Scope,
+            Self::Scope => Self::Off,
         }
     }
 
@@ -192,6 +197,7 @@ impl Mode {
             Self::Spectrum => "Spectrum",
             Self::Waveform => "Rolling waveform",
             Self::Spectrogram => "Spectrogram",
+            Self::Scope => "Oscilloscope",
         }
     }
 }
@@ -235,7 +241,9 @@ impl History {
                 self.amplitudes[self.cursor] = amplitude_height(mean_square.sqrt());
             }
             Mode::Spectrogram => self.spectra[self.cursor] = frequency_bands(audio),
-            Mode::Off | Mode::Spectrum => return,
+            // The scope draws the live frame and keeps no history: it is a
+            // picture of *now*, which is the whole of what distinguishes it.
+            Mode::Off | Mode::Spectrum | Mode::Scope => return,
         }
         self.cursor = (self.cursor + 1) % HISTORY_FRAMES;
         self.len = (self.len + 1).min(HISTORY_FRAMES);
@@ -536,6 +544,13 @@ pub(crate) fn background(
         Mode::Spectrum => spectrum(audio, width, height, field),
         Mode::Waveform => waveform(history, width, height, field),
         Mode::Spectrogram => spectrogram(history, width, height, field),
+        Mode::Scope => crate::scope::Scope::new(
+            &audio.samples,
+            inks(field, theme::active()),
+            theme::active().paper_muted,
+            iced::Size::new(width, height),
+        )
+        .into(),
     }
 }
 
@@ -850,13 +865,51 @@ mod tests {
         }
     }
 
+    /// **One mark cycles every mode and comes home**, in the stated order.
+    ///
+    /// The order is a claim rather than an accident: the three measurements
+    /// first, in the order they get more elaborate — a snapshot of frequency,
+    /// then loudness over time, then both — and the oscilloscope last, because
+    /// it is the odd one out. The other three are readings *about* the signal;
+    /// the scope is the signal.
     #[test]
     fn modes_cycle_from_off_and_back_to_off() {
         let mut mode = Mode::Off;
-        for expected in [Mode::Spectrum, Mode::Waveform, Mode::Spectrogram, Mode::Off] {
+        for expected in [
+            Mode::Spectrum,
+            Mode::Waveform,
+            Mode::Spectrogram,
+            Mode::Scope,
+            Mode::Off,
+        ] {
             mode = mode.next();
             assert_eq!(mode, expected);
         }
+    }
+
+    /// **Every mode has a name a tooltip can print**, and no two share one.
+    ///
+    /// The mark is icon-only, so the label *is* the control's name (doc 10
+    /// §3.1) — a mode added without one would be a step in the cycle a
+    /// listener could reach and not identify.
+    #[test]
+    fn every_mode_names_itself_and_no_two_names_agree() {
+        let mut mode = Mode::Off;
+        let mut names = Vec::new();
+        loop {
+            let label = mode.label();
+            assert!(!label.is_empty(), "{mode:?} has no name");
+            assert!(
+                !names.contains(&label),
+                "{mode:?} shares its name with an earlier mode"
+            );
+            names.push(label);
+            mode = mode.next();
+            if mode == Mode::Off {
+                break;
+            }
+        }
+        assert!(names.len() > 3, "the cycle lost a mode");
     }
 
     #[test]
