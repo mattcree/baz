@@ -385,9 +385,16 @@ jobs:
 
           path = Path("packaging/flatpak/io.github.mattcree.baz.yml")
           manifest = path.read_text()
-          start = manifest.index("      - type: git\\n")
+          start = manifest.index("      - type: git")
           end = manifest.index("      # Every crate", start)
-          source = "      - type: dir\\n        path: ../..\\n        skip: [target, .git]\\n"
+          source = "\n".join(
+              [
+                  "      - type: dir",
+                  "        path: ../..",
+                  "        skip: [target, .git]",
+                  "",
+              ]
+          )
           path.write_text(manifest[:start] + source + manifest[end:])
           PY
           # The image carries the Flatpak tooling but not a configured remote.
