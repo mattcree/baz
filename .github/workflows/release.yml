@@ -375,9 +375,21 @@ jobs:
         run: |
           set -euo pipefail
           id=io.github.mattcree.baz
-          # The manifest builds the git source, and inside a container the
-          # checkout is a directory git will not trust without being told.
-          git config --global --add safe.directory "$PWD"
+          # A release tag's manifest intentionally names the last published
+          # source.  For this build, replace only that source with the exact
+          # checked-out ref that triggered the workflow: otherwise v0.4.0
+          # would accidentally bundle v0.3.0.  The committed manifest remains
+          # the canonical Flathub input and is pinned after publication.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("packaging/flatpak/io.github.mattcree.baz.yml")
+          manifest = path.read_text()
+          start = manifest.index("      - type: git\\n")
+          end = manifest.index("      # Every crate", start)
+          source = "      - type: dir\\n        path: ../..\\n        skip: [target, .git]\\n"
+          path.write_text(manifest[:start] + source + manifest[end:])
+          PY
           # The image carries the Flatpak tooling but not a configured remote.
           # `--install-deps-from` names a remote; make that name real before
           # asking the builder to install the pinned SDK and Rust extension.
