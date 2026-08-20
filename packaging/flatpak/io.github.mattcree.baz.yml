@@ -36,14 +36,39 @@ finish-args:
   # directly (see ADR-0011 on why hardware volume is out of reach here).
   - --socket=pulseaudio
 
-  # The music. Read-only by design: baz never writes to a listener's files,
-  # and the sandbox is the place to make that structural rather than promised.
-  # Only ~/Music is granted, because baz's first-run screen takes a typed path
-  # rather than opening a portal file chooser: a collection kept anywhere else
-  # needs an explicit
-  #     flatpak override --user --filesystem=/srv/music:ro io.github.mattcree.baz
-  # A portal-based folder chooser is the proper fix and is not built yet.
+  # The music. **Read-only by design**: baz never writes to a listener's
+  # files, and the sandbox is the place to make that structural rather than
+  # promised. Every grant here is `:ro` and that is not an oversight to be
+  # corrected later.
   - --filesystem=xdg-music:ro
+
+  # **Anything the desktop has mounted for you.** `xdg-run/gvfs` is the FUSE
+  # mount point gvfs puts SMB, NFS, MTP and attached-device shares under, and
+  # without it a sandboxed baz cannot see a collection that lives on a NAS —
+  # which is not an edge case, it is how a large library is usually kept. It
+  # is also, concretely, how the owner's own 8 600 tracks are stored, so a
+  # Flathub baz without this grant would be unable to open the library it was
+  # developed against.
+  #
+  # This is the standard grant for the case and every media player on Flathub
+  # that reads network shares carries it. It grants no *new* directory: gvfs
+  # only exposes what the listener has already mounted in their own session,
+  # so the reach is the desktop's, not ours.
+  - --filesystem=xdg-run/gvfs:ro
+
+  # **A collection kept somewhere else entirely** — `/mnt/music`, a second
+  # drive, a directory the listener chose years ago — is reached through the
+  # file chooser rather than by widening this list. baz's `Browse…` is
+  # `rfd` built portal-only (ADR-0025), so the pick goes through
+  # `org.freedesktop.portal.FileChooser` and the portal grants the sandbox
+  # access to what was picked. That is the correct shape: the listener grants
+  # the folder, rather than the packager guessing which folders exist.
+  #
+  # The typed path on the first-run screen is the one route that cannot work
+  # this way, because nothing granted it. It stays, because it is the only
+  # route that can name a share that is not mounted yet — and where it names
+  # something outside these grants, the honest fallback is still
+  #     flatpak override --user --filesystem=/srv/music:ro io.github.mattcree.baz
 
   # MPRIS2. The well-known name and the per-instance fallback baz claims when
   # a second copy is already on the bus (crates/baz/src/mpris/server.rs).

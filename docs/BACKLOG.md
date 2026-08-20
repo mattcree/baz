@@ -1498,9 +1498,17 @@ Newest first. Each was asked for in conversation and is now in the product.
   Playing's optional local facts cycle reads the complete retained
   `PlayerState::signal_path`: source/output rates, direct vs resampled and
   shared vs exclusive. The Debug session log retains the detailed event too.
-- **Transport buttons take no keyboard focus and publish no accessibility tree**
-  — iced 0.13 offers neither (no AccessKit). Tooltips and 32 px hit targets are
-  the whole of what the toolkit currently allows.
+- **No accessibility tree.** iced 0.14 still ships no AccessKit integration, so
+  nothing baz draws is visible to a screen reader. Tooltips and 32 px hit
+  targets remain what the toolkit allows, and the icon-only law (doc 10 §3.1)
+  exists because a tooltip is currently the *only* accessible name a mark has.
+
+  ~~**Transport buttons take no keyboard focus**~~ — **fixed 2026-08-19.**
+  That half was never the toolkit's limit so much as a missing primitive:
+  iced has exactly two focusable widgets, and `crates/baz/src/focus.rs`
+  wraps any control in a stop so `focus_next` can find it. The transport,
+  the app bar and the lane are all reachable by <kbd>Tab</kbd>; the
+  collection is one steered region with the arrows inside it.
 - ~~**No settings surface at all**~~ — **shipped, and it is now the pattern.**
   The rail holds a third panel: one heading, one sentence per section, the
   controls, and a readout where the engine has something to say about the here
@@ -1647,14 +1655,17 @@ Newest first. Each was asked for in conversation and is now in the product.
   Marquee lens's switcher form (ADR-0017 step 18) is likewise left to its
   own design: `WALL · MARQUEE` will be a state row in the state row's
   vocabulary, and nothing shipped pre-empts its keys.
-- **No keyboard route out of the search field.** Transport keys are bound
-  (`crates/baz/src/keys.rs`), but `text_input` captures every key press while
-  focused except Tab and the vertical arrows, so while the search well has
-  focus almost nothing is a shortcut — the field takes the key, and the focus
-  rule in `crate::keys` honours that rather than second-guessing it.
-  <kbd>F11</kbd> and <kbd>Esc</kbd> are the two exceptions, each for a stated
-  reason. Everything else waits on a focus order per place, which is the same
-  missing capability as the accessibility gap above.
+- ~~**No keyboard route out of the search field.**~~ **Fixed 2026-08-19.**
+  <kbd>Tab</kbd> is the route, and it is the third exception to the focus rule
+  after <kbd>F11</kbd> and <kbd>Esc</kbd>: it is the only key on the board
+  whose meaning is *leave here and go to the next thing*, so a field that kept
+  it would be a room with no door. See `crates/baz/src/focus.rs`.
+
+  The entry below it is kept, because the *reason* is still exactly right and
+  still describes every key that is not Tab: `text_input` captures what it is
+  given, and `crate::keys` honours that rather than second-guessing it.
+  Transport keys are bound (`crates/baz/src/keys.rs`) and remain the field's
+  while the caret is in it.
   - ~~**<kbd>Esc</kbd> takes two presses to peel a query you are still
     typing.**~~ **Fixed 2026-08-17** —
     `docs/design/impl/escape-in-the-well/`. The claim that this needed "a
