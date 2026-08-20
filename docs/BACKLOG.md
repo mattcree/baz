@@ -1443,11 +1443,15 @@ Newest first. Each was asked for in conversation and is now in the product.
   downloadable binary with an icon set, a desktop entry and an AppStream file
   has everywhere to point a link *from* and nowhere to point one *to*.
 
-  Nothing in `docs/`, no Pages workflow, no draft. The cheapest honest version
-  is one page built from what already exists — `README.md`'s claims, the
-  screenshots this repo can generate on demand, and `docs/INSTALL.md`'s three
-  routes — published from the release workflow that already builds the
-  archives.
+  **Planned, deliberately not yet built.** The owner, 2026-08-20: *"lets make
+  a really nice enticing website showing off the features of the app. lets not
+  necessarily do it until our backlog is settled, but lets plan it in… and
+  ensure we really make it nice. like, super minimal, no trappings of AI
+  generated sites, and just make the app front and center."* The brief is
+  `docs/design/26-the-site.md`; it is written now because the constraint that
+  matters — *the app is the page* — decides things this repo has to be able to
+  do before the page is written, and those are cheaper to build alongside the
+  screenshots than to retrofit.
 
 ## Interface
 
