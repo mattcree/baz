@@ -1413,20 +1413,37 @@ Newest first. Each was asked for in conversation and is now in the product.
      certificate ~200–400 USD/yr. Unsigned downloads warn on both platforms;
      the pipeline is shaped so that turning signing on is a secret and a flag.
 
-- **The Flathub submission is blocked on the folder portal.** The manifest
-  grants `xdg-music:ro` and nothing else, so a Flathub baz cannot see a
-  library on an external drive or a network share — including the owner's own,
-  which lives on SMB through gvfs at `/run/user/1000/gvfs/…`. A listener has
-  to run `flatpak override --filesystem=…` by hand, which is not an install
-  anybody should be asked to perform.
+- ~~**The Flathub submission is blocked on network shares.**~~ **Fixed and
+  measured 2026-08-20, in a real sandbox**, which is the only place this
+  question has an answer. The Flatpak was built, installed and probed on the
+  owner's own machine.
 
-  **The fix is the portal file chooser** that `docs/design` already names: a
-  listener picks the folder and the portal grants it, so the sandbox learns
-  the path from the person who owns it rather than from a packager's guess.
-  ADR-0025 shipped `Browse…` through the XDG portal for the *desktop* case;
-  what is missing is that the granted path survives into the sandbox's
-  permissions. This is now a release blocker rather than a comment in a
-  manifest.
+  Two grants were missing and only one of them is obvious.
+  `--filesystem=xdg-run/gvfs:ro` makes the desktop's mounts *visible*.
+  `--talk-name=org.gtk.vfs.*` makes them fully *readable*: without it,
+  traversal works and enumeration of a mount root does not, because gvfs
+  answers that one over D-Bus. Measured, inside the sandbox:
+
+  ```text
+  $ ls '…/smb-share:server=…,share=music'          → Input/output error
+  $ ls '…/smb-share:server=…,share=music/CDs/FLAC' → 65daysofstatic  ABBA  …
+  ```
+
+  A listener whose library root *is* the share would have added a folder baz
+  then reported as empty — the worst kind of failure, because nothing is
+  broken and nothing says so. With both grants the same path lists what it
+  lists outside the sandbox.
+
+  Read-only is now proven rather than promised: `touch` inside the share
+  answers *Read-only file system*.
+
+- **Still unverified: the portal folder chooser inside the sandbox.** A
+  collection at `/mnt/music` — not under `~/Music`, not a desktop mount —
+  should be reachable by picking it in `Browse…`, because `rfd` is built
+  portal-only (ADR-0025) and the portal grants what was picked. That is the
+  correct shape and it is *unproven*: it needs a human to click through a file
+  chooser inside the sandbox, which no automated probe can do. Worth ten
+  minutes before submission.
 
 - **Crossfade.** *(The owner: "another backlog item: crossfade" … "enable
   disable as a control and a setting for how long".)* So the surface is

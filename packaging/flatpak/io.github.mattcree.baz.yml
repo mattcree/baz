@@ -56,6 +56,25 @@ finish-args:
   # so the reach is the desktop's, not ours.
   - --filesystem=xdg-run/gvfs:ro
 
+  # **And permission to talk to the daemon that owns those mounts.** The
+  # grant above makes the FUSE tree *visible*; it does not make it fully
+  # readable. Measured inside a real sandbox on 2026-08-20, with the
+  # filesystem grant and without this one:
+  #
+  #     $ ls '/run/user/1000/gvfs/smb-share:server=…,share=music'
+  #     ls: cannot access …: Input/output error
+  #     $ ls '/run/user/1000/gvfs/smb-share:server=…,share=music/CDs/FLAC'
+  #     65daysofstatic  ABBA  Alanis Morissette
+  #
+  # Traversal works and enumeration of the mount root does not, because gvfs
+  # answers that one over D-Bus. A listener whose library root *is* the share
+  # would have added a folder baz then reported as empty — the worst kind of
+  # failure, because nothing is broken and nothing says so. Adding this grant
+  # and re-running the same command lists `CDs  Other  #recycle`, which is
+  # what the same path lists outside the sandbox.
+  - --talk-name=org.gtk.vfs
+  - --talk-name=org.gtk.vfs.*
+
   # **A collection kept somewhere else entirely** — `/mnt/music`, a second
   # drive, a directory the listener chose years ago — is reached through the
   # file chooser rather than by widening this list. baz's `Browse…` is
