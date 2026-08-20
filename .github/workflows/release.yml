@@ -315,9 +315,14 @@ jobs:
           # represented by MSI's numeric ProductVersion.  It has no bearing
           # on version precedence, so use the release portion inside MSI.
           MSI_VERSION="${VERSION%%+*}"
+          # `--no-build` deliberately preserves the target selected by the
+          # matrix build above.  Tell cargo-wix where that cross-compiled
+          # executable landed instead of its native `target/release` default.
+          TARGET_BIN_DIR="target/x86_64-pc-windows-msvc/release"
           cargo wix --no-build --nocapture \
             --package baz \
             --profile release \
+            --target-bin-dir "${TARGET_BIN_DIR}" \
             --install-version "${MSI_VERSION}" \
             --output "dist/baz-${VERSION}-windows-x86_64.msi" \
             --include packaging/windows/main.wxs
