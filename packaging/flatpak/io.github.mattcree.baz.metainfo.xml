@@ -157,6 +157,14 @@
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
+    <release version="0.4.1" date="2026-08-20" type="stable">
+      <description>
+        <p>
+          Flatpak playback now uses the desktop sound server reliably instead
+          of a sandbox-local fallback that could race through a track.
+        </p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-08-20" type="stable">
       <description>
         <p>

@@ -24,6 +24,15 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-20
+
+### Fixed
+
+- **Flatpak playback now reaches the desktop sound server.** The sandboxed
+  ALSA `default` endpoint is explicitly routed to Flatpak's PulseAudio/
+  PipeWire socket. It can no longer accept samples at CPU speed and race
+  through a record when no raw audio device is exposed.
+
 ## [0.4.0] - 2026-08-20
 
 ### Added
@@ -3128,7 +3137,8 @@ a promise about the next commit.
   output (which is also what puts hardware volume out of reach).
   `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/compare/v0.4.0...main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.4.1...main
+[0.4.1]: https://github.com/mattcree/baz/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mattcree/baz/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mattcree/baz/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mattcree/baz/releases/tag/v0.2.0
