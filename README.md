@@ -18,13 +18,6 @@
 > than left to be discovered. Reports are the point of a beta:
 > [open an issue](https://github.com/mattcree/baz/issues).
 
-foo, bar… baz. The name is an homage and the debt is real: **baz is inspired by
-foobar2000** — instant, correct, no commercial agenda, and the conviction that
-the files on your disk are the point rather than an import step. It is not
-foobar2000 and is not trying to be. What baz borrowed is the posture; the rest
-is its own, including the care the paid players spend on making a collection
-worth looking at, without any of their clouds.
-
 ## What you get
 
 - **Your records on a wall.** Every album you own, with its cover, arranged by
@@ -61,10 +54,12 @@ worth looking at, without any of their clouds.
 |---|---|
 | ![Now playing](docs/screenshots/now-playing.png) | ![A playlist](docs/screenshots/playlist.png) |
 | **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **Playlists** — the ones you have made, beside Favourites and the way to a new one. Each is an ordinary `.m3u8` on disk. |
-| ![A record's page](docs/screenshots/album.png) | ![Search](docs/screenshots/search.png) |
-| **A record** — the sleeve at size, the run in play order, and both editions the library merged. | **Search** — app-wide, from any place, reaching tracks as well as records. |
-| ![Equalizer](docs/screenshots/equalizer.png) | ![Home](docs/screenshots/home.png) |
-| **Equalizer** — ten bands, a live response curve, safe auto gain, built-in situations and curves you can save. | **Home** — the collection at a glance: all songs, recent additions and the way back to the music. |
+| ![Chromeless, full-screen visualizer](docs/screenshots/now-playing-immersive.png) | ![A record's page](docs/screenshots/album.png) |
+| **Immersive Now Playing** — live spectrum and chromeless presentation, with every control one gesture away. <kbd>F11</kbd> can take the window full screen. | **A record** — the sleeve at size, the run in play order, and both editions the library merged. |
+| ![Search](docs/screenshots/search.png) | ![Equalizer](docs/screenshots/equalizer.png) |
+| **Search** — app-wide, from any place, reaching tracks as well as records. | **Equalizer** — ten bands, a live response curve, safe auto gain, built-in situations and curves you can save. |
+| ![Home](docs/screenshots/home.png) | ![Theme choices](docs/screenshots/themes.png) |
+| **Home** — the collection at a glance: all songs, recent additions and the way back to the music. | **Themes** — sixteen built-in rooms, live palette previews, and a local data-only format for your own. |
 
 ![A smart playlist: draw how it should move](docs/screenshots/smart-playlist.png)
 

@@ -433,14 +433,37 @@ sleep 28
 park
 shot now-playing
 
-# 4 · Home: `All songs` with its collage sleeve, what arrived recently, and the
+# 4 · The immersive Now Playing room. Null PCM consumes a real-library queue
+# much faster than a listener hears it, so start a fresh record immediately
+# before this frame — an immersive capture of a stopped player would be a
+# black, misleading claim about the feature.
+click 105 133
+park
+rest 370 270
+click 370 $PLAY_1
+click 105 237
+sleep 1.5
+# Advance to the live spectrum and take away Baz's own frame. This is the
+# chromeless presentation a listener uses; the window manager's F11 mode is
+# deliberately not scripted under Xvfb, whose fake compositor can replace the
+# live window with a blank surface. Escape restores the ordinary frame before
+# the route continues.
+click 1242 24                           # visualization: Off → Spectrum
+click 1178 24                           # chromeless
+park
+sleep 3
+shot now-playing-immersive
+xdotool key --clearmodifiers Escape
+sleep 1.2
+
+# 5 · Home: `All songs` with its collage sleeve, what arrived recently, and the
 #     size of the collection. The one place that is about the library rather
 #     than about a record.
 click 105 81
 park
 shot home
 
-# 5 · the playlists place: the list built above beside the built-in
+# 6 · the playlists place: the list built above beside the built-in
 #     `Favourites` and the ghost tile a new one starts from, grouped A–Z the
 #     way the library groups records.
 #
@@ -454,7 +477,7 @@ click 105 185
 park
 shot playlist
 
-# 6 · a record's own page — the sleeve at size, the track list beside it, and
+# 7 · a record's own page — the sleeve at size, the track list beside it, and
 #     the run in play order. Reached from the wall the way a listener reaches
 #     it: the caption selects, and `Open` on the sleeve's own veil goes in.
 click 105 133
@@ -471,7 +494,7 @@ fi
 park
 shot album
 
-# 7 · search, which is app-wide and the fastest way to anything. Typed rather
+# 8 · search, which is app-wide and the fastest way to anything. Typed rather
 #     than pasted: the count beside the field is live, and a paste would
 #     photograph it mid-debounce.
 click 200 24
@@ -488,7 +511,17 @@ shot search
 xdotool key --clearmodifiers Escape
 sleep 0.8
 
-# ------------------------------------------------- 8 · the smart playlist
+# 9 · Appearance: the built-in rooms and the selected palette's swatches.
+# Settings is an app-bar door; Appearance is the third fixed section in its
+# spine at this captured width. This frame is proof that themes are offered as
+# a visible, local choice rather than hidden configuration.
+click 1422 24
+sleep 1.5
+click 320 250
+park
+shot themes
+
+# ------------------------------------------------- 10 · the smart playlist
 # **A second pass, against a different fixture, and it has to be.**
 #
 # Every sample in the wall's fixture is a zero — one of the two guarantees
