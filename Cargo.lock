@@ -422,7 +422,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "baz"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "baz-core",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "baz-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "alsa",
  "cpal",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "baz-vibe"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "baz-core",
  "bliss-audio",

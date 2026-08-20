@@ -406,7 +406,17 @@ shot library
 # the wall, so the record's own selection is in no picture.
 click 1042 741
 
-# 2 · Now playing, by the lane's own row — the record and the rest of the run,
+# 2 · Equaliser: a global player control, open over the wall it is shaping.
+# It lives between the view marks and the notification bell at 1600 × 900.
+# Move to dead ground without pressing it: an outside **press** correctly
+# dismisses this floating panel, while a move clears the preceding tile hover.
+park
+click 1327 24
+park
+shot equalizer
+click 1327 24
+
+# 3 · Now playing, by the lane's own row — the record and the rest of the run,
 #     side by side, which is the whole of that place.
 click 105 237
 # **Wait for the case to come round.** It turns once every 32 s
@@ -419,14 +429,14 @@ sleep 28
 park
 shot now-playing
 
-# 3 · Home: `All songs` with its collage sleeve, what arrived recently, and the
+# 4 · Home: `All songs` with its collage sleeve, what arrived recently, and the
 #     size of the collection. The one place that is about the library rather
 #     than about a record.
 click 105 81
 park
 shot home
 
-# 4 · the playlists place: the list built above beside the built-in
+# 5 · the playlists place: the list built above beside the built-in
 #     `Favourites` and the ghost tile a new one starts from, grouped A–Z the
 #     way the library groups records.
 #
@@ -440,7 +450,7 @@ click 105 185
 park
 shot playlist
 
-# 5 · a record's own page — the sleeve at size, the track list beside it, and
+# 6 · a record's own page — the sleeve at size, the track list beside it, and
 #     the run in play order. Reached from the wall the way a listener reaches
 #     it: the caption selects, and `Open` on the sleeve's own veil goes in.
 click 105 133
@@ -457,7 +467,7 @@ fi
 park
 shot album
 
-# 6 · search, which is app-wide and the fastest way to anything. Typed rather
+# 7 · search, which is app-wide and the fastest way to anything. Typed rather
 #     than pasted: the count beside the field is live, and a paste would
 #     photograph it mid-debounce.
 click 200 24
@@ -474,7 +484,7 @@ shot search
 xdotool key --clearmodifiers Escape
 sleep 0.8
 
-# ------------------------------------------------- 7 · the smart playlist
+# ------------------------------------------------- 8 · the smart playlist
 # **A second pass, against a different fixture, and it has to be.**
 #
 # Every sample in the wall's fixture is a zero — one of the two guarantees
@@ -529,7 +539,7 @@ sleep 6
 
 click 105 185                           # Playlists
 sleep 1.5
-click 614 274                           # `New smart playlist`
+click 764 316                           # `New smart playlist` — centre of its tile
 sleep 3
 if [[ -z $REAL ]]; then
   click 1120 626                        # `Listen to my music` — the one step first

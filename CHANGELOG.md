@@ -24,6 +24,36 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-20
+
+### Added
+
+- **Install baz like an app on every supported platform.** Releases now carry
+  a Linux Flatpak bundle, a Windows MSI and a macOS DMG alongside the existing
+  archives. The Linux archive also includes a reversible per-user installer
+  that installs the application entry, metadata and icons.
+- **Optional update checks and a verified installer hand-off.** Baz can check
+  GitHub Releases once at startup, download the matching platform installer,
+  compare it with the published SHA-256 sum, and hand it to the platform. It
+  never replaces a running application itself; the setting can turn the check
+  off, and Flatpak continues to be updated by its store.
+- **A ten-band graphic equaliser.** It is available from every page, can be
+  completely bypassed, draws its real response curve, offers automatic
+  headroom, and saves listener-owned presets.
+- **More ways to listen and look.** AIFF and Ogg Vorbis join the library;
+  Now Playing gains an oscilloscope and a chromeless presentation; themes gain
+  more rooms and record-aware colour; and a file or folder dropped on a
+  running Baz is queued to play.
+
+### Changed
+
+- **The whole keyboard can reach more of Baz.** The app frame, transport,
+  lane and collection now participate in Tab navigation, with a focused
+  collection still navigated by arrow keys.
+- **Library and playlist details are more resilient.** Missing playlist files
+  can be located again, untagged compilations group correctly, and search also
+  finds playlists while treating `and` and `&amp;` as the same word.
+
 ## [0.3.0] - 2026-08-17
 
 ### Changed
@@ -3098,7 +3128,8 @@ a promise about the next commit.
   output (which is also what puts hardware volume out of reach).
   `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/compare/v0.3.0...main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.4.0...main
+[0.4.0]: https://github.com/mattcree/baz/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mattcree/baz/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mattcree/baz/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mattcree/baz/releases/tag/v0.1.0

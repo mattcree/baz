@@ -157,6 +157,25 @@
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
+    <release version="0.4.0" date="2026-08-20" type="stable">
+      <description>
+        <p>
+          Baz is easier to install: releases now include a Linux Flatpak
+          bundle, a Windows installer and a macOS disk image, alongside the
+          archives for people who prefer them.
+        </p>
+        <p>
+          A new ten-band equaliser is available from every page. It can be
+          fully bypassed, shows the curve it is applying, keeps boosted music
+          from clipping with automatic headroom, and saves your own presets.
+        </p>
+        <p>
+          This release also adds AIFF and Ogg Vorbis, an oscilloscope and a
+          chromeless Now Playing view, fuller keyboard navigation, and safer
+          handling for missing playlist entries and untagged compilations.
+        </p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-08-17" type="stable">
       <description>
         <p>

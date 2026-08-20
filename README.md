@@ -32,7 +32,7 @@ worth looking at, without any of their clouds.
   densities. baz remembers where you left it.
 - **It just plays.** Gapless between tracks — a live album or a mixed record
   runs as one piece, with no click and no pause. FLAC, MP3, WAV, ALAC, AAC,
-  Ogg Vorbis.
+  AIFF and Ogg Vorbis.
 - **Nothing touches your files.** baz reads your folders and never writes to
   them: no tags rewritten, no files moved, nothing left behind. Move your
   music and baz finds it again.
@@ -50,9 +50,12 @@ worth looking at, without any of their clouds.
   changes nothing on the way out; when it *has* to change something it says so
   on screen. If your files carry ReplayGain tags it will use them, and it can
   measure your library itself.
+- **Shape the sound when you want to.** A ten-band equalizer is one click away
+  from every room, with named curves, your own saved presets and automatic
+  headroom protection. Leave it off and the direct, bit-perfect path remains.
 - **It belongs to your desktop.** Media keys, the lock screen and GNOME's and
   KDE's own controls all drive baz and show the cover.
-- **Four themes**, plus a plain file format for writing your own.
+- **Sixteen themes**, plus a plain file format for writing your own.
 
 |  |  |
 |---|---|
@@ -60,6 +63,8 @@ worth looking at, without any of their clouds.
 | **Now playing** — cover, rotating jewel case, or a spectrum-led room with no album object. | **Playlists** — the ones you have made, beside Favourites and the way to a new one. Each is an ordinary `.m3u8` on disk. |
 | ![A record's page](docs/screenshots/album.png) | ![Search](docs/screenshots/search.png) |
 | **A record** — the sleeve at size, the run in play order, and both editions the library merged. | **Search** — app-wide, from any place, reaching tracks as well as records. |
+| ![Equalizer](docs/screenshots/equalizer.png) | ![Home](docs/screenshots/home.png) |
+| **Equalizer** — ten bands, a live response curve, safe auto gain, built-in situations and curves you can save. | **Home** — the collection at a glance: all songs, recent additions and the way back to the music. |
 
 ![A smart playlist: draw how it should move](docs/screenshots/smart-playlist.png)
 
@@ -70,10 +75,9 @@ rows down the list: *quiet · slow · dark* at the top, *loud · fast · noisy* 
 the bottom. Every track is analysed on your own machine, and none of your
 audio leaves it.
 
-> These are real screenshots of a real 4 870-track library, not a mock-up.
-> `docs/screenshots/capture.sh` takes them from the shipping binary.
-
-![Home](docs/screenshots/home.png)
+> These are real screenshots from the shipping binary, captured against the
+> project's representative music fixture — not mock-ups.
+> `docs/screenshots/capture.sh` refreshes them reproducibly.
 
 The long version of all of this — every audio claim and how it is checked — is
 in [`docs/FEATURES.md`](docs/FEATURES.md).
