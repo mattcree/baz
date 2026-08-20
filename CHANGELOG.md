@@ -26,6 +26,12 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [0.4.1] - 2026-08-20
 
+### Changed
+
+- **Updates now has its own Settings section.** It no longer appears among
+  playback and loudness controls. Flatpak installations explain their update
+  path without assuming they came from a software centre.
+
 ### Fixed
 
 - **Flatpak playback now reaches the desktop sound server.** The sandboxed

@@ -4,9 +4,11 @@
 //! # What this surface is for
 //!
 //! Everything that is a standing decision rather than a transport action. It
-//! holds three sections: **Playback** — ReplayGain (ADR-0013), whose content moved
-//! here from the rail panel *verbatim* — and **Library**, the music folders baz
-//! holds and the force sync that re-reads them (ADR-0022). It remains the
+//! holds sections for **Playback** — ReplayGain (ADR-0013), whose content moved
+//! here from the rail panel *verbatim* — **Library**, the music folders baz
+//! holds and the force sync that re-reads them (ADR-0022), and **Updates**,
+//! whose availability and install actions do not belong to listening controls.
+//! It remains the
 //! container for the ones the vision promises next: the output chain and
 //! exclusive mode, a signal-path readout, the enrichment toggles that are off by
 //! default.
@@ -173,17 +175,27 @@ const PLACE_PAD: f32 = theme::HANG;
 /// control rather than a picture of one.
 ///
 /// Playback stays first because it was first; a listener who opens Settings out
-/// of habit finds what they left.
-const SECTIONS: [&str; 5] = ["Playback", "Library", "Appearance", "Vibe", "Debug"];
+/// of habit finds what they left. Updates is its own decision, before the
+/// session-only diagnostics.
+const SECTIONS: [&str; 6] = [
+    "Playback",
+    "Library",
+    "Appearance",
+    "Vibe",
+    "Updates",
+    "Debug",
+];
 
 /// The index of the Library section in [`SECTIONS`].
 pub(crate) const LIBRARY_SECTION: usize = 1;
-/// The index of the Vibe section in [`SECTIONS`].
+/// The index of the Appearance section in [`SECTIONS`].
 pub(crate) const APPEARANCE_SECTION: usize = 2;
 /// The index of the Vibe section in [`SECTIONS`].
 pub(crate) const VIBE_SECTION: usize = 3;
+/// The index of the update controls in [`SECTIONS`].
+pub(crate) const UPDATES_SECTION: usize = 4;
 /// The index of the session diagnostic stream in [`SECTIONS`].
-pub(crate) const DEBUG_SECTION: usize = 4;
+pub(crate) const DEBUG_SECTION: usize = 5;
 
 /// The Settings place: a header with the way back, a list of sections, and the
 /// current section's content.
@@ -228,10 +240,11 @@ pub(crate) fn view<'a>(
         LIBRARY_SECTION => vec![library_section(library)],
         APPEARANCE_SECTION => vec![appearance_section(&theme_view)],
         VIBE_SECTION => vec![vibe_section(vibe_workers, ink)],
+        UPDATES_SECTION => vec![updates_section(updating, check_on_start)],
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![
             output_section(output, player),
-            replay_gain_section(player, ink, measuring, updating, check_on_start),
+            replay_gain_section(player, ink, measuring),
             sleep_section(sleep),
             shortcuts_section(),
         ],
@@ -772,13 +785,11 @@ fn section_entry(
 
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
 /// clipping prevention, and what it all came to for the track playing now.
-fn replay_gain_section<'a>(
-    player: &'a PlayerState,
+fn replay_gain_section(
+    player: &PlayerState,
     ink: Ink,
     measuring: Measuring,
-    updating: &Updating,
-    check_on_start: bool,
-) -> Element<'a, Message> {
+) -> Element<'_, Message> {
     let room = theme::active();
     let state = player.replay_gain();
     // No engine, nothing to configure — the same rule the album panel's Play
@@ -869,11 +880,6 @@ fn replay_gain_section<'a>(
     }
 
     section = section.push(measuring_block(measuring));
-    section = section.push(update_block(
-        crate::release::Route::detect(),
-        updating,
-        check_on_start,
-    ));
 
     section.into()
 }
@@ -896,7 +902,7 @@ pub(crate) enum Updating {
     Failed(String),
 }
 
-/// **The update block** (ADR-0043 §3, as the owner amended it: *"ideally we
+/// **The Updates section** (ADR-0043 §3, as the owner amended it: *"ideally we
 /// want to be able to update easily. as in, the user just clicks something and
 /// the app updates"*).
 ///
@@ -905,30 +911,23 @@ pub(crate) enum Updating {
 /// `SHA256SUMS` published beside it, and a hand-off to `msiexec` or the
 /// desktop's opener — baz never overwrites its own running binary.
 ///
-/// **Inside a Flatpak this block is absent entirely**, and that is the
-/// interesting case. `/app` is read only, so an update button could not work;
-/// and the store updates baz without being asked, so it does not need to. What
-/// stands there instead is one sentence saying so.
-fn update_block(
-    route: crate::release::Route,
-    updating: &Updating,
-    starts: bool,
-) -> Element<'static, Message> {
+/// **Inside a Flatpak installation**, `/app` is read only, so an update button
+/// could not work. Its own Updates section instead explains which system owns
+/// that operation; it is never mixed into Playback.
+fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Message> {
     let room = theme::active();
-    let mut block = column![
-        text("Updates")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim),
-    ]
+    let route = crate::release::Route::detect();
+    let mut block = column![section_heading(
+        "Updates",
+        "Choose how baz looks for and installs newer releases.",
+    )]
     .spacing(theme::GAP_SM);
 
     if !route.can_install() {
         return block
             .push(readout_block(vec![(
-                "baz was installed from a software centre, which keeps it up to \
-                 date for you. There is nothing to do here."
+                "This is a Flatpak. Update it through its Flatpak remote, your \
+                 software centre, or `flatpak update`."
                     .to_owned(),
                 room.paper_faint,
             )]))
