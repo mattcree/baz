@@ -199,7 +199,7 @@ pub(crate) fn view(
     // is transparent, so what the well actually stands on is the record's own
     // wash — [`crate::views::now_playing`] derives that from the wall's
     // lightness, so the wall is the right answer in both states.
-    let search = crate::views::search::well(shelf, room.wall);
+    let search = crate::views::search::well(shelf, room.wall, ink);
     // **Two zones, two seams.** The display options are the *view's*
     // (ADR-0040 §2 zone 3) and the bell and the gear are the *application's*
     // (zone 4), so the pair is one cluster on
@@ -211,12 +211,12 @@ pub(crate) fn view(
     // icons/controls"*.
     let application = row![
         equalizer(ink),
-        crate::views::status::bell(health),
+        crate::views::status::bell(health, ink),
         gear(ink)
     ]
     .spacing(theme::CONTROL_CLUSTER_GAP)
     .align_y(iced::Alignment::Center);
-    let furniture = row![marks(density, visualization), application]
+    let furniture = row![marks(density, visualization, ink), application]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
@@ -342,10 +342,11 @@ pub(crate) fn view(
 fn marks(
     density: Option<crate::shelf::Density>,
     visualization: Option<crate::visualizer::State>,
+    ink: Ink,
 ) -> Element<'static, Message> {
     let inner: Element<'static, Message> = match (density, visualization) {
-        (Some(current), None) => crate::views::density_marks(current),
-        (None, Some(current)) => crate::visualizer::marks(current),
+        (Some(current), None) => crate::views::density_marks(current, ink),
+        (None, Some(current)) => crate::visualizer::marks(current, ink),
         (None, None) => Space::new()
             .width(Length::Fixed(theme::APP_BAR_MARKS_W))
             .height(Length::Shrink)
@@ -514,12 +515,7 @@ fn glyph_button(
         iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_ink(
-                true,
-                false,
-                ink.hover(named),
-                ink.pressed(named),
-            )),
+            .opacity(ink.glyph(true, false, named)),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -819,7 +815,7 @@ mod tests {
             .1;
         let application = &application[..application.find(";\n").expect("a binding ends")];
         assert!(
-            application.contains("crate::views::status::bell(health)")
+            application.contains("crate::views::status::bell(health, ink)")
                 && application.contains("gear(ink)")
                 && application.contains("theme::CONTROL_CLUSTER_GAP"),
             "the application's two doors are no longer one cluster on the \
@@ -831,7 +827,7 @@ mod tests {
             .1;
         let furniture = &furniture[..furniture.find(";\n").expect("a binding ends")];
         assert!(
-            furniture.contains("marks(density, visualization)")
+            furniture.contains("marks(density, visualization, ink)")
                 && furniture.contains("application")
                 && furniture.contains("theme::GAP_LG"),
             "the display options and the application's doors no longer stand \

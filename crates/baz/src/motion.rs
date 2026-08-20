@@ -100,6 +100,15 @@ pub const TILE: Duration = Duration::from_millis(90);
 /// incidental: see [`DISSOLVE`].
 pub const LAMP: Duration = Duration::from_millis(200);
 
+/// **The chromeless frame lighting and going out**, on approach.
+///
+/// Slower than [`INK`]'s 90 ms, which is a hover, and faster than a listener
+/// can pull their hand back: the point of the mode is that the record fills
+/// the window, so the controls have to *arrive* rather than blink — a hard cut
+/// at the edge of a reveal band reads as a glitch — and they have to be gone
+/// again before the eye returns to the artwork.
+pub const CHROME_REVEAL: Duration = Duration::from_millis(160);
+
 /// **The Now playing hero's crossfade when the record changes — [`LAMP`]'s own
 /// 200 ms, and [`Curve::Linear`]** (ADR-0020's third amendment).
 ///
@@ -467,13 +476,56 @@ pub enum Control {
 pub struct Ink {
     hover: Keyed<Control>,
     pressed: Option<Control>,
+    veil: f32,
 }
 
 impl Ink {
     /// The shell's current reading.
     #[must_use]
     pub const fn new(hover: Keyed<Control>, pressed: Option<Control>) -> Self {
-        Self { hover, pressed }
+        Self {
+            hover,
+            pressed,
+            veil: 1.0,
+        }
+    }
+
+    /// **Fade every glyph inked from this reading**, `0.0` gone to `1.0` whole.
+    ///
+    /// The owner, on the chromeless mode: *"keep all windows controls existing
+    /// just invisible until you start moving your mouse near to them"*. A
+    /// control that is *absent* until the pointer arrives is a different
+    /// control — it takes no space, so the bar reflows, and it cannot be found
+    /// by a hand that does not already know it is there. A control that is
+    /// merely **unlit** keeps its place, its hit box and its tooltip, and the
+    /// only thing the pointer restores is the ink.
+    ///
+    /// It rides on [`Ink`] rather than on a parameter of its own because this
+    /// type is already the answer to *how should a glyph be inked right now*,
+    /// and a veil is exactly that kind of fact. Threading a second scalar
+    /// beside it would be two answers to one question, kept in step by hand.
+    #[must_use]
+    pub fn veiled(mut self, veil: f32) -> Self {
+        self.veil = veil.clamp(0.0, 1.0);
+        self
+    }
+
+    /// **One glyph's opacity**, ladder and veil together.
+    ///
+    /// The one place the two are combined, so a surface cannot draw a glyph
+    /// that forgot the veil — see [`crate::theme::glyph_ink`] for the ladder
+    /// itself.
+    #[must_use]
+    pub fn glyph(self, enabled: bool, pending: bool, control: Control) -> f32 {
+        crate::theme::glyph_ink(enabled, pending, self.hover(control), self.pressed(control))
+            * self.veil
+    }
+
+    /// The veil alone, for the few inks in a bar that are not glyphs — the
+    /// search well's own colours.
+    #[must_use]
+    pub const fn veil(self) -> f32 {
+        self.veil
     }
 
     /// How far `control`'s hover fade has travelled, in `[0, 1]`.
@@ -496,6 +548,56 @@ mod tests {
     /// One frame at 60 Hz, which is what the transitions are actually ticked
     /// against on a vsynced display.
     const FRAME: Duration = Duration::from_micros(16_667);
+
+    /// **A veil scales every glyph on a bar, and scales nothing else.**
+    ///
+    /// The owner, on chromeless: *"keep all windows controls existing just
+    /// invisible until you start moving your mouse near to them"* — *existing*
+    /// being the load-bearing word, and the reason the veil is a multiplier on
+    /// the ink rather than a branch that removes the control. A control that is
+    /// absent takes no space, so the bar reflows as the hand approaches and the
+    /// thing you were reaching for moves; one that is merely unlit keeps its
+    /// place, its hit box and its tooltip.
+    ///
+    /// Pinned as a *proportion*, so the ladder underneath — resting, hovered,
+    /// pressed, disabled — still reads at every veil rather than collapsing to
+    /// one flat grey as it fades.
+    #[test]
+    fn a_veil_scales_the_whole_ink_ladder_and_flattens_none_of_it() {
+        let ink = Ink::new(Keyed::new(), None);
+        for veil in [0.0_f32, 0.25, 0.5, 1.0] {
+            let veiled = ink.veiled(veil);
+            assert!(
+                (veiled.veil() - veil).abs() < f32::EPSILON,
+                "a veil of {veil} was not kept"
+            );
+            for (enabled, pending) in [(true, false), (false, false), (true, true)] {
+                let whole = ink.glyph(enabled, pending, Control::HistoryBack);
+                let faded = veiled.glyph(enabled, pending, Control::HistoryBack);
+                assert!(
+                    (faded - whole * veil).abs() < 1e-6,
+                    "the veil is not a proportion of the ladder at {veil}"
+                );
+            }
+        }
+        assert!(
+            ink.veiled(0.0)
+                .glyph(true, false, Control::HistoryBack)
+                .abs()
+                < f32::EPSILON,
+            "a fully drawn veil leaves ink on the bar"
+        );
+    }
+
+    /// **A veil is a proportion and cannot be more than one**, because a
+    /// caller that handed it a tween mid-flight would otherwise be able to
+    /// brighten a glyph past the ladder's own top rung.
+    #[test]
+    fn a_veil_is_bounded_at_both_ends() {
+        let ink = Ink::new(Keyed::new(), None);
+        assert!((ink.veiled(4.0).veil() - 1.0).abs() < f32::EPSILON);
+        assert!(ink.veiled(-2.0).veil().abs() < f32::EPSILON);
+    }
 
     /// **It stops, and no later instant revives it.**
     ///

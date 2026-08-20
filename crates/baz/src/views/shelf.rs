@@ -1367,7 +1367,7 @@ mod tests {
             bar.split("#[cfg(test)]")
                 .next()
                 .expect("a head")
-                .contains("crate::views::density_marks(current)"),
+                .contains("crate::views::density_marks(current, ink)"),
             "the app bar does not draw the marks it took"
         );
     }

@@ -1199,6 +1199,12 @@ pub(crate) enum Message {
     WindowMaximiseToggled,
     /// F11: fill the window's current monitor, or return to its windowed size.
     ToggleFullscreen,
+    /// **The pointer has come near the chromeless frame, or left it.**
+    ///
+    /// One message on crossing rather than one per mouse move: the reveal band
+    /// is a `mouse_area`, so this fires twice per approach and never while the
+    /// hand is still.
+    ChromeApproached(bool),
     /// **Move the keyboard's ring to the next focus stop**, in the order the
     /// place builds its controls — see [`crate::focus`].
     FocusNext,
@@ -1685,6 +1691,13 @@ struct App {
     /// close button, from a press the listener made days ago. A mode you take
     /// the frame off for is a mode you enter on purpose each time.
     chromeless: bool,
+    /// **How lit the chromeless frame's controls are**, 0 gone to 1 whole.
+    ///
+    /// Settled at zero because chromeless is entered from a press on the bar
+    /// itself: the pointer is already up there, `chrome_near` is about to say
+    /// so, and starting lit would flash the bar on before fading it out.
+    /// Outside chromeless nothing reads it — the bar is simply always whole.
+    chrome_veil: motion::Tween,
     /// When the app bar was last pressed, for the double-press that maximises
     /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
     /// double, so that three presses are a double and a single.
@@ -2307,6 +2320,7 @@ impl App {
             window_maximized: false,
             fullscreen: false,
             chromeless: false,
+            chrome_veil: motion::Tween::settled(0.0),
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
@@ -3176,6 +3190,14 @@ impl App {
                 {
                     state.selection.select(Content::Album(album.id));
                 }
+                Task::none()
+            }
+            Message::ChromeApproached(near) => {
+                self.chrome_veil.go(
+                    if near { 1.0 } else { 0.0 },
+                    motion::CHROME_REVEAL,
+                    Instant::now(),
+                );
                 Task::none()
             }
             Message::ToggleChromeless => {
@@ -4070,6 +4092,7 @@ impl App {
     fn tick_motion(&mut self, now: Instant) -> Task<Message> {
         self.ink.tick(now);
         self.warmth.tick(now);
+        self.chrome_veil.tick(now);
         match &mut self.screen {
             Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
             Screen::Shelf(state) => state.tick_motion(now),
@@ -4086,6 +4109,7 @@ impl App {
     fn moving(&self) -> bool {
         self.ink.live()
             || self.warmth.live()
+            || self.chrome_veil.live()
             || match &self.screen {
                 Screen::Setup(_) | Screen::Blocked(_) => false,
                 Screen::Shelf(state) => state.moving(),
@@ -8336,8 +8360,35 @@ impl App {
                 owns_chrome(),
                 over_field,
                 self.health_summary(),
-                ink,
+                // **Chromeless keeps every control and lights none of them
+                // until the hand comes near.** The owner: *"keep all windows
+                // controls existing just invisible until you start moving your
+                // mouse near to them"* — *existing* being the load-bearing
+                // word. A control that is absent takes no space, so the bar
+                // reflows as you approach; one that is merely unlit keeps its
+                // place, its hit box and its tooltip, and the pointer restores
+                // only the ink. Everywhere else the veil is 1 and this is the
+                // bar it always was.
+                if self.chromeless {
+                    ink.veiled(self.chrome_veil.value())
+                } else {
+                    ink
+                },
             )
+        };
+        // **The band that hears the approach**, and only in chromeless.
+        //
+        // A `mouse_area` rather than a tracked cursor: one message on crossing
+        // in, one on crossing out, and none at all while the hand is still —
+        // where reading a position would be a message per mouse move, which is
+        // the per-frame cost every other clock in this file is guarded against.
+        let bar: Element<'_, Message> = if self.chromeless {
+            iced::widget::mouse_area(bar)
+                .on_enter(Message::ChromeApproached(true))
+                .on_exit(Message::ChromeApproached(false))
+                .into()
+        } else {
+            bar
         };
         // **Over the page, not above it, wherever the bar is glass.**
         //

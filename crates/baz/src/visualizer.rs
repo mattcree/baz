@@ -323,12 +323,12 @@ pub(crate) fn foreground(
 /// available without pressing. The tooltip carries it — *"Cover art — choose
 /// Jewel case"* — which is the same promise [`mode_button`] has always made
 /// and is why he named that control as the one to match.
-pub(crate) fn marks(state: State) -> Element<'static, Message> {
+pub(crate) fn marks(state: State, ink: crate::motion::Ink) -> Element<'static, Message> {
     row![
-        chromeless_mark(state.chromeless),
-        foreground_button(state.foreground),
-        mode_button(state.mode),
-        facts_button(state.facts),
+        chromeless_mark(state.chromeless, ink),
+        foreground_button(state.foreground, ink),
+        mode_button(state.mode, ink),
+        facts_button(state.facts, ink),
     ]
     .into()
 }
@@ -350,7 +350,7 @@ pub(crate) fn marks(state: State) -> Element<'static, Message> {
 /// one is a *window* operation and this one is about what baz draws inside the
 /// window. Both at once is the reading the ask is really after, and neither
 /// needs to know about the other.
-pub(crate) fn chromeless_mark(on: bool) -> Element<'static, Message> {
+pub(crate) fn chromeless_mark(on: bool, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(crate::icon::inked(
@@ -359,7 +359,7 @@ pub(crate) fn chromeless_mark(on: bool) -> Element<'static, Message> {
         ))
         .width(Length::Fixed(theme::ICON_PX))
         .height(Length::Fixed(theme::ICON_PX))
-        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY } * ink.veil()),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -388,7 +388,7 @@ pub(crate) fn chromeless_mark(on: bool) -> Element<'static, Message> {
     .into()
 }
 
-fn facts_button(on: bool) -> Element<'static, Message> {
+fn facts_button(on: bool, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(crate::icon::inked(
@@ -397,7 +397,7 @@ fn facts_button(on: bool) -> Element<'static, Message> {
         ))
         .width(Length::Fixed(theme::ICON_PX))
         .height(Length::Fixed(theme::ICON_PX))
-        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY } * ink.veil()),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -436,7 +436,7 @@ fn facts_button(on: bool) -> Element<'static, Message> {
 /// No new message. `VisualizationForeground` already means *be this object*,
 /// and the button computes which one — so the shell's arm, the config it
 /// persists and every test over them are untouched by the change of grammar.
-fn foreground_button(selected: Foreground) -> Element<'static, Message> {
+fn foreground_button(selected: Foreground, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
     let showing = selected.draws_art();
     let mark = container(
@@ -446,7 +446,7 @@ fn foreground_button(selected: Foreground) -> Element<'static, Message> {
         ))
         .width(Length::Fixed(theme::ICON_PX))
         .height(Length::Fixed(theme::ICON_PX))
-        .opacity(if showing { 1.0 } else { theme::GLYPH_OPACITY }),
+        .opacity(if showing { 1.0 } else { theme::GLYPH_OPACITY } * ink.veil()),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -475,7 +475,7 @@ fn foreground_button(selected: Foreground) -> Element<'static, Message> {
     .into()
 }
 
-fn mode_button(mode: Mode) -> Element<'static, Message> {
+fn mode_button(mode: Mode, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(crate::icon::inked(
@@ -488,11 +488,13 @@ fn mode_button(mode: Mode) -> Element<'static, Message> {
         ))
         .width(Length::Fixed(theme::ICON_PX))
         .height(Length::Fixed(theme::ICON_PX))
-        .opacity(if mode.active() {
-            1.0
-        } else {
-            theme::GLYPH_OPACITY
-        }),
+        .opacity(
+            if mode.active() {
+                1.0
+            } else {
+                theme::GLYPH_OPACITY
+            } * ink.veil(),
+        ),
     )
     .width(Length::Fill)
     .height(Length::Fill)

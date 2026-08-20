@@ -28,7 +28,11 @@ pub(crate) fn scroll_id() -> iced::widget::Id {
 }
 
 /// The one full search well, resident in the app bar at every width/place.
-pub(crate) fn well(shelf: &Shelf, ground: iced::Color) -> Element<'_, Message> {
+pub(crate) fn well(
+    shelf: &Shelf,
+    ground: iced::Color,
+    ink: crate::motion::Ink,
+) -> Element<'_, Message> {
     let room = theme::active();
     let filtering = !shelf.query.trim().is_empty();
     let input = text_input(SCOPE, &shelf.query)
@@ -48,7 +52,7 @@ pub(crate) fn well(shelf: &Shelf, ground: iced::Color) -> Element<'_, Message> {
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(theme::SIDEBAR_MEASURE))
-        .style(move |_theme, status| theme::well(room, ground, status));
+        .style(move |_theme, status| theme::well(room, ground, status, ink.veil()));
     let mark: Element<'_, Message> = if filtering {
         container(crate::views::clear_mark(room.recess))
             .height(Length::Fixed(theme::TRANSPORT_HIT))
@@ -66,7 +70,7 @@ pub(crate) fn well(shelf: &Shelf, ground: iced::Color) -> Element<'_, Message> {
             iced::widget::image(icon::handle(icon::Glyph::Magnifier))
                 .width(Length::Fixed(theme::ICON_PX))
                 .height(Length::Fixed(theme::ICON_PX))
-                .opacity(theme::GLYPH_OPACITY),
+                .opacity(theme::GLYPH_OPACITY * ink.veil()),
         )
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(theme::pad(0.0, theme::SIDEBAR_WELL_GLYPH_LEAD))

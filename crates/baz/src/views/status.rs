@@ -14,14 +14,23 @@ const DOT: f32 = 7.0;
 const PANEL_W: f32 = 440.0;
 const PANEL_H: f32 = 420.0;
 
-pub(crate) fn bell(summary: Summary) -> Element<'static, Message> {
+pub(crate) fn bell(summary: Summary, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
+    // **The pip fades with the glyph it sits on.** It is a painted container
+    // rather than a sprite, so the veil (`crate::motion::Ink::veil`) has to
+    // reach it through its colour — and it has to reach it at all, or the
+    // chromeless frame goes dark leaving one coloured dot alone in the corner
+    // of the window, which is exactly what the first build did.
     let tone = tone(room, summary.level);
+    let tone = iced::Color {
+        a: tone.a * ink.veil(),
+        ..tone
+    };
     let mark = container(iced::widget::stack![
         iced_image(icon::handle(icon::Glyph::Bell))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_ink(true, false, 0.0, false)),
+            .opacity(theme::glyph_ink(true, false, 0.0, false) * ink.veil()),
         // **The dot is painted on a [`DOT`]-sized box, and *that* box is
         // aligned** — two containers, not one, and the difference is the whole
         // of the bell.

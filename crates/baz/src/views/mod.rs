@@ -932,13 +932,16 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
 /// would do nothing, and a control that does nothing when pressed is the lie
 /// the rail's absent letters already refuse. It is the fact; the others are
 /// the controls (L8.3's split).
-pub(crate) fn density_marks(current: crate::shelf::Density) -> Element<'static, Message> {
+pub(crate) fn density_marks(
+    current: crate::shelf::Density,
+    ink: crate::motion::Ink,
+) -> Element<'static, Message> {
     // One axis now, and that is a simplification the move paid for: the run
     // used to be laid down the index rail's lane in one place and along a
     // section rule in two others, so it carried a `DetentAxis` to say which.
     // A bar is horizontal in every place there is, so the parameter went with
     // the placements that needed it.
-    row(crate::shelf::Density::ALL.map(|step| density_mark(step, current))).into()
+    row(crate::shelf::Density::ALL.map(|step| density_mark(step, current, ink))).into()
 }
 
 /// One detent of [`density_marks`]: the step's glyph in a
@@ -949,6 +952,7 @@ pub(crate) fn density_marks(current: crate::shelf::Density) -> Element<'static, 
 fn density_mark(
     step: crate::shelf::Density,
     current: crate::shelf::Density,
+    ink: crate::motion::Ink,
 ) -> Element<'static, Message> {
     use crate::shelf::Density;
 
@@ -964,11 +968,13 @@ fn density_mark(
         iced_image(crate::icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(if active {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY
-            }),
+            .opacity(
+                if active {
+                    theme::GLYPH_OPACITY_HOVER
+                } else {
+                    theme::GLYPH_OPACITY
+                } * ink.veil(),
+            ),
     )
     .width(Length::Fill)
     .height(Length::Fill)

@@ -4455,7 +4455,12 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
 /// `ground` is what the well is actually over, because a hairline is an opaque
 /// colour rather than an alpha ([`Palette::ink_over`]).
 #[must_use]
-pub fn well(p: &Palette, ground: Color, status: text_input::Status) -> text_input::Style {
+pub fn well(
+    p: &Palette,
+    ground: Color,
+    status: text_input::Status,
+    veil: f32,
+) -> text_input::Style {
     let (background, border_color) = match status {
         text_input::Status::Focused { .. } => (p.recess, p.paper_ring(p.recess)),
         text_input::Status::Hovered => (p.recess, p.hairline_strong(p.recess)),
@@ -4463,16 +4468,24 @@ pub fn well(p: &Palette, ground: Color, status: text_input::Status) -> text_inpu
             (Color::TRANSPARENT, p.hairline(ground))
         }
     };
+    // The well is the one thing in the bar that is not a glyph, so the veil
+    // (`crate::motion::Ink::veil`) has to be spent on its colours rather than
+    // on an image's opacity. Every ink it draws fades together, edge included,
+    // or the chromeless bar would keep a rectangle drawn around nothing.
+    let fade = |colour: Color| Color {
+        a: colour.a * veil,
+        ..colour
+    };
     text_input::Style {
-        background: Background::Color(background),
+        background: Background::Color(fade(background)),
         border: Border {
-            color: border_color,
+            color: fade(border_color),
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
-        icon: p.paper_faint,
-        placeholder: p.paper_faint,
-        value: p.paper,
+        icon: fade(p.paper_faint),
+        placeholder: fade(p.paper_faint),
+        value: fade(p.paper),
         selection: p.select_wash(p.recess),
     }
 }
@@ -9472,9 +9485,11 @@ mod tests {
             // than on a design change.
             bar.contains("let application = row![")
                 && bar.contains("equalizer(ink),")
-                && bar.contains("crate::views::status::bell(health),")
+                && bar.contains("crate::views::status::bell(health, ink),")
                 && bar.contains("gear(ink)")
-                && bar.contains("let furniture = row![marks(density, visualization), application]"),
+                && bar.contains(
+                    "let furniture = row![marks(density, visualization, ink), application]"
+                ),
             "the trailing furniture's tenants changed; `APP_BAR_FURNITURE_W` is \
              what the budget spends on them"
         );
