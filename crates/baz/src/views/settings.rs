@@ -213,6 +213,7 @@ pub(crate) fn view<'a>(
     resources: Option<crate::resource::Reading>,
     sleep: Option<std::time::Duration>,
     measuring: Measuring,
+    updating: &'a Updating,
     ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -229,7 +230,7 @@ pub(crate) fn view<'a>(
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![
             output_section(output, player),
-            replay_gain_section(player, ink, measuring),
+            replay_gain_section(player, ink, measuring, updating),
             sleep_section(sleep),
             shortcuts_section(),
         ],
@@ -770,11 +771,12 @@ fn section_entry(
 
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
 /// clipping prevention, and what it all came to for the track playing now.
-fn replay_gain_section(
-    player: &PlayerState,
+fn replay_gain_section<'a>(
+    player: &'a PlayerState,
     ink: Ink,
     measuring: Measuring,
-) -> Element<'_, Message> {
+    updating: &Updating,
+) -> Element<'a, Message> {
     let room = theme::active();
     let state = player.replay_gain();
     // No engine, nothing to configure — the same rule the album panel's Play
@@ -865,8 +867,109 @@ fn replay_gain_section(
     }
 
     section = section.push(measuring_block(measuring));
+    section = section.push(update_block(crate::release::Route::detect(), updating));
 
     section.into()
+}
+
+/// **Where an update is up to.** One value, so the section cannot draw two
+/// states at once and a listener cannot press a button that is already
+/// pressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Updating {
+    /// Nothing asked yet.
+    Idle,
+    Checking,
+    UpToDate,
+    /// A newer version, named.
+    Found(String),
+    /// Downloading and verifying it.
+    Fetching(String),
+    /// Verified and handed to the platform's installer.
+    HandedOff,
+    Failed(String),
+}
+
+/// **The update block** (ADR-0043 §3, as the owner amended it: *"ideally we
+/// want to be able to update easily. as in, the user just clicks something and
+/// the app updates"*).
+///
+/// Two presses at most: *Check for updates*, then *Install*. What happens
+/// between them is a download whose SHA-256 is compared against the
+/// `SHA256SUMS` published beside it, and a hand-off to `msiexec` or the
+/// desktop's opener — baz never overwrites its own running binary.
+///
+/// **Inside a Flatpak this block is absent entirely**, and that is the
+/// interesting case. `/app` is read only, so an update button could not work;
+/// and the store updates baz without being asked, so it does not need to. What
+/// stands there instead is one sentence saying so.
+fn update_block(route: crate::release::Route, updating: &Updating) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut block = column![
+        text("Updates")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim),
+    ]
+    .spacing(theme::GAP_SM);
+
+    if !route.can_install() {
+        return block
+            .push(readout_block(vec![(
+                "baz was installed from a software centre, which keeps it up to \
+                 date for you. There is nothing to do here."
+                    .to_owned(),
+                room.paper_faint,
+            )]))
+            .into();
+    }
+
+    // The verb for the state, and only the verb the state has. A button that
+    // is live in every state is a button a listener presses twice.
+    let action = match updating {
+        Updating::Idle | Updating::UpToDate | Updating::Failed(_) => {
+            Some(word_action("Check for updates", Message::CheckForUpdate))
+        }
+        Updating::Found(_) => Some(word_action("Install", Message::InstallUpdate)),
+        Updating::Checking | Updating::Fetching(_) | Updating::HandedOff => None,
+    };
+    if let Some(action) = action {
+        block = block.push(action);
+    }
+
+    let (line, ink) = match updating {
+        Updating::Idle => (
+            "baz does not check by itself. Nothing here reaches the network \
+             until you press it."
+                .to_owned(),
+            room.paper_faint,
+        ),
+        Updating::Checking => ("Checking…".to_owned(), room.paper_faint),
+        Updating::UpToDate => (
+            format!(
+                "You have baz {}, which is the newest.",
+                env!("CARGO_PKG_VERSION")
+            ),
+            room.paper_faint,
+        ),
+        Updating::Found(version) => (
+            crate::release::Route::Standalone.sentence(version),
+            room.paper,
+        ),
+        Updating::Fetching(version) => (
+            format!("Downloading baz {version} and checking it against its published checksum…"),
+            room.paper_faint,
+        ),
+        Updating::HandedOff => (
+            "The installer has been handed the verified download. baz has not \
+             closed itself — quit it when the installer asks."
+                .to_owned(),
+            room.paper,
+        ),
+        Updating::Failed(why) => (format!("Nothing was installed: {why}"), room.alert),
+    };
+    block.push(readout_block(vec![(line, ink)])).into()
 }
 
 /// **Measuring the files that carry no figure**, and the readout for it.

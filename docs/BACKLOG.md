@@ -1405,10 +1405,12 @@ Newest first. Each was asked for in conversation and is now in the product.
 
   **Two things it left open, both deliberately:**
 
-  1. **The version check for archive users** is designed and unbuilt, because
-     it costs a runtime HTTP client and a TLS stack for one request a day.
-     The reasoning and the implementation are in ADR-0043 §3 and
-     `docs/design/impl/release-check.rs.txt`; the decision is the owner's.
+  1. ~~**The version check for archive users** is designed and unbuilt.~~
+     **Built 2026-08-20**, and it is an updater rather than a check: the owner
+     overruled §1 the same day — *"ideally we want to be able to update
+     easily. as in, the user just clicks something and the app updates"* —
+     which settled the dependency question with it. Two presses, a verified
+     download, and a hand-off to the platform's own installer. ADR-0043 §3.
   2. **Signing is bought, not built.** Apple 99 USD/yr, Windows OV
      certificate ~200–400 USD/yr. Unsigned downloads warn on both platforms;
      the pipeline is shaped so that turning signing on is a secret and a flag.

@@ -17,6 +17,8 @@ image = { workspace = true }
 lofty = { workspace = true }
 lru = { workspace = true }
 rfd = { workspace = true }
+ureq = { workspace = true }
+sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

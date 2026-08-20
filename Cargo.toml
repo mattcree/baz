@@ -112,6 +112,21 @@ zbus = "5.19"
 # small D-Bus client driven by `pollster::block_on`. The `gtk3` fallback
 # feature stays off deliberately. See ADR-0023 for the graph audit.
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+# **The updater's one wire** (ADR-0043 §3, as the owner amended it on
+# 2026-08-20: *"ideally we want to be able to update easily. as in, the user
+# just clicks something and the app updates"*).
+#
+# `ureq` rather than `reqwest`: blocking, no async runtime of its own, and it
+# is already the shape of the two calls baz makes — one JSON fetch and one file
+# download, both on a background thread. `rustls` rather than the platform's
+# TLS so the same code and the same trust store ship on all three platforms;
+# `webpki-roots` so a stripped container still has roots to verify GitHub
+# against. Every crate it brings is MIT/Apache-2.0/ISC — see `deny.toml`.
+ureq = { version = "3.4", default-features = false, features = ["rustls", "gzip"] }
+# The digest the updater refuses to skip. Pure Rust, no C, MIT/Apache-2.0, and
+# already compiled in this workspace as a build-dependency of `ort-sys` — this
+# makes it a runtime one so the same crate serves both.
+sha2 = "0.10"
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)
 cpal = "0.16"       # shared-mode device output, optional feature `device-output` (Apache-2.0)

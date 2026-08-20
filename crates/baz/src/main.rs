@@ -84,6 +84,7 @@ mod queue_edit;
 mod queue_window;
 mod rail;
 mod reach;
+mod release;
 mod repair;
 mod replaygain;
 mod resource;

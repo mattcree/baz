@@ -23,7 +23,7 @@ allowed to do about it*.
 
 ## Decision
 
-### 1. The package manager owns the update. Everywhere it exists.
+### 1. The package manager owns the update where it exists — and baz can install it where it does not.
 
 | Platform | Route | Updates by |
 |---|---|---|
@@ -63,10 +63,58 @@ The tarball and the zip **stay**. They are what a reviewer, a packager and a
 person on a distribution we do not target actually want, and they cost one
 line each now that the staging exists.
 
-### 3. baz tells the people no package manager can reach — decided, and **not built yet**, because it costs a dependency
+### 3. Two clicks, and baz installs it — **built 2026-08-20**
 
-*The design below is settled. What is not settled is whether it is worth what
-it costs, and that is the owner's call rather than one to make quietly.*
+*This section originally argued for a version check and against an updater,
+and parked even the check on a dependency question. The owner overruled it the
+same day — "ideally we want to be able to update easily. as in, the user just
+clicks something and the app updates" — which settles the dependency question
+too. What follows is what was built; the original reasoning is kept below it,
+because the parts of it that were right shaped the result.*
+
+**Check for updates**, then **Install**. Between them baz downloads the
+installer for this platform and **proves it is the published one** before
+anything is opened or run: the SHA-256 is compared against the `SHA256SUMS`
+published beside it, and a mismatch discards the file rather than leaving it
+somewhere it could later be found and mistaken for a download.
+
+**It hands off; it does not overwrite.** `msiexec` on Windows, the desktop's
+opener elsewhere. That is not timidity — a self-replacing binary fights the
+lock on the running executable on Windows and breaks a bundle's signature on
+macOS, and an installer is what a listener on those platforms expects a
+download to do anyway. baz also does not close itself: quitting somebody's
+music player without being asked is not a thing an update may do.
+
+**An asset URL is data, and data does not decide where a listener goes.** The
+release document arrives over TLS, which authenticates *the document* and says
+nothing about a field inside it — so a `browser_download_url` that is not a
+GitHub release asset is refused, and refused means no button.
+
+**Inside a Flatpak there is no button at all**, replaced by one sentence.
+`/app` is read only, so it could not work; the store updates baz unasked, so
+it need not.
+
+**There is no automatic check and no interval.** The press is the consent, and
+it is unambiguous in a way a checkbox ticked months ago is not: baz reaches
+the network when a listener asks and at no other moment. It also means no
+clock, no setting and no persisted state — a smaller product for the same two
+clicks.
+
+**What pressing it found.** A repository with no published release answers
+`404`, and the first build reported that in the alert ink as *"could not reach
+…: http status: 404"* — baz saying something went wrong when nothing had. It
+is now read as what it means: nothing newer exists. That defect was reachable
+only by pressing the button against the real endpoint, which is the argument
+for having done so.
+
+`ureq` (rustls) and `sha2` are the two new dependencies; `cargo deny check
+licenses` passes.
+
+#### The reasoning this replaced, kept because half of it survived
+
+*The design below is what §3 said before the owner overruled it. The
+conclusion was wrong; the constraints it names are not, and they are why the
+updater hands off rather than overwriting.*
 
 **The cost.** baz has no HTTP client. `ureq` is in `Cargo.lock` today only as a
 **build**-dependency of `ort-sys`, so it is compiled and never linked; making

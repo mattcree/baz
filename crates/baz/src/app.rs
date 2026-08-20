@@ -1221,6 +1221,15 @@ pub(crate) enum Message {
     CancelLoudness,
     /// Read the pass's progress and empty its channel.
     LoudnessTick,
+    /// **Ask whether there is a newer baz.** Opt-in: nothing sends this until
+    /// a listener presses it or turns the setting on.
+    CheckForUpdate,
+    /// The check answered — an update, or nothing, or why not.
+    UpdateChecked(Result<Option<crate::release::Update>, String>),
+    /// **Download it, prove it, and hand it to the installer.**
+    InstallUpdate,
+    /// The download answered.
+    UpdateFetched(Result<std::path::PathBuf, String>),
     /// **Move the keyboard's ring to the next focus stop**, in the order the
     /// place builds its controls — see [`crate::focus`].
     FocusNext,
@@ -1726,6 +1735,11 @@ struct App {
     loudness_events: Option<std::sync::mpsc::Receiver<baz_core::protocol::Event>>,
     /// What the running, or last, measurement pass has done.
     loudness_progress: baz_core::analysis::AnalysisProgress,
+    /// **Where the update is up to**, and the whole of the updater's state.
+    updating: views::settings::Updating,
+    /// The update a check found, kept so the button that installs it does not
+    /// have to ask again.
+    update_found: Option<crate::release::Update>,
     /// **How lit the chromeless frame's controls are**, 0 gone to 1 whole.
     ///
     /// Settled at zero because chromeless is entered from a press on the bar
@@ -2359,6 +2373,8 @@ impl App {
             loudness: None,
             loudness_events: None,
             loudness_progress: baz_core::analysis::AnalysisProgress::default(),
+            updating: views::settings::Updating::Idle,
+            update_found: None,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
@@ -3247,6 +3263,57 @@ impl App {
             }
             Message::LoudnessTick => {
                 self.read_loudness();
+                Task::none()
+            }
+            // **Both halves run on a worker**, because both block: one on a
+            // request, one on a download that can be tens of megabytes. The
+            // shell holds only the answer.
+            Message::CheckForUpdate => {
+                self.updating = views::settings::Updating::Checking;
+                Task::perform(
+                    tokio::task::spawn_blocking(crate::release::check),
+                    |joined| {
+                        Message::UpdateChecked(
+                            joined.unwrap_or_else(|error| Err(error.to_string())),
+                        )
+                    },
+                )
+            }
+            Message::UpdateChecked(answer) => {
+                self.updating = match answer {
+                    Ok(Some(update)) => {
+                        let found = views::settings::Updating::Found(update.version.clone());
+                        self.update_found = Some(update);
+                        found
+                    }
+                    Ok(None) => views::settings::Updating::UpToDate,
+                    Err(why) => views::settings::Updating::Failed(why),
+                };
+                Task::none()
+            }
+            Message::InstallUpdate => {
+                let Some(update) = self.update_found.clone() else {
+                    return Task::none();
+                };
+                self.updating = views::settings::Updating::Fetching(update.version.clone());
+                Task::perform(
+                    tokio::task::spawn_blocking(move || crate::release::fetch_verified(&update)),
+                    |joined| {
+                        Message::UpdateFetched(
+                            joined.unwrap_or_else(|error| Err(error.to_string())),
+                        )
+                    },
+                )
+            }
+            Message::UpdateFetched(answer) => {
+                self.updating = match answer.and_then(|path| crate::release::hand_off(&path)) {
+                    // **baz does not close itself.** The installer it just
+                    // started may want the file lock, and it may not; either
+                    // way, quitting somebody's music player without being
+                    // asked is not a thing an update is allowed to do.
+                    Ok(()) => views::settings::Updating::HandedOff,
+                    Err(why) => views::settings::Updating::Failed(why),
+                };
                 Task::none()
             }
             Message::ChromeApproached(near) => {
@@ -8254,6 +8321,7 @@ impl App {
                     self.resource_reading,
                     self.sleep_remaining(),
                     self.loudness_progress.into(),
+                    &self.updating,
                     self.ink(),
                 )
             }
