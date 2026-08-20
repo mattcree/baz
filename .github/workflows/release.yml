@@ -291,9 +291,114 @@ jobs:
           $name = "baz-${env:VERSION}-${{ matrix.artifact }}"
           Compress-Archive -Path "staging/$name" -DestinationPath "dist/$name.zip"
 
+      # ---------------------------------------------------------------
+      # The installers (ADR-0043 §2). The archives above stay: they are what
+      # a reviewer, a packager and a person on a platform we do not target
+      # actually want. These are what an ordinary person wants.
+      # ---------------------------------------------------------------
+      - name: Installer (msi)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Rendered from LICENSE rather than committed, so the licence the
+          # installer shows cannot drift from the one the project has.
+          python3 packaging/windows/license-rtf.py
+          cargo install cargo-wix --locked --version ^0.3
+          # `--nocapture` puts WiX's own diagnostics in the job log: a light
+          # build failure here is a linker message from candle/light and
+          # nothing else says which element it disliked.
+          cargo wix --no-build --nocapture \
+            --package baz \
+            --profile release \
+            --install-version "${VERSION}" \
+            --output "dist/baz-${VERSION}-windows-x86_64.msi" \
+            packaging/windows/main.wxs
+          ls -l dist
+
+      - name: Installer (dmg)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="staging/baz-${VERSION}-${{ matrix.artifact }}"
+          ./packaging/macos/dmg.sh \
+            "$stage/baz.app" \
+            "dist/baz-${VERSION}-macos-universal.dmg" \
+            "baz ${VERSION}"
+          ls -l dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: baz-${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # **The Flatpak bundle** (ADR-0043 §2) — the recommended way to install baz
+  # on Linux, and the one route whose updates a listener never has to think
+  # about again.
+  #
+  # It is its own job rather than a step in `build` because it needs a
+  # container the other artifacts do not: `flatpak-builder`, the freedesktop
+  # SDK, and the Rust extension, none of which belong on a runner that is
+  # only cross-compiling. It also builds baz *itself* — the manifest compiles
+  # from source inside the sandbox — so it shares nothing with the matrix
+  # above and gains nothing from waiting on it.
+  #
+  # A single-file `.flatpak` is a working install on every distribution the
+  # day it is published: `flatpak install ./baz.flatpak`. Flathub is the
+  # destination and its review is a human step; this is what makes the wait
+  # cost a listener nothing, and it is also the proof that the manifest we
+  # submit builds.
+  # ---------------------------------------------------------------------
+  flatpak:
+    name: build (flatpak)
+    needs: [version, gate]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Build the bundle
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          id=io.github.mattcree.baz
+          # The manifest builds the git source, and inside a container the
+          # checkout is a directory git will not trust without being told.
+          git config --global --add safe.directory "$PWD"
+          flatpak-builder --user --disable-rofiles-fuse --force-clean \
+            --repo=repo --install-deps-from=flathub \
+            builddir "packaging/flatpak/$id.yml"
+          mkdir -p dist
+          flatpak build-bundle repo \
+            "dist/baz-${VERSION}-linux-x86_64.flatpak" "$id"
+          ls -l dist
+
+      # **Prove the metadata a store will show is valid**, not merely that the
+      # build succeeded. `appstreamcli validate` is what Flathub runs on
+      # submission, so a failure here is a failure we would rather have in our
+      # own CI than in a review queue.
+      - name: Validate the AppStream metadata
+        run: |
+          set -euo pipefail
+          appstreamcli validate --no-net --explain \
+            packaging/flatpak/io.github.mattcree.baz.metainfo.xml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baz-flatpak
           path: dist/*
           if-no-files-found: error
           retention-days: 7
@@ -305,7 +410,7 @@ jobs:
   # ---------------------------------------------------------------------
   publish:
     name: checksums and release
-    needs: [version, build]
+    needs: [version, build, flatpak]
     runs-on: ubuntu-latest
     permissions:
       # Only this job writes anything, and only on a tag.
@@ -356,6 +461,20 @@ jobs:
           for installation, and
           [\`CHANGELOG.md\`](https://github.com/mattcree/baz/blob/v$VERSION/CHANGELOG.md)
           for what changed.
+
+          **Which file to take.** Everything below is the same build; they
+          differ in what happens after you download them.
+
+          | You are on | Take | Updates by |
+          |---|---|---|
+          | Linux | \`.flatpak\` — \`flatpak install ./baz-*.flatpak\` | your software centre, automatically |
+          | Windows | \`.msi\` | installing the next one over it |
+          | macOS | \`.dmg\`, then drag baz to Applications | replacing the app |
+          | anything | \`.tar.gz\` / \`.zip\` — the plain binary | nothing; you come back here |
+
+          The archives are still here and still supported: they are what a
+          packager, a reviewer, or a person on a distribution we do not target
+          actually wants.
 
           Verify a download against \`SHA256SUMS\`:
 

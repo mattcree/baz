@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<!--
+  The Windows installer, hand-written rather than generated.
+
+  `cargo wix init` will write one of these; this is a committed copy for the
+  reason every other packaging file in this repository is committed — an
+  installer decides where a listener's music player lives, what appears in
+  Add/Remove Programs, and whether the next version replaces this one or
+  installs beside it. Those are decisions, and a decision that lives only in a
+  tool's defaults is a decision nobody made.
+
+  WiX v3 (`WixToolset.wxs` namespace), because that is what `cargo-wix` 0.3
+  drives and what the GitHub Windows runners carry.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+      Id="*"
+      Name="baz"
+      UpgradeCode="D51D120B-D454-4CCF-9FD8-960467691750"
+      Manufacturer="Matt Cree"
+      Language="1033"
+      Codepage="1252"
+      Version="$(var.Version)">
+
+    <Package Id="*"
+             Keywords="Installer"
+             Description="baz — a music player for people who own their music"
+             Manufacturer="Matt Cree"
+             InstallerVersion="450"
+             Languages="1033"
+             Compressed="yes"
+             InstallScope="perMachine"
+             SummaryCodepage="1252"/>
+
+    <!-- **This is what makes `winget upgrade` work**, and it is the whole of
+         baz's Windows update story (ADR-0043 §1): a newer MSI with the same
+         UpgradeCode removes the older one first, so a listener ends with one
+         baz rather than two entries in Add/Remove Programs. Scheduled after
+         `InstallValidate` so the removal happens before the new files land,
+         which is what stops a downgrade from deleting the version it was
+         supposed to replace. -->
+    <MajorUpgrade
+        Schedule="afterInstallValidate"
+        DowngradeErrorMessage="A newer version of baz is already installed. Uninstall it first if you meant to go back."/>
+
+    <!-- One cabinet, embedded. baz is a single executable and its fonts and
+         icons are compiled into it; there is nothing to stream. -->
+    <MediaTemplate EmbedCab="yes"/>
+
+    <Icon Id="ProductIcon" SourceFile="packaging/windows/baz.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon"/>
+    <Property Id="ARPHELPLINK" Value="https://github.com/mattcree/baz"/>
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/mattcree/baz"/>
+    <!-- No repair option in Add/Remove Programs: there is one file, and a
+         "repair" that reinstalls it is a button that reads as though
+         something might be broken in a way it cannot be. -->
+    <Property Id="ARPNOREPAIR" Value="1" Secure="yes"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="APPLICATIONFOLDER" Name="baz">
+          <Component Id="MainExecutable" Guid="*">
+            <File Id="bazExe"
+                  Name="baz.exe"
+                  Source="target\$(var.Profile)\baz.exe"
+                  KeyPath="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="baz">
+          <!-- **The Start-menu entry is the point of having an installer.**
+               A zip gives a listener an executable in their Downloads folder;
+               this gives them something they can find by typing its name. -->
+          <Component Id="StartMenuShortcut" Guid="8EAFD717-C7A3-44DC-B8B2-A38C67503627">
+            <Shortcut Id="ApplicationStartMenuShortcut"
+                      Name="baz"
+                      Description="A music player for people who own their music"
+                      Target="[APPLICATIONFOLDER]baz.exe"
+                      WorkingDirectory="APPLICATIONFOLDER"
+                      Icon="ProductIcon"/>
+            <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall"/>
+            <!-- A per-machine install writing a per-user registry key needs a
+                 key path under HKCU, or the component has no way to be
+                 counted as installed for the user whose Start menu it wrote
+                 to. This is the standard shape, not a workaround. -->
+            <RegistryValue Root="HKCU"
+                           Key="Software\Matt Cree\baz"
+                           Name="installed"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Complete" Level="1" Title="baz" Description="The application and its Start-menu entry." Display="expand" ConfigurableDirectory="APPLICATIONFOLDER">
+      <ComponentRef Id="MainExecutable"/>
+      <ComponentRef Id="StartMenuShortcut"/>
+    </Feature>
+
+    <!-- `WixUI_InstallDir` rather than `WixUI_Minimal`: a listener who keeps
+         their programs somewhere other than the default should be able to say
+         so, and it is one extra page. `WIXUI_INSTALLDIR` names the directory
+         property that page writes to. -->
+    <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONFOLDER"/>
+    <UIRef Id="WixUI_InstallDir"/>
+    <WixVariable Id="WixUILicenseRtf" Value="packaging/windows/License.rtf"/>
+  </Product>
+</Wix>

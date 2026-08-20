@@ -10,3 +10,4 @@ fuzz/artifacts/
 coverage-html/
 .claude/
 __pycache__/
+packaging/windows/License.rtf

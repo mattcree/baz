@@ -247,6 +247,40 @@ jobs:
           test -f "packaging/icons/$id.icns"
           echo "application id consistent: $id"
 
+      # **The installers are packaging files and are reviewed like code**
+      # (ADR-0043 §2), so they are checked here for the same reason the
+      # Flatpak manifest is: a syntax error costs a second now and a release
+      # dry run later. The installers themselves are *built* by the release
+      # workflow, where the runners that can build them are.
+      - name: Windows installer definition
+        run: |
+          set -euo pipefail
+          python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])"             packaging/windows/main.wxs
+          # The licence page is rendered from LICENSE at release time, so the
+          # generator has to work on a checkout with nothing else set up.
+          python3 packaging/windows/license-rtf.py
+          head -c 6 packaging/windows/License.rtf | grep -q '{\\rtf1'
+          grep -q 'GENERAL PUBLIC LICENSE' packaging/windows/License.rtf
+          # **The one element that makes an upgrade an upgrade.** Without a
+          # stable UpgradeCode and a MajorUpgrade, installing v2 over v1
+          # leaves two entries in Add/Remove Programs and two copies on disk,
+          # which is the whole of the Windows update story going wrong
+          # quietly.
+          grep -q 'UpgradeCode="D51D120B-D454-4CCF-9FD8-960467691750"'             packaging/windows/main.wxs
+          grep -q '<MajorUpgrade' packaging/windows/main.wxs
+          test -f packaging/windows/baz.ico
+          echo "windows installer definition ok"
+
+      - name: macOS disk image script
+        run: |
+          set -euo pipefail
+          sh -n packaging/macos/dmg.sh
+          # A DMG without the symlink is a folder you cannot install from.
+          grep -q 'ln -s /Applications' packaging/macos/dmg.sh
+          # And it proves the image mounts rather than trusting a zero exit.
+          grep -q 'hdiutil attach' packaging/macos/dmg.sh
+          echo "disk image script ok"
+
   fuzz:
     name: fuzz (scheduled/manual)
     # Discovery fuzzing is intentionally not part of an ordinary push, PR, or

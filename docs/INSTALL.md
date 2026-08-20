@@ -19,7 +19,38 @@
 > **building from source is the only way in** — it works on every platform and
 > it is described below.
 
+## Which file to take
+
+Everything a release publishes is the same build. They differ in what happens
+afterwards — and *updating* is the difference that matters, because only one
+column here happens without you (ADR-0043).
+
+| You are on | Take | Updates by |
+|---|---|---|
+| Linux | `.flatpak` | your software centre, automatically |
+| Windows | `.msi` | installing the next one over it |
+| macOS | `.dmg`, then drag baz to Applications | replacing the app |
+| anything | `.tar.gz` / `.zip` | nothing; you come back to the releases page |
+
+The archives are not second-class — they are what a packager, a reviewer, or
+somebody on a distribution we do not target actually wants. They just do not
+update themselves, and nothing in baz will tell you when they are stale.
+
+**Unsigned, for now.** Windows SmartScreen and macOS Gatekeeper will both say
+so, because a signing certificate is bought rather than built and baz has not
+bought one. The Flatpak needs no such thing, which is a second reason it is
+the recommended route on Linux and not merely a convenient one.
+
 ## Flatpak (Linux, the intended way)
+
+**From a release**, without waiting for Flathub — this is a full install, with
+the desktop entry, the icons and the automatic updates once it *is* on
+Flathub:
+
+```sh
+flatpak install ./baz-<version>-linux-x86_64.flatpak
+flatpak run io.github.mattcree.baz
+```
 
 Not yet on Flathub — see `packaging/flatpak/README.md` for where the
 submission stands. When it is there:
@@ -142,6 +173,10 @@ absolute path if you put it elsewhere.
 
 ### macOS
 
+**Take the `.dmg`.** Open it and drag baz onto the Applications shortcut
+beside it — the gesture the window is laid out to teach. The `.zip` below is
+the same bundle for anyone who would rather place it themselves.
+
 The macOS download contains **`baz.app`**, an ordinary application bundle.
 Drag it to `/Applications` — or run it from wherever you unpacked it — and it
 will carry baz's own mark in Finder, the Dock and Launchpad. The local Vibe
@@ -163,7 +198,14 @@ not take either on trust.
 
 ### Windows
 
-SmartScreen will warn, for the same reason: the `.exe` is unsigned. *More
+**Take the `.msi`.** It installs baz into `Program Files`, adds a Start-menu
+entry, and appears in Add/Remove Programs so it can be uninstalled the
+ordinary way. Installing a newer `.msi` over an older one **replaces** it
+rather than installing beside it, which is the whole of updating on Windows;
+`winget upgrade` does the same thing once baz is listed there. The `.zip` is
+the bare executable, for anyone who wants no installer at all.
+
+SmartScreen will warn, for the same reason: the installer is unsigned. *More
 info* → *Run anyway*.
 
 **Neither is a formality being skipped.** Signing needs a paid Apple Developer

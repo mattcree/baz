@@ -1396,6 +1396,38 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Asked for on 2026-08-20, not yet built
 
+- ~~**Installers for every platform, and an answer for updating.**~~
+  **Shipped 2026-08-20** — [ADR-0043](adr/0043-installing-and-updating.md).
+  The release builds a `.flatpak` bundle, a Windows `.msi` and a macOS `.dmg`
+  beside the archives it already made, and the update story is *the platform's
+  package manager owns it* (Flathub, winget, Homebrew) rather than a
+  self-updater baz would have to own forever.
+
+  **Two things it left open, both deliberately:**
+
+  1. **The version check for archive users** is designed and unbuilt, because
+     it costs a runtime HTTP client and a TLS stack for one request a day.
+     The reasoning and the implementation are in ADR-0043 §3 and
+     `docs/design/impl/release-check.rs.txt`; the decision is the owner's.
+  2. **Signing is bought, not built.** Apple 99 USD/yr, Windows OV
+     certificate ~200–400 USD/yr. Unsigned downloads warn on both platforms;
+     the pipeline is shaped so that turning signing on is a secret and a flag.
+
+- **The Flathub submission is blocked on the folder portal.** The manifest
+  grants `xdg-music:ro` and nothing else, so a Flathub baz cannot see a
+  library on an external drive or a network share — including the owner's own,
+  which lives on SMB through gvfs at `/run/user/1000/gvfs/…`. A listener has
+  to run `flatpak override --filesystem=…` by hand, which is not an install
+  anybody should be asked to perform.
+
+  **The fix is the portal file chooser** that `docs/design` already names: a
+  listener picks the folder and the portal grants it, so the sandbox learns
+  the path from the person who owns it rather than from a packager's guess.
+  ADR-0025 shipped `Browse…` through the XDG portal for the *desktop* case;
+  what is missing is that the granted path survives into the sandbox's
+  permissions. This is now a release blocker rather than a comment in a
+  manifest.
+
 - **Crossfade.** *(The owner: "another backlog item: crossfade" … "enable
   disable as a control and a setting for how long".)* So the surface is
   settled: a switch and a duration, in Settings → Playback beside the gapless
