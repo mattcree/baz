@@ -114,8 +114,10 @@ This list is a feature, and it is not going to get shorter.
 
 - **No account.** There is nothing to sign in to and no identity to have.
 - **No telemetry.** baz reports nothing about you, to anyone, ever.
-- **No cloud, and no network at all.** The Flatpak ships without network
-  permission because there is nothing to ask for.
+- **No cloud or online music service.** Your library, analysis and playlists
+  stay on your machine. The optional update check is the sole exception to
+  baz's offline-first default; turn it off in Settings and baz makes no
+  network request. The Flatpak continues to ship without network permission.
 - **No library anywhere but your disk.** The index is a cache of what is in
   your folders — throw it away and a rescan rebuilds it.
 - **No writing to your music.** Not tags, not filenames, not folder layout.

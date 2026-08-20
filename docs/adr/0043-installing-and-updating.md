@@ -2,6 +2,13 @@
 
 **Status**: proposed (2026-08-20) · answers the owner's *"we need to get on our backlog INSTALLERS for all platforms… and we need to solve updating"* · extends [ADR-0025](0025-picking-a-folder.md)'s desktop integration and the release workflow the archives already come from
 
+**Amendment, 2026-08-20 — keep the network exception singular.** The update
+check this ADR authorises is not a precedent for online features. baz is
+offline-first: new product features should not make their own network requests
+unless the owner explicitly reverses that rule for the specific feature. A
+listener can turn the update check off and return baz to zero network requests;
+the Flatpak remains network-free.
+
 ## Context
 
 What a release produces today, and what each one leaves a listener holding:

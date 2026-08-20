@@ -1225,7 +1225,7 @@ in `BACKLOG.md`.
     own without a build — and it is a small follow-on once the shape of a
     recipe has been lived with.
 
-57. **Not started — smart shuffle, investigation first.** *"I also thought
+57. **Doing 2026-08-20 — smart shuffle, investigation first.** *"I also thought
     that shuffle might be one of those things where instead of shuffle, we
     have some sort of smart shuffle?"*
 
@@ -1243,10 +1243,17 @@ in `BACKLOG.md`.
     only large ones; the cost on a 9,000-track All songs run (the walk is
     O(limit × shortlist), and a shuffle's limit is the whole run); and what the
     control says, since `Shuffle` currently means one thing and would then mean
-    two.
+    two. **Investigation recorded:** `docs/design/27-smart-shuffle.md` keeps
+    ordinary Shuffle and recommends a separate, cache-only Flow traversal;
+    it identifies why the generated-playlist selector cannot be reused and
+    names the bounded-work and protocol changes required before implementation.
 
-58. **Not started — an equaliser, and saved presets over it.** *"we probably
-    want a way to allow users to create and save EQ presets."*
+58. **Done 2026-08-18 — an equaliser, and saved presets over it.** *"we probably
+    want a way to allow users to create and save EQ presets."* A ten-band,
+    high-precision EQ now sits behind a resident app-bar door, with a real
+    magnitude-response curve, automatic headroom, an off-path bypass when
+    disabled, and listener-owned saved presets. The implementation and its
+    interaction review are recorded in `BACKLOG.md`'s 2026-08-18 entries.
 
     baz has **no equaliser at all** today, so this is two features. The filter
     is `baz-core`'s — a biquad chain between the decoder and the volume stage —
@@ -1908,9 +1915,8 @@ or not."*
   verified, and item 60 is measured with its cheapest repair shipped.
 
   **What is left is the big stuff, and the owner has asked to pick it up
-  tomorrow**: 57 (smart shuffle, investigation first), 58 (an equaliser and
-  then presets over it — two features, in the one place this project has been
-  most careful), 59 (how the engine is prompted, which needs a scored run
+  tomorrow**: 57 (smart shuffle, investigation first), 59 (how the engine is
+  prompted, which needs a scored run
   against the baseline corpus), 60's remaining half (one shared model session
   behind a mutex, which trades wall-clock and needs a *time* measurement), 62
   (multi-select), and 64–70 (the parity queue: lyrics, ratings, rule-based
