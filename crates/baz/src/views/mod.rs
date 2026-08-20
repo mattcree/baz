@@ -932,6 +932,73 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
 /// would do nothing, and a control that does nothing when pressed is the lie
 /// the rail's absent letters already refuse. It is the fact; the others are
 /// the controls (L8.3's split).
+/// **The band that offers an update**, at the top of the window, once per
+/// launch.
+///
+/// The owner, 2026-08-20: *"maybe the way to go is a single update check on
+/// startup which asks if you want to update"*. This is the asking, and its
+/// shape is chosen against the one thing baz must not do: interrupt. It is not
+/// a modal — a dialogue in front of somebody's collection before they have
+/// pressed anything is the interruption a music player has least excuse for.
+/// It is a line the width of the window, with the two answers as words, above
+/// a place that remains entirely usable while it stands.
+///
+/// **Both answers dismiss it.** *Not now* because that is what it says, and
+/// *Update* because the download replaces it with its own progress in
+/// Settings. Neither asks again this session.
+pub(crate) fn update_band(version: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    container(
+        row![
+            text(format!("baz {version} is available."))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .color(room.paper),
+            Space::new().width(Length::Fill),
+            band_word("Update", Message::InstallUpdate),
+            band_word("Not now", Message::DismissUpdateNotice),
+        ]
+        .spacing(theme::GAP_MD)
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(theme::BAND_H))
+    .padding(theme::pad(0.0, theme::HANG))
+    .style(move |_theme| container::Style {
+        // One plane up from the wall, so it reads as laid *on* the place
+        // rather than cut into it — and no accent: the lamp is playback truth
+        // and an update is not (doc 07 L8.4).
+        background: Some(iced::Background::Color(room.plinth)),
+        ..container::Style::default()
+    })
+    .into()
+}
+
+/// One of [`update_band`]'s two answers.
+fn band_word(label: &'static str, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
+    crate::focus::stop(
+        button(
+            container(
+                text(label)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::MEDIUM),
+            )
+            .height(Length::Fill)
+            .align_y(alignment::Vertical::Center),
+        )
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(theme::pad(0.0, theme::GAP_MD))
+        .style(move |_theme, status| theme::word_button(room, room.plinth, status))
+        .on_press(message.clone()),
+        Some(message),
+    )
+    .on(room.plinth)
+    .into()
+}
+
 pub(crate) fn density_marks(
     current: crate::shelf::Density,
     ink: crate::motion::Ink,

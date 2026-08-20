@@ -177,6 +177,7 @@ const THEME: &str = "theme";
 
 /// The number of concurrent local Vibe model sessions.
 const VIBE_WORKERS: &str = "vibe_workers";
+const CHECK_FOR_UPDATES: &str = "check_for_updates";
 /// The default number of concurrent local Vibe model sessions.
 ///
 /// **Four, and the number is a memory decision measured rather than guessed.**
@@ -345,6 +346,20 @@ pub struct Config {
     pub(crate) visualization_foreground: crate::visualizer::Foreground,
     /// Whether the one-line local fact feed is visible on Now Playing.
     pub(crate) now_playing_facts: bool,
+    /// **Whether baz looks for a newer version when it starts** (ADR-0043 §3).
+    ///
+    /// **On by default**, which is a deliberate departure from the rule that
+    /// baz makes no network request unasked — the owner's, 2026-08-20: *"this
+    /// could then be unchecked for anyone that doesn't want to"*. The trade is
+    /// stated rather than hidden: a listener who never opens Settings gets
+    /// told when a fix ships, and a listener who does not want that unticks
+    /// one box and is never asked again.
+    ///
+    /// **One check, at startup, and never again in that session.** Not a
+    /// poller: the answer changes a few times a year, and a music player that
+    /// reaches the network while you are listening is doing something you did
+    /// not ask for.
+    pub check_for_updates: bool,
     /// Concurrent local CLAP model sessions used by a Vibe scan.
     pub vibe_workers: usize,
     /// The selected visual room. A missing or invalid custom document falls
@@ -379,6 +394,7 @@ impl Default for Config {
             equalizer_bands_centidb: [0; 10],
             equalizer_preamp_centidb: 0,
             equalizer_auto_gain: true,
+            check_for_updates: true,
             equalizer_presets: Vec::new(),
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
@@ -408,6 +424,60 @@ fn read_now_playing(table: &toml::Table) -> (crate::visualizer::Foreground, bool
 /// Write the equaliser's three keys, with the sentence that says what `off`
 /// means — a config file is read by hand, and *off is not a flat filter* is
 /// the one thing about this feature worth knowing there.
+/// **The player's own standing state** — how loud, where to, and what a
+/// finished run does.
+///
+/// Grouped for the same reason [`write_equalizer`] is: these four belong to
+/// one object and are read back as one, and lifting them out is what keeps
+/// `to_toml` a list of sections rather than a wall of `writeln!`.
+fn write_player(out: &mut String, config: &Config) {
+    use std::fmt::Write as _;
+    let _ = writeln!(
+        out,
+        "# volume fader position: 0 (silent) to {MAX_POSITION} (unity)\n\
+         {VOLUME} = {}",
+        config.volume.position(),
+    );
+    if let Some(device) = config.output_device.as_deref() {
+        let _ = writeln!(
+            out,
+            "# shared-mode audio endpoint; remove this line to follow the system default\n\
+             {OUTPUT_DEVICE} = {}",
+            toml_string(device),
+        );
+    }
+    write_flag(
+        out,
+        "whether shuffle is on — the crossed arrows on the now-playing bar",
+        SHUFFLE,
+        config.shuffle,
+    );
+    let _ = writeln!(
+        out,
+        "# what a finished run does: \"off\", \"all\" or \"one\"\n\
+         {REPEAT} = {}",
+        toml_string(repeat_code(config.repeat)),
+    );
+}
+
+/// One commented boolean, in the shape every line in this file has.
+///
+/// Its own function because `to_toml` is a long enough list of these that
+/// clippy counts its lines, and a fourth spelling of *comment, key, value*
+/// inline would be the one that drifts from the other three.
+/// One boolean, or its default — see [`write_flag`] for the other half.
+fn read_flag(table: &toml::Table, key: &str, default: bool) -> bool {
+    table
+        .get(key)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(default)
+}
+
+fn write_flag(out: &mut String, note: &str, key: &str, value: bool) {
+    use std::fmt::Write as _;
+    let _ = writeln!(out, "# {note}\n{key} = {value}");
+}
+
 fn write_equalizer(out: &mut String, config: &Config) {
     use std::fmt::Write as _;
 
@@ -640,38 +710,13 @@ impl Config {
              (Ctrl+- / Ctrl+= / Ctrl+scroll)\n{DENSITY} = {}",
             toml_string(self.density.code()),
         );
-        let _ = writeln!(
-            out,
-            "# whether the returns lane stands open (Ctrl+B, or the two \
-             marks at its foot)\n{SIDEBAR_OPEN} = {}",
+        write_flag(
+            &mut out,
+            "whether the returns lane stands open (Ctrl+B, or the two marks at its foot)",
+            SIDEBAR_OPEN,
             self.sidebar_open,
         );
-        let _ = writeln!(
-            out,
-            "# volume fader position: 0 (silent) to {MAX_POSITION} (unity)\n\
-             {VOLUME} = {}",
-            self.volume.position(),
-        );
-        if let Some(device) = self.output_device.as_deref() {
-            let _ = writeln!(
-                out,
-                "# shared-mode audio endpoint; remove this line to follow the system default\n\
-                 {OUTPUT_DEVICE} = {}",
-                toml_string(device),
-            );
-        }
-        let _ = writeln!(
-            out,
-            "# whether shuffle is on — the crossed arrows on the \
-             now-playing bar\n{SHUFFLE} = {}",
-            self.shuffle,
-        );
-        let _ = writeln!(
-            out,
-            "# what a finished run does: \"off\", \"all\" or \"one\"\n\
-             {REPEAT} = {}",
-            toml_string(repeat_code(self.repeat)),
-        );
+        write_player(&mut out, self);
         write_equalizer(&mut out, self);
         let _ = writeln!(
             out,
@@ -679,10 +724,10 @@ impl Config {
              {VISUALIZATION_FOREGROUND} = {}",
             toml_string(self.visualization_foreground.code()),
         );
-        let _ = writeln!(
-            out,
-            "# whether Now Playing shows the local one-line fact feed\n\
-             {NOW_PLAYING_FACTS} = {}",
+        write_flag(
+            &mut out,
+            "whether Now Playing shows the local one-line fact feed",
+            NOW_PLAYING_FACTS,
             self.now_playing_facts,
         );
         let _ = writeln!(
@@ -690,6 +735,12 @@ impl Config {
             "# concurrent local CLAP model sessions for Vibe scans (1–{MAX_VIBE_WORKERS})\n\
              {VIBE_WORKERS} = {}",
             self.vibe_workers,
+        );
+        write_flag(
+            &mut out,
+            "look for a newer baz once, when it starts; nothing else reaches the network",
+            CHECK_FOR_UPDATES,
+            self.check_for_updates,
         );
         let _ = writeln!(
             out,
@@ -804,6 +855,10 @@ impl Config {
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_VIBE_WORKERS).contains(value))
             .unwrap_or(DEFAULT_VIBE_WORKERS);
+        // Per key and defensive, like every other value in this file: a value
+        // baz cannot read takes its own default and leaves its neighbours
+        // alone.
+        let check_for_updates = read_flag(&table, CHECK_FOR_UPDATES, true);
         let theme = table
             .get(THEME)
             .and_then(toml::Value::as_str)
@@ -827,6 +882,7 @@ impl Config {
             sidebar_open,
             volume,
             output_device,
+            check_for_updates,
             shuffle,
             repeat,
             equalizer_enabled: equalizer.enabled,
@@ -1013,6 +1069,7 @@ mod tests {
     #[test]
     fn a_saved_curve_round_trips_through_the_document() {
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: vec![
                 SavedCurve {
@@ -1125,6 +1182,7 @@ preamp_centidb = -9000
     #[test]
     fn a_curve_named_with_a_quote_survives_the_write() {
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: vec![SavedCurve {
                 name: "Ol' \"loud\" one\\two".to_owned(),
@@ -1146,6 +1204,7 @@ preamp_centidb = -9000
     #[test]
     fn the_equaliser_round_trips_and_degrades_to_flat() {
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             equalizer_enabled: true,
@@ -1215,6 +1274,7 @@ preamp_centidb = -9000
             "/home/user/# not a comment",
         ] {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from(dir)],
@@ -1231,6 +1291,7 @@ preamp_centidb = -9000
     fn round_trips_every_shape_of_volume_position() {
         for position in [0, 1, 618, MAX_POSITION - 1, MAX_POSITION] {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 volume: Volume::new(position),
@@ -1253,6 +1314,7 @@ preamp_centidb = -9000
             crate::visualizer::Foreground::None,
         ] {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 visualization_foreground: foreground,
@@ -1290,6 +1352,7 @@ preamp_centidb = -9000
     fn the_fact_feed_is_on_by_default_and_round_trips_off() {
         assert!(Config::from_toml("").now_playing_facts);
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             now_playing_facts: false,
@@ -1328,6 +1391,7 @@ preamp_centidb = -9000
             Place::Settings,
         ] {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 last_place: place,
@@ -1368,6 +1432,7 @@ preamp_centidb = -9000
         ];
         for replay_gain in cases {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
@@ -1405,6 +1470,7 @@ preamp_centidb = -9000
         ] {
             assert_eq!(mode_key(mode), word);
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 replay_gain: settings(mode, 0, 0, true),
@@ -1428,6 +1494,7 @@ preamp_centidb = -9000
     fn round_trips_every_group_key_as_its_own_word() {
         for key in GroupKey::ALL {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
@@ -1512,6 +1579,7 @@ preamp_centidb = -9000
     fn round_trips_every_density_step_as_its_own_word() {
         for density in Density::ALL {
             let config = Config {
+                check_for_updates: true,
                 equalizer_auto_gain: true,
                 equalizer_presets: Vec::new(),
                 music_dirs: vec![PathBuf::from("/m")],
@@ -1730,6 +1798,7 @@ preamp_centidb = -9000
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from(raw)],
@@ -1762,6 +1831,7 @@ preamp_centidb = -9000
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/Music")],
@@ -1799,6 +1869,7 @@ preamp_centidb = -9000
             PathBuf::from("/home/user/My \"Music\""),
         ];
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: dirs.clone(),
@@ -1910,6 +1981,7 @@ preamp_centidb = -9000
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![
@@ -1931,6 +2003,7 @@ preamp_centidb = -9000
     #[test]
     fn the_written_document_parses_as_toml() {
         let config = Config {
+            check_for_updates: true,
             equalizer_auto_gain: true,
             equalizer_presets: Vec::new(),
             music_dirs: vec![PathBuf::from("/home/user/My \"Music\"")],

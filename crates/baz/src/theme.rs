@@ -2969,6 +2969,15 @@ pub const BAR_ZONE_LEAD: f32 = GAP_MD;
 /// means it.
 pub const BAR_CONTENT_H: f32 = NOW_PLAYING_H + 2.0 * BAR_ZONE_LEAD;
 
+/// **The height of a notice laid over a place** — today, the update band
+/// (`crate::views::update_band`).
+///
+/// [`TRANSPORT_HIT`] plus a [`GAP_SM`] above and below: the words inside it
+/// are pressable and therefore owe law L7 a target, and a band that was only
+/// as tall as its type would put two controls on a 20 px line. Derived rather
+/// than chosen so it moves with the control size it contains.
+pub const BAND_H: f32 = TRANSPORT_HIT + 2.0 * GAP_SM;
+
 /// Vertical padding of the top bar and of the Settings place's header strip
 /// (logical px) — the two strips that have to be one frame.
 pub const TOP_BAR_PAD_V: f32 = GAP_SM;

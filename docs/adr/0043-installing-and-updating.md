@@ -94,11 +94,42 @@ GitHub release asset is refused, and refused means no button.
 `/app` is read only, so it could not work; the store updates baz unasked, so
 it need not.
 
-**There is no automatic check and no interval.** The press is the consent, and
-it is unambiguous in a way a checkbox ticked months ago is not: baz reaches
-the network when a listener asks and at no other moment. It also means no
-clock, no setting and no persisted state — a smaller product for the same two
-clicks.
+**One check, at startup, and a band that asks.** The owner, the same day:
+*"maybe the way to go is a single update check on startup which asks if you
+want to update and it is able to circumvent the whole orchestration of the app
+being closed etc."* — and the second half of that sentence is the insight the
+manual button was missing.
+
+An installer cannot replace a file the running application holds open, so an
+update accepted **mid-session** ends in *now quit baz*, which is a chore, and
+a chore is where people stop. Accepted from the **startup band** there is
+nothing to protect: nothing is playing, no queue is in flight, nothing is
+unsaved. So baz closes itself through the ordinary quit path and the installer
+has the field. The band's presence is what distinguishes the two, and pressing
+*Update* in Settings still leaves baz running, because a listener there may be
+halfway through something.
+
+The check runs **after the first frame**, so nobody waits on a socket to see
+their music, and **once per launch** — the answer changes a few times a year,
+and a music player that reaches the network while you are listening is doing
+something you did not ask for. **A failed check at startup says nothing at
+all**: no network, a captive portal, GitHub down — none of that is about the
+listener's music. The Settings block still reports it to somebody who pressed
+the button and is therefore waiting for an answer.
+
+**It is on by default**, which is a deliberate departure from *baz makes no
+network request unasked*, and the owner's: *"this could then be unchecked for
+anyone that doesn't want to."* The trade is stated rather than hidden — a
+listener who never opens Settings gets told when a fix ships, and one who does
+not want that unticks a box and is never asked again. The box is in the same
+block as the buttons, and `config.toml` carries a comment saying what the key
+does.
+
+**The band is not a modal.** A dialogue in front of somebody's collection
+before they have pressed anything is the interruption a music player has least
+excuse for. It is a line the width of the window with the two answers as
+words, above a place that stays entirely usable, and both answers dismiss it
+for the session.
 
 **What pressing it found.** A repository with no published release answers
 `404`, and the first build reported that in the alert ink as *"could not reach

@@ -214,6 +214,7 @@ pub(crate) fn view<'a>(
     sleep: Option<std::time::Duration>,
     measuring: Measuring,
     updating: &'a Updating,
+    check_on_start: bool,
     ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -230,7 +231,7 @@ pub(crate) fn view<'a>(
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![
             output_section(output, player),
-            replay_gain_section(player, ink, measuring, updating),
+            replay_gain_section(player, ink, measuring, updating, check_on_start),
             sleep_section(sleep),
             shortcuts_section(),
         ],
@@ -776,6 +777,7 @@ fn replay_gain_section<'a>(
     ink: Ink,
     measuring: Measuring,
     updating: &Updating,
+    check_on_start: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let state = player.replay_gain();
@@ -867,7 +869,11 @@ fn replay_gain_section<'a>(
     }
 
     section = section.push(measuring_block(measuring));
-    section = section.push(update_block(crate::release::Route::detect(), updating));
+    section = section.push(update_block(
+        crate::release::Route::detect(),
+        updating,
+        check_on_start,
+    ));
 
     section.into()
 }
@@ -903,7 +909,11 @@ pub(crate) enum Updating {
 /// interesting case. `/app` is read only, so an update button could not work;
 /// and the store updates baz without being asked, so it does not need to. What
 /// stands there instead is one sentence saying so.
-fn update_block(route: crate::release::Route, updating: &Updating) -> Element<'static, Message> {
+fn update_block(
+    route: crate::release::Route,
+    updating: &Updating,
+    starts: bool,
+) -> Element<'static, Message> {
     let room = theme::active();
     let mut block = column![
         text("Updates")
@@ -924,6 +934,26 @@ fn update_block(route: crate::release::Route, updating: &Updating) -> Element<'s
             )]))
             .into();
     }
+
+    // **The setting the owner asked for**: on by default, and one tick to
+    // stop it. *"this could then be unchecked for anyone that doesn't want
+    // to"*. The words say what it does rather than what it is called, because
+    // *check for updates* is the name of a feature and *when baz starts* is
+    // the fact a listener is deciding about.
+    block = block.push(
+        container(
+            checkbox(starts)
+                .label("Look for a newer baz when it starts")
+                .size(theme::STEPPER_HIT)
+                .text_size(theme::SIZE_META)
+                .text_line_height(theme::LEADING_META)
+                .spacing(theme::GAP_SM)
+                .style(move |_theme, status| theme::check(room, status))
+                .on_toggle(Message::CheckOnStartToggled),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .align_y(alignment::Vertical::Center),
+    );
 
     // The verb for the state, and only the verb the state has. A button that
     // is live in every state is a button a listener presses twice.
