@@ -193,6 +193,15 @@ uses for this case. Two ways through it:
 - Or clear the flag yourself: `xattr -dr com.apple.quarantine
   /Applications/baz.app`.
 
+**Updates do not have this problem.** Settings → Playback → *Check for
+updates* downloads the disk image, compares its SHA-256 against the checksums
+published beside the release, and clears the quarantine flag itself before
+opening it — so what you drag out is not quarantined and Gatekeeper does not
+object. baz only does that because it has just proved the bytes are the
+published ones; it is completing a check macOS cannot perform for an unsigned
+application, not skipping one. If baz is ever signed and notarised this stops
+happening, because Gatekeeper will pass it on its own.
+
 Verify the download's SHA-256 against `SHA256SUMS` first if you would rather
 not take either on trust.
 

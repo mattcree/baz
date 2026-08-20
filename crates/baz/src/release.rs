@@ -425,6 +425,33 @@ pub(crate) fn fetch_verified(update: &Update) -> Result<std::path::PathBuf, Stri
 ///
 /// A platform tool that will not start.
 pub(crate) fn hand_off(path: &std::path::Path) -> Result<(), String> {
+    // **macOS: take the quarantine flag off first, and only here.**
+    //
+    // Gatekeeper attaches `com.apple.quarantine` to anything a *browser*
+    // downloads, and it propagates from a disk image to whatever is dragged
+    // out of it — so an unsigned baz dragged from a downloaded DMG refuses to
+    // open with *"baz is damaged and can't be opened"*, which is macOS'
+    // message for this case and not a statement about the file.
+    // `docs/INSTALL.md` currently asks a listener to clear it by hand. This is
+    // the same act, done for them.
+    //
+    // It is defensible **only because of the line above it**: these bytes have
+    // already been proved to be the ones published beside the release's own
+    // checksums. Stripping quarantine from an unverified download would be
+    // taking off the one guard macOS supplies; stripping it from a verified
+    // one is completing a check macOS cannot perform because baz is not
+    // signed (ADR-0043 §4). If baz is ever signed and notarised, this comes
+    // out — Gatekeeper will pass it on its own and the flag is then doing its
+    // job rather than blocking one.
+    if cfg!(target_os = "macos") {
+        // Best effort: an image with no such attribute is the ordinary case
+        // for a file baz wrote itself, and `xattr` reports that as a failure.
+        let _ = std::process::Command::new("xattr")
+            .arg("-dr")
+            .arg("com.apple.quarantine")
+            .arg(path)
+            .status();
+    }
     let (program, args): (&str, Vec<&std::ffi::OsStr>) = if cfg!(target_os = "windows") {
         ("msiexec", vec![std::ffi::OsStr::new("/i"), path.as_ref()])
     } else if cfg!(target_os = "macos") {
@@ -437,6 +464,30 @@ pub(crate) fn hand_off(path: &std::path::Path) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("could not start {program}: {error}"))
+}
+
+/// **What just happened, in the words of the platform it happened on.**
+///
+/// The three hand-offs do genuinely different things and a single sentence
+/// could only be right about one of them: Windows starts an installer that
+/// asks questions, macOS opens a window a listener drags from, and a Linux
+/// archive is handed to whatever the desktop opens archives with. Telling a
+/// Mac listener "the installer has been handed the download" when what
+/// appeared is a Finder window is baz describing something they cannot see.
+#[must_use]
+pub(crate) fn handed_off_note() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "The installer is running. Follow it, and quit baz when it asks — baz \
+         will not close itself."
+    } else if cfg!(target_os = "macos") {
+        "The disk image is open. Drag baz onto Applications to replace this \
+         version, then quit and reopen it. Gatekeeper will not object: the \
+         download was checked against its published checksum and its \
+         quarantine flag cleared."
+    } else {
+        "The archive has been downloaded and checked against its published \
+         checksum. Unpack it over your existing baz, then quit and reopen."
+    }
 }
 
 #[cfg(test)]
@@ -595,6 +646,74 @@ d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26  baz-0.4.0-linu
         assert!(!super::digest_matches(b"x", EMPTY));
         assert!(!super::digest_matches(b"", ""));
         assert!(!super::digest_matches(b"", &EMPTY[..63]));
+    }
+
+    /// **Each platform is told what actually appeared in front of it.**
+    ///
+    /// The three hand-offs do different things — Windows starts an installer
+    /// that asks questions, macOS opens a window a listener drags from, Linux
+    /// hands an archive to the desktop — and one sentence could only be right
+    /// about one of them. Telling a Mac listener *the installer is running*
+    /// when what appeared is a Finder window is baz describing something they
+    /// cannot see.
+    ///
+    /// Asserted against the *running* platform rather than all three, because
+    /// `cfg!` is resolved at compile time and the other two branches do not
+    /// exist in this binary. What the test can hold is that this one is about
+    /// the thing that will actually happen here.
+    #[test]
+    fn the_hand_off_describes_what_this_platform_will_show() {
+        let note = super::handed_off_note();
+        assert!(!note.is_empty());
+        // Whatever the platform, the sentence has to leave a listener knowing
+        // that baz is still running and that they have something to do.
+        assert!(
+            note.contains("quit") || note.contains("Unpack"),
+            "the note does not say what to do next: {note}"
+        );
+        if cfg!(target_os = "macos") {
+            assert!(note.contains("Drag"), "{note}");
+            assert!(
+                !note.contains("installer is running"),
+                "a Mac listener is told about an installer they will not see"
+            );
+        }
+        if cfg!(target_os = "windows") {
+            assert!(note.contains("installer"), "{note}");
+            assert!(!note.contains("Drag"), "{note}");
+        }
+    }
+
+    /// **The quarantine flag is cleared only after the checksum matched.**
+    ///
+    /// Stripping `com.apple.quarantine` from an *unverified* download would
+    /// take off the one guard macOS supplies for an unsigned application.
+    /// Stripping it from a verified one completes a check macOS cannot
+    /// perform, because baz is not signed. The order is the whole argument,
+    /// so it is pinned in the source rather than left to a reader's memory.
+    #[test]
+    fn quarantine_is_cleared_after_verification_and_not_before() {
+        let source = include_str!("release.rs").replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let verify = shipped
+            .find("fn fetch_verified")
+            .expect("the verification exists");
+        let strip = shipped
+            .find("com.apple.quarantine")
+            .expect("the quarantine strip exists");
+        assert!(
+            verify < strip,
+            "the quarantine flag is cleared before the checksum is compared"
+        );
+        // And it lives in the hand-off, which only runs on a verified path.
+        let rest = &shipped[shipped.find("fn hand_off").expect("the hand-off")..];
+        assert!(
+            rest.contains("com.apple.quarantine"),
+            "the strip has moved out of the hand-off"
+        );
     }
 
     /// **Inside a Flatpak there is no update button.**

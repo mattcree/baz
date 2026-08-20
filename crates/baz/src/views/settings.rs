@@ -961,12 +961,7 @@ fn update_block(route: crate::release::Route, updating: &Updating) -> Element<'s
             format!("Downloading baz {version} and checking it against its published checksum…"),
             room.paper_faint,
         ),
-        Updating::HandedOff => (
-            "The installer has been handed the verified download. baz has not \
-             closed itself — quit it when the installer asks."
-                .to_owned(),
-            room.paper,
-        ),
+        Updating::HandedOff => (crate::release::handed_off_note().to_owned(), room.paper),
         Updating::Failed(why) => (format!("Nothing was installed: {why}"), room.alert),
     };
     block.push(readout_block(vec![(line, ink)])).into()
