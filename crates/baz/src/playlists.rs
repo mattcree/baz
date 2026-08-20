@@ -3257,11 +3257,12 @@ mod tests {
         playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         let original = open_paths(&playlists);
-        assert_eq!(original[0], PathBuf::from("/gone/b.flac"));
+        assert_eq!(original[0], track("/gone/b.flac"));
 
-        playlists.repair_entry(0, Path::new("/m/b.flac"), &library);
+        let replacement = track("/m/b.flac");
+        playlists.repair_entry(0, &replacement, &library);
         let repaired = open_paths(&playlists);
-        assert_eq!(repaired[0], PathBuf::from("/m/b.flac"), "the entry moved");
+        assert_eq!(repaired[0], replacement, "the entry moved");
         assert_eq!(repaired[1], original[1], "and nothing else did");
 
         let on_disk = playlists
@@ -3278,7 +3279,7 @@ mod tests {
         let written: Vec<PathBuf> = on_disk.entries().map(|entry| entry.path.clone()).collect();
         assert_eq!(
             written,
-            vec![PathBuf::from("/m/b.flac"), PathBuf::from("/m/c.flac")],
+            vec![track("/m/b.flac"), track("/m/c.flac")],
             "the confirmation did not reach the file"
         );
 
