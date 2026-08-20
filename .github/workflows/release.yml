@@ -310,10 +310,15 @@ jobs:
           # `--nocapture` puts WiX's own diagnostics in the job log: a light
           # build failure here is a linker message from candle/light and
           # nothing else says which element it disliked.
+          # A dispatch adds SemVer build metadata (for example
+          # `0.4.0+dry.abcdef`), which describes the artifact but cannot be
+          # represented by MSI's numeric ProductVersion.  It has no bearing
+          # on version precedence, so use the release portion inside MSI.
+          MSI_VERSION="${VERSION%%+*}"
           cargo wix --no-build --nocapture \
             --package baz \
             --profile release \
-            --install-version "${VERSION}" \
+            --install-version "${MSI_VERSION}" \
             --output "dist/baz-${VERSION}-windows-x86_64.msi" \
             --include packaging/windows/main.wxs
           ls -l dist
