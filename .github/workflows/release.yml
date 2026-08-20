@@ -315,7 +315,7 @@ jobs:
             --profile release \
             --install-version "${VERSION}" \
             --output "dist/baz-${VERSION}-windows-x86_64.msi" \
-            packaging/windows/main.wxs
+            --include packaging/windows/main.wxs
           ls -l dist
 
       - name: Installer (dmg)
@@ -378,6 +378,11 @@ jobs:
           # The manifest builds the git source, and inside a container the
           # checkout is a directory git will not trust without being told.
           git config --global --add safe.directory "$PWD"
+          # The image carries the Flatpak tooling but not a configured remote.
+          # `--install-deps-from` names a remote; make that name real before
+          # asking the builder to install the pinned SDK and Rust extension.
+          flatpak remote-add --if-not-exists --user flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak-builder --user --disable-rofiles-fuse --force-clean \
             --repo=repo --install-deps-from=flathub \
             builddir "packaging/flatpak/$id.yml"
