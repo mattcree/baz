@@ -76,7 +76,7 @@ the bottom. Every track is analysed on your own machine, and none of your
 audio leaves it.
 
 > These are real screenshots from the shipping binary, captured against the
-> project's representative music fixture — not mock-ups.
+> maintainer's real music library — not mock-ups.
 > `docs/screenshots/capture.sh` refreshes them reproducibly.
 
 The long version of all of this — every audio claim and how it is checked — is

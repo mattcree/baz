@@ -17,14 +17,14 @@
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb \
 #     cargo build --release -p baz
-#   toolbox run -c baz-dev docs/screenshots/capture.sh          # the fixture
-#   REAL=1 toolbox run -c baz-dev docs/screenshots/capture.sh   # his library
+#   toolbox run -c baz-dev docs/screenshots/capture.sh           # real library
+#   FIXTURE=1 toolbox run -c baz-dev docs/screenshots/capture.sh # safe fallback
 #
-# **`REAL=1` is what ships.** The owner asked twice for real music, and a
+# **The real library is what ships.** The owner asked twice for real music, and a
 # generated wall reads as generated however good its sleeves are. It costs
 # publishing his record titles, his artists and their cover art on a store
-# page; the fixture path stays for anyone who cannot spend that, and for
-# regenerating a clean-room set if Flathub ever asks.
+# page. `FIXTURE=1` is the explicit clean-room fallback for local testing or a
+# future store policy that cannot spend that.
 #
 # # Headless, and isolated six ways
 #
@@ -32,19 +32,19 @@
 # from docs/DEVELOPMENT.md §"Headless UI verification", so nothing reaches his
 # library, his settings or his session bus. The run's `[mpris] no session bus`
 # line is the receipt and this script prints it. Nothing is audible twice over:
-# the scratch `HOME` routes ALSA's default PCM to `null`, and every sample in
-# the fixture is a zero. `BAZ_DEVICE_TESTS` stays unset.
+# the scratch `HOME` routes ALSA's default PCM to `null`. The fixture samples
+# are zero when `FIXTURE=1` is used; `BAZ_DEVICE_TESTS` stays unset in either
+# mode.
 #
 # Every GUI binary includes device output and the transport at the bottom of
 # the window. There is no silent screenshot-only build.
 #
-# # Why the fixture, and what is done to it
+# # The fixture fallback, and what is done to it
 #
-# The owner's own collection is not photographed for a public store page, and
-# it is read-only to agents besides. `docs/design/composition/tools/mkfixture.sh`
-# already builds a wall of silent FLACs with drawn sleeves, plausible bands and
-# real years — but it is a *test* fixture, and three of its choices are visible
-# as test choices:
+# The default photographs the owner's real collection. `FIXTURE=1` instead
+# uses `docs/design/composition/tools/mkfixture.sh`, which builds a wall of
+# silent FLACs with drawn sleeves, plausible bands and real years — but it is a
+# *test* fixture, and three of its choices are visible as test choices:
 #
 #   - album 4 is titled "A Rather Considerably Overlong Album Title That Will
 #     Clip", which is exactly what a layout harness needs and exactly what a
@@ -95,14 +95,14 @@ W=1600; H=900
 mkdir -p "$OUT"
 
 # ---------------------------------------------------------------- real mode
-# **`REAL=1` photographs the owner's own library instead of the fixture.**
+# **The default photographs the owner's own library instead of the fixture.**
 #
 # He asked for it twice — *"ideally the screenshots could use my library and/or
 # look realistic at least"*, then *"it doesn't seem like you've used my real
 # library or at least real music"* — and a fixture that reads as a fixture is
-# what the second one is about. The flag is his call to spend, and it publishes
-# real record titles, real artists and real cover art on a store page, which is
-# the cost and is why it is a flag rather than the default.
+# what the second one is about. It publishes real record titles, real artists
+# and real cover art on a store page; `FIXTURE=1` is deliberately explicit so
+# a release refresh cannot quietly switch back to generic music.
 #
 # **Nothing is written to his data.** The library index, the analysis store,
 # the art cache and the playlists are *copied* into this run's scratch
@@ -110,7 +110,11 @@ mkdir -p "$OUT"
 # with his own `music_dirs` read out of his. The copies also make the run fast
 # and faithful at once: no scan, no re-analysis, and every sleeve already
 # rendered.
-REAL=${REAL:-}
+if [[ -n ${FIXTURE:-} ]]; then
+  REAL=""
+else
+  REAL=1
+fi
 if [[ -n $REAL ]]; then
   HIS_DATA=${HIS_DATA:-$HOME/.local/share/baz}
   HIS_CACHE=${HIS_CACHE:-$HOME/.cache/baz}
