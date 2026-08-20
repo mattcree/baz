@@ -221,8 +221,19 @@ jobs:
       # flatpak toolchain on the runner for no extra signal.)
       - name: Flatpak manifest parses
         run: |
+          set -euo pipefail
           python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" \
             packaging/flatpak/io.github.mattcree.baz.yml
+          # CPAL opens ALSA's default PCM. The Flatpak intentionally has no
+          # raw sound-device permission, so that PCM must be forced onto the
+          # PulseAudio/PipeWire socket; otherwise a sandbox fallback can drain
+          # the engine ring at CPU speed and race through a track.
+          test -f packaging/flatpak/asound.conf
+          grep -qx '  - --env=ALSA_CONFIG_PATH=/app/etc/asound.conf' \
+            packaging/flatpak/io.github.mattcree.baz.yml
+          grep -qx '      - install -Dm644 packaging/flatpak/asound.conf /app/etc/asound.conf' \
+            packaging/flatpak/io.github.mattcree.baz.yml
+          grep -qx '    type pulse' packaging/flatpak/asound.conf
       # A Flathub build is offline, so every crate is listed by URL and hash.
       # This is where that list is caught drifting from Cargo.lock.
       - name: Vendored crate list matches Cargo.lock

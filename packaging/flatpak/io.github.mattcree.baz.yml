@@ -31,10 +31,12 @@ finish-args:
   - --device=dri
 
   # Audio. cpal opens ALSA's "default" PCM; inside the sandbox the runtime's
-  # ALSA configuration routes that to the PulseAudio/PipeWire socket this
-  # grants. No other device access is needed — baz never touches a card
-  # directly (see ADR-0011 on why hardware volume is out of reach here).
+  # ALSA configuration is installed below and routes that to the
+  # PulseAudio/PipeWire socket this grants. No other device access is needed
+  # — baz never touches a card directly (see ADR-0011 on why hardware volume
+  # is out of reach here).
   - --socket=pulseaudio
+  - --env=ALSA_CONFIG_PATH=/app/etc/asound.conf
 
   # The music. **Read-only by design**: baz never writes to a listener's
   # files, and the sandbox is the place to make that structural rather than
@@ -140,6 +142,7 @@ modules:
         /app/share/applications/io.github.mattcree.baz.desktop
       - install -Dm644 packaging/flatpak/io.github.mattcree.baz.metainfo.xml
         /app/share/metainfo/io.github.mattcree.baz.metainfo.xml
+      - install -Dm644 packaging/flatpak/asound.conf /app/etc/asound.conf
       # The icon, in the hicolor layout AppStream and every launcher expect.
       # The basename is the application id, so the desktop entry's bare
       # `Icon=io.github.mattcree.baz` resolves without a path.
