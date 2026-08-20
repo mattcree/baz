@@ -62,7 +62,7 @@
           <Component Id="MainExecutable" Guid="*">
             <File Id="bazExe"
                   Name="baz.exe"
-                  Source="target\$(var.Profile)\baz.exe"
+                  Source="$(var.CargoTargetBinDir)\baz.exe"
                   KeyPath="yes"/>
           </Component>
         </Directory>
