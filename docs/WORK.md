@@ -1225,7 +1225,7 @@ in `BACKLOG.md`.
     own without a build — and it is a small follow-on once the shape of a
     recipe has been lived with.
 
-57. **Doing 2026-08-20 — smart shuffle, investigation first.** *"I also thought
+57. **Deferred by the owner 2026-08-20 — smart shuffle.** *"I also thought
     that shuffle might be one of those things where instead of shuffle, we
     have some sort of smart shuffle?"*
 
@@ -1247,6 +1247,12 @@ in `BACKLOG.md`.
     ordinary Shuffle and recommends a separate, cache-only Flow traversal;
     it identifies why the generated-playlist selector cannot be reused and
     names the bounded-work and protocol changes required before implementation.
+
+    The owner asked to skip this for now rather than commit to a feature whose
+    product shape is unsettled. In particular, a finite reordering of the
+    current queue and an endlessly extending, steerable local-radio experience
+    are different features. Ordinary Shuffle remains unchanged; revisit only
+    when one of those experiences is chosen explicitly.
 
 58. **Done 2026-08-18 — an equaliser, and saved presets over it.** *"we probably
     want a way to allow users to create and save EQ presets."* A ten-band,
@@ -1915,8 +1921,7 @@ or not."*
   verified, and item 60 is measured with its cheapest repair shipped.
 
   **What is left is the big stuff, and the owner has asked to pick it up
-  tomorrow**: 57 (smart shuffle, investigation first), 59 (how the engine is
-  prompted, which needs a scored run
+  tomorrow**: 59 (how the engine is prompted, which needs a scored run
   against the baseline corpus), 60's remaining half (one shared model session
   behind a mutex, which trades wall-clock and needs a *time* measurement), 62
   (multi-select), and 64–70 (the parity queue: lyrics, ratings, rule-based
