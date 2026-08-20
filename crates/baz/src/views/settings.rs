@@ -212,6 +212,7 @@ pub(crate) fn view<'a>(
     diagnostic_lines: Vec<String>,
     resources: Option<crate::resource::Reading>,
     sleep: Option<std::time::Duration>,
+    measuring: Measuring,
     ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -228,7 +229,7 @@ pub(crate) fn view<'a>(
         DEBUG_SECTION => vec![debug_section(diagnostic_lines, resources)],
         _ => vec![
             output_section(output, player),
-            replay_gain_section(player, ink),
+            replay_gain_section(player, ink, measuring),
             sleep_section(sleep),
             shortcuts_section(),
         ],
@@ -769,7 +770,11 @@ fn section_entry(
 
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
 /// clipping prevention, and what it all came to for the track playing now.
-fn replay_gain_section(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+fn replay_gain_section(
+    player: &PlayerState,
+    ink: Ink,
+    measuring: Measuring,
+) -> Element<'_, Message> {
     let room = theme::active();
     let state = player.replay_gain();
     // No engine, nothing to configure — the same rule the album panel's Play
@@ -859,7 +864,132 @@ fn replay_gain_section(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         section = section.push(readout_block(vec![(note.clone(), room.paper_faint)]));
     }
 
+    section = section.push(measuring_block(measuring));
+
     section.into()
+}
+
+/// **Measuring the files that carry no figure**, and the readout for it.
+///
+/// baz has been able to do this since ADR-0015 — an EBU R128 meter over a
+/// cancellable, resumable background pass — and until now nothing could ask
+/// it to: the pass was reachable from `AnalysisCommand` and from nowhere a
+/// listener could press. A capability with no door is a capability the
+/// product does not have.
+///
+/// **It belongs in this section rather than in Library**, by law L8.1: a
+/// control goes where what it reads is. What this reads is the figure
+/// ReplayGain plays at, and the pre-amps and the mode it stands under are the
+/// rest of that same reading. Scanning for *files* is the Library's; measuring
+/// their *loudness* is ReplayGain's.
+///
+/// **Two verbs, and the second is deliberately not the default.** The ordinary
+/// press measures only what has no figure yet and never touches a file whose
+/// own tags carry one — a tag is what a scanner wrote and ADR-0013 prefers it,
+/// so re-measuring would spend a decode to produce a number that then loses.
+/// *Measure everything again* is the escape hatch for a listener who does not
+/// trust the tags, and it says what it costs.
+fn measuring_block(measuring: Measuring) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut block = column![
+        text("Loudness of untagged files")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim),
+    ]
+    .spacing(theme::GAP_SM);
+
+    // **Running and idle are different controls, not one control relabelled.**
+    // A button that says `Measure` and then `Stop` in the same place is a
+    // press a listener can make twice by accident at exactly the moment the
+    // two meanings swap.
+    let actions = if measuring.running {
+        row![word_action("Stop measuring", Message::CancelLoudness)]
+    } else {
+        row![
+            word_action(
+                "Measure untagged files",
+                Message::MeasureLoudness { redo: false }
+            ),
+            word_action(
+                "Measure everything again",
+                Message::MeasureLoudness { redo: true }
+            ),
+        ]
+    };
+    block = block.push(actions.spacing(theme::GAP_SM));
+
+    // A pass that has never run says nothing: an empty readout is quieter than
+    // one reporting zero of zero, and the two verbs above already say what the
+    // section can do.
+    if measuring.running || measuring.tracks > 0 {
+        block = block.push(readout_block(vec![(
+            measuring_line(measuring),
+            room.paper_faint,
+        )]));
+    }
+    block.into()
+}
+
+/// **What the readout is drawn from**, as this view's own value.
+///
+/// [`baz_core::analysis::AnalysisProgress`] is `#[non_exhaustive]`, so no
+/// front end can build one — which is right for a status snapshot the engine
+/// owns and wrong for the four-line sentence below, whose states are a table
+/// or they are three branches nobody can reach at a window without a large
+/// library and a stopwatch. So the numbers cross into the view's own type at
+/// the boundary and the sentence is a pure function of it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Measuring {
+    pub(crate) running: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) analysed: usize,
+    pub(crate) tracks: usize,
+    pub(crate) editions: usize,
+    pub(crate) failed: usize,
+}
+
+impl From<baz_core::analysis::AnalysisProgress> for Measuring {
+    fn from(progress: baz_core::analysis::AnalysisProgress) -> Self {
+        Self {
+            running: progress.running,
+            cancelled: progress.cancelled,
+            analysed: progress.analysed,
+            tracks: progress.tracks,
+            editions: progress.editions,
+            failed: progress.failed,
+        }
+    }
+}
+
+/// One sentence for [`measuring_block`]'s readout.
+///
+/// Separate and pure so the four states — running, finished, cancelled, and
+/// finished with failures — are a table in a test rather than four branches
+/// nobody can reach at a window without a large library and a stopwatch.
+pub(crate) fn measuring_line(measuring: Measuring) -> String {
+    let failed = if measuring.failed == 0 {
+        String::new()
+    } else if measuring.failed == 1 {
+        " · 1 could not be measured".to_owned()
+    } else {
+        format!(" · {} could not be measured", measuring.failed)
+    };
+    if measuring.running {
+        return format!(
+            "Measuring {} of {} tracks, over {} albums.{failed}",
+            measuring.analysed, measuring.tracks, measuring.editions
+        );
+    }
+    if measuring.cancelled {
+        return format!(
+            "Stopped after {} of {} tracks. What was measured is kept; measuring \
+             again carries on from there.{failed}",
+            measuring.analysed, measuring.tracks
+        );
+    }
+    format!("Measured {} tracks.{failed}", measuring.analysed)
 }
 
 /// The **Library** section: which folders baz holds, what is in each of them,
@@ -1572,6 +1702,100 @@ fn stepper(
 
 #[cfg(test)]
 mod tests {
+
+    /// **The four states a measurement pass can be read in**, as a table.
+    ///
+    /// Written as a table because three of them need a large library and a
+    /// stopwatch to reach at a window: a pass that is running, one that ran
+    /// out of work, one that was stopped, and any of those with files it could
+    /// not measure. The sentence is the whole of what a listener is told, and
+    /// the difference between *"your library is measured"* and *"as much of it
+    /// as we got to is measured"* is the difference the pass itself is careful
+    /// to report.
+    #[test]
+    fn the_measurement_readout_tells_the_four_states_apart() {
+        use super::Measuring as AnalysisProgress;
+        let running = AnalysisProgress {
+            running: true,
+            tracks: 900,
+            editions: 70,
+            analysed: 120,
+            ..AnalysisProgress::default()
+        };
+        let line = super::measuring_line(running);
+        assert!(
+            line.contains("120") && line.contains("900") && line.contains("70"),
+            "{line}"
+        );
+
+        let done = AnalysisProgress {
+            tracks: 900,
+            analysed: 900,
+            ..AnalysisProgress::default()
+        };
+        let line = super::measuring_line(done);
+        assert!(line.starts_with("Measured 900"), "{line}");
+        assert!(
+            !line.contains("could not"),
+            "a clean pass reported failures: {line}"
+        );
+
+        let stopped = AnalysisProgress {
+            tracks: 900,
+            analysed: 300,
+            cancelled: true,
+            ..AnalysisProgress::default()
+        };
+        let line = super::measuring_line(stopped);
+        assert!(
+            line.contains("Stopped") && line.contains("carries on"),
+            "a stopped pass does not say its work was kept: {line}"
+        );
+
+        // One failure and many read differently, because "1 could not be
+        // measured" with an s is the kind of thing a listener notices instead
+        // of the number.
+        let one = AnalysisProgress {
+            failed: 1,
+            tracks: 9,
+            analysed: 9,
+            ..AnalysisProgress::default()
+        };
+        assert!(super::measuring_line(one).contains("1 could not be measured"));
+        let many = AnalysisProgress {
+            failed: 7,
+            tracks: 9,
+            analysed: 9,
+            ..AnalysisProgress::default()
+        };
+        assert!(super::measuring_line(many).contains("7 could not be measured"));
+    }
+
+    /// **A pass that has never run says nothing at all.**
+    ///
+    /// An empty readout is quieter than one reporting zero of zero, and the
+    /// two verbs beside it already say what the section can do.
+    #[test]
+    fn a_library_that_was_never_measured_gets_no_readout() {
+        let source = include_str!("settings.rs").replace("\r\n", "\n");
+        let rest = source
+            .split_once("fn measuring_block(")
+            .expect("the measuring block")
+            .1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            body.contains("measuring.running || measuring.tracks > 0"),
+            "the measuring readout is drawn before a pass has ever run"
+        );
+        assert!(
+            body.contains("Message::CancelLoudness"),
+            "a running pass cannot be stopped from this section"
+        );
+        assert!(
+            body.contains("redo: false") && body.contains("redo: true"),
+            "the section offers only one of the two measurement verbs"
+        );
+    }
     use super::*;
 
     /// **The steppers ride the same ink ladder as the transport.**

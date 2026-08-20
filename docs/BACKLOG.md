@@ -1394,6 +1394,61 @@ Newest first. Each was asked for in conversation and is now in the product.
   its neighbours alone, because a `#[derive(Deserialize)]` would fail the whole
   document over a mistyped pre-amp and cost a listener their music folder.
 
+## Asked for on 2026-08-20, not yet built
+
+- **Crossfade.** *(The owner: "another backlog item: crossfade" … "enable
+  disable as a control and a setting for how long".)* So the surface is
+  settled: a switch and a duration, in Settings → Playback beside the gapless
+  and ReplayGain controls, because what it reads is the player.
+
+  **The engine half is the work.** baz's boundary policy today is
+  drain-and-restart at a track edge (`docs/BACKLOG.md`, "Skip and seek are
+  drain-and-restart"), and a crossfade is the opposite shape: two decoders
+  alive at once, their outputs summed, for the duration of the overlap. That
+  means the pump path grows a second source and a mix stage, and the questions
+  worth answering before any of it is written are:
+
+  1. **What happens at a gapless boundary?** A crossfade across an album's own
+     seam would destroy exactly the thing `docs/design` spends a chapter
+     protecting. The plausible answer is that a fade is skipped where the two
+     tracks are gapless neighbours in the same edition, which makes the setting
+     mean *between records* rather than *between tracks*.
+  2. **What does it do to ReplayGain and the equaliser?** Both are gain stages
+     on one signal path; two sources need either two chains or one chain after
+     the sum, and the two answers sound different.
+  3. **Does a skip crossfade?** A manual Next mid-track is not the same event
+     as a track ending, and every player answers this differently.
+
+- **The rooms are flat, and the now-playing gradient is not.** *(The owner:
+  "it does seem like our app is a bit flat in terms of colour: the now playing
+  gradient etc. looks great.. maybe that should be part of our theming? some
+  having interesting gradients".)*
+
+  A [`crate::theme::Palette`] is four opaque planes, so every surface in the
+  product is one flat colour by construction — and the one surface that is
+  *not* is Now playing, whose wash comes from the record rather than from the
+  room. The ask is to let a room carry that too.
+
+  **The design question is which surfaces**, and it is not "all of them": a
+  gradient behind a wall of artwork competes with the artwork, and a gradient
+  under a list of tracks makes a row's ground depend on where it is scrolled
+  to. The candidates that would not fight anything are the two chrome bands and
+  the lane. It also has to survive the veil law (`RESIDUAL_DARK`) and the
+  contrast floors, which are stated against a *colour* per plane — a plane with
+  two ends needs both ends tested, which is a real change to the room laws
+  rather than a new field.
+
+- **There is no website.** Never started and, until now, never recorded —
+  which is the more useful half of the answer. A project that ships a
+  downloadable binary with an icon set, a desktop entry and an AppStream file
+  has everywhere to point a link *from* and nowhere to point one *to*.
+
+  Nothing in `docs/`, no Pages workflow, no draft. The cheapest honest version
+  is one page built from what already exists — `README.md`'s claims, the
+  screenshots this repo can generate on demand, and `docs/INSTALL.md`'s three
+  routes — published from the release workflow that already builds the
+  archives.
+
 ## Interface
 
 - **A serious UX pass with expert guidance** — the current look is deliberate

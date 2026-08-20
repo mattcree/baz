@@ -1205,6 +1205,22 @@ pub(crate) enum Message {
     /// is a `mouse_area`, so this fires twice per approach and never while the
     /// hand is still.
     ChromeApproached(bool),
+    /// **Measure ReplayGain for the library**, or for all of it again.
+    ///
+    /// The engine has been able to do this since ADR-0015 and nothing could
+    /// ask it to: the pass was reachable from `AnalysisCommand` and from
+    /// nowhere a listener could press.
+    MeasureLoudness {
+        /// Re-measure files baz has already measured. `false` — the ordinary
+        /// case — measures only what has no figure yet, and never a file whose
+        /// own tags carry one.
+        redo: bool,
+    },
+    /// Stop the running pass. What it has measured is kept, and starting again
+    /// carries on from there.
+    CancelLoudness,
+    /// Read the pass's progress and empty its channel.
+    LoudnessTick,
     /// **Move the keyboard's ring to the next focus stop**, in the order the
     /// place builds its controls — see [`crate::focus`].
     FocusNext,
@@ -1691,6 +1707,25 @@ struct App {
     /// close button, from a press the listener made days ago. A mode you take
     /// the frame off for is a mode you enter on purpose each time.
     chromeless: bool,
+    /// **The loudness measurement service**, spawned on first use.
+    ///
+    /// Lazily, because it opens a second connection to the library and holds a
+    /// thread: a listener who never asks baz to measure anything should not
+    /// pay for the machinery that would. The same rule every clock in this
+    /// file follows — a cost with no reader is not paid.
+    loudness: Option<baz_core::analysis::AnalysisHandle>,
+    /// The pass's own event stream, drained rather than read.
+    ///
+    /// Kept because the worker sends on it and an `mpsc` grows without bound:
+    /// one event per track over a large library is thousands of retained
+    /// paths. Nothing here needs them — [`baz_core::analysis::AnalysisProgress`]
+    /// carries every number the readout states, and the pass counts its
+    /// failures rather than itemising them (a wall of red for a handful of
+    /// corrupt files helps nobody) — so the tick empties the channel and reads
+    /// the snapshot.
+    loudness_events: Option<std::sync::mpsc::Receiver<baz_core::protocol::Event>>,
+    /// What the running, or last, measurement pass has done.
+    loudness_progress: baz_core::analysis::AnalysisProgress,
     /// **How lit the chromeless frame's controls are**, 0 gone to 1 whole.
     ///
     /// Settled at zero because chromeless is entered from a press on the bar
@@ -2321,6 +2356,9 @@ impl App {
             fullscreen: false,
             chromeless: false,
             chrome_veil: motion::Tween::settled(0.0),
+            loudness: None,
+            loudness_events: None,
+            loudness_progress: baz_core::analysis::AnalysisProgress::default(),
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
@@ -3190,6 +3228,25 @@ impl App {
                 {
                     state.selection.select(Content::Album(album.id));
                 }
+                Task::none()
+            }
+            Message::MeasureLoudness { redo } => {
+                self.measure_loudness(redo);
+                Task::none()
+            }
+            Message::CancelLoudness => {
+                if let Some(loudness) = &self.loudness {
+                    // A cancel is a request the service answers by winding up
+                    // the edition it is inside — the pass keeps what it has
+                    // measured, so `running` stays true for a moment and the
+                    // tick below is what notices it stop.
+                    let _ = loudness
+                        .send(baz_core::protocol::AnalysisCommand::CancelReplayGainAnalysis);
+                }
+                Task::none()
+            }
+            Message::LoudnessTick => {
+                self.read_loudness();
                 Task::none()
             }
             Message::ChromeApproached(near) => {
@@ -8196,6 +8253,7 @@ impl App {
                     },
                     self.resource_reading,
                     self.sleep_remaining(),
+                    self.loudness_progress.into(),
                     self.ink(),
                 )
             }
@@ -8346,10 +8404,21 @@ impl App {
         // that is also where chromeless is used. The bar draws no ground in
         // either case; what changes is whether anything is drawn *under* it —
         // see the composition below.
-        let over_field = matches!(
-            (&self.screen, self.place),
-            (Screen::Shelf(_), Place::NowPlaying)
-        );
+        // **Glass everywhere, not only over the record.**
+        //
+        // The owner, 2026-08-20: *"can we make sure the top bar is transparent
+        // for all modes not just now playing"*. It was conditional because the
+        // condition used to matter — the bar was a plane above the page, and
+        // its own `recess` ground was what separated the two. It does not
+        // matter now: the bar and the page are one column, so a transparent
+        // bar shows the window's own ground rather than anything that scrolls,
+        // and the strip of `recess` it was drawing was a stripe across the top
+        // of every place with nothing on the other side of it.
+        //
+        // The hairline goes with the ground, for the reason the bar's own
+        // note gives: a seam belongs to the surface it divides, and with no
+        // surface there is nothing for a line to divide.
+        let over_field = true;
         let bar: Element<'_, Message> = {
             views::app_bar::view(
                 state,
@@ -8637,6 +8706,53 @@ impl App {
     /// scrolling. It wears no *strip* of its own — the returns lane is the
     /// route in and out of it — but since ADR-0040 it wears the **app bar**,
     /// like every other place, and that does come off the top.
+    /// **Start measuring**, spawning the service if this is the first ask.
+    ///
+    /// A failure to spawn is reported where every other background failure is
+    /// — the bell's health log — rather than swallowed: a press that appears
+    /// to do nothing is worse than one that says why.
+    fn measure_loudness(&mut self, redo: bool) {
+        if self.loudness.is_none() {
+            let Some(db_path) = config::library_db_file() else {
+                return;
+            };
+            match baz_core::analysis::spawn(db_path) {
+                Ok((handle, events)) => {
+                    self.loudness = Some(handle);
+                    self.loudness_events = Some(events);
+                }
+                Err(error) => {
+                    if let Screen::Shelf(state) = &mut self.screen {
+                        state.health.record(
+                            crate::health::Level::Error,
+                            "Could not measure loudness",
+                            format!("The measurement service would not start: {error}"),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+        if let Some(loudness) = &self.loudness {
+            let _ = loudness
+                .send(baz_core::protocol::AnalysisCommand::StartReplayGainAnalysis { redo });
+            // Read straight back so the readout says *running* on this frame
+            // rather than on the tick after it — the press must look answered.
+            self.loudness_progress = loudness.progress();
+        }
+    }
+
+    /// Empty the pass's channel and take its latest counts — see
+    /// [`Self::loudness_events`] for why the events are dropped.
+    fn read_loudness(&mut self) {
+        if let Some(events) = &self.loudness_events {
+            while events.try_recv().is_ok() {}
+        }
+        if let Some(loudness) = &self.loudness {
+            self.loudness_progress = loudness.progress();
+        }
+    }
+
     fn body_height(&self) -> f32 {
         // The bottom bar's band and its hairline are gone with the frame; the
         // app bar's strip is not, because chromeless keeps a shorter one for
@@ -8699,6 +8815,14 @@ impl App {
         // cost with no reader.
         if self.sleep.is_some() {
             subs.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::SleepTimerTick));
+        }
+        // **Only while a pass is running**, the same rule as every other clock
+        // here. Twice a second rather than per event: the service emits one
+        // event per measured track, a few per second, and a readout that
+        // repainted on each of them would be spending frames to move a number
+        // nobody can read at that rate.
+        if self.loudness_progress.running {
+            subs.push(iced::time::every(Duration::from_millis(500)).map(|_| Message::LoudnessTick));
         }
         if let Screen::Shelf(state) = &self.screen {
             if state.scanning {
