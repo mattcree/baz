@@ -279,6 +279,12 @@ jobs:
           # quietly.
           grep -q 'UpgradeCode="D51D120B-D454-4CCF-9FD8-960467691750"'             packaging/windows/main.wxs
           grep -q '<MajorUpgrade' packaging/windows/main.wxs
+          # **The shortcut has to point at the launcher, not at baz.**
+          # Pointing it at `baz.exe` would still start baz and would silently
+          # remove the whole staged-update path (ADR-0043 §5) — a defect with
+          # no symptom until a release nobody is ever offered.
+          grep -q 'Name="baz-boot.exe"' packaging/windows/main.wxs
+          grep -q 'Target="\[APPLICATIONFOLDER\]baz-boot.exe"' packaging/windows/main.wxs
           test -f packaging/windows/baz.ico
           echo "windows installer definition ok"
 
@@ -291,6 +297,29 @@ jobs:
           # And it proves the image mounts rather than trusting a zero exit.
           grep -q 'hdiutil attach' packaging/macos/dmg.sh
           echo "disk image script ok"
+
+      # **The bundle is assembled by a script that runs anywhere**, which is
+      # the whole reason it is `mkdir` and `cp` rather than Xcode — so CI can
+      # build one on Linux and read its shape. What matters here is the part
+      # a Mac would answer silently: the plist names an executable, and the
+      # named executable is in the bundle.
+      - name: macOS bundle shape
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          printf '#!/bin/sh\n' > "$work/baz"
+          printf '#!/bin/sh\n' > "$work/baz-boot"
+          chmod +x "$work/baz" "$work/baz-boot"
+          packaging/macos/bundle.sh "$work/baz" 9.9.9 "$work/with" "$work/baz-boot"
+          grep -q '<string>baz-boot</string>' "$work/with/baz.app/Contents/Info.plist"
+          test -x "$work/with/baz.app/Contents/MacOS/baz-boot"
+          test -x "$work/with/baz.app/Contents/MacOS/baz"
+          # And without one it still builds something that starts, so the
+          # launcher is an addition rather than a load-bearing accident.
+          packaging/macos/bundle.sh "$work/baz" 9.9.9 "$work/without"
+          grep -q '<string>baz</string>' "$work/without/baz.app/Contents/Info.plist"
+          rm -rf "$work"
+          echo "macOS bundle shape ok"
 
   fuzz:
     name: fuzz (scheduled/manual)

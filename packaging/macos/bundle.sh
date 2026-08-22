@@ -7,7 +7,13 @@
 # so Finder, the Dock, Launchpad and Spotlight had nothing to draw but the
 # generic application mark. This builds the directory.
 #
-#     packaging/macos/bundle.sh BINARY VERSION OUTPUT_DIR
+#     packaging/macos/bundle.sh BINARY VERSION OUTPUT_DIR [LAUNCHER]
+#
+# `LAUNCHER` is `baz-boot`, and when it is given it becomes the bundle's
+# `CFBundleExecutable`: LaunchServices starts it, it offers an
+# already-downloaded update if one is waiting, and otherwise `exec`s `baz` in
+# the same process (ADR-0043 §5). Omitting it builds a bundle that starts baz
+# directly, which is what CI's Linux shape check does.
 #
 # It runs on any Unix — deliberately. Nothing here is `iconutil`, `plutil` or
 # `codesign`: the icon is committed (`packaging/icons/`, rendered by
@@ -22,18 +28,25 @@
 # is an external boundary and the owner's to cross.
 set -euo pipefail
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: bundle.sh BINARY VERSION OUTPUT_DIR" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+  echo "usage: bundle.sh BINARY VERSION OUTPUT_DIR [LAUNCHER]" >&2
   exit 2
 fi
 
 binary=$1
 version=$2
 out=$3
+launcher=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
 app_id=io.github.mattcree.baz
 
 [ -f "$binary" ] || { echo "bundle.sh: no binary at $binary" >&2; exit 1; }
+if [ -n "$launcher" ]; then
+  [ -f "$launcher" ] || { echo "bundle.sh: no launcher at $launcher" >&2; exit 1; }
+  executable=baz-boot
+else
+  executable=baz
+fi
 
 iconset="$here/../icons/baz.iconset"
 fallback="$here/../icons/$app_id.icns"
@@ -47,6 +60,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 # string stays one string; `@VERSION@` from the caller so the Finder's Get
 # Info panel agrees with the tag.
 sed -e "s/@APP_ID@/$app_id/g" -e "s/@VERSION@/$version/g" \
+    -e "s/@EXECUTABLE@/$executable/g" \
   "$here/Info.plist.in" > "$app/Contents/Info.plist"
 
 # **Apple's own tool builds the container that ships.**
@@ -74,6 +88,11 @@ else
 fi
 cp "$binary" "$app/Contents/MacOS/baz"
 chmod +x "$app/Contents/MacOS/baz"
+if [ -n "$launcher" ]; then
+  cp "$launcher" "$app/Contents/MacOS/baz-boot"
+  chmod +x "$app/Contents/MacOS/baz-boot"
+  echo "  launcher: baz-boot starts first and execs baz"
+fi
 
 # The models Vibe needs. `Contents/Resources` is where a bundle's data lives.
 # `baz_vibe::semantic::model_directory` walks the executable's ancestors and
@@ -95,19 +114,20 @@ fi
 # **Check the shape rather than trusting the script**, because every failure
 # mode here is silent: macOS answers a malformed bundle with the generic icon
 # and no diagnostic at all.
-python3 - "$app" "$app_id" "$version" <<'EOF'
+python3 - "$app" "$app_id" "$version" "$executable" <<'EOF'
+import os
 import plistlib
 import struct
 import sys
 
-app, app_id, version = sys.argv[1], sys.argv[2], sys.argv[3]
+app, app_id, version, executable = sys.argv[1:5]
 
 with open(f"{app}/Contents/Info.plist", "rb") as handle:
     plist = plistlib.load(handle)
 for key, want in [
     ("CFBundleIdentifier", app_id),
     ("CFBundleIconFile", f"{app_id}.icns"),
-    ("CFBundleExecutable", "baz"),
+    ("CFBundleExecutable", executable),
     ("CFBundleShortVersionString", version),
     ("CFBundlePackageType", "APPL"),
 ]:
@@ -117,6 +137,14 @@ if plist.get("NSHighResolutionCapable") is not True:
     raise SystemExit("NSHighResolutionCapable must be true or the icon draws soft")
 if plist.get("LSUIElement") is not False:
     raise SystemExit("LSUIElement must be false or the Dock icon is hidden")
+
+# **The name in the plist has to be a file that is there.** macOS answers a
+# CFBundleExecutable that does not exist with a bounce and nothing else, and
+# the whole point of the launcher is that nobody looks inside the bundle.
+for name in {executable, "baz"}:
+    path = f"{app}/Contents/MacOS/{name}"
+    if not os.access(path, os.X_OK):
+        raise SystemExit(f"Contents/MacOS/{name} is missing or not executable")
 
 # The icon is the point of the exercise; read its container rather than its
 # name. `@VERSION@` left unsubstituted would also land here as a plist that
@@ -128,7 +156,7 @@ if icon[:4] != b"icns" or struct.unpack(">I", icon[4:8])[0] != len(icon):
 if "@" in version:
     raise SystemExit(f"version {version!r} was never substituted")
 
-print(f"  bundle: {app_id} {version}, icon {len(icon)} bytes")
+print(f"  bundle: {app_id} {version}, starts {executable}, icon {len(icon)} bytes")
 EOF
 
 echo "built $app"

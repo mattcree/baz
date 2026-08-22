@@ -1909,6 +1909,43 @@ or not."*
     title's own box is capped at what is left after the heart's slot and the
     gap between them.
 
+83. **Done 2026-08-22 — a second executable does the asking, before baz
+    starts.** *(The owner, 2026-08-20: "honestly we don't need to show that a
+    new version in the app… we could just have a separate boot up script
+    essentially, a smaller exe which checks for updates and prompts to either
+    install or not, based on their config flag.")*
+
+    **Logged late, and that is the first thing this item records.** The ask was
+    made on 2026-08-20, immediately after the band it replaces was built; it
+    reached neither this file nor `BACKLOG.md`, and `0.4.0` and `0.4.1` shipped
+    over it. That is precisely the failure both tables exist to prevent.
+
+    The reason it is more than a preference is one sentence: **an installer
+    cannot replace a file the running application holds open.** Every in-app
+    answer therefore ends at *now quit baz*, and a chore is where people stop.
+    So the work splits in two. `baz` — after the first frame, once per launch,
+    drawing nothing — checks, downloads, proves the SHA-256 and leaves the
+    installer in the cache directory with a marker. `baz-boot` — before baz
+    starts — finds it, proves it again, and asks. Yes hands off to `msiexec` or
+    the disk image with nothing standing in the field; no starts baz and keeps
+    the file for next time.
+
+    The download is deliberately **not** in the launcher: the macOS image is
+    186 MB, and fetching it at boot would make baz take a minute to start on
+    the day a release lands. `installs_itself()` — `windows || macos` — is the
+    single predicate deciding whether baz stages, whether the launcher offers,
+    and whether the launcher ships at all; the Linux archive has none, because
+    nobody but its owner can unpack a tarball over an installation.
+
+    Removed with it: the band, `theme::BAND_H`, `views::update_band`,
+    `band_word`, `Message::DismissUpdateNotice`, and the branch that quit baz
+    to let an installer through. **baz no longer closes itself for any reason
+    it was not asked to.** ADR-0043 §5.
+
+    **Not proved**, and it is written into the ADR rather than left implied:
+    neither hand-off has been run on the platform it is for. The offer itself
+    was — headless, against a hand-built stage, photographed.
+
 ## Doing
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries

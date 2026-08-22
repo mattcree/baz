@@ -28,8 +28,8 @@ column here happens without you (ADR-0043).
 | You are on | Take | Updates by |
 |---|---|---|
 | Linux | `.flatpak` | your software centre, automatically |
-| Windows | `.msi` | installing the next one over it |
-| macOS | `.dmg`, then drag baz to Applications | replacing the app |
+| Windows | `.msi` | **itself** — see *How baz updates itself* below |
+| macOS | `.dmg`, then drag baz to Applications | **itself**, the same way |
 | anything | `.tar.gz` / `.zip` | nothing; you come back to the releases page |
 
 The archives are not second-class — they are what a packager, a reviewer, or
@@ -40,6 +40,40 @@ update themselves, and nothing in baz will tell you when they are stale.
 so, because a signing certificate is bought rather than built and baz has not
 bought one. The Flatpak needs no such thing, which is a second reason it is
 the recommended route on Linux and not merely a convenient one.
+
+## How baz updates itself
+
+**Only the `.msi` and the `.dmg` do this**, because they are the only two
+downloads that install anything. A Flatpak is updated by the store that owns
+it, and nobody but you can unpack an archive over your own installation.
+
+Two things happen, in two different sessions, and neither of them interrupts
+anything (ADR-0043 §5):
+
+1. **While you are listening**, baz asks GitHub once — after the window is
+   already up, once per launch — whether there is a newer release. If there
+   is, it downloads it in the background and checks it against the SHA-256
+   published beside it. It draws nothing at all. A file that fails that check
+   is thrown away.
+2. **The next time you start baz**, a small program called `baz-boot` runs
+   first. If nothing is waiting — which is almost every launch — it starts baz
+   and is gone. If something is waiting, it checks it again and asks you, once,
+   whether to install it. Say no and it starts baz; it will ask again next
+   time. Say yes and the installer runs with baz not yet started, which is the
+   only moment it can replace baz without asking you to close anything.
+
+`baz-boot` is what your Start-menu entry and your application icon point at.
+That is the whole of it: it has no window of its own and it never asks you to
+quit your music player.
+
+**To turn it off**, untick Settings → Updates → *Download new versions in the
+background*. That stops both halves: nothing is downloaded and nothing is
+offered, and baz makes no network request at all.
+
+**To bring it forward**, Settings → Updates → *Check for updates* asks now
+rather than waiting for the background pass, and *Download it now* fetches and
+checks the new version straight away. It is still offered at the next start
+rather than installed on the spot, because that is the moment it can succeed.
 
 ## Flatpak (Linux, the intended way)
 
@@ -91,10 +125,10 @@ somewhere on real disk.
 
 ## Release binaries
 
-GitHub Release archives are the supported beta distribution path. Baz has no
-network client or automatic updater: when you choose to update, download the
-new archive and its `SHA256SUMS`, verify it, quit Baz, replace the old
-application files and relaunch. Your configuration, library database and
+GitHub Release archives are the supported beta distribution path, and they are
+the one route that does **not** update itself: when you choose to update,
+download the new archive and its `SHA256SUMS`, verify it, quit baz, replace the
+old application files and relaunch. Your configuration, library database and
 playlists live outside the archive and are preserved. Keep the previous archive
 until the new one has opened successfully if you want a simple manual rollback.
 
@@ -193,14 +227,14 @@ uses for this case. Two ways through it:
 - Or clear the flag yourself: `xattr -dr com.apple.quarantine
   /Applications/baz.app`.
 
-**Updates do not have this problem.** Settings → Playback → *Check for
-updates* downloads the disk image, compares its SHA-256 against the checksums
-published beside the release, and clears the quarantine flag itself before
-opening it — so what you drag out is not quarantined and Gatekeeper does not
-object. baz only does that because it has just proved the bytes are the
-published ones; it is completing a check macOS cannot perform for an unsigned
-application, not skipping one. If baz is ever signed and notarised this stops
-happening, because Gatekeeper will pass it on its own.
+**Updates do not have this problem.** baz downloads the next disk image
+itself, compares its SHA-256 against the checksums published beside the
+release, and clears the quarantine flag before opening it — so what you drag
+out is not quarantined and Gatekeeper does not object. baz only does that
+because it has just proved the bytes are the published ones; it is completing a
+check macOS cannot perform for an unsigned application, not skipping one. If
+baz is ever signed and notarised this stops happening, because Gatekeeper will
+pass it on its own.
 
 Verify the download's SHA-256 against `SHA256SUMS` first if you would rather
 not take either on trust.

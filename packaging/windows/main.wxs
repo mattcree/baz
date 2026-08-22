@@ -43,17 +43,18 @@
         Schedule="afterInstallValidate"
         DowngradeErrorMessage="A newer version of baz is already installed. Uninstall it first if you meant to go back."/>
 
-    <!-- One cabinet, embedded. baz is a single executable and its fonts and
-         icons are compiled into it; there is nothing to stream. -->
+    <!-- One cabinet, embedded. baz is two small executables with its fonts
+         and icons compiled into them; there is nothing to stream. -->
     <MediaTemplate EmbedCab="yes"/>
 
     <Icon Id="ProductIcon" SourceFile="packaging/windows/baz.ico"/>
     <Property Id="ARPPRODUCTICON" Value="ProductIcon"/>
     <Property Id="ARPHELPLINK" Value="https://github.com/mattcree/baz"/>
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/mattcree/baz"/>
-    <!-- No repair option in Add/Remove Programs: there is one file, and a
-         "repair" that reinstalls it is a button that reads as though
-         something might be broken in a way it cannot be. -->
+    <!-- No repair option in Add/Remove Programs: there are two files and no
+         registry state to lose, and a "repair" that reinstalls them is a
+         button that reads as though something might be broken in a way it
+         cannot be. -->
     <Property Id="ARPNOREPAIR" Value="1" Secure="yes"/>
 
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -63,6 +64,23 @@
             <File Id="bazExe"
                   Name="baz.exe"
                   Source="$(var.CargoTargetBinDir)\baz.exe"
+                  KeyPath="yes"/>
+          </Component>
+
+          <!-- **The launcher, and it is what the shortcut points at.**
+
+               `baz-boot.exe` offers an update baz already downloaded and
+               checked, then `CreateProcess`es `baz.exe` and exits. It exists
+               because Windows will not let an installer replace a file a
+               running process holds open: accepted here, `msiexec` has the
+               field to itself, because baz has not started yet (ADR-0043 §5).
+
+               Its own component so a repair or a partial install cannot leave
+               a shortcut pointing at a file that is not there. -->
+          <Component Id="Launcher" Guid="*">
+            <File Id="bazBootExe"
+                  Name="baz-boot.exe"
+                  Source="$(var.CargoTargetBinDir)\baz-boot.exe"
                   KeyPath="yes"/>
           </Component>
         </Directory>
@@ -77,7 +95,7 @@
             <Shortcut Id="ApplicationStartMenuShortcut"
                       Name="baz"
                       Description="A music player for people who own their music"
-                      Target="[APPLICATIONFOLDER]baz.exe"
+                      Target="[APPLICATIONFOLDER]baz-boot.exe"
                       WorkingDirectory="APPLICATIONFOLDER"
                       Icon="ProductIcon"/>
             <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall"/>
@@ -96,8 +114,9 @@
       </Directory>
     </Directory>
 
-    <Feature Id="Complete" Level="1" Title="baz" Description="The application and its Start-menu entry." Display="expand" ConfigurableDirectory="APPLICATIONFOLDER">
+    <Feature Id="Complete" Level="1" Title="baz" Description="The application, its launcher and its Start-menu entry." Display="expand" ConfigurableDirectory="APPLICATIONFOLDER">
       <ComponentRef Id="MainExecutable"/>
+      <ComponentRef Id="Launcher"/>
       <ComponentRef Id="StartMenuShortcut"/>
     </Feature>
 

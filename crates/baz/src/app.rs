@@ -1221,19 +1221,22 @@ pub(crate) enum Message {
     CancelLoudness,
     /// Read the pass's progress and empty its channel.
     LoudnessTick,
-    /// **Ask whether there is a newer baz.** Opt-in: nothing sends this until
-    /// a listener presses it or turns the setting on.
+    /// **Ask whether there is a newer baz.** Sent by the button in Settings,
+    /// by somebody who is therefore waiting for an answer.
     CheckForUpdate,
     /// The check answered — an update, or nothing, or why not.
-    UpdateChecked(Result<Option<crate::release::Update>, String>),
-    /// *Not now.* The band goes and the session does not ask again.
-    DismissUpdateNotice,
-    /// The listener turned the startup check on or off.
+    UpdateChecked(Result<Option<baz_update::Update>, String>),
+    /// The listener turned the background check on or off.
     CheckOnStartToggled(bool),
-    /// **Download it, prove it, and hand it to the installer.**
+    /// **Download it, prove it, and stage it** — or, where nothing can be
+    /// staged, hand it straight to the thing that opens it.
     InstallUpdate,
     /// The download answered.
     UpdateFetched(Result<std::path::PathBuf, String>),
+    /// **The quiet one.** What the background pass left staged for
+    /// `baz-boot`, or nothing, or why not — and nothing on this path is ever
+    /// drawn unasked (ADR-0043 §5).
+    UpdateStaged(Result<Option<String>, String>),
     /// **Move the keyboard's ring to the next focus stop**, in the order the
     /// place builds its controls — see [`crate::focus`].
     FocusNext,
@@ -1741,16 +1744,9 @@ struct App {
     loudness_progress: baz_core::analysis::AnalysisProgress,
     /// **Where the update is up to**, and the whole of the updater's state.
     updating: views::settings::Updating,
-    /// The update a check found, kept so the button that installs it does not
-    /// have to ask again.
-    update_found: Option<crate::release::Update>,
-    /// Whether the band offering it is standing. Set by the startup check
-    /// only, and cleared by either answer.
-    update_notice: bool,
-    /// Whether the install in flight was accepted from the band rather than
-    /// from Settings — which decides whether baz closes itself when the
-    /// installer starts.
-    update_from_band: bool,
+    /// The update a check found, kept so the button that downloads it does
+    /// not have to ask again.
+    update_found: Option<baz_update::Update>,
     /// **How lit the chromeless frame's controls are**, 0 gone to 1 whole.
     ///
     /// Settled at zero because chromeless is entered from a press on the bar
@@ -2386,8 +2382,6 @@ impl App {
             loudness_progress: baz_core::analysis::AnalysisProgress::default(),
             updating: views::settings::Updating::Idle,
             update_found: None,
-            update_notice: false,
-            update_from_band: false,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
             visualization: crate::visualizer::State {
@@ -3283,40 +3277,40 @@ impl App {
             // shell holds only the answer.
             Message::CheckForUpdate => {
                 self.updating = views::settings::Updating::Checking;
-                Task::perform(
-                    tokio::task::spawn_blocking(crate::release::check),
-                    |joined| {
-                        Message::UpdateChecked(
-                            joined.unwrap_or_else(|error| Err(error.to_string())),
-                        )
-                    },
-                )
+                Task::perform(tokio::task::spawn_blocking(baz_update::check), |joined| {
+                    Message::UpdateChecked(joined.unwrap_or_else(|error| Err(error.to_string())))
+                })
             }
             Message::UpdateChecked(answer) => {
                 self.updating = match answer {
                     Ok(Some(update)) => {
                         let found = views::settings::Updating::Found(update.version.clone());
                         self.update_found = Some(update);
-                        // **The startup check is the one that gets a band.**
-                        // A listener who pressed the button in Settings is
-                        // already looking at the answer; one who did not asked
-                        // for nothing and is owed a way to say no.
-                        self.update_notice = true;
                         found
                     }
                     Ok(None) => views::settings::Updating::UpToDate,
-                    // **A failed check at startup says nothing.** No network,
-                    // a captive portal, GitHub down — none of that is the
-                    // listener's problem and none of it is about their music.
-                    // The Settings block still reports it to somebody who
-                    // pressed the button and is therefore waiting for an
-                    // answer.
+                    // Reported, because whoever sees this pressed a button and
+                    // is waiting for an answer. The background pass below is
+                    // the one that stays silent.
                     Err(why) => views::settings::Updating::Failed(why),
                 };
                 Task::none()
             }
-            Message::DismissUpdateNotice => {
-                self.update_notice = false;
+            // **The background pass, and it draws nothing.**
+            //
+            // No network, no permission and no release are all the same
+            // answer here: silence. A listener who never opens Settings finds
+            // out about a new baz from `baz-boot` at the next launch, and a
+            // failed check is not a thing that happened to their music.
+            Message::UpdateStaged(answer) => {
+                match answer {
+                    Ok(Some(version)) => {
+                        crate::baz_log!("[update] {version} staged for the next launch");
+                        self.updating = views::settings::Updating::Staged(version);
+                    }
+                    Ok(None) => {}
+                    Err(why) => crate::baz_log!("[update] nothing staged: {why}"),
+                }
                 Task::none()
             }
             Message::CheckOnStartToggled(on) => {
@@ -3327,14 +3321,9 @@ impl App {
                 let Some(update) = self.update_found.clone() else {
                     return Task::none();
                 };
-                // Remembered *now*, because the band is about to come down
-                // and the answer that arrives later has to know which of the
-                // two doors it came through — see `UpdateFetched`.
-                self.update_from_band = self.update_notice;
-                self.update_notice = false;
                 self.updating = views::settings::Updating::Fetching(update.version.clone());
                 Task::perform(
-                    tokio::task::spawn_blocking(move || crate::release::fetch_verified(&update)),
+                    tokio::task::spawn_blocking(move || baz_update::fetch_verified(&update)),
                     |joined| {
                         Message::UpdateFetched(
                             joined.unwrap_or_else(|error| Err(error.to_string())),
@@ -3342,33 +3331,35 @@ impl App {
                     },
                 )
             }
+            // **What a finished download becomes, and it is not an install.**
+            //
+            // An installer cannot replace a file the running application holds
+            // open, so baz never starts one — `baz-boot` does, at the next
+            // launch, with nothing standing in the field (ADR-0043 §5). Here
+            // the download simply becomes a staged file and a sentence saying
+            // so.
+            //
+            // **Where nothing can be staged there is no launcher either**, and
+            // a Linux archive is that case: unpacking it over an existing
+            // installation is a decision about a directory only its owner
+            // knows. So the verified file is handed to the desktop, exactly as
+            // it always was, and [`baz_update::handed_off_note`] says what
+            // will appear.
             Message::UpdateFetched(answer) => {
-                match answer.and_then(|path| crate::release::hand_off(&path)) {
-                    Ok(()) => {
-                        self.updating = views::settings::Updating::HandedOff;
-                        self.update_notice = false;
-                        // **Quitting is what makes the startup check worth
-                        // having.** An installer cannot replace a file the
-                        // running application holds open, so an update
-                        // accepted mid-session ends in "now quit baz" — which
-                        // is a chore, and a chore is where people stop.
-                        //
-                        // Accepted from the *startup band* there is nothing to
-                        // protect: nothing is playing, no queue is in flight,
-                        // nothing is unsaved. So baz closes itself and the
-                        // installer has the field. Accepted from Settings, a
-                        // listener may well be halfway through something, so
-                        // the band's absence is what distinguishes them and
-                        // baz stays up.
-                        if self.update_from_band {
-                            // The same path a listener pressing the window's
-                            // close button takes, so an update never loses
-                            // something an ordinary quit would have kept.
-                            return self.leave_for_good();
-                        }
+                self.updating = match answer {
+                    Ok(_) if baz_update::installs_itself() => {
+                        let version = self
+                            .update_found
+                            .as_ref()
+                            .map_or_else(String::new, |update| update.version.clone());
+                        views::settings::Updating::Staged(version)
                     }
-                    Err(why) => self.updating = views::settings::Updating::Failed(why),
-                }
+                    Ok(path) => match baz_update::hand_off(&path) {
+                        Ok(()) => views::settings::Updating::HandedOff,
+                        Err(why) => views::settings::Updating::Failed(why),
+                    },
+                    Err(why) => views::settings::Updating::Failed(why),
+                };
                 Task::none()
             }
             Message::ChromeApproached(near) => {
@@ -4260,29 +4251,29 @@ impl App {
             "[startup] startup-to-interactive: {:.1} ms",
             self.started.elapsed().as_secs_f64() * 1e3
         );
-        // **The one check, and it is here rather than in `new`.**
+        // **The background pass, and it is here rather than in `new`.**
         //
         // After the first frame, so a listener never waits on a socket to see
-        // their music — the request is on a worker and its answer arrives
-        // whenever it arrives. Once per launch and never again in the session:
-        // the answer changes a few times a year, and a music player that
-        // reaches the network while you are listening is doing something you
-        // did not ask for.
+        // their music. Once per launch and never again in the session: the
+        // answer changes a few times a year, and a music player that reaches
+        // the network while you are listening is doing something you did not
+        // ask for.
         //
-        // **And this is the moment an update is cheap.** Nothing is playing,
-        // no queue is mid-flight, nothing is unsaved — so accepting one can
-        // quit baz and hand off cleanly, which is what makes the whole
-        // "quit when the installer asks" dance unnecessary
-        // (`Message::UpdateFetched`).
+        // **It draws nothing at all.** The owner, 2026-08-20: *"honestly we
+        // don't need to show that a new version in the app"*. What it does is
+        // leave a verified installer where `baz-boot` will find it before baz
+        // next starts — which is the one moment an installer can replace baz,
+        // because baz is not running (ADR-0043 §5).
         let wanted =
             config::config_file().is_some_and(|path| config::load(&path).check_for_updates);
-        if !wanted || !crate::release::Route::detect().can_install() {
+        // `installs_itself` is the whole gate: a download nothing can install
+        // is bandwidth spent on a file that would sit in a cache forever.
+        if !wanted || !baz_update::installs_itself() || !baz_update::Route::detect().can_install() {
             return Task::none();
         }
-        Task::perform(
-            tokio::task::spawn_blocking(crate::release::check),
-            |joined| Message::UpdateChecked(joined.unwrap_or_else(|error| Err(error.to_string()))),
-        )
+        Task::perform(tokio::task::spawn_blocking(stage_an_update), |joined| {
+            Message::UpdateStaged(joined.unwrap_or_else(|error| Err(error.to_string())))
+        })
     }
 
     /// Advance every transition that is running.
@@ -8623,21 +8614,15 @@ impl App {
         // asks for the lane and the bottom band to go, not for the doors to;
         // an immersive mode you cannot change the visualiser from is a mode
         // you leave to change the visualiser.
-        // **The notice, between the bar and the place.** Always in the tree
-        // and empty at rest, for the reason this file states at length about
-        // every other conditional layer: iced diffs by position, so a band
-        // that appeared would push the place one level down and hand it a
-        // fresh state — scrolling the wall back to the top the moment an
-        // update was found.
-        let notice: Element<'_, Message> = match (self.update_notice, &self.update_found) {
-            (true, Some(update)) => views::update_band(&update.version),
-            _ => iced::widget::Space::new()
-                .width(iced::Length::Fill)
-                .height(0.0)
-                .into(),
-        };
         // The bar belongs to the body now, and the lane stands beside both.
-        let screen: Element<'_, Message> = column![bar, notice, screen].into();
+        //
+        // **There was a band here once**, between the two, offering an update
+        // the startup check had just found. It is gone: the owner's *"we
+        // don't need to show that a new version in the app"* moved that
+        // question to `baz-boot`, before baz starts, where answering it yes
+        // costs nothing (ADR-0043 §5). Nothing about somebody's collection
+        // has to move aside for it any more.
+        let screen: Element<'_, Message> = column![bar, screen].into();
         let screen: Element<'_, Message> = match lane {
             Some(lane) => row![lane, screen].into(),
             None => screen,
@@ -11921,6 +11906,32 @@ impl Shelf {
     pub(crate) fn album(&self, id: u64) -> Option<&vm::AlbumVm> {
         self.albums.iter().find(|album| album.id == id)
     }
+}
+
+/// **Leave a verified installer where `baz-boot` will find it.**
+///
+/// Blocking, and the whole of what baz's background pass does. ADR-0043 §5.
+///
+/// **A stage that is already good is left alone**, which is what stops the
+/// second launch after a release from downloading 190 MB again. The check is
+/// the full one — newer than this baz, and the file still matching the digest
+/// it was staged with — because a half-written stage from a session that was
+/// killed mid-download must be replaced rather than trusted.
+///
+/// `Ok(None)` is the ordinary answer and means *nothing to do*.
+fn stage_an_update() -> Result<Option<String>, String> {
+    if let Some(pending) = baz_update::stage::pending()
+        && baz_update::is_newer(&pending.version, env!("CARGO_PKG_VERSION"))
+        && baz_update::stage::ready(&pending).is_some()
+    {
+        return Ok(Some(pending.version));
+    }
+    let Some(update) = baz_update::check()? else {
+        return Ok(None);
+    };
+    let version = update.version.clone();
+    baz_update::fetch_verified(&update)?;
+    Ok(Some(version))
 }
 
 fn record_root_scan(health: &mut crate::health::Log, root: &std::path::Path, counts: [usize; 4]) {

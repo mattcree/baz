@@ -224,6 +224,102 @@ Everything below is built to be signable later: the MSI and the DMG take a
 signing step that is currently a no-op, so turning it on is a secret and a
 flag rather than a rebuild of the pipeline.
 
+### 5. A second executable does the asking, before baz starts — **built 2026-08-22**
+
+*§3 built the band the owner asked for on 2026-08-20 and shipped it in
+`0.4.0`. Later the same day he replaced it: "honestly we don't need to show
+that a new version in the app… we could just have a separate boot up script
+essentially, a smaller exe which checks for updates and prompts to either
+install or not, based on their config flag". That ask reached neither
+`BACKLOG.md` nor `WORK.md`, and `0.4.1` shipped over it — which is the failure
+the ask table exists to prevent, recorded there now with its own late date.
+This section is what was built.*
+
+**The sentence that makes it more than a preference.** An installer cannot
+replace a file the running application holds open. Every version of the in-app
+answer ends at the same place — *now quit baz* — and a chore is where people
+stop. Nothing in `baz-boot` is baz, so when the answer is yes, `msiexec` has a
+field with nothing standing in it.
+
+**The split, and each half only does what it can do cheaply.**
+
+| | Where | What it does | What it draws |
+|---|---|---|---|
+| `baz` | after the first frame, once per launch | checks; downloads; proves the SHA-256; leaves the installer in the cache directory with a marker | nothing |
+| `baz-boot` | before baz starts | finds that file, re-proves it, asks | one native dialogue, and only when there is something to ask about |
+
+**Why the download is not in the launcher.** The macOS disk image is 186 MB.
+A launcher that fetched it would make baz take a minute to start on the day a
+release lands, which is the worst possible day for it. The download belongs in
+the session *before* — while somebody is already listening to something, where
+a background transfer costs them nothing and interrupts nothing.
+
+**Why the digest is proved twice.** The first proof is at download time,
+against the release's published `SHA256SUMS`. Then the file sits in a
+user-writable cache directory across a reboot, and the thing that picks it up
+is about to hand it to `msiexec`. So the digest travels in the marker and the
+launcher hashes the file again. That second check is also what makes a
+half-written stage — a session killed mid-download — harmless: it fails, it is
+thrown away, and the next session stages it again.
+
+**One flag, both halves.** `check_for_updates` governs the staging *and* the
+offer. A tick-box that stopped one and not the other would be a setting that
+lies, so `crates/baz/src/config.rs` holds a test that the launcher's reader and
+the application's reader agree — on the same file, over the file baz writes and
+over the shapes a hand-edited one arrives in. Its words changed with its
+meaning: it now says the thing that actually happens, which is a background
+download.
+
+**Only where an installer can install.** `baz_update::installs_itself()` is
+`windows || macos`, and it is the single predicate: it decides whether baz
+stages anything, whether `baz-boot` offers anything, and whether the launcher
+is shipped at all. **The Linux archive gets no launcher**, because unpacking a
+`.tar.gz` over an existing installation is a decision about a directory only
+its owner knows the shape of — there is nothing for a launcher to do. Linux's
+blessed route is the Flatpak, which updates itself and needs none of this. The
+Flatpak also grants no network, so the staging half cannot run there either.
+
+**It carries no toolkit.** The one dialogue is the platform's own — the task
+dialog on Windows, the alert on macOS, `zenity` under a desktop that has one —
+through `rfd`, which baz already depends on. A launcher carrying a GUI toolkit
+to ask one question would be most of a second application, and it would be the
+wrong one: this is the operating system talking about installing software, and
+that is the voice it should be in. Where no such tool exists the question is
+not asked and baz simply starts: a music player that will not open because it
+could not find `zenity` is a far worse failure than a missed update.
+
+**And it is invisible on every other launch.** On Unix it `exec`s baz, so it
+leaves no parent process, no second entry in a task manager, and the
+application's exit status is what the desktop sees. Both of those are pinned by
+tests that stand a script where baz goes.
+
+**What the two packagings changed.** The MSI's Start-menu shortcut targets
+`baz-boot.exe`, and the bundle's `CFBundleExecutable` is `baz-boot`. Both are
+checked in CI, because pointing either back at `baz` would still start baz and
+would silently remove the whole path — a defect with no symptom until a release
+nobody is ever offered.
+
+**What Settings kept.** The section is still there and no button in it asks
+anyone to quit anything: the standing tick-box, a way to bring the check
+forward for somebody who wants it now, and one line saying where the thing is
+up to. *Download it now* ends at *it will be offered the next time you start
+baz*. On a platform with no launcher it ends where it always did — a verified
+file handed to the desktop, with the sentence that says what will appear.
+
+**What was removed.** The band, `theme::BAND_H`, `views::update_band`,
+`band_word`, `Message::DismissUpdateNotice`, and the `leave_for_good` branch
+that quit baz to let an installer through. baz no longer closes itself for any
+reason it was not asked to.
+
+**What is not proved.** Neither hand-off has been run on the platform it is
+for: there is no Windows machine and no Mac in this loop, so `msiexec /i` and
+the disk image open are reasoned about, compiled and unit-tested, and that is
+all. The offer itself *was* run — headless, against a hand-built stage, with
+the dialogue photographed. One thing that run found and that is worth writing
+down: `zenity` exits `0` when its X server disappears, and `rfd` reads that as
+*yes*. It is unreachable in a shipped baz, because Linux ships no launcher, and
+it is recorded here so nobody re-derives it if that ever changes.
+
 ## What this exposes, and it is worth knowing before Flathub
 
 The manifest grants `--filesystem=xdg-music:ro` and nothing else. **The
@@ -257,8 +353,11 @@ Flathub submission rather than a note in a file, and it is tracked as such.
 
 - Three new release artefacts, and one of them (`.flatpak`) is a working
   install on every Linux distribution the week it lands.
-- One new opt-in network capability, guarded by a setting, whose entire
-  effect is a line of text.
+- One new network capability, guarded by a setting and on by default, whose
+  entire effect is a file left in a cache directory and a question asked
+  before baz starts.
+- A second shipped executable on Windows and macOS, `baz-boot`, which is what
+  those two packagings' entry points now point at (§5).
 - A blocker on Flathub — the portal folder chooser — promoted from a comment
   in a manifest to a tracked piece of work.
 - Signing remains bought rather than built, and the pipeline is shaped so

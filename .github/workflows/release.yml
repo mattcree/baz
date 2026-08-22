@@ -164,6 +164,17 @@ jobs:
             cargo build --release --locked --target "$target" \
                         -p baz --features device-output,vibe-analysis
           done
+          # **The launcher, where the download is an installer** (ADR-0043 §5).
+          # Windows and macOS get `baz-boot`: it offers an update baz already
+          # downloaded and then `exec`s baz. The Linux archive gets none —
+          # nothing can unpack a tarball over an installation for you, so a
+          # launcher there would be a program with nothing to do.
+          if [ "${{ runner.os }}" != "Linux" ]; then
+            for target in ${{ matrix.targets }}; do
+              cargo build --release --locked --target "$target" \
+                          -p baz-update --bin baz-boot
+            done
+          fi
 
       - name: Stage the archive contents
         shell: bash
@@ -182,6 +193,13 @@ jobs:
             # shellcheck disable=SC2086
             lipo -create -output "staging/baz-universal" $slices
             lipo -info "staging/baz-universal"
+            boots=""
+            for target in ${{ matrix.targets }}; do
+              boots="$boots target/$target/release/baz-boot"
+            done
+            # shellcheck disable=SC2086
+            lipo -create -output "staging/baz-boot-universal" $boots
+            lipo -info "staging/baz-boot-universal"
             # **A macOS application is a bundle, not a binary.** A bare Mach-O
             # cannot carry an icon, a name or a permission string, so what
             # shipped before this had nothing for Finder, the Dock, Launchpad
@@ -209,16 +227,24 @@ jobs:
             # so the check can be the statement itself rather than a guess
             # about its output.
             packaging/macos/bundle.sh "staging/baz-universal" "${VERSION}" "$stage" \
-              | tee bundle.log
+              "staging/baz-boot-universal" | tee bundle.log
             grep -q "built by iconutil" bundle.log || {
               echo "the bundle fell back to the committed icns — macOS would draw" \
                    "the generic icon over it" >&2
               exit 1
             }
+            # And that the launcher is the thing LaunchServices will start,
+            # because a bundle that quietly starts `baz` instead loses the
+            # whole staged-update path with no visible symptom.
+            grep -q "launcher: baz-boot" bundle.log || {
+              echo "the bundle was built without its launcher" >&2
+              exit 1
+            }
             rm bundle.log
-            rm "staging/baz-universal"
+            rm "staging/baz-universal" "staging/baz-boot-universal"
           elif [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.targets }}/release/baz.exe" "$stage/baz.exe"
+            cp "target/${{ matrix.targets }}/release/baz-boot.exe" "$stage/baz-boot.exe"
           else
             cp "target/${{ matrix.targets }}/release/baz" "$stage/baz"
           fi
@@ -502,9 +528,15 @@ jobs:
           | You are on | Take | Updates by |
           |---|---|---|
           | Linux | \`.flatpak\` — \`flatpak install ./baz-*.flatpak\` | your software centre, automatically |
-          | Windows | \`.msi\` | installing the next one over it |
-          | macOS | \`.dmg\`, then drag baz to Applications | replacing the app |
+          | Windows | \`.msi\` | itself: baz downloads the next one quietly and offers it the next time you start it |
+          | macOS | \`.dmg\`, then drag baz to Applications | itself, the same way |
           | anything | \`.tar.gz\` / \`.zip\` — the plain binary | nothing; you come back here |
+
+          The \`.msi\` and the \`.dmg\` install a second small executable,
+          \`baz-boot\`, which is what the Start-menu entry and the app icon
+          point at. It asks nothing and shows nothing unless an update is
+          already downloaded and waiting, and it can be turned off in
+          Settings → Updates. Nothing here ever asks you to quit baz.
 
           The archives are still here and still supported: they are what a
           packager, a reviewer, or a person on a distribution we do not target

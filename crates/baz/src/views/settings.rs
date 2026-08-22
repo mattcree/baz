@@ -897,26 +897,38 @@ pub(crate) enum Updating {
     Found(String),
     /// Downloading and verifying it.
     Fetching(String),
-    /// Verified and handed to the platform's installer.
+    /// **Downloaded, proved, and waiting for `baz-boot`** to offer it at the
+    /// next launch. The end of the road on every platform that ships a
+    /// launcher, which is every platform whose installer can install itself.
+    Staged(String),
+    /// Verified and handed to the platform's opener, where nothing can be
+    /// staged — a Linux archive, which only its owner can unpack.
     HandedOff,
     Failed(String),
 }
 
-/// **The Updates section** (ADR-0043 §3, as the owner amended it: *"ideally we
-/// want to be able to update easily. as in, the user just clicks something and
-/// the app updates"*).
+/// **The Updates section** (ADR-0043 §3 and §5).
 ///
-/// Two presses at most: *Check for updates*, then *Install*. What happens
-/// between them is a download whose SHA-256 is compared against the
-/// `SHA256SUMS` published beside it, and a hand-off to `msiexec` or the
-/// desktop's opener — baz never overwrites its own running binary.
+/// **This is not where updating happens any more, and that is the point.**
+/// The owner, 2026-08-20: *"honestly we don't need to show that a new version
+/// in the app… we could just have a separate boot up script essentially, a
+/// smaller exe which checks for updates and prompts to either install or
+/// not"*. baz downloads and proves a new version in the background while
+/// somebody is listening, and `baz-boot` offers it before baz next starts —
+/// which is the one moment an installer can replace baz, because baz is not
+/// running.
 ///
-/// **Inside a Flatpak installation**, `/app` is read only, so an update button
-/// could not work. Its own Updates section instead explains which system owns
-/// that operation; it is never mixed into Playback.
+/// So what stands here is the **standing decision** (one checkbox, which
+/// governs both halves), a way to bring the check forward for somebody who
+/// wants it now, and one line saying where the thing is up to. No button here
+/// ever asks a listener to quit their music player.
+///
+/// **Inside a Flatpak installation**, `/app` is read only and the store
+/// already updates baz unasked, so there is no control at all — one sentence
+/// naming the system that owns the operation.
 fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Message> {
     let room = theme::active();
-    let route = crate::release::Route::detect();
+    let route = baz_update::Route::detect();
     let mut block = column![section_heading(
         "Updates",
         "Choose how baz looks for and installs newer releases.",
@@ -936,13 +948,18 @@ fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Messag
 
     // **The setting the owner asked for**: on by default, and one tick to
     // stop it. *"this could then be unchecked for anyone that doesn't want
-    // to"*. The words say what it does rather than what it is called, because
-    // *check for updates* is the name of a feature and *when baz starts* is
-    // the fact a listener is deciding about.
+    // to"*. The words say what actually happens rather than what the feature
+    // is called — it downloads, and a listener deciding about a background
+    // download deserves to be told that it is one. It governs both halves:
+    // unticked, baz stages nothing and `baz-boot` offers nothing.
     block = block.push(
         container(
             checkbox(starts)
-                .label("Look for a newer baz when it starts")
+                .label(if baz_update::installs_itself() {
+                    "Download new versions in the background and offer them at the next start"
+                } else {
+                    "Look for a newer baz when it starts"
+                })
                 .size(theme::STEPPER_HIT)
                 .text_size(theme::SIZE_META)
                 .text_line_height(theme::LEADING_META)
@@ -960,18 +977,52 @@ fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Messag
         Updating::Idle | Updating::UpToDate | Updating::Failed(_) => {
             Some(word_action("Check for updates", Message::CheckForUpdate))
         }
-        Updating::Found(_) => Some(word_action("Install", Message::InstallUpdate)),
-        Updating::Checking | Updating::Fetching(_) | Updating::HandedOff => None,
+        Updating::Found(_) => Some(word_action(
+            if baz_update::installs_itself() {
+                "Download it now"
+            } else {
+                "Download it"
+            },
+            Message::InstallUpdate,
+        )),
+        Updating::Checking | Updating::Fetching(_) | Updating::Staged(_) | Updating::HandedOff => {
+            None
+        }
     };
     if let Some(action) = action {
         block = block.push(action);
     }
 
-    let (line, ink) = match updating {
+    block
+        .push(readout_block(vec![updates_line(updating)]))
+        .into()
+}
+
+/// **One line under the section, saying where the thing is up to.**
+///
+/// Its own function because the sentence differs by *platform* as well as
+/// by state: where an installer can install itself the answer is always
+/// *it will be offered at the next start*, and where one cannot the answer
+/// is always *here is a file, and unpacking it is yours*. Two axes in one
+/// `match` is what makes this worth reading in one place.
+fn updates_line(updating: &Updating) -> (String, iced::Color) {
+    let room = theme::active();
+    match updating {
+        Updating::Idle if baz_update::installs_itself() => (
+            format!(
+                "You have baz {}. A new version is downloaded quietly while you \
+                 listen and offered the next time baz starts.",
+                env!("CARGO_PKG_VERSION")
+            ),
+            room.paper_faint,
+        ),
         Updating::Idle => (
-            "baz does not check by itself. Nothing here reaches the network \
-             until you press it."
-                .to_owned(),
+            format!(
+                "You have baz {}. This copy is an archive, which baz cannot \
+                 replace for you — the download is checked and then handed to \
+                 your desktop to unpack.",
+                env!("CARGO_PKG_VERSION")
+            ),
             room.paper_faint,
         ),
         Updating::Checking => ("Checking…".to_owned(), room.paper_faint),
@@ -982,18 +1033,22 @@ fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Messag
             ),
             room.paper_faint,
         ),
-        Updating::Found(version) => (
-            crate::release::Route::Standalone.sentence(version),
-            room.paper,
-        ),
+        Updating::Found(version) => (baz_update::Route::Standalone.sentence(version), room.paper),
         Updating::Fetching(version) => (
             format!("Downloading baz {version} and checking it against its published checksum…"),
             room.paper_faint,
         ),
-        Updating::HandedOff => (crate::release::handed_off_note().to_owned(), room.paper),
+        Updating::Staged(version) => (
+            format!(
+                "baz {version} has been downloaded and checked. It will be \
+                 offered the next time you start baz — nothing has to be quit \
+                 or closed for it."
+            ),
+            room.paper,
+        ),
+        Updating::HandedOff => (baz_update::handed_off_note().to_owned(), room.paper),
         Updating::Failed(why) => (format!("Nothing was installed: {why}"), room.alert),
-    };
-    block.push(readout_block(vec![(line, ink)])).into()
+    }
 }
 
 /// **Measuring the files that carry no figure**, and the readout for it.

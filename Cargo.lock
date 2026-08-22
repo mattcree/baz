@@ -426,6 +426,7 @@ version = "0.4.1"
 dependencies = [
  "ab_glyph",
  "baz-core",
+ "baz-update",
  "baz-vibe",
  "dirs",
  "hound",
@@ -468,6 +469,18 @@ dependencies = [
  "thiserror 2.0.19",
  "trash",
  "walkdir",
+]
+
+[[package]]
+name = "baz-update"
+version = "0.4.1"
+dependencies = [
+ "dirs",
+ "rfd",
+ "sha2",
+ "tempfile",
+ "toml 1.1.4+spec-1.1.0",
+ "ureq",
 ]
 
 [[package]]

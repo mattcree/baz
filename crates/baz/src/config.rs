@@ -1063,6 +1063,74 @@ pub fn store(path: &Path, config: &Config) -> io::Result<()> {
     std::fs::write(path, config.to_toml())
 }
 
+/// **The launcher reads this file too, and the two readers have to agree.**
+///
+/// `baz-boot` cannot link the application — that is the entire point of it
+/// being a separate executable (ADR-0043 §5) — so `baz_update::wanted_in` is
+/// a second reader of the one key that governs whether either half of the
+/// updater runs. A tick-box that stops baz downloading and does not stop the
+/// launcher offering, or the reverse, is a setting that lies.
+///
+/// So the agreement is asserted rather than assumed, over the file baz itself
+/// writes and over the shapes a hand-edited one arrives in.
+#[cfg(test)]
+mod launcher_agrees {
+    use super::{Config, config_file, load};
+
+    /// **Both readers, over the same text, always answer the same thing.**
+    ///
+    /// Including the two defaults, which are the case a fresh install is in:
+    /// no file at all, and a file with no such key. Both must read *yes*,
+    /// because a listener who has never opened Settings must still be told
+    /// when a fix ships.
+    #[test]
+    fn the_launcher_and_the_application_read_the_flag_the_same_way() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let wrote = Config {
+            check_for_updates: false,
+            ..Config::default()
+        };
+        for text in [
+            String::new(),
+            "check_for_updates = true
+"
+            .to_owned(),
+            "check_for_updates = false
+"
+            .to_owned(),
+            "player = {}
+check_for_updates = false
+"
+            .to_owned(),
+            // Nonsense in the file is not permission to stop telling somebody
+            // about a security fix, so both readers fall back to the default.
+            "check_for_updates = \"maybe\"
+"
+            .to_owned(),
+            "this is not toml {{{
+"
+            .to_owned(),
+            Config::default().to_toml(),
+            wrote.to_toml(),
+        ] {
+            let path = dir.path().join("config.toml");
+            std::fs::write(&path, &text).expect("a config file");
+            assert_eq!(
+                load(&path).check_for_updates,
+                baz_update::wanted_in(&text),
+                "the launcher and baz disagree about:\n{text}"
+            );
+        }
+    }
+
+    /// **And they look in the same place.** Two processes reading the same
+    /// key out of two different files is the same defect one step earlier.
+    #[test]
+    fn the_launcher_and_the_application_look_in_the_same_file() {
+        assert_eq!(config_file(), baz_update::config_path());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// **A saved curve survives the file**, name, bands and headroom.

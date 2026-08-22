@@ -1,0 +1,39 @@
+[package]
+name = "baz-update"
+description = "baz — the release check, the staged installer, and the launcher that offers it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# **Why this is a crate of its own and not a module of `baz`.**
+#
+# It has two callers that must never be the same process. `baz` uses the
+# library half to *stage* an update while somebody is listening; `baz-boot`
+# uses it to *offer* one before baz starts. The second only works because baz
+# is not running — an installer cannot replace a file the running application
+# holds open — so the launcher cannot be a mode of the application it
+# launches. ADR-0043 §5.
+[lib]
+name = "baz_update"
+path = "src/lib.rs"
+
+# The launcher. Small on purpose: no GUI toolkit, no audio, no library, no
+# database — a config flag, a directory, a dialog and an `exec`.
+[[bin]]
+name = "baz-boot"
+path = "src/boot.rs"
+
+[dependencies]
+dirs = { workspace = true }
+rfd = { workspace = true }
+sha2 = { workspace = true }
+toml = { workspace = true }
+ureq = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

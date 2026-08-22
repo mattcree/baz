@@ -24,6 +24,33 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Added
+
+- **baz updates itself on Windows and macOS, without ever asking you to quit
+  it.** A new small executable, `baz-boot`, is what the Start-menu entry and
+  the application icon now point at. While you listen, baz quietly downloads
+  the next release and checks it against its published SHA-256; the next time
+  you start baz, `baz-boot` checks that file again and asks, once, whether to
+  install it. Saying yes runs the installer with baz not yet started — the one
+  moment it can replace baz cleanly. Saying no starts baz and asks again next
+  time. Almost every launch has nothing to ask about, and on those it is
+  invisible. ADR-0043 §5.
+
+### Changed
+
+- **The update band is gone from the application.** Nothing about a new
+  version is drawn over your collection any more; the question moved to
+  `baz-boot`, before baz opens.
+- **Settings → Updates says what it actually does.** The tick-box now reads
+  *Download new versions in the background and offer them at the next start*,
+  and governs both halves — unticked, baz makes no network request at all.
+  *Download it now* ends at a file waiting for the next launch rather than at
+  a request to close baz.
+- **The Linux archive is unchanged and ships no launcher.** Nothing can unpack
+  a tarball over your installation for you, so Settings still hands the
+  verified download to your desktop. The Flatpak is still updated by the store
+  that owns it.
+
 ## [0.4.1] - 2026-08-20
 
 ### Changed

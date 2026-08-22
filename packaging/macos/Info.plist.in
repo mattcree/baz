@@ -12,9 +12,20 @@
 	<key>CFBundleIdentifier</key>
 	<string>@APP_ID@</string>
 
-	<!-- What the executable inside Contents/MacOS is called. -->
+	<!--
+	  What the executable inside Contents/MacOS is called — and on a shipping
+	  bundle it is **not** `baz`.
+
+	  `baz-boot` is what LaunchServices starts: a small launcher that offers
+	  an already-downloaded update before baz opens, and otherwise replaces
+	  itself with `baz` through `exec` in the same process. That is why an
+	  update accepted here can succeed at all — an installer cannot replace a
+	  bundle the running application is executing out of, and at this instant
+	  nothing is (ADR-0043 §5). `bundle.sh` substitutes the name so a bundle
+	  built without a launcher still names the binary it does have.
+	-->
 	<key>CFBundleExecutable</key>
-	<string>baz</string>
+	<string>@EXECUTABLE@</string>
 
 	<!--
 	  CFBundleName is the menu-bar name and is capped at 15 characters by

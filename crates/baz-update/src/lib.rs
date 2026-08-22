@@ -1,38 +1,61 @@
 //! **Is there a newer baz, and is it any of our business to say so?**
 //!
-//! ADR-0043 §3. The update *mechanism* is the platform's package manager —
-//! Flathub, winget, Homebrew — and none of it is code baz owns. What is left
-//! over is the person who took a tarball, a zip, or dragged the `.app` across:
-//! no store knows they exist, and nothing will ever tell them a new version
-//! shipped.
+//! ADR-0043 §3 and §5. The update *mechanism* is the platform's package
+//! manager — Flathub, winget, Homebrew — and none of it is code baz owns.
+//! What is left over is the person who took a tarball, a zip, or dragged the
+//! `.app` across: no store knows they exist, and nothing will ever tell them
+//! a new version shipped.
+//!
+//! # Two processes, and the split is the whole design
+//!
+//! The owner, 2026-08-20: *"honestly we don't need to show that a new version
+//! in the app… we could just have a separate boot up script essentially, a
+//! smaller exe which checks for updates and prompts to either install or not,
+//! based on their config flag"*.
+//!
+//! So there are two callers and they are deliberately never the same process:
+//!
+//! - **`baz`, while somebody is listening**, uses [`check`] and
+//!   [`fetch_verified`] to *stage* an update into [`stage`]'s directory. It
+//!   draws nothing. A 186 MB disk image cannot be downloaded while a listener
+//!   waits to hear music, so it is downloaded while they are already hearing
+//!   it.
+//! - **`baz-boot`, before baz starts**, finds that staged file and *offers*
+//!   it. The offer is instant, because the download already happened, and
+//!   accepting it works because **baz is not running**: an installer cannot
+//!   replace a file the running application holds open, which is the whole
+//!   reason a launcher exists rather than a button.
 //!
 //! # It hands off; it does not overwrite
 //!
-//! The owner, 2026-08-20: *"ideally we want to be able to update easily. as in,
-//! the user just clicks something and the app updates"*. So baz downloads and
-//! **verifies**, and then hands the verified file to the thing that already
-//! knows how to install it — `msiexec` on Windows, the disk image on macOS.
+//! The owner, the same day: *"ideally we want to be able to update easily. as
+//! in, the user just clicks something and the app updates"*. So baz downloads
+//! and **verifies**, and then hands the verified file to the thing that
+//! already knows how to install it — `msiexec` on Windows, the disk image on
+//! macOS.
 //!
 //! That is not timidity, it is the shape that is both safer *and* more
 //! familiar. A self-replacing binary fights the lock on the running
 //! executable on Windows and breaks a bundle's signature on macOS; an
 //! installer does neither, and it is what a listener on those platforms
 //! expects a download to do anyway. The one step baz refuses to skip is the
-//! **checksum**: nothing is opened, run or handed anywhere until its SHA-256
-//! matches the `SHA256SUMS` published beside it.
+//! **checksum**: nothing is opened, run, staged or handed anywhere until its
+//! SHA-256 matches the `SHA256SUMS` published beside it.
 //!
 //! # What it cannot do, and does not pretend to
 //!
-//! **Inside a Flatpak there is no update button**, because `/app` is read
-//! only and the store already updates baz without being asked. Drawing a
-//! button that could not work — or that told somebody to go and download
-//! something — would be worse than drawing nothing. [`Route`] decides this,
+//! **Inside a Flatpak nothing here runs at all**, because `/app` is read only
+//! and the store already updates baz without being asked. The Flatpak ships
+//! no launcher and its manifest grants no network. [`Route`] decides this,
 //! and it is read from the filesystem rather than compiled in.
 //!
-//! **Not on by default.** baz makes no network request in its life — that is a
-//! property of a local music player, not an oversight — and it will not start
-//! making one because a developer thought it would be handy. The setting is
-//! off until a listener turns it on, and the words next to it say what it does.
+//! **One flag, and it governs both halves.** `check_for_updates` in
+//! `config.toml` is what the staging task reads and what the launcher reads,
+//! and turning it off means neither runs. It is on by default, which is a
+//! stated departure from *baz makes no network request unasked* rather than a
+//! hidden one — the words beside the box say what it does, and the owner's
+//! *"this could then be unchecked for anyone that doesn't want to"* is why
+//! the box is there at all.
 //!
 //! # It has to know how it was installed
 //!
@@ -41,12 +64,14 @@
 //! and will offer it. So [`Route`] is read from the filesystem, and the
 //! sentence changes with it. Getting this wrong is worse than saying nothing.
 
+pub mod stage;
+
 /// How this copy of baz got onto the machine, as far as it can tell.
 ///
 /// Detected rather than compiled in, because one binary is shipped several
 /// ways: the same `baz` inside a Flatpak is also the one inside the tarball.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Route {
+pub enum Route {
     /// Inside a Flatpak sandbox. The store owns the update.
     Flatpak,
     /// Anywhere else: a tarball, a zip, an MSI, a dragged bundle.
@@ -63,7 +88,7 @@ impl Route {
     ///
     /// `/.flatpak-info` exists in every Flatpak sandbox and nowhere else; it
     /// is the check `flatpak` itself documents for exactly this question.
-    pub(crate) fn detect() -> Self {
+    pub fn detect() -> Self {
         if std::path::Path::new("/.flatpak-info").exists() {
             Self::Flatpak
         } else {
@@ -72,7 +97,7 @@ impl Route {
     }
 
     /// What to tell a listener, given a newer version.
-    pub(crate) fn sentence(self, newer: &str) -> String {
+    pub fn sentence(self, newer: &str) -> String {
         match self {
             Self::Flatpak => format!(
                 "baz {newer} has been released. Your software centre will \
@@ -87,7 +112,7 @@ impl Route {
     /// Inside a Flatpak it cannot and must not offer to: `/app` is read only,
     /// and the store updates baz without being asked. A button that could not
     /// work is worse than no button.
-    pub(crate) const fn can_install(self) -> bool {
+    pub const fn can_install(self) -> bool {
         matches!(self, Self::Standalone)
     }
 }
@@ -99,7 +124,7 @@ impl Route {
 /// an archive *and* an installer for every platform; this names the installer,
 /// because handing a listener a `.tar.gz` is handing them the problem back.
 #[must_use]
-pub(crate) const fn asset_suffix() -> &'static str {
+pub const fn asset_suffix() -> &'static str {
     if cfg!(target_os = "windows") {
         ".msi"
     } else if cfg!(target_os = "macos") {
@@ -110,6 +135,25 @@ pub(crate) const fn asset_suffix() -> &'static str {
         // already excluded the sandbox by the time this is asked.
         ".tar.gz"
     }
+}
+
+/// **Can this platform's installer replace baz without being supervised?**
+///
+/// Windows and macOS publish an installer — an `.msi` and a `.dmg` — that a
+/// listener already expects to double-click, and a launcher can hand either
+/// one over with baz not running. That is the whole staged-update path.
+///
+/// **A Linux archive cannot be installed by anyone but the person holding
+/// it.** Unpacking a `.tar.gz` over an existing installation is a decision
+/// about a directory only they know the shape of, so there is nothing for a
+/// launcher to do and none is shipped in that download. The blessed Linux
+/// route is the Flatpak, which updates itself and needs none of this either.
+///
+/// This is the one predicate: it decides whether `baz` stages anything,
+/// whether `baz-boot` is shipped at all, and which sentence Settings shows.
+#[must_use]
+pub const fn installs_itself() -> bool {
+    cfg!(target_os = "windows") || cfg!(target_os = "macos")
 }
 
 // **There is no interval, because there is no automatic check.**
@@ -126,7 +170,7 @@ pub(crate) const fn asset_suffix() -> &'static str {
 
 /// The releases endpoint. Public, unauthenticated, and rate limited far above
 /// once a day.
-pub(crate) const ENDPOINT: &str = "https://api.github.com/repos/mattcree/baz/releases/latest";
+pub const ENDPOINT: &str = "https://api.github.com/repos/mattcree/baz/releases/latest";
 
 /// **Is `candidate` newer than `running`?**
 ///
@@ -139,7 +183,7 @@ pub(crate) const ENDPOINT: &str = "https://api.github.com/repos/mattcree/baz/rel
 /// hears about it a version later, and the cost of a false positive is baz
 /// telling somebody their current version is out of date when it is not.
 #[must_use]
-pub(crate) fn is_newer(candidate: &str, running: &str) -> bool {
+pub fn is_newer(candidate: &str, running: &str) -> bool {
     let Some(candidate) = parse(candidate) else {
         return false;
     };
@@ -176,7 +220,7 @@ fn parse(version: &str) -> Option<(u32, u32, u32)> {
 /// It is deliberately strict: a field it does not find exactly is `None`, and
 /// `None` is silence.
 #[must_use]
-pub(crate) fn tag_of(json: &str) -> Option<String> {
+pub fn tag_of(json: &str) -> Option<String> {
     let at = json.find("\"tag_name\"")?;
     let rest = &json[at + "\"tag_name\"".len()..];
     let colon = rest.find(':')?;
@@ -206,7 +250,7 @@ pub(crate) fn tag_of(json: &str) -> Option<String> {
 /// data that names where to send a listener is exactly the field an attacker
 /// would want to control.
 #[must_use]
-pub(crate) fn asset_url(json: &str, suffix: &str) -> Option<String> {
+pub fn asset_url(json: &str, suffix: &str) -> Option<String> {
     const HOSTS: [&str; 2] = [
         "https://github.com/mattcree/baz/releases/download/",
         "https://objects.githubusercontent.com/",
@@ -236,7 +280,7 @@ pub(crate) fn asset_url(json: &str, suffix: &str) -> Option<String> {
 /// for. A checksum reader that is generous is a checksum reader that can be
 /// talked into agreeing.
 #[must_use]
-pub(crate) fn published_sum(sums: &str, file_name: &str) -> Option<String> {
+pub fn published_sum(sums: &str, file_name: &str) -> Option<String> {
     for line in sums.lines() {
         let line = line.trim();
         let Some((digest, name)) = line.split_once("  ") else {
@@ -260,7 +304,7 @@ pub(crate) fn published_sum(sums: &str, file_name: &str) -> Option<String> {
 /// constant-time-irrelevant but case-insensitive, because `sha256sum` and
 /// GitHub disagree about case and neither is wrong.
 #[must_use]
-pub(crate) fn digest_matches(bytes: &[u8], published: &str) -> bool {
+pub fn digest_matches(bytes: &[u8], published: &str) -> bool {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -284,15 +328,15 @@ const CEILING: u64 = 512 * 1024 * 1024;
 
 /// What a completed check found.
 #[derive(Debug, Clone)]
-pub(crate) struct Update {
+pub struct Update {
     /// The version, as the tag names it.
-    pub(crate) version: String,
+    pub version: String,
     /// Where this platform's installer lives.
-    pub(crate) asset: String,
+    pub asset: String,
     /// Its file name, which is also the key into `SHA256SUMS`.
-    pub(crate) file_name: String,
+    pub file_name: String,
     /// Where the release's `SHA256SUMS` lives.
-    pub(crate) sums: String,
+    pub sums: String,
 }
 
 /// A GET that answered `404`.
@@ -345,7 +389,7 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
 /// # Errors
 ///
 /// The network, or a response that is not what the endpoint documents.
-pub(crate) fn check() -> Result<Option<Update>, String> {
+pub fn check() -> Result<Option<Update>, String> {
     // **A repository with no release is up to date, not broken.** This is the
     // state baz itself is in until its first tag, and it is the state a fork
     // is in permanently.
@@ -385,15 +429,17 @@ pub(crate) fn check() -> Result<Option<Update>, String> {
 
 /// **Download the installer and prove it is the published one.**
 ///
-/// Returns the path it was written to. The digest is compared before the file
-/// is written anywhere a listener could run it, so a mismatch leaves nothing
-/// behind to be found later and mistaken for a download.
+/// Returns the path it was written to, which is [`stage`]'s directory: the
+/// digest is compared before the file is written anywhere a listener could
+/// run it, so a mismatch leaves nothing behind to be found later and mistaken
+/// for a download, and what does get written is written with the marker that
+/// lets the launcher prove it again at the next start.
 ///
 /// # Errors
 ///
 /// The network, a missing or malformed `SHA256SUMS` entry, a digest that does
 /// not match, or a filesystem that will not take the file.
-pub(crate) fn fetch_verified(update: &Update) -> Result<std::path::PathBuf, String> {
+pub fn fetch_verified(update: &Update) -> Result<std::path::PathBuf, String> {
     let sums = get(&update.sums)?;
     let sums = String::from_utf8_lossy(&sums);
     let published = published_sum(&sums, &update.file_name)
@@ -407,11 +453,61 @@ pub(crate) fn fetch_verified(update: &Update) -> Result<std::path::PathBuf, Stri
         ));
     }
 
-    let dir = std::env::temp_dir().join("baz-update");
-    std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
-    let path = dir.join(&update.file_name);
-    std::fs::write(&path, &bytes).map_err(|error| format!("{}: {error}", path.display()))?;
-    Ok(path)
+    stage::hold(
+        &stage::Pending {
+            version: update.version.clone(),
+            file_name: update.file_name.clone(),
+            sha256: published,
+        },
+        &bytes,
+    )
+}
+
+/// **Does this listener want baz to look for updates at all?**
+///
+/// One key out of `config.toml`, read here rather than in `baz` because the
+/// launcher needs the same answer and is not allowed to link the application
+/// to get it. `crates/baz/src/config.rs` holds a test that the two readers
+/// agree; the shape of that agreement is the point, not either copy.
+///
+/// **A config file that cannot be read means yes**, matching the default the
+/// application itself writes. A listener who has never opened Settings has no
+/// file, and *no file* must not mean *never tell me about a fix*.
+#[must_use]
+pub fn wanted() -> bool {
+    let Some(path) = config_path() else {
+        return true;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return true;
+    };
+    wanted_in(&text)
+}
+
+/// **Where `config.toml` is**, by the same rule `crates/baz/src/config.rs`
+/// uses — and pinned to it by a test over there, because two processes
+/// disagreeing about which file holds the setting would be a tick-box that
+/// does nothing.
+#[must_use]
+pub fn config_path() -> Option<std::path::PathBuf> {
+    Some(dirs::config_dir()?.join("baz").join("config.toml"))
+}
+
+/// [`wanted`] over a `config.toml` already in hand.
+///
+/// Separated so it can be held against the application's own reader without
+/// either of them touching an environment variable — see
+/// `crates/baz/src/config.rs`.
+#[must_use]
+pub fn wanted_in(text: &str) -> bool {
+    const KEY: &str = "check_for_updates";
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return true;
+    };
+    table
+        .get(KEY)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true)
 }
 
 /// **Hand the verified file to the thing that installs it.**
@@ -424,7 +520,7 @@ pub(crate) fn fetch_verified(update: &Update) -> Result<std::path::PathBuf, Stri
 /// # Errors
 ///
 /// A platform tool that will not start.
-pub(crate) fn hand_off(path: &std::path::Path) -> Result<(), String> {
+pub fn hand_off(path: &std::path::Path) -> Result<(), String> {
     // **macOS: take the quarantine flag off first, and only here.**
     //
     // Gatekeeper attaches `com.apple.quarantine` to anything a *browser*
@@ -475,7 +571,7 @@ pub(crate) fn hand_off(path: &std::path::Path) -> Result<(), String> {
 /// Mac listener "the installer has been handed the download" when what
 /// appeared is a Finder window is baz describing something they cannot see.
 #[must_use]
-pub(crate) fn handed_off_note() -> &'static str {
+pub fn handed_off_note() -> &'static str {
     if cfg!(target_os = "windows") {
         "The installer is running. Follow it, and quit baz when it asks — baz \
          will not close itself."
@@ -693,7 +789,7 @@ d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26  baz-0.4.0-linu
     /// so it is pinned in the source rather than left to a reader's memory.
     #[test]
     fn quarantine_is_cleared_after_verification_and_not_before() {
-        let source = include_str!("release.rs").replace("\r\n", "\n");
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
         let shipped = source
             .split("#[cfg(test)]")
             .next()
