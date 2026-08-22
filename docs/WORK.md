@@ -1401,11 +1401,51 @@ because a player without it is missing a floor rather than a feature.
     anyway. `NEXT-STEPS.md` §1 said the releases page was empty; that is now
     marked closed rather than left to contradict the front page.
 
-62. **Not started — multi-select and bulk actions.** The workflow floor every
-    other list feature stands on: shift/ctrl over rows and tiles, then queue,
-    add-to-playlist or remove applied to the set. baz's selection is
-    deliberately one content item (ADR-0017's select-then-activate), which is
-    right for activation and wrong for building a list by hand. Medium.
+62. **Done 2026-08-22 — multi-select and bulk actions.** The workflow floor
+    every other list feature stands on (`docs/design/18-feature-parity.md` §4:
+    *multi-select first*, because it is what tag editing and bulk actions
+    stand on).
+
+    **A selection is a set now**, and the single-selection case is the set of
+    one. <kbd>Ctrl</kbd> adds or removes one; <kbd>Shift</kbd> takes everything
+    from the anchor to the press; a plain press replaces the whole set, because
+    a listener who has ticked five rows and clicks a sixth means *that one*.
+
+    **`State::is` answers for the whole set**, which is what kept this from
+    being a sweep through every view: the album page, the queue, a playlist's
+    page and the wall all ask *is this one selected* and get the same answer
+    they always did, for more things. Not one view changed to draw a set.
+
+    **A set never spans two lists.** *Everything from here to there* is only a
+    sentence inside one list, and a set holding two playlist rows and an album
+    tile has no verb that means anything — so every `Content` names a `Run`,
+    and a press in a different one starts again.
+
+    **Two deliberate refusals**, both recorded because they look like
+    omissions:
+
+    - **<kbd>Shift</kbd> on a sleeve still queues the record.** That is a
+      taught gesture with a printed accelerator in the tile menu (doc 09 §13
+      step 7); taking it away to give the wall a range would break something
+      learned to add something unlearned. Ctrl still builds a set of records by
+      hand, which is the half with no other route.
+    - **Playlist and implicit-list tiles are selected one at a time.** baz
+      cannot read a saved playlist's tracks without opening it, so there is no
+      bulk verb a set of them could spend — and a selection a listener can
+      build and then find nothing to do with is worse than one they cannot
+      build.
+
+    **The verbs are a visible strip**, `views::marks`, at the foot of the place
+    and empty at rest: *n selected* · Play · Queue · Add to playlist… ·
+    Remove · Clear. It is a control rather than a right-click menu because of
+    the rule `crate::menu` is built on — **no action's only route is a
+    gesture** — and `Remove` appears only over a queue or a playlist page,
+    because those are the two lists a listener owns and can shorten. Esc puts a
+    set of more than one down before it leaves the place.
+
+    **Removal goes bottom row first**, which is the whole of the arithmetic:
+    every removal shifts the rows below it up, so taking row 2 before row 5
+    would take out the row that *was* row 6.
 
 63. **Done 2026-08-15 — a sleep timer.** Settings → Playback, six choices and
     an off, with the time remaining under them while it runs.
@@ -1981,12 +2021,44 @@ or not."*
     visualiser at all and asked to see this state before saying — so this item
     is done and the question it was raised to answer is open.
 
-85. **Not started — more background visualisations.** *(The owner, 2026-08-22:
+85. **Done 2026-08-22 — two more background visualisations, and they ask
+    about the record rather than about the music.** *(The owner, 2026-08-22:
     "we have nice visualizers in the background. Firstly, let's get more of
-    those because those are great here.")* Four exist: spectrum, the rolling
-    waveform, the spectrogram and the oscilloscope. Each is a different
-    *question* about the signal rather than a different skin — that is the bar
-    a fifth has to clear (`crate::scope`'s module note states it).
+    those because those are great here.")*
+
+    The bar the four existing ones set is that each is a different **question**
+    rather than a different skin — spectrum asks *what frequencies*, the
+    rolling waveform *how loud lately*, the spectrogram *both over time*, the
+    oscilloscope *what shape is the air making*. Two more clear it, and both
+    ask about the **master** rather than about the music, which is a whole
+    class none of the four could reach:
+
+    - **Stereo image** (`crate::stereo`) — how wide is this, and do the two
+      channels agree? A goniometer: mono is a vertical line, an ordinary mix a
+      fat upright cloud, and an out-of-phase record lies *flat* — the one fault
+      in a mastering chain that is invisible until you look at exactly this.
+    - **Peak and average** (`crate::headroom`) — what is left of the dynamics.
+      Two figures a frame and the reading is the **gap**: a thick band is a
+      record with its transients intact, a thin ribbon riding the top is one
+      squashed flat. Drawn as the filled band between them rather than as two
+      lines, because the thing to look at is the space.
+
+    **The engine gained one fact for the first of them.** Every visualisation
+    until now read the mono fold, which costs the other four nothing — a
+    spectrum of the left channel and a spectrum of the right are two pictures
+    of the same music. It costs a stereo image everything, so
+    `VisualizationFrame` now carries `side` beside `samples`: mid and side,
+    from which `left = mid + side` and `right = mid - side` exactly, rather
+    than two arrays that mostly repeat each other.
+
+    **A chromagram was considered and refused**, and the reason is item 79's:
+    the tap is 256 samples, which at 44.1 kHz is 5.8 ms and about 172 Hz of
+    frequency resolution. That cannot separate semitones anywhere a listener
+    would care about, so a pitch-class wheel drawn from it would be a confident
+    picture of noise. Wide log bands survive that resolution; twelve narrow
+    ones do not.
+
+    Frames of all six are at `docs/design/impl/liquid-glass/`.
 
 ## Doing
 

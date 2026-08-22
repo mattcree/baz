@@ -166,10 +166,18 @@ pub(crate) enum Mode {
     Spectrum,
     Waveform,
     Spectrogram,
-    /// **The delivered waveform itself** — see [`crate::scope`]. Last in the
-    /// ring because it is the odd one out: the other three are measurements
-    /// of the signal and this is the signal.
+    /// **The delivered waveform itself** — see [`crate::scope`]. Last of the
+    /// four that read the mono fold, because it is the odd one out among
+    /// them: the other three are measurements of the signal and this is the
+    /// signal.
     Scope,
+    /// **The stereo image** — see [`crate::stereo`]. The first reading here
+    /// that is about the *record* rather than about the music: how wide it is,
+    /// and whether its two channels agree.
+    Stereo,
+    /// **Peak against average, over time** — see [`crate::headroom`]. What is
+    /// left of this master's dynamics.
+    Headroom,
 }
 
 impl Mode {
@@ -179,7 +187,9 @@ impl Mode {
             Self::Spectrum => Self::Waveform,
             Self::Waveform => Self::Spectrogram,
             Self::Spectrogram => Self::Scope,
-            Self::Scope => Self::Off,
+            Self::Scope => Self::Stereo,
+            Self::Stereo => Self::Headroom,
+            Self::Headroom => Self::Off,
         }
     }
 
@@ -188,7 +198,7 @@ impl Mode {
     }
 
     pub(crate) const fn records_history(self) -> bool {
-        matches!(self, Self::Waveform | Self::Spectrogram)
+        matches!(self, Self::Waveform | Self::Spectrogram | Self::Headroom)
     }
 
     const fn label(self) -> &'static str {
@@ -198,6 +208,8 @@ impl Mode {
             Self::Waveform => "Rolling waveform",
             Self::Spectrogram => "Spectrogram",
             Self::Scope => "Oscilloscope",
+            Self::Stereo => "Stereo image",
+            Self::Headroom => "Peak and average",
         }
     }
 }
@@ -208,6 +220,8 @@ impl Mode {
 #[derive(Debug, Clone)]
 pub(crate) struct History {
     amplitudes: [f32; HISTORY_FRAMES],
+    /// The loudest instant in each frame — [`Mode::Headroom`]'s other half.
+    peaks: [f32; HISTORY_FRAMES],
     spectra: [[f32; BANDS]; HISTORY_FRAMES],
     cursor: usize,
     len: usize,
@@ -217,6 +231,7 @@ impl Default for History {
     fn default() -> Self {
         Self {
             amplitudes: [0.0; HISTORY_FRAMES],
+            peaks: [0.0; HISTORY_FRAMES],
             spectra: [[0.0; BANDS]; HISTORY_FRAMES],
             cursor: 0,
             len: 0,
@@ -241,9 +256,28 @@ impl History {
                 self.amplitudes[self.cursor] = amplitude_height(mean_square.sqrt());
             }
             Mode::Spectrogram => self.spectra[self.cursor] = frequency_bands(audio),
-            // The scope draws the live frame and keeps no history: it is a
-            // picture of *now*, which is the whole of what distinguishes it.
-            Mode::Off | Mode::Spectrum | Mode::Scope => return,
+            // **Two numbers, and the gap between them is the reading.** The
+            // loudest instant in the frame and the average of the whole of it
+            // — see [`crate::headroom`], which draws the distance rather than
+            // either figure.
+            Mode::Headroom => {
+                let mean_square = audio
+                    .samples
+                    .iter()
+                    .map(|sample| sample * sample)
+                    .sum::<f32>()
+                    / VISUAL_SAMPLE_COUNT as f32;
+                let peak = audio
+                    .samples
+                    .iter()
+                    .fold(0.0_f32, |loudest, sample| loudest.max(sample.abs()));
+                self.amplitudes[self.cursor] = amplitude_height(mean_square.sqrt());
+                self.peaks[self.cursor] = amplitude_height(peak);
+            }
+            // The scope and the stereo image draw the live frame and keep no
+            // history: both are pictures of *now*, which is the whole of what
+            // distinguishes them.
+            Mode::Off | Mode::Spectrum | Mode::Scope | Mode::Stereo => return,
         }
         self.cursor = (self.cursor + 1) % HISTORY_FRAMES;
         self.len = (self.len + 1).min(HISTORY_FRAMES);
@@ -255,6 +289,22 @@ impl History {
 
     fn amplitude(&self, position: usize) -> f32 {
         self.amplitudes[self.ordered_index(position)]
+    }
+
+    /// The loudest instant of the frame at `position`.
+    pub(crate) fn peak(&self, position: usize) -> f32 {
+        self.peaks[self.ordered_index(position)]
+    }
+
+    /// The average of the frame at `position`, which is [`Self::amplitude`]
+    /// under the name [`crate::headroom`] reads it by.
+    pub(crate) fn average(&self, position: usize) -> f32 {
+        self.amplitude(position)
+    }
+
+    /// How many frames are held, oldest first.
+    pub(crate) const fn len(&self) -> usize {
+        self.len
     }
 
     fn spectrum(&self, position: usize) -> &[f32; BANDS] {
@@ -559,6 +609,21 @@ pub(crate) fn background(
         Mode::Spectrogram => spectrogram(history, width, height, field),
         Mode::Scope => crate::scope::Scope::new(
             &audio.samples,
+            inks(field, theme::active()),
+            theme::active().paper_muted,
+            iced::Size::new(width, height),
+        )
+        .into(),
+        Mode::Stereo => crate::stereo::Stereo::new(
+            &audio.samples,
+            &audio.side,
+            inks(field, theme::active()),
+            theme::active().paper_muted,
+            iced::Size::new(width, height),
+        )
+        .into(),
+        Mode::Headroom => crate::headroom::Headroom::new(
+            history,
             inks(field, theme::active()),
             theme::active().paper_muted,
             iced::Size::new(width, height),
@@ -882,9 +947,15 @@ mod tests {
     ///
     /// The order is a claim rather than an accident: the three measurements
     /// first, in the order they get more elaborate — a snapshot of frequency,
-    /// then loudness over time, then both — and the oscilloscope last, because
-    /// it is the odd one out. The other three are readings *about* the signal;
-    /// the scope is the signal.
+    /// then loudness over time, then both — then the oscilloscope, which is
+    /// the odd one out among them: the first three are readings *about* the
+    /// signal and the scope is the signal.
+    ///
+    /// **The last two are about the record rather than about the music**, and
+    /// they come after everything that is about the music. The stereo image
+    /// asks how wide it is and whether its channels agree; peak-against-average
+    /// asks what is left of its dynamics. Both are questions you ask of a
+    /// *master*, and neither can be answered by any of the four before them.
     #[test]
     fn modes_cycle_from_off_and_back_to_off() {
         let mut mode = Mode::Off;
@@ -893,6 +964,8 @@ mod tests {
             Mode::Waveform,
             Mode::Spectrogram,
             Mode::Scope,
+            Mode::Stereo,
+            Mode::Headroom,
             Mode::Off,
         ] {
             mode = mode.next();
@@ -923,6 +996,68 @@ mod tests {
             }
         }
         assert!(names.len() > 3, "the cycle lost a mode");
+    }
+
+    /// **The gap is the reading, and the gap is what the capture measures.**
+    ///
+    /// A square wave is the squashed master's limit — every instant is the
+    /// loudest instant — so its peak and its average must land on top of each
+    /// other. A sparse transient is the opposite: almost all of it is silence
+    /// and one sample is full scale, so the two must be a long way apart.
+    /// `crate::headroom` draws the distance between them and nothing else, so
+    /// if these two frames measured alike the whole visualisation would be a
+    /// flat ribbon whatever anybody played.
+    #[test]
+    fn a_squashed_frame_and_a_dynamic_one_do_not_measure_alike() {
+        let frame = |samples: [f32; VISUAL_SAMPLE_COUNT]| {
+            let mut history = History::default();
+            history.capture(
+                Mode::Headroom,
+                &VisualizationFrame {
+                    samples,
+                    sample_rate: 44_100,
+                    ..VisualizationFrame::default()
+                },
+            );
+            (history.average(0), history.peak(0))
+        };
+
+        // Every instant at full scale: nothing is louder than the mean.
+        let (flat_average, flat_peak) = frame(std::array::from_fn(|at| {
+            if at.is_multiple_of(2) { 1.0 } else { -1.0 }
+        }));
+        assert!(
+            (flat_peak - flat_average).abs() < 0.01,
+            "a square wave read as {} of headroom",
+            flat_peak - flat_average
+        );
+
+        // One transient in a quiet frame.
+        let (sparse_average, sparse_peak) =
+            frame(std::array::from_fn(|at| if at == 0 { 1.0 } else { 0.0 }));
+        assert!(
+            sparse_peak - sparse_average > 0.2,
+            "a transient read as {} of headroom",
+            sparse_peak - sparse_average
+        );
+        assert!(
+            (sparse_peak - flat_peak).abs() < 0.01,
+            "the two frames disagree about the loudest instant, which they share"
+        );
+    }
+
+    /// **The two live modes keep no history**, which is what makes them
+    /// pictures of *now*: the oscilloscope draws the delivered block and the
+    /// stereo image draws the delivered pair, and a ring buffer behind either
+    /// would be a cost with no reader.
+    #[test]
+    fn the_live_modes_record_nothing() {
+        for mode in [Mode::Off, Mode::Spectrum, Mode::Scope, Mode::Stereo] {
+            assert!(!mode.records_history(), "{mode:?} keeps a history");
+        }
+        for mode in [Mode::Waveform, Mode::Spectrogram, Mode::Headroom] {
+            assert!(mode.records_history(), "{mode:?} keeps no history");
+        }
     }
 
     #[test]

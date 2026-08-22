@@ -1237,6 +1237,17 @@ pub(crate) enum Message {
     /// `baz-boot`, or nothing, or why not — and nothing on this path is ever
     /// drawn unasked (ADR-0043 §5).
     UpdateStaged(Result<Option<String>, String>),
+    /// **Play everything selected**, as one run, in the order it is drawn.
+    MarkedPlay,
+    /// Append everything selected to what is playing.
+    MarkedQueue,
+    /// Put everything selected in front of the playlist picker.
+    MarkedAddToPlaylist,
+    /// Take everything selected out of the list it is in — the queue, or a
+    /// playlist's page. Never offered anywhere else (`views::marks`).
+    MarkedRemove,
+    /// Put the selection down without spending it.
+    MarksClear,
     /// **Move the keyboard's ring to the next focus stop**, in the order the
     /// place builds its controls — see [`crate::focus`].
     FocusNext,
@@ -3362,6 +3373,40 @@ impl App {
                 };
                 Task::none()
             }
+            // **The bulk verbs** (`views::marks`, `docs/WORK.md` item 62).
+            // Every one of them spends a path that already existed for one
+            // object; what is new is that the set is turned into queue rows
+            // *once*, in the order it is drawn, and handed over whole.
+            Message::MarkedPlay => {
+                let items = self.marked_items();
+                if items.is_empty() {
+                    return Task::none();
+                }
+                self.start_marked(items)
+            }
+            Message::MarkedQueue => {
+                let items = self.marked_items();
+                self.append_items_to_run(items);
+                Task::none()
+            }
+            Message::MarkedAddToPlaylist => {
+                let items = self.marked_items();
+                if items.is_empty() {
+                    return Task::none();
+                }
+                if let Screen::Shelf(state) = &self.screen {
+                    let entries = crate::playlists::entries_for_items(&items);
+                    let label = format!("Add {} tracks", items.len());
+                    self.playlists
+                        .begin_pick(Some(&state.library), label, entries, items);
+                }
+                Task::none()
+            }
+            Message::MarkedRemove => self.remove_marked(),
+            Message::MarksClear => {
+                self.clear_marks();
+                Task::none()
+            }
             Message::ChromeApproached(near) => {
                 self.chrome_veil.go(
                     if near { 1.0 } else { 0.0 },
@@ -3709,14 +3754,250 @@ impl App {
         Task::none()
     }
 
+    /// **Whichever selection the visible place owns.**
+    ///
+    /// The search dropover keeps its own, because it is a list *over* the
+    /// place rather than in it, and every reader of a selection has to make
+    /// the same choice `press_content` does.
+    fn live_selection(&self) -> Option<&crate::selection::State> {
+        let Screen::Shelf(state) = &self.screen else {
+            return None;
+        };
+        Some(if state.search_open {
+            &state.search_selection
+        } else {
+            &state.selection
+        })
+    }
+
+    /// Everything selected, in the order it was marked.
+    fn marked(&self) -> Vec<Content> {
+        self.live_selection()
+            .map(|selection| selection.marked().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// **The selected set as queue rows**, ready for any of the bulk verbs.
+    ///
+    /// One conversion for all of them, because the alternative is four places
+    /// that each have to agree about what a marked album means. A marked
+    /// *record* means its tracks, in its own order; a marked row means that
+    /// row and nothing around it — ADR-0023 §3's queue rule, which is that a
+    /// listener who pointed at a track gets the track.
+    ///
+    /// Anything that cannot be resolved contributes nothing rather than a
+    /// placeholder: a row whose list has changed under the selection is gone,
+    /// and a run with a hole in it would be worse than a shorter one.
+    fn marked_items(&self) -> Vec<vm::QueueItemVm> {
+        let Screen::Shelf(state) = &self.screen else {
+            return Vec::new();
+        };
+        let mut items = Vec::new();
+        for content in self.marked() {
+            match content {
+                Content::Album(id) => {
+                    let chosen = state.edition_choice.get(&id).copied();
+                    if let Some(album) = state.albums.iter().find(|album| album.id == id) {
+                        items.extend(vm::album_queue(album, chosen).items);
+                    }
+                }
+                Content::AlbumTrack { album, row } | Content::SearchTrack { album, row } => {
+                    if let Some(item) = self.album_row_item(album, row) {
+                        items.push(item);
+                    }
+                }
+                Content::PlaylistTrack { playlist, row } => {
+                    if let Some(item) = self
+                        .playlists
+                        .page(playlist)
+                        .and_then(|open| open.queue.items.get(row))
+                    {
+                        items.push(item.clone());
+                    }
+                }
+                Content::QueueTrack(row) => {
+                    if let Some(item) = self.player.queue().and_then(|queue| queue.items.get(row)) {
+                        items.push(item.clone());
+                    }
+                }
+                // The tiles that stand for a list are selected one at a time
+                // and have no bulk verb — `selection::Run::bulkable`.
+                Content::Playlist(_) | Content::AllSongs | Content::ArtistSongs(_) => {}
+            }
+        }
+        items
+    }
+
+    /// One album page row as a queue row, which is what a marked track means.
+    fn album_row_item(&self, album: u64, row: usize) -> Option<vm::QueueItemVm> {
+        let Screen::Shelf(state) = &self.screen else {
+            return None;
+        };
+        let held = state.albums.iter().find(|held| held.id == album)?;
+        let chosen = state.edition_choice.get(&album).copied();
+        let track = vm::selected_edition(held, chosen)?.tracks.get(row)?;
+        Some(vm::QueueItemVm {
+            title: track.title.clone(),
+            artist: track.artist.clone().filter(|_| held.track_artists_vary),
+            album: held.title.clone(),
+            album_artist: Some(held.artist.label().to_owned()),
+            duration: track.duration,
+            path: track.path.clone(),
+        })
+    }
+
+    /// **Play the marked set as one assembled run.**
+    ///
+    /// `Assembled`, the same provenance a run built one pick at a time carries
+    /// — because that is exactly what it is, gathered in one gesture instead
+    /// of several. It is the one kind the save word is for.
+    fn start_marked(&mut self, items: Vec<vm::QueueItemVm>) -> Task<Message> {
+        let (album, artist) = items.first().map_or((None, String::new()), |item| {
+            (
+                item.album.clone(),
+                item.album_artist.clone().unwrap_or_default(),
+            )
+        });
+        let queue = vm::QueueVm {
+            album,
+            artist,
+            items,
+            origin: None,
+            source: vm::RunSource::Assembled,
+        };
+        self.start_and_show(queue);
+        Task::none()
+    }
+
+    /// **Take the marked rows out of the list they are in**, bottom row first.
+    ///
+    /// Descending, and that is the whole of the arithmetic: every removal
+    /// shifts the rows below it up, so removing row 2 before row 5 would take
+    /// out the row that *was* row 6. Going from the bottom leaves every row
+    /// still to be removed at the index it was marked at.
+    fn remove_marked(&mut self) -> Task<Message> {
+        let marked = self.marked();
+        if !crate::views::marks::removable(&marked) {
+            return Task::none();
+        }
+        let mut rows: Vec<usize> = marked
+            .iter()
+            .filter_map(|content| match content {
+                // The two lists a listener owns, and the only two `removable`
+                // lets through — see `views::marks`.
+                Content::QueueTrack(row) | Content::PlaylistTrack { row, .. } => Some(*row),
+                _ => None,
+            })
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        let queue = matches!(marked.first(), Some(Content::QueueTrack(_)));
+        for row in rows.into_iter().rev() {
+            if queue {
+                self.remove_queued(row);
+            } else if let Screen::Shelf(state) = &self.screen {
+                let library = &state.library;
+                self.playlists.remove_entry(row, library);
+            }
+        }
+        // The rows the set named are gone; a selection of indices into a list
+        // that has changed underneath is not a selection of anything.
+        self.clear_marks();
+        Task::none()
+    }
+
+    /// Put the selection down, in whichever place owns it.
+    fn clear_marks(&mut self) {
+        if let Screen::Shelf(state) = &mut self.screen {
+            if state.search_open {
+                state.search_selection.clear();
+            } else {
+                state.selection.clear();
+            }
+        }
+    }
+
+    /// **The list `content` lives in, in the order it is drawn.**
+    ///
+    /// What <kbd>Shift</kbd> needs to mean *everything from there to here*
+    /// (`crate::selection::State::extend`), and it lives here rather than in
+    /// the selection module for the reason that module's note gives: a range
+    /// is a slice of what a listener can *see*, so the surface that draws it
+    /// is what should say what it holds.
+    ///
+    /// **Tiles answer nothing**, deliberately. <kbd>Shift</kbd>-click on a
+    /// sleeve is the established Queue accelerator (doc 09 §13 step 7) and has
+    /// a printed accelerator in the tile menu; taking it away to give the wall
+    /// a range would break a taught gesture to add an untaught one. Ctrl still
+    /// builds a set of records by hand, which is the half that has no other
+    /// route. An empty run makes `extend` an ordinary selection, which is the
+    /// honest answer rather than a guess.
+    fn run_of(&self, content: Content) -> Vec<Content> {
+        use crate::selection::Run;
+        let Screen::Shelf(state) = &self.screen else {
+            return Vec::new();
+        };
+        match content.run() {
+            Run::Records | Run::Lists => Vec::new(),
+            Run::Queue => self.player.queue().map_or_else(Vec::new, |queue| {
+                (0..queue.items.len()).map(Content::QueueTrack).collect()
+            }),
+            Run::AlbumTracks(album) => state
+                .albums
+                .iter()
+                .find(|held| held.id == album)
+                .and_then(|held| {
+                    vm::selected_edition(held, state.edition_choice.get(&album).copied())
+                })
+                .map_or_else(Vec::new, |edition| {
+                    (0..edition.tracks.len())
+                        .map(|row| Content::AlbumTrack { album, row })
+                        .collect()
+                }),
+            Run::PlaylistTracks(playlist) => self
+                .playlists
+                .open
+                .as_ref()
+                .filter(|open| open.id == playlist)
+                .map_or_else(Vec::new, |open| {
+                    (0..open.rows.len())
+                        .map(|row| Content::PlaylistTrack { playlist, row })
+                        .collect()
+                }),
+            // **The results in the order they are drawn**, tracks only: the
+            // album and playlist results in the same list are doors rather
+            // than rows, and a range that swept one up would carry a whole
+            // record into a set of songs.
+            Run::SearchTracks => (0..state.search_result_count())
+                .filter_map(|index| state.search_result_content(index))
+                .filter(|found| matches!(found, Content::SearchTrack { .. }))
+                .collect(),
+        }
+    }
+
     /// One click selects; the second click on the same playable object inside
     /// the shared interval activates. Shift-click on an album retains its
     /// established explicit Queue accelerator.
+    ///
+    /// **<kbd>Ctrl</kbd> and <kbd>Shift</kbd> build a set instead**
+    /// (`crate::selection`, `docs/WORK.md` item 62) — Ctrl adds or removes
+    /// one, Shift takes the range from the anchor. Neither can activate: two
+    /// modified presses building a set of two adjacent rows must not start
+    /// playing one of them.
     fn press_content(&mut self, content: Content) -> Task<Message> {
         if let Content::Album(id) = content
             && self.modifiers.shift()
         {
             return self.queue_album(id);
+        }
+        if self.modifiers.command() {
+            self.mark_content(content, None);
+            return Task::none();
+        }
+        if self.modifiers.shift() {
+            let run = self.run_of(content);
+            self.mark_content(content, Some(run));
+            return Task::none();
         }
         let press = match &mut self.screen {
             Screen::Shelf(state) => {
@@ -3739,6 +4020,28 @@ impl App {
         match press {
             Press::Selected => Task::none(),
             Press::Activated => self.activate_content(content),
+        }
+    }
+
+    /// **A modified press**, against whichever selection the place owns.
+    ///
+    /// `range` is `Some` for <kbd>Shift</kbd> and `None` for <kbd>Ctrl</kbd>.
+    /// The search dropover keeps its own selection — it is a list over the
+    /// place rather than in it — and that split is the one this has to respect
+    /// rather than reinvent, so it mirrors `press_content`'s own choice.
+    fn mark_content(&mut self, content: Content, range: Option<Vec<Content>>) {
+        let Screen::Shelf(state) = &mut self.screen else {
+            return;
+        };
+        let searching = state.search_open && state.search_result_index(content).is_some();
+        let selection = if searching {
+            &mut state.search_selection
+        } else {
+            &mut state.selection
+        };
+        match range {
+            Some(run) => selection.extend(content, &run),
+            None => selection.toggle(content),
         }
     }
 
@@ -6904,6 +7207,15 @@ impl App {
         if self.peel_place_states() {
             return Task::none();
         }
+        // **A selection of more than one peels before the place does.** It is
+        // something the listener assembled and has not spent, and leaving the
+        // place with it standing would lose the work; one selected row is the
+        // ordinary state of every list and is not a layer at all
+        // (`views::marks`).
+        if self.live_selection().is_some_and(|held| held.count() > 1) {
+            self.clear_marks();
+            return Task::none();
+        }
         if !self.place.is_library() {
             return self.leave();
         }
@@ -8620,6 +8932,18 @@ impl App {
         // asks for the lane and the bottom band to go, not for the doors to;
         // an immersive mode you cannot change the visualiser from is a mode
         // you leave to change the visualiser.
+        // **The strip that spends a selection**, at the foot of the body —
+        // always in the tree and empty at rest, for the reason this file
+        // states at length about every other conditional layer: iced diffs by
+        // position, so a strip that appeared would hand the place beneath it a
+        // fresh state, scrolling the list back to the top at the exact moment
+        // somebody ticked their fifth row in it (`views::marks`).
+        let marks: Element<'_, Message> = views::marks::view(
+            self.live_selection()
+                .map(crate::selection::State::marked)
+                .unwrap_or_default(),
+            collecting.available,
+        );
         // The bar belongs to the body now, and the lane stands beside both.
         //
         // **There was a band here once**, between the two, offering an update
@@ -8628,7 +8952,7 @@ impl App {
         // question to `baz-boot`, before baz starts, where answering it yes
         // costs nothing (ADR-0043 §5). Nothing about somebody's collection
         // has to move aside for it any more.
-        let screen: Element<'_, Message> = column![bar, screen].into();
+        let screen: Element<'_, Message> = column![bar, screen, marks].into();
         let screen: Element<'_, Message> = match lane {
             Some(lane) => row![lane, screen].into(),
             None => screen,

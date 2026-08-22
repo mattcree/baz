@@ -618,12 +618,30 @@ pub struct EngineHandle {
 /// before ReplayGain, volume and mute are applied.
 ///
 /// The engine only updates it while a front end has explicitly enabled the
-/// visualization tap. Samples are mono folds of the source stream at the
-/// output rate, so the visual follows the record rather than the fader.
+/// visualization tap. Samples are taken from the source stream at the output
+/// rate, so the visual follows the record rather than the fader.
+///
+/// # Mid and side, rather than left and right
+///
+/// [`Self::samples`] is the mono fold — the *mid* — and it is what every
+/// measurement of the signal wants: a spectrum of the left channel and a
+/// spectrum of the right are two pictures of the same music. [`Self::side`]
+/// carries the difference, which is the one fact mono cannot express: **how
+/// wide the record is, and whether its two channels agree**.
+///
+/// The pair is exact rather than approximate. `left = mid + side` and
+/// `right = mid - side`, so a front end that wants the channels back has them
+/// without the engine publishing two arrays that mostly repeat each other.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualizationFrame {
-    /// Uniformly sampled points from the latest delivered block.
+    /// Uniformly sampled points from the latest delivered block — the mono
+    /// fold, `(left + right) / 2`.
     pub samples: [f32; VISUAL_SAMPLE_COUNT],
+    /// The same points' half-difference, `(left - right) / 2`.
+    ///
+    /// Zero for a mono record and for anything folded to one channel, which is
+    /// the honest reading: there is no stereo image to show.
+    pub side: [f32; VISUAL_SAMPLE_COUNT],
     /// Output sample rate applying to [`Self::samples`].
     pub sample_rate: u32,
 }
@@ -632,6 +650,7 @@ impl Default for VisualizationFrame {
     fn default() -> Self {
         Self {
             samples: [0.0; VISUAL_SAMPLE_COUNT],
+            side: [0.0; VISUAL_SAMPLE_COUNT],
             sample_rate: 0,
         }
     }
@@ -645,6 +664,7 @@ struct VisualizationTap {
     sequence: AtomicU64,
     sample_rate: AtomicU32,
     samples: [AtomicU32; VISUAL_SAMPLE_COUNT],
+    side: [AtomicU32; VISUAL_SAMPLE_COUNT],
 }
 
 impl Default for VisualizationTap {
@@ -654,6 +674,7 @@ impl Default for VisualizationTap {
             sequence: AtomicU64::new(0),
             sample_rate: AtomicU32::new(0),
             samples: std::array::from_fn(|_| AtomicU32::new(0)),
+            side: std::array::from_fn(|_| AtomicU32::new(0)),
         }
     }
 }
@@ -682,16 +703,17 @@ impl VisualizationTap {
         // Odd means a writer is active; the release of the following even
         // value publishes every relaxed payload store as one snapshot.
         self.sequence.fetch_add(1, Ordering::AcqRel);
-        for (index, slot) in self.samples.iter().enumerate() {
-            let mono = if index < count {
+        for (index, (mid_slot, side_slot)) in self.samples.iter().zip(&self.side).enumerate() {
+            let (mid, side) = if index < count {
                 let frame = start + index * step;
                 let left = interleaved[frame * CHANNELS];
                 let right = interleaved[frame * CHANNELS + 1];
-                (left + right) * 0.5
+                ((left + right) * 0.5, (left - right) * 0.5)
             } else {
-                0.0
+                (0.0, 0.0)
             };
-            slot.store(mono.to_bits(), Ordering::Relaxed);
+            mid_slot.store(mid.to_bits(), Ordering::Relaxed);
+            side_slot.store(side.to_bits(), Ordering::Relaxed);
         }
         self.sample_rate.store(sample_rate, Ordering::Relaxed);
         self.sequence.fetch_add(1, Ordering::Release);
@@ -709,6 +731,9 @@ impl VisualizationTap {
                 ..VisualizationFrame::default()
             };
             for (sample, slot) in frame.samples.iter_mut().zip(&self.samples) {
+                *sample = f32::from_bits(slot.load(Ordering::Relaxed));
+            }
+            for (sample, slot) in frame.side.iter_mut().zip(&self.side) {
                 *sample = f32::from_bits(slot.load(Ordering::Relaxed));
             }
             if self.sequence.load(Ordering::Acquire) == before {
@@ -3907,6 +3932,65 @@ mod tests {
         let frame = tap.snapshot();
         assert_eq!(frame.sample_rate, RATE);
         assert!((frame.samples[0] - 0.125).abs() < f32::EPSILON);
+        // `(0.5 - -0.25) / 2`: the half-difference, which is the fact mono
+        // cannot carry.
+        assert!((frame.side[0] - 0.375).abs() < f32::EPSILON);
+    }
+
+    /// **Mid and side reconstruct the two channels exactly.**
+    ///
+    /// The pair is published instead of left and right because a spectrum of
+    /// the left channel and a spectrum of the right are two pictures of the
+    /// same music — but a front end drawing a stereo image needs the channels
+    /// back, and it is entitled to have them without a rounding story. This
+    /// is that promise, over the awkward cases as well as the ordinary one.
+    #[test]
+    fn mid_and_side_are_the_two_channels_without_loss() {
+        for (left, right) in [
+            (0.5_f32, -0.25_f32),
+            (1.0, 1.0),   // dead centre — no side at all
+            (1.0, -1.0),  // out of phase — all side, no mid
+            (0.0, 0.0),   // silence
+            (-0.75, 0.3), // an ordinary asymmetric moment
+        ] {
+            let tap = VisualizationTap::default();
+            tap.set_enabled(true);
+            let mut samples = [0.0_f32; 512];
+            for frame in samples.chunks_exact_mut(2) {
+                frame[0] = left;
+                frame[1] = right;
+            }
+            tap.capture(&samples, RATE);
+            let frame = tap.snapshot();
+            let (mid, side) = (frame.samples[0], frame.side[0]);
+            assert!(
+                ((mid + side) - left).abs() < 1e-6 && ((mid - side) - right).abs() < 1e-6,
+                "mid {mid} and side {side} do not reconstruct ({left}, {right})"
+            );
+        }
+    }
+
+    /// **A record with nothing but a centre has no side at all**, which is
+    /// what makes the reading honest: a stereo image drawn for a mono file
+    /// must be a line and not an invented shape.
+    #[test]
+    fn a_mono_record_publishes_no_side() {
+        let tap = VisualizationTap::default();
+        tap.set_enabled(true);
+        let mut samples = [0.0_f32; 512];
+        for (index, frame) in samples.chunks_exact_mut(2).enumerate() {
+            #[expect(clippy::cast_precision_loss, reason = "a 256-frame test block")]
+            let value = (index as f32 / 256.0).sin();
+            frame[0] = value;
+            frame[1] = value;
+        }
+        tap.capture(&samples, RATE);
+        let frame = tap.snapshot();
+        assert!(
+            frame.side.iter().all(|sample| sample.abs() < 1e-7),
+            "a mono record was published with a stereo image"
+        );
+        assert!(frame.samples.iter().any(|sample| sample.abs() > 0.1));
     }
 
     #[test]

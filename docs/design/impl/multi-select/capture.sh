@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
-# **The background visualisation, away from the place that owns it** — item 84.
+# **Selecting more than one thing, and the strip that spends it** — item 62.
 #
-# The owner, 2026-08-22: *"can you make sure when we switch to other screens and
-# the visualizer stays in the background that it continues animating, but it
-# should be heavily blurred or opaque? … almost that liquid glass look, then I
-# might like it."*
-#
-# He is deciding whether he wants the background visualiser at all, so the
-# deliverable is a picture rather than a passing test. This takes four: the
-# unveiled Now playing that is the control, and three places where the veiled
-# ground has to stay a ground.
+# `docs/design/18-feature-parity.md` §4 calls multi-select the floor every
+# other list feature stands on, and the part worth photographing is the part
+# that is *new to look at*: a set of rows lit at once, and the strip at the
+# foot of the place naming how many and what can be done with them.
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb cargo build --release -p baz
-#   toolbox run -c baz-dev docs/design/impl/liquid-glass/capture.sh
+#   toolbox run -c baz-dev docs/design/impl/multi-select/capture.sh
 #
 # Headless and isolated six ways, exactly as `docs/screenshots/capture.sh` is
-# and for the same reasons — the `[mpris] no session bus` line it prints is the
-# receipt that nothing reached the owner's desktop, library or session bus.
+# and for the same reasons; it prints the `[mpris] no session bus` receipt.
 set -uo pipefail
 
 REPO=${REPO:-$(git rev-parse --show-toplevel)}
 BIN=${BIN:-$REPO/target/tb/release/baz}
-OUT=${OUT:-$REPO/docs/design/impl/liquid-glass}
-DISP=${DISP:-:197}
-S=${S:-/tmp/baz-glass-scratch}
+OUT=${OUT:-$REPO/docs/design/impl/multi-select}
+DISP=${DISP:-:196}
+S=${S:-/tmp/baz-marks-scratch}
 W=1600; H=900
 
 FIX=${FIX:-/tmp/baz-shot-fix}
@@ -173,56 +167,41 @@ click() { xdotool mousemove "$1" "$2"; sleep 0.4; xdotool click 1; sleep 1.6; }
 rest()  { xdotool mousemove "$1" "$2"; sleep 1.5; }
 park()  { xdotool mousemove 1200 78; sleep 0.5; xdotool mousemove 1202 80; sleep 0.9; }
 
-# Put a record on, through the tile's own `Play` — his wall hangs five to a
-# row, columns at 370, 615, 860, 1104, 1349 (docs/screenshots/capture.sh).
+# **Open a record**, through the tile's own `Open` — the fourth of the four
+# choices its hover raises, at +182 from the tile's top
+# (`docs/screenshots/capture.sh` derived these from a frame; the wall here is
+# the same fixture at the same size).
 rest 648 255
-click 596 198
+click 596 354
 sleep 2
-# Deliberate playback lands on Now playing once the engine confirms the start.
-probe now-playing-raw
-
-# The visualisation cycle lives on Now playing and is `Off` on a fresh config,
-# so one press is `Spectrum`. `$CYCLE_X`/`$CYCLE_Y` are read off the probe.
-CYCLE_X=${CYCLE_X:-1242}; CYCLE_Y=${CYCLE_Y:-24}
-click $CYCLE_X $CYCLE_Y
 park
-shot now-playing
+probe album-page
 
-# **And every other mode, one press apart** — item 85 added two, and a
-# visualisation nobody has looked at is a visualisation nobody has verified.
-# The ring is Spectrum · Waveform · Spectrogram · Oscilloscope · Stereo image ·
-# Peak and average, then off.
-for mode in waveform spectrogram scope stereo headroom; do
-  click $CYCLE_X $CYCLE_Y
-  # The two history modes need a second of frames before they have anything to
-  # draw; the live ones do not and lose nothing by waiting.
-  sleep 2
-  park
-  shot "mode-$mode"
+# **Ctrl over three rows that are not adjacent**, which is the half a range
+# cannot do. `$ROW_1`/`$ROW_PITCH` are read off the probe.
+ROW_1=${ROW_1:-301}; ROW_PITCH=${ROW_PITCH:-52}; ROW_X=${ROW_X:-700}
+for row in 0 2 4; do
+  xdotool mousemove $ROW_X $((ROW_1 + row * ROW_PITCH))
+  sleep 0.3
+  xdotool keydown ctrl; xdotool click 1; xdotool keyup ctrl
+  sleep 0.8
 done
-# Back to the spectrum, so the frames below are of the state this file's own
-# section describes.
-for _ in 1 2; do click $CYCLE_X $CYCLE_Y; done
 park
+shot ctrl-picked
 
-# And the three places where it has to be weather rather than an instrument.
-click 105 133; park; shot library
-click 105 81;  park; shot home
-click 1422 24; park; shot settings
+# **And Shift over a range**, from the anchor the last press left.
+xdotool mousemove $ROW_X $((ROW_1 + 8 * ROW_PITCH))
+sleep 0.3
+xdotool keydown shift; xdotool click 1; xdotool keyup shift
+sleep 1.0
+park
+shot shift-range
+
+# **Esc puts it down**, which is the way out that is not a word.
+xdotool key --clearmodifiers Escape
+sleep 1.0
+park
+shot cleared
 
 echo "== receipts"
 grep -m1 'mpris' "$S/app.log" || echo "  (no mpris line — check the isolation)"
-# **Say so if the pictures are of silence.** Two ways this has already gone
-# wrong without failing: the album that played was not the one given a signal,
-# and the album ran out before the last frame. Both produce a plausible
-# screenshot of nothing happening.
-if ! grep -q "track started.*$(basename "$SOUNDING")" "$S/app.log"; then
-  echo "THE SOUNDED ALBUM NEVER PLAYED — the frames are of silence."
-  grep -m3 'track started' "$S/app.log"
-  exit 1
-fi
-if grep -q 'queue ended' "$S/app.log"; then
-  echo "THE RECORD RAN OUT BEFORE THE LAST FRAME — lengthen the signal."
-  exit 1
-fi
-echo "  sounding: $(grep -c 'track started' "$S/app.log") track(s) started, queue still running"

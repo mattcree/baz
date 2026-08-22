@@ -88,6 +88,7 @@ pub(crate) mod favourites;
 pub(crate) mod home;
 pub(crate) mod lane;
 pub(crate) mod list_tile;
+pub(crate) mod marks;
 pub(crate) mod new_playlist;
 pub(crate) mod now_playing;
 pub(crate) mod page;

@@ -36,6 +36,21 @@ Every release is built from a tag by CI, gated on the full test suite — see
   time. Almost every launch has nothing to ask about, and on those it is
   invisible. ADR-0043 §5.
 
+- **Select more than one thing, and do something with all of it.**
+  <kbd>Ctrl</kbd>-click adds or removes one; <kbd>Shift</kbd>-click takes
+  everything between. A strip appears at the foot of the place saying how many
+  are selected, with Play, Queue, Add to playlist… and — over a queue or a
+  playlist page — Remove. It works over album tracks, search results, playlist
+  rows, the queue and the wall's records. Esc puts the selection down.
+
+- **Two more background visualisations, both about the record rather than the
+  music.** **Stereo image** is a goniometer: a mono record stands upright, an
+  ordinary mix is a fat upright cloud, and one whose channels are opposed lies
+  flat — the fault that costs a record its middle the moment anything sums it.
+  **Peak and average** draws the band between the loudest instant and the mean,
+  where the band's *thickness* is what is left of the master's dynamics. Both
+  join the same cycle behind the visualisation mark on Now playing.
+
 - **The background visualisation keeps moving on every screen, behind glass.**
   It was drawn everywhere and animated in one place, so away from Now playing
   it was a frozen still. Now it runs wherever a record is sounding — and away

@@ -22,6 +22,18 @@ it in, so the call can be made against a thing rather than a description.
 | [`library.png`](library.png) | Over a wall of covers, where most of it is behind something. |
 | [`home.png`](home.png) | The same, over a mixed page. |
 
+And the whole ring, one press apart — **item 85**, the other half of the same
+ask (*"let's get more of those because those are great here"*):
+
+| | Asks |
+|---|---|
+| [`now-playing.png`](now-playing.png) | **Spectrum** — what frequencies. |
+| [`mode-waveform.png`](mode-waveform.png) | **Rolling waveform** — how loud, over the last second. |
+| [`mode-spectrogram.png`](mode-spectrogram.png) | **Spectrogram** — both, over time. |
+| [`mode-scope.png`](mode-scope.png) | **Oscilloscope** — what shape the air is making right now. |
+| [`mode-stereo.png`](mode-stereo.png) | **Stereo image** (new) — how wide this record is, and whether its channels agree. |
+| [`mode-headroom.png`](mode-headroom.png) | **Peak and average** (new) — what is left of this master's dynamics. |
+
 ## What changed, and the two findings behind it
 
 **It was not animating at all away from Now playing.** The backdrop was drawn
