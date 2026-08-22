@@ -1923,6 +1923,12 @@ struct App {
     /// The density the wall opens at, read from the config for the same reason
     /// and handed to the shelf the same way (ADR-0017 step 6).
     density: shelf::Density,
+    /// **Whether a drag from the file manager is over the window.**
+    ///
+    /// The one piece of drag state baz keeps: what it is *for* is the sentence
+    /// in the strip saying where the drop will land, and a drop's destination
+    /// is the place, so nothing about the path being dragged is needed.
+    drop_hover: bool,
     /// Which modifier keys are down, as iced last reported them.
     ///
     /// The one piece of input state baz tracks itself, consulted only where
@@ -2337,6 +2343,7 @@ impl App {
             was_scanning: true,
             resume: resume.clone(),
             written: (0, None, 0),
+            drop_hover: false,
             modifiers: keyboard::Modifiers::empty(),
             started,
             last_interaction: Instant::now(),
@@ -3497,13 +3504,22 @@ impl App {
             // dropping a folder of FLACs and one PDF should not leave a
             // listener wondering which track went missing.
             Message::FileDropped(path) if matches!(self.screen, Screen::Shelf(_)) => {
-                self.queue_dropped(&path)
+                self.drop_hover = false;
+                self.take_drop(&path)
             }
-            // The hover marks are the Setup screen's; on the shelf a drop is
-            // taken without ceremony and the queue's own count is the receipt.
-            Message::FileHovered | Message::FileHoverLeft
-                if matches!(self.screen, Screen::Shelf(_)) =>
-            {
+            // **The hover says where it will land**, in the strip at the foot
+            // of the place (`views::marks::hint`). It used to say nothing at
+            // all, on the reasoning that the queue's own count is the receipt
+            // — which is true *after* the drop and no help at all during it,
+            // when the question is whether baz will take this and what it will
+            // do with it. X11 only: Wayland's protocol does not report a
+            // hovering drag to a client that has not accepted it.
+            Message::FileHovered if matches!(self.screen, Screen::Shelf(_)) => {
+                self.drop_hover = true;
+                Task::none()
+            }
+            Message::FileHoverLeft if matches!(self.screen, Screen::Shelf(_)) => {
+                self.drop_hover = false;
                 Task::none()
             }
             message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
@@ -6777,6 +6793,86 @@ impl App {
     /// for is the metadata: a dropped file baz already knows keeps its title
     /// and artist, and one it does not is named by its filename rather than by
     /// nothing.
+    /// **Where a drop will land, and what to call it.**
+    ///
+    /// `docs/WORK.md` item 70's missing half. A drop used to mean *queue it*
+    /// wherever it fell, which is the right answer almost everywhere and the
+    /// wrong one in the two places a listener is plainly building a list:
+    /// standing on a playlist's page, or on the draft of a new one. Dropping a
+    /// folder of files onto an open playlist and having them play instead is
+    /// baz answering a question nobody asked.
+    ///
+    /// It is decided by the **place**, not by the pointer. A drop is delivered
+    /// with a position on some platforms and not on others, and a gesture
+    /// whose meaning depended on which half of a window it landed in would be
+    /// a gesture nobody could learn.
+    fn drop_lands(&self) -> DropTo {
+        match self.place {
+            Place::Playlist(id) => self.playlists.page(id).map_or(DropTo::Run, |open| {
+                DropTo::Playlist(id, open.name().to_owned())
+            }),
+            Place::NewPlaylist => DropTo::Draft,
+            _ => DropTo::Run,
+        }
+    }
+
+    /// Take a drop to wherever [`Self::drop_lands`] says it belongs.
+    fn take_drop(&mut self, path: &Path) -> Task<Message> {
+        let found = crate::drop::audio_under(path);
+        if found.is_empty() {
+            crate::baz_log!("[drop] {path:?} holds nothing baz can play");
+            return Task::none();
+        }
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        let items: Vec<vm::QueueItemVm> = found
+            .iter()
+            .map(|path| vm::dropped_item(&state.library, path))
+            .collect();
+        match self.drop_lands() {
+            DropTo::Run => return self.queue_dropped(path),
+            DropTo::Playlist(id, name) => {
+                let entries = crate::playlists::entries_for_items(&items);
+                let count = entries.len();
+                let Screen::Shelf(state) = &self.screen else {
+                    return Task::none();
+                };
+                // The library is borrowed twice over — once to build the
+                // entries above and once to write them — so the write takes
+                // its own borrow rather than holding one across the call.
+                let library = &state.library;
+                self.playlists.append(id, entries, library);
+                crate::baz_log!("[drop] added {count} to {name:?}");
+                // The page is re-read so the rows the listener is looking at
+                // are the ones the file now holds.
+                if let Screen::Shelf(state) = &self.screen {
+                    let library = &state.library;
+                    self.playlists.reload_open(library);
+                }
+            }
+            DropTo::Draft => {
+                let before = self.playlists.creation.items.len();
+                for item in items {
+                    if !self
+                        .playlists
+                        .creation
+                        .items
+                        .iter()
+                        .any(|held| held.path == item.path)
+                    {
+                        self.playlists.creation.items.push(item);
+                    }
+                }
+                crate::baz_log!(
+                    "[drop] added {} to the draft",
+                    self.playlists.creation.items.len() - before
+                );
+            }
+        }
+        Task::none()
+    }
+
     fn queue_dropped(&mut self, path: &Path) -> Task<Message> {
         let found = crate::drop::audio_under(path);
         if found.is_empty() {
@@ -8938,12 +9034,19 @@ impl App {
         // position, so a strip that appeared would hand the place beneath it a
         // fresh state, scrolling the list back to the top at the exact moment
         // somebody ticked their fifth row in it (`views::marks`).
-        let marks: Element<'_, Message> = views::marks::view(
-            self.live_selection()
-                .map(crate::selection::State::marked)
-                .unwrap_or_default(),
-            collecting.available,
-        );
+        // **One slot, two tenants**, and they cannot both be wanted: you are
+        // either assembling a selection or dragging something in from outside.
+        // The hover wins while it is happening.
+        let marks: Element<'_, Message> = if self.drop_hover {
+            views::marks::hint(self.drop_lands().hint())
+        } else {
+            views::marks::view(
+                self.live_selection()
+                    .map(crate::selection::State::marked)
+                    .unwrap_or_default(),
+                collecting.available,
+            )
+        };
         // The bar belongs to the body now, and the lane stands beside both.
         //
         // **There was a band here once**, between the two, offering an update
@@ -12578,6 +12681,61 @@ fn persist_shuffle(on: bool) {
 /// density step and the group key, and **no Settings row**).
 fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
+}
+
+/// **Where a dropped file lands** — see [`App::drop_lands`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DropTo {
+    /// Behind whatever is playing, which is what a drop means everywhere the
+    /// listener is not plainly building a list.
+    Run,
+    /// The open playlist's file, by id and name.
+    Playlist(u64, String),
+    /// The draft on the New playlist place.
+    Draft,
+}
+
+impl DropTo {
+    /// What the strip says while a drag is over the window.
+    fn hint(&self) -> String {
+        match self {
+            Self::Run => "Drop to play it after this".to_owned(),
+            Self::Playlist(_, name) => format!("Drop to add to \u{201c}{name}\u{201d}"),
+            Self::Draft => "Drop to add to this list".to_owned(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod drop_destination {
+    use super::DropTo;
+
+    /// **Three destinations, three sentences, and each names what it will do.**
+    ///
+    /// The hint is the whole of the feedback a drag gets (`views::marks::hint`),
+    /// so a sentence that did not distinguish *play this after what is on* from
+    /// *add this to Road Trip* would leave a listener guessing at the moment
+    /// they can still let go somewhere else.
+    #[test]
+    fn every_destination_says_what_it_will_do() {
+        let run = DropTo::Run.hint();
+        let draft = DropTo::Draft.hint();
+        let list = DropTo::Playlist(1, "Road Trip".to_owned()).hint();
+        assert!(list.contains("Road Trip"), "{list}");
+        assert!(run != draft && draft != list && run != list);
+        for words in [&run, &draft, &list] {
+            assert!(words.starts_with("Drop to "), "{words}");
+        }
+    }
+
+    /// **A playlist's name travels with its id**, because the sentence names
+    /// the list and an id names nothing a listener has seen.
+    #[test]
+    fn the_playlist_hint_is_about_a_playlist_and_not_an_id() {
+        let hint = DropTo::Playlist(99, "Sunday Morning".to_owned()).hint();
+        assert!(!hint.contains("99"), "{hint}");
+        assert!(hint.contains("Sunday Morning"), "{hint}");
+    }
 }
 
 /// Remember the radio-like foreground choice on the same view-state footing

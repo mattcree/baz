@@ -119,6 +119,35 @@ pub(crate) fn view(marked: &[Content], collecting: bool) -> Element<'static, Mes
         .into()
 }
 
+/// **The same slot, saying where a drop will land.**
+///
+/// One slot with two tenants, and they cannot both be wanted: you are either
+/// assembling a selection or dragging something in from outside. The hover
+/// wins while it is happening, because it is about a gesture in flight and the
+/// selection is not going anywhere.
+///
+/// Its own function rather than a branch inside [`view`] so the two readings
+/// stay legible; `crate::app` chooses between them.
+pub(crate) fn hint(words: String) -> Element<'static, Message> {
+    let room = theme::active();
+    container(
+        text(words)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .color(room.paper),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(STRIP_H))
+    .padding(theme::pad(0.0, theme::HANG))
+    .align_y(alignment::Vertical::Center)
+    .style(move |_theme| container::Style {
+        background: Some(iced::Background::Color(room.plinth)),
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// `5 selected` — the count first, because the count is the fact the strip
 /// exists to state and the verbs after it are what to do about it.
 fn count(marked: usize) -> String {

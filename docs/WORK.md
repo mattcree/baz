@@ -1520,54 +1520,37 @@ because a player without it is missing a floor rather than a feature.
     Playback, and the test that says it worked — a gapless album still
     bit-exact with a fade configured.
 
-70. **Not started — drag and drop from the file manager, and it is half
-    done.** baz already accepts a drop on the first-run setup screen
-    (`Message::FileDropped`, straight into the folder field), so the
-    window-level plumbing exists. What is missing is a drop *anywhere else* —
-    an album onto the wall, files onto a playlist — which is the half people
-    would use.
+70. **Done 2026-08-22 — drag and drop lands where you are standing.**
 
-71. **Done 2026-08-15 — the store screenshots' playlist sequence.** The harness
-    builds a playlist by hand in the running app (a dozen presses through the
-    picker panel) so the frame is a picture of the feature rather than of a
-    file dropped into a folder. Those coordinates drifted with the lane and
-    the panel, silently: the run still succeeds and the list is never made,
-    which is why the shipped playlists frame is honest but empty.
+    **This entry was stale**, and saying so is half the item: it read *"what
+    is missing is a drop anywhere else"*, and a drop anywhere on the shelf has
+    queued its audio since 2026-08-18 (`crate::drop`, the owner's *"drag and
+    drop yes (depending on the circumstances)"*). What was actually missing was
+    narrower and more useful.
 
-    Re-derived frame by frame, and every number in the script now says which
-    kind it is — `[arithmetic]` for the lane's rows, `[photograph]` for the
-    wall's tiles, the tile veil's four options, the panel's rows and the new
-    playlist place's field and Save.
+    **A drop meant *queue it* everywhere**, which is the right answer almost
+    everywhere and the wrong one in the two places a listener is plainly
+    building a list: standing on a playlist's page, and on the draft of a new
+    one. Dropping a folder of files onto an open playlist and having them play
+    instead is baz answering a question nobody asked. A drop now lands where
+    the *place* says — appended to the open playlist's file, added to the
+    draft, or queued as before.
 
-    **The route itself had changed and nothing said so.** The panel's `New
-    playlist` no longer takes a name in the panel: it opens the canonical New
-    playlist place with the record already in the draft, and the name and the
-    Save live there. The old three lines typed `Sunday Morning` into the
-    *app-bar search* — type-anywhere took the keystrokes, because no field had
-    focus — and then pressed a `Save` that did not exist. Every press after
-    that missed, and the run reported success.
+    **It is decided by the place, not by the pointer.** A drop is delivered
+    with a position on some platforms and not on others, and a gesture whose
+    meaning depended on which half of a window it landed in is a gesture nobody
+    could learn.
 
-    So the script now **fails loudly**: if `Sunday Morning.m3u8` is missing or
-    holds fewer than twenty tracks it prints what to re-derive and exits 1. A
-    capture that cannot tell a built list from an empty place is not a
-    verification, which is the whole lesson of this item.
+    **And the hover says so.** It used to say nothing at all, on the reasoning
+    that the queue's own count is the receipt — which is true *after* the drop
+    and no help during it, when the question is whether baz will take this and
+    what it will do with it. The strip at the foot of the place
+    (`views::marks`, from item 62) is the surface: one slot, two tenants, and
+    they cannot both be wanted, because you are either assembling a selection
+    or dragging something in from outside. **X11 only**, and that is the
+    platform's: Wayland does not report a hovering drag to a client that has
+    not accepted it.
 
-    Two more things the re-shoot caught, both *pictures of the pointer* rather
-    than of the composition: the parking spot (1400, 780) sat inside Home's
-    recently-added row and raised that tile's four choices, and the newly saved
-    list stood **selected**, which raises a playlist tile's options too — so
-    the run now parks at (1400, 430), dead ground on all four frames, and puts
-    the selection on a record's caption before it leaves the wall. And the
-    jewel case turns once every 32 s: shot on arrival it was caught edge-on, a
-    black bar where the cover should be, so the Now Playing frame waits for it
-    to come round.
-
-### Phase J — the 2026-08-15 Vibe review
-
-`docs/design/19-vibe-next-phase.md` is the design note; the mockups were
-delivered to the owner as a page. **72 and 73 are blocked on his word**, which
-is the point of the note: *"create some designs which we can actually approve
-or not."*
 
 72. **Built 2026-08-15 — composing a playlist, rebuilt.** The specification is
     `docs/design/21-vibe-the-design.md` and the build plan is

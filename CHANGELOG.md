@@ -36,6 +36,13 @@ Every release is built from a tag by CI, gated on the full test suite — see
   time. Almost every launch has nothing to ask about, and on those it is
   invisible. ADR-0043 §5.
 
+- **A dropped file lands where you are standing.** Dropping music onto an open
+  playlist adds it to that playlist, and onto a new list's draft adds it to the
+  draft; everywhere else it queues, as before. While the drag is over the
+  window the strip at the foot of the place says which of those will happen
+  (X11 only — Wayland does not tell an application about a drag it has not
+  accepted yet).
+
 - **Select more than one thing, and do something with all of it.**
   <kbd>Ctrl</kbd>-click adds or removes one; <kbd>Shift</kbd>-click takes
   everything between. A strip appears at the foot of the place saying how many
