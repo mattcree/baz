@@ -1946,6 +1946,32 @@ or not."*
     neither hand-off has been run on the platform it is for. The offer itself
     was — headless, against a hand-built stage, photographed.
 
+84. **Not started — the background visualiser away from Now playing, heavily
+    blurred.** *(The owner, 2026-08-22: "can you make sure when we switch to
+    other screens and the visualizer stays in the background that it continues
+    animating, but it should be heavily blurred or opaque? that is where I'm
+    thinking now. I'm not a hundred percent sure I really like the visualizer
+    being in the background. But if I can see it in the state that I mentioned
+    there, almost that liquid glass look, then I might like it.")*
+
+    **This is a decision he is trying to make**, and the deliverable is
+    therefore a thing to look at rather than only a thing that works. Build the
+    blurred state, show it to him, and let the question of whether the
+    background visualiser stays at all be answered afterwards.
+
+    It keeps animating away from Now playing — so the cost guard that gates
+    continuous motion on *place* has to be re-read rather than assumed — and it
+    is heavily blurred or veiled where it is not the subject. No reading may
+    rest on it: it is a ground, and the contrast floors over it are the same
+    ones every other ground owes.
+
+85. **Not started — more background visualisations.** *(The owner, 2026-08-22:
+    "we have nice visualizers in the background. Firstly, let's get more of
+    those because those are great here.")* Four exist: spectrum, the rolling
+    waveform, the spectrogram and the oscilloscope. Each is a different
+    *question* about the signal rather than a different skin — that is the bar
+    a fifth has to clear (`crate::scope`'s module note states it).
+
 ## Doing
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries
