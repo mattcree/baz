@@ -1486,10 +1486,39 @@ because a player without it is missing a floor rather than a feature.
 68. **Not started — a folder view.** Browse by directory beside browse by
     tags, for libraries organised by hand. baz's wall is entirely tag-derived.
 
-69. **Not started — crossfade.** Expected by listeners coming from the
-    streaming clients. baz is album-first and gapless, where crossfade is
-    actively wrong, so the interaction has to be *stated* — probably: never
-    within an album's own sequence, optional between unrelated tracks.
+69. **Designed 2026-08-22, not built — crossfade.** *(The owner: "another
+    backlog item: crossfade" … "enable disable as a control and a setting for
+    how long".)*
+
+    **[ADR-0044](adr/0044-crossfade.md) answers the three questions this item
+    was blocked on**, which is what `BACKLOG.md` said had to happen before a
+    line was written — and the answering changed the shape of the feature
+    twice.
+
+    **The producer mixes the overlap, not the pump.** Every track after the
+    anchor is already decoded *whole* before it is pushed, so the outgoing
+    tail can be held back and summed into the incoming head under equal-power
+    ramps where the samples already sit. The ring still carries one stream and
+    the realtime path does not change by a line — which matters, because that
+    path caps every block at a track boundary so a per-track ReplayGain lands
+    on the right sample, and it has a transparent short-circuit that hands the
+    ring's own slices to the sink untouched.
+
+    **The engine cannot know where a gapless boundary is.** It plays a list of
+    paths; *album* is a library fact `baz-core` has never had and should not
+    grow. So the queue carries `fade_into_next`, set by the front end that
+    built the run — which is what makes the setting mean *between records*
+    rather than *between tracks*.
+
+    Two more findings are in the ADR: a fade never crosses a rate change
+    (there is nothing to mix into — the session ends there), and **mixing is
+    not bit-perfect**, so `Event::SignalPath` has to say so while a fade is
+    configured rather than keeping a badge it no longer earns.
+
+    **What is left is the building**, and it is a piece of its own: a producer
+    change, one protocol field, the switch and duration in Settings →
+    Playback, and the test that says it worked — a gapless album still
+    bit-exact with a fade configured.
 
 70. **Not started — drag and drop from the file manager, and it is half
     done.** baz already accepts a drop on the first-run setup screen

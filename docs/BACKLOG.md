@@ -1464,16 +1464,31 @@ Newest first. Each was asked for in conversation and is now in the product.
   means the pump path grows a second source and a mix stage, and the questions
   worth answering before any of it is written are:
 
-  1. **What happens at a gapless boundary?** A crossfade across an album's own
-     seam would destroy exactly the thing `docs/design` spends a chapter
-     protecting. The plausible answer is that a fade is skipped where the two
-     tracks are gapless neighbours in the same edition, which makes the setting
-     mean *between records* rather than *between tracks*.
-  2. **What does it do to ReplayGain and the equaliser?** Both are gain stages
-     on one signal path; two sources need either two chains or one chain after
-     the sum, and the two answers sound different.
-  3. **Does a skip crossfade?** A manual Next mid-track is not the same event
-     as a track ending, and every player answers this differently.
+  **All three are answered now, in [ADR-0044](adr/0044-crossfade.md)**, which
+  is what this entry said had to happen before a line was written. The short
+  version, and the shape it settled on:
+
+  1. **A gapless boundary is not faded** — and the engine cannot know where one
+     is, because it plays a list of paths and *album* is a library fact it has
+     never had. So the **queue** carries `fade_into_next`, set by the front end
+     that built the run, which makes the setting mean *between records*.
+  2. **The equaliser needs no decision** (it is the listener's, after the sum).
+     **ReplayGain** does: the fade plays under the outgoing track's gain and
+     the producer pre-scales the incoming head by the ratio of the two tracks'
+     tags. Exact in track mode with tagged files, a no-op inside an album, and
+     inexact by a stated amount where the engine's resolved gain and the tags
+     disagree.
+  3. **A skip does not crossfade.** *Next* means now, and it falls out of the
+     architecture for free — a skip tears the session down, so there is no held
+     tail to mix.
+
+  And the shape that makes it affordable: **the producer mixes the overlap, not
+  the pump.** Every track after the anchor is already decoded whole before it
+  is pushed, so the tail can be held back and summed into the next head under
+  equal-power ramps where the samples already sit — the realtime path does not
+  change by a line. Two more findings are in the ADR: a fade never crosses a
+  rate change, and mixing is not bit-perfect, so the signal path has to say so
+  while a fade is configured.
 
 - **The rooms are flat, and the now-playing gradient is not.** *(The owner:
   "it does seem like our app is a bit flat in terms of colour: the now playing
