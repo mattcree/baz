@@ -1813,28 +1813,28 @@ because a player without it is missing a floor rather than a feature.
     happened. It wants a pass with eyes on each site, which is a session of
     its own rather than the tail of another one.
 
-78. **Not started — a keyboard route to the things a pointer can reach.**
-    *(From item 72, and from the quorum's R4.)*
+78. **Mostly done 2026-08-21, and this entry was stale — a keyboard route to
+    the things a pointer can reach.** *(From item 72, and from the quorum's
+    R4.)*
 
-    The composing page's drawn line now takes keys: a press inside it takes
-    focus, Tab walks its points, the arrows nudge the focused one, Shift takes
-    each press four times as far, and a ring marks the point they are moving.
-    That is the *tuning* half of R4 and it works.
+    It read *"there is no focus traversal at all"*, and there is:
+    `crate::focus` (569 lines) is a `Stop` wrapper that makes any widget a
+    focus stop, <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> walk them, and
+    `crate::grid` (223 lines) is the *inside* half — the arrows moving within
+    the collection under the ARIA grid pattern, shelf-aware so a partial row
+    never swallows a press. The context menu takes the arrows and Enter too.
 
-    **The reachability half does not**, and it is a product-wide fact rather
-    than this page's: `text_input` and now `crate::contour` are the only
-    widgets in baz a key press can be routed to, and neither can be reached
-    without a pointer, because there is no focus traversal at all. So a
-    keyboard-only listener cannot get to the line, the chips, the presets or
-    the commitment — on this page or on any other.
+    **What is genuinely left** is the panels: the equaliser's faders, the
+    playlist panel's rows and the composing page's chips are still
+    pointer-only, and each needs its place to *state* an order rather than
+    inherit the tree's. That is the remaining work and it is a pass per
+    surface, not one change.
 
-    This is the item that would fix it everywhere: a focus order per place, a
-    visible ring on whatever holds it, and `Tab`/`Shift+Tab` walking it.
-    `crate::keys` already reads iced's own capture report rather than tracking
-    focus itself, which is exactly the seam that makes this possible without
-    rewriting the binding table — the curve proved it. Sized as a real piece of
-    work, not a pass: every place has to state its order, and an order nobody
-    stated would be the DOM order, which is a shape nobody designed.
+    **And three things cannot be proved here**: the Xvfb harness delivers
+    <kbd>Tab</kbd> and letters but **not arrow keys** — established by a
+    control test, not assumed — so the wall's arrows, the menu's arrows and
+    the portal folder chooser inside the Flatpak all need the owner's own
+    hands on a keyboard.
 
 79. **Not started — the analysis has to be worth the claims made about it.**
     *(The owner, 2026-08-17: "the most important is that our model of the songs
