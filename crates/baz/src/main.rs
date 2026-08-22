@@ -59,6 +59,7 @@ mod fader;
 mod field;
 mod focus;
 mod font;
+mod glass;
 mod grid;
 mod groove;
 mod health;

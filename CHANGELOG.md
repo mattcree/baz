@@ -36,6 +36,12 @@ Every release is built from a tag by CI, gated on the full test suite — see
   time. Almost every launch has nothing to ask about, and on those it is
   invisible. ADR-0043 §5.
 
+- **The background visualisation keeps moving on every screen, behind glass.**
+  It was drawn everywhere and animated in one place, so away from Now playing
+  it was a frozen still. Now it runs wherever a record is sounding — and away
+  from the place that owns it, all four visualisations become one soft veiled
+  ground behind a frost pane, so it is weather rather than an instrument.
+
 ### Changed
 
 - **The update band is gone from the application.** Nothing about a new

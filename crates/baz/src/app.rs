@@ -4171,6 +4171,12 @@ impl App {
                     self.case_rotation.release();
                 }
             }
+            // **The same tick drives two things and only one of them is
+            // everywhere.** Away from Now playing the case is not drawn and the
+            // history is not read — the backdrop there is one soft ground built
+            // from the live frame ([`crate::glass`]) — so this arm does nothing
+            // but ask for the repaint the subscription has already decided is
+            // worth having.
             Message::CaseTick(now) => {
                 if self.place == Place::NowPlaying && self.visualization.foreground.draws_case() {
                     self.case_rotation.tick(now);
@@ -8702,6 +8708,7 @@ impl App {
                         favourite: None,
                     },
                     self.window,
+                    self.place != Place::NowPlaying,
                 ),
                 whole,
             ]
@@ -8926,15 +8933,12 @@ impl App {
     }
 
     fn add_place_clocks(&self, subs: &mut Vec<Subscription<Message>>) {
-        if visualization_clock(
+        if let Some(every) = visualization_clock(
             self.place,
             self.player.now_playing().is_some(),
             self.visualization,
         ) {
-            subs.push(
-                iced::time::every(crate::jewel_case::TICK)
-                    .map(|_| Message::CaseTick(Instant::now())),
-            );
+            subs.push(iced::time::every(every).map(|_| Message::CaseTick(Instant::now())));
         }
         if fact_clock(
             self.place,
@@ -12258,19 +12262,41 @@ fn persist_visualization_foreground(foreground: crate::visualizer::Foreground) {
     persist(|config| config.visualization_foreground = foreground);
 }
 
-/// Whether Now Playing owns a continuous redraw clock in this state.
+/// **How often the visualisation's clock ticks here**, or `None` for no clock.
 ///
-/// Focus is intentionally not an input. The place being visible, a sounding
-/// record, and a visual that actually changes are the complete cost gate.
+/// Focus is intentionally not an input. A sounding record and a visual that
+/// actually changes are the cost gate; what changed on 2026-08-22 is that
+/// *place* is no longer part of it, only the rate.
+///
+/// The owner: *"can you make sure when we switch to other screens and the
+/// visualizer stays in the background that it continues animating"*. It did
+/// not — the backdrop was drawn everywhere and frozen everywhere but one
+/// place, which is why it read as a still.
+///
+/// **The veil is what buys the cheaper clock.** Away from Now playing the
+/// backdrop is one soft ground behind a frost pane
+/// (`views::now_playing::backdrop`), and nothing about it is legible at
+/// thirty frames that is not legible at ten. So the cadence there is
+/// [`GLASS_TICK`], which is a third of the wake-ups for a picture nobody can
+/// tell apart — and `Mode::Off` still means no clock at all, anywhere.
 fn visualization_clock(
     place: Place,
     sounding: bool,
     visualization: crate::visualizer::State,
-) -> bool {
-    place == Place::NowPlaying
-        && sounding
-        && (visualization.mode.active() || visualization.foreground.draws_case())
+) -> Option<Duration> {
+    if !sounding {
+        return None;
+    }
+    if place == Place::NowPlaying {
+        return (visualization.mode.active() || visualization.foreground.draws_case())
+            .then_some(crate::jewel_case::TICK);
+    }
+    visualization.mode.active().then_some(GLASS_TICK)
 }
+
+/// The cadence of the veiled backdrop away from Now playing — see
+/// [`visualization_clock`].
+const GLASS_TICK: Duration = Duration::from_millis(100);
 
 /// Whether the 20-second fact-feed clock exists. It is absent everywhere the
 /// line cannot be seen, so enabling it has no idle cost in other places.
@@ -12572,16 +12598,34 @@ mod tests {
                 ..still
             };
             assert_eq!(
-                visualization_clock(Place::NowPlaying, true, still),
+                visualization_clock(Place::NowPlaying, true, still).is_some(),
                 foreground.draws_case(),
                 "{foreground:?} without spectrum"
             );
-            assert!(
+            assert_eq!(
                 visualization_clock(Place::NowPlaying, true, spectral),
+                Some(crate::jewel_case::TICK),
                 "{foreground:?} with spectrum"
             );
-            assert!(!visualization_clock(Place::Library, true, spectral));
-            assert!(!visualization_clock(Place::NowPlaying, false, spectral));
+            // **Away from the place it keeps moving, and more slowly.** The
+            // owner asked for the background to go on animating everywhere;
+            // the veil over it (`views::now_playing::backdrop`) is what makes
+            // a third of the wake-ups an invisible saving rather than a
+            // visible one.
+            assert_eq!(
+                visualization_clock(Place::Library, true, spectral),
+                Some(GLASS_TICK),
+                "the backdrop froze away from Now playing"
+            );
+            assert!(GLASS_TICK > crate::jewel_case::TICK);
+            // **Off is off, everywhere.** A listener who turned the
+            // visualisation off did not ask for a cheaper one.
+            assert_eq!(visualization_clock(Place::Library, true, still), None);
+            assert_eq!(
+                visualization_clock(Place::NowPlaying, false, spectral),
+                None
+            );
+            assert_eq!(visualization_clock(Place::Library, false, spectral), None);
         }
     }
 
@@ -12595,7 +12639,7 @@ mod tests {
         };
         // There is deliberately no focus argument: a visible Now Playing
         // remains live while another application owns the keyboard.
-        assert!(visualization_clock(Place::NowPlaying, true, state));
+        assert!(visualization_clock(Place::NowPlaying, true, state).is_some());
     }
 
     #[test]

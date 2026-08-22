@@ -1946,24 +1946,40 @@ or not."*
     neither hand-off has been run on the platform it is for. The offer itself
     was — headless, against a hand-built stage, photographed.
 
-84. **Not started — the background visualiser away from Now playing, heavily
-    blurred.** *(The owner, 2026-08-22: "can you make sure when we switch to
-    other screens and the visualizer stays in the background that it continues
-    animating, but it should be heavily blurred or opaque? that is where I'm
-    thinking now. I'm not a hundred percent sure I really like the visualizer
-    being in the background. But if I can see it in the state that I mentioned
-    there, almost that liquid glass look, then I might like it.")*
+84. **Done 2026-08-22 — the background visualiser away from Now playing,
+    heavily veiled.** *(The owner, 2026-08-22: "can you make sure when we
+    switch to other screens and the visualizer stays in the background that it
+    continues animating, but it should be heavily blurred or opaque? … almost
+    that liquid glass look, then I might like it.")*
 
-    **This is a decision he is trying to make**, and the deliverable is
-    therefore a thing to look at rather than only a thing that works. Build the
-    blurred state, show it to him, and let the question of whether the
-    background visualiser stays at all be answered afterwards.
+    **It was not animating at all**, which is the first thing the ask found.
+    The backdrop is drawn behind every place and its clock existed in exactly
+    one — so every other screen showed a frozen last frame, and *continues
+    animating* was a request to fix a bug neither of us had named. There is a
+    clock everywhere a record is sounding now, at 100 ms rather than 33 ms:
+    **the veil is what buys the cheaper clock**, because nothing about a soft
+    ground behind frosted glass is legible at thirty frames that is not
+    legible at ten. `Mode::Off` is still no clock at all, anywhere.
 
-    It keeps animating away from Now playing — so the cost guard that gates
-    continuous motion on *place* has to be re-read rather than assumed — and it
-    is heavily blurred or veiled where it is not the subject. No reading may
-    rest on it: it is a ground, and the contrast floors over it are the same
-    ones every other ground owes.
+    **All four visualisations become one ground away from the place that owns
+    them** (`crate::glass`). At this blur a spectrum and a spectrogram are the
+    same picture; four constructions would be four things to maintain for one
+    appearance, and it would put a mode switch behind a surface where its
+    effect cannot be seen. The ground is seven soft blobs, each a stack of
+    twenty-four nested capsules whose alphas add into a falloff with no edge —
+    iced has no blur pass and `canvas` is priced deliberately, so accumulated
+    alpha is what a blur looks like from the outside.
+
+    **Two numbers were chosen by looking**, and the frames that chose them are
+    at `docs/design/impl/liquid-glass/`. `RINGS` was nine and the first capture
+    came back with visible contour rings — a topographic map of a blur;
+    twenty-four reads as continuous. `FROST` was 0.72 and erased the thing
+    entirely; 0.40 leaves weather behind the glass while every contrast floor
+    over it stays the floor over the bare wall.
+
+    **The decision is still his.** He was not sure he wants the background
+    visualiser at all and asked to see this state before saying — so this item
+    is done and the question it was raised to answer is open.
 
 85. **Not started — more background visualisations.** *(The owner, 2026-08-22:
     "we have nice visualizers in the background. Firstly, let's get more of

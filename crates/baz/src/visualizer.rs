@@ -538,7 +538,20 @@ pub(crate) fn background(
     width: f32,
     height: f32,
     field: Option<crate::field::Field>,
+    veiled: bool,
 ) -> Element<'static, Message> {
+    // **Away from Now playing all four become one ground** — see
+    // `crate::glass`, which argues it: at the blur the owner asked for, a
+    // spectrum and a spectrogram are the same picture, and a mode switch
+    // behind a surface where its effect cannot be seen is a control that does
+    // nothing.
+    if veiled {
+        if mode == Mode::Off {
+            return Space::new().width(Length::Fill).height(Length::Fill).into();
+        }
+        return crate::glass::Glass::new(&frequency_bands(audio), inks(field, theme::active()))
+            .into();
+    }
     match mode {
         Mode::Off => Space::new().width(Length::Fill).height(Length::Fill).into(),
         Mode::Spectrum => spectrum(audio, width, height, field),

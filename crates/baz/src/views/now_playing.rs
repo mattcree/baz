@@ -385,14 +385,27 @@ pub(crate) fn view<'a>(
 /// ran off the top of the window. The layers that want to be behind the bar
 /// are these two, so it is these two that leave the page. The lane keeps its
 /// own ground and stays readable over them.
+/// **`veiled` is *this is not the place that owns it*.**
+///
+/// The owner, 2026-08-22: *"when we switch to other screens and the visualizer
+/// stays in the background… it should be heavily blurred or opaque… almost
+/// that liquid glass look"*. Veiled, the four visualisations become one soft
+/// ground ([`crate::glass`]) and a frost pane goes over the whole backdrop —
+/// the record's wash included, because a wash nobody is looking at should not
+/// be the loudest thing behind a wall of covers either.
+///
+/// It switches rather than fades, because a place change is already a cut: a
+/// half-veiled backdrop mid-transition would be a state nobody chose and
+/// nobody would see for long enough to read.
 pub(crate) fn backdrop<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     visual: Visual<'_>,
     window: iced::Size,
+    veiled: bool,
 ) -> Element<'a, Message> {
     let Some(now) = player.now_playing() else {
-        return field_layer(None, None, 1.0);
+        return frosted(field_layer(None, None, 1.0), veiled);
     };
     let hues = now
         .album_id
@@ -425,11 +438,42 @@ pub(crate) fn backdrop<'a>(
             window.width,
             window.height,
             hues,
+            veiled,
         )
     } else {
         Space::new().width(Length::Fill).height(Length::Fill).into()
     };
-    stack![field, spectrum].into()
+    frosted(stack![field, spectrum].into(), veiled)
+}
+
+/// **How opaque the frost is** over a backdrop nobody is looking at.
+///
+/// The wall's own colour at this alpha, which is what turns a wash and a
+/// moving field into weather behind glass. High enough that every contrast
+/// floor over this ground is the floor over the bare wall — the reason the
+/// rest of the product needed no re-measuring for this change — and short of
+/// opaque, because at 1.0 there would be nothing behind the glass and the
+/// owner's question would have no answer.
+const FROST: f32 = 0.40;
+
+/// Put [`FROST`] over `under`, or hand it back untouched.
+///
+/// Always the same tree shape either way: iced diffs by position, and a layer
+/// that came and went would hand the backdrop beneath it a fresh state on
+/// every place change.
+fn frosted(under: Element<'_, Message>, veiled: bool) -> Element<'_, Message> {
+    let room = theme::active();
+    let pane = container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(theme::alpha(
+                room.wall,
+                if veiled { FROST } else { 0.0 },
+            ))),
+            ..container::Style::default()
+        });
+    stack![under, pane].into()
 }
 
 /// Whether the album line is worth drawing: an album source footer already

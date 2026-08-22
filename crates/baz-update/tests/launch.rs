@@ -40,10 +40,19 @@ fn the_launcher_hands_every_argument_to_baz() {
         .args(["one", "two three", "--four"])
         .output()
         .expect("the launcher runs");
-    assert!(out.status.success(), "{out:?}");
+    // Both halves of the report, because the one time this failed the message
+    // was `{out:?}` and said nothing a reader could act on.
+    assert!(
+        out.status.success(),
+        "the launcher exited {:?}\nstderr: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "one\ntwo three\n--four\n"
+        "one\ntwo three\n--four\n",
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
