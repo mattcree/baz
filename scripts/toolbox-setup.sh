@@ -25,6 +25,16 @@ PACKAGES=(
   # it: "Create event loop: XNotSupported(libXcursor.so.1: cannot open shared
   # object file)". Found on 2026-08-23, rebuilding the container from scratch.
   libXcursor libXi libXrandr libXinerama
+  # `ort`'s build-time model downloader links native-tls, so `--all-features`
+  # — which the CI gate's clippy and test steps both use — needs the OpenSSL
+  # headers on the *host* toolchain. The shipped binary does not link OpenSSL
+  # (docs/RELEASING.md says so and it is still true); this is a build
+  # dependency only. Third entry in this file's running list of packages that
+  # lived in the maintainer's container by hand and not in this script: the
+  # 2026-08-23 rebuild dropped it, and `cargo clippy --all-features` has failed
+  # with "Could not find directory of OpenSSL installation" on any cold target
+  # directory since. Found 2026-08-24.
+  openssl-devel
   # Release/Flatpak manifest checks documented in docs/RELEASING.md.
   python3-pyyaml desktop-file-utils appstream
 )

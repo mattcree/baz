@@ -14089,6 +14089,78 @@ mod tests {
         const { assert!(size_of::<Place>() <= 16) }
     }
 
+    /// The pointer route to a keyboard binding's intention, in the one form a
+    /// test can actually hold.
+    ///
+    /// The `CONTROLS` table in
+    /// [`every_keyboard_binding_is_a_press_some_control_also_makes`] used to be
+    /// prose alone, and prose naming a door that was deleted
+    /// two releases ago reads exactly like prose naming one that is still
+    /// there. It happened: the `TogglePlaylists` row named "the Library
+    /// strip's labelled `Playlists` door" for months after 44f2b76 removed
+    /// that strip in favour of the returns lane.
+    #[derive(Clone, Copy)]
+    enum Pointer {
+        /// A control in the view layer sends this message. Checked against
+        /// the source of every module that builds controls, so deleting the
+        /// control turns the claim red.
+        Sends(&'static str),
+        /// Not machine-checked, and the exact set of these is pinned below so
+        /// that a new one is a deliberate edit rather than a quiet one.
+        Prose,
+    }
+
+    /// Every module that builds controls, with comments and test modules
+    /// removed, so that a `Message::` in a doc line or a unit test cannot
+    /// stand in for a control on screen.
+    ///
+    /// `app.rs` is excluded because it *defines* and *handles* every message —
+    /// including it would let this check pass on the strength of the very
+    /// thing it is checking — and `keys.rs` because it is the keyboard, which
+    /// is the side of the mirror being verified.
+    ///
+    /// Two limits, stated rather than left to be discovered. A control whose
+    /// message is *handed to it* by `app.rs` — the now-playing block takes its
+    /// door as an argument — is invisible here, so no row may claim one. And
+    /// this reads source at all, which is the weakest kind of assertion; it is
+    /// here only until there is a headless `App` to draw and interrogate, which
+    /// would answer "does a control send this" directly and close both gaps.
+    fn control_source() -> String {
+        let mut source = String::new();
+        let mut stack = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("the crate's own src is readable") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .unwrap_or_default();
+                let is_rust = path.extension().is_some_and(|ext| ext == "rs");
+                if !is_rust || matches!(name, "app.rs" | "keys.rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("a readable module");
+                // The *test module*, which is last — not the first
+                // `#[cfg(test)]`, which in several view modules is a constant
+                // kept for an audit and sits above the controls.
+                let live = text
+                    .rsplit_once("#[cfg(test)]\nmod ")
+                    .map_or(text.as_str(), |(head, _)| head);
+                for line in live.lines() {
+                    if !line.trim_start().starts_with("//") {
+                        source.push_str(line);
+                        source.push('\n');
+                    }
+                }
+            }
+        }
+        source
+    }
+
     /// **Every keyboard binding resolves to a message an on-screen control
     /// also sends.**
     ///
@@ -14124,17 +14196,22 @@ mod tests {
     fn every_keyboard_binding_is_a_press_some_control_also_makes() {
         use iced::keyboard::{Key, Modifiers, key};
 
-        /// Message tag → the on-screen control that sends the same message,
-        /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 24] = [
+        /// Message tag → the pointer route to the same intention, then the
+        /// prose naming the control. The middle field is the half a test can
+        /// hold: prose that names a deleted door reads exactly like prose
+        /// that names a live one, and that is how this table came to claim a
+        /// `Playlists` word the returns lane removed in 44f2b76.
+        const CONTROLS: [(&str, Pointer, &str); 24] = [
             (
                 "ToggleLane",
+                Pointer::Sends("ToggleLane"),
                 "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
                  the state you are in at full ink and inert, the other \
                  pressable, in the density detents' exact anatomy",
             ),
             (
                 "Undo",
+                Pointer::Sends("Undo"),
                 "the transient `Undo` word beside the Queue place's summary \
                  and the playlist page's counts (doc 11 §5 P2) — present \
                  exactly while there is an edit to take back, which is \
@@ -14142,63 +14219,117 @@ mod tests {
             ),
             (
                 "ToggleShortcuts",
+                Pointer::Sends("ToggleShortcuts"),
                 "Settings' `Show shortcuts` word — the card `?` opens, given a \
                  visible door because a key that is the only way to a card \
                  about keys reaches exactly the people who did not need it",
             ),
-            ("PlayPause", "the bottom bar's play/pause button"),
+            (
+                "PlayPause",
+                Pointer::Sends("PlayPause"),
+                "the bottom bar's play/pause button",
+            ),
             (
                 "TogglePlaylists",
-                "the Library strip's labelled `Playlists` door (ADR-0024 §5)",
+                Pointer::Sends("AddAlbumToPlaylist"),
+                "`Add to playlist`, on a record's context menu and its page — \
+                 which summons this same panel as the picker (09 §8.1) and \
+                 leaves it standing afterwards. **That is a weaker equivalence \
+                 than every other row here and is written down rather than \
+                 rounded up**: the pointer can only summon the panel *into a \
+                 pick*, and the Library strip's `Playlists` word this row named \
+                 until 2026-08-24 has not existed since 44f2b76 replaced the \
+                 strip with the returns lane. The lane's `Playlists` row is a \
+                 door to the *place*, which is a different surface. So at rest \
+                 this chord is the only summon, and `drop_drag`'s `over_panel` \
+                 branch — dragging a record from the wall onto a list — needs \
+                 the panel already open. Backlog #8 carries the decision",
             ),
-            ("NextTrack", "the bottom bar's Next button"),
-            ("PreviousTrack", "the bottom bar's Previous button"),
+            (
+                "NextTrack",
+                Pointer::Sends("NextTrack"),
+                "the bottom bar's Next button",
+            ),
+            (
+                "PreviousTrack",
+                Pointer::Sends("PreviousTrack"),
+                "the bottom bar's Previous button",
+            ),
             (
                 "Play",
+                Pointer::Sends("PlayPause"),
                 "MPRIS only; the bar's toggle covers both directions",
             ),
             (
                 "Pause",
+                Pointer::Sends("PlayPause"),
                 "MPRIS only; the bar's toggle covers both directions",
             ),
-            ("Stop", "MPRIS only; there is no on-screen Stop"),
+            (
+                "Stop",
+                Pointer::Prose,
+                "MPRIS only; there is no on-screen Stop",
+            ),
             (
                 "SeekBy",
+                Pointer::Sends("NeedleDragged"),
                 "the needle, pressed inside the entry that is sounding \
                  (ADR-0017 §1.1: the groove's job, at the window's edge)",
             ),
             (
                 "Direction",
+                Pointer::Sends("SearchAction"),
                 "the selected row/action in the open search chooser; outside \
                  search, the bottom bar's needle and volume fader",
             ),
-            ("ToggleMute", "the bottom bar's speaker button"),
+            (
+                "ToggleMute",
+                Pointer::Sends("ToggleMute"),
+                "the bottom bar's speaker button",
+            ),
             (
                 "ShowNowPlaying",
+                Pointer::Sends("GoTo"),
                 "the returns lane's labelled `Now playing` row",
             ),
-            ("ToggleSettings", "the top bar's Settings control"),
-            ("HistoryBack", "the app bar's visible Back arrow"),
-            ("HistoryForward", "the app bar's visible Forward arrow"),
-            ("FocusSearch", "the top bar's search well"),
+            (
+                "ToggleSettings",
+                Pointer::Sends("ToggleSettings"),
+                "the top bar's Settings control",
+            ),
+            (
+                "HistoryBack",
+                Pointer::Sends("HistoryBack"),
+                "the app bar's visible Back arrow",
+            ),
+            (
+                "HistoryForward",
+                Pointer::Sends("HistoryForward"),
+                "the app bar's visible Forward arrow",
+            ),
+            ("FocusSearch", Pointer::Prose, "the top bar's search well"),
             (
                 "EscapePressed",
+                Pointer::Sends("DismissSearch"),
                 "every place's `‹ Library`, and — for the query layer the peel \
                  ends on — the well's own clear mark, which is this key's \
                  pointer route into the identical function (ADR-0036 §4)",
             ),
             (
                 "QueryTyped",
+                Pointer::Sends("SearchChanged"),
                 "the top bar's search well — the field ADR-0017 §1.2 kept, \
                  which a pointer clicks into to type the same query",
             ),
             (
                 "PlayFirstMatch",
+                Pointer::Sends("SearchConfirmed"),
                 "the selected app-bar search result while its chooser stands; \
                  the record page's `Play album` for the fall-through",
             ),
             (
                 "DensityStep",
+                Pointer::Sends("DensityStep"),
                 "the density marks — at the foot of the index rail's lane on \
                  the Library, and on the block's own section rule on Home and \
                  an artist's page (ADR-0028 and its fourth-step amendment). \
@@ -14208,6 +14339,7 @@ mod tests {
             ),
             (
                 "GroupKeySelected",
+                Pointer::Sends("GroupKeySelected"),
                 "the top bar's row of six words (ADR-0019); the first two, \
                  A–Z and ARTIST, are the same order broken into letter \
                  shelves and into a shelf per artist (ADR-0035, as thrice \
@@ -14215,6 +14347,7 @@ mod tests {
             ),
             (
                 "SetVolume",
+                Pointer::Sends("VolumeDragged"),
                 "MPRIS only; the fader sends its own pointer messages",
             ),
         ];
@@ -14295,7 +14428,7 @@ mod tests {
                     .map_or(debug.as_str(), |(head, _)| head)
                     .to_owned();
                 assert!(
-                    CONTROLS.iter().any(|(name, _)| *name == tag),
+                    CONTROLS.iter().any(|(name, _, _)| *name == tag),
                     "{key} + {modifiers:?} binds to `{tag}`, which no entry in \
                      CONTROLS accounts for — name the control that sends it, or \
                      record why there is none"
@@ -14305,7 +14438,7 @@ mod tests {
         }
         // …and the table has no stale entries either, except the three that
         // exist for the desktop rather than for the keyboard.
-        for (tag, _) in CONTROLS {
+        for (tag, _, _) in CONTROLS {
             let desktop_only = matches!(tag, "Play" | "Pause" | "SetVolume");
             assert!(
                 desktop_only || produced.contains(&tag.to_owned()),
@@ -14313,6 +14446,43 @@ mod tests {
             );
         }
         assert!(produced.len() > 20, "the sweep stopped covering the table");
+
+        // **And the pointer half, which until now was only prose.** Every
+        // route the table claims has to be a message some control really
+        // sends; a door removed in a refactor fails here instead of quietly
+        // leaving a binding with nothing behind it.
+        let controls = control_source();
+        for (tag, pointer, description) in CONTROLS {
+            let Pointer::Sends(sent) = pointer else {
+                continue;
+            };
+            assert!(
+                controls.contains(&format!("Message::{sent}")),
+                "`{tag}`'s pointer route is `Message::{sent}` — \"{description}\" — \
+                 but no module outside app.rs and keys.rs sends it. Either the \
+                 control was removed, in which case the binding has no pointer \
+                 route and this table must say so, or it was renamed and this \
+                 row is stale."
+            );
+        }
+
+        // The exceptions, named. Two bindings have no message-sending control
+        // behind them and both are deliberate; pinning the set is what stops a
+        // third being added by writing `Pointer::Prose` and moving on.
+        let unchecked: Vec<&str> = CONTROLS
+            .iter()
+            .filter(|(_, pointer, _)| matches!(pointer, Pointer::Prose))
+            .map(|(tag, _, _)| *tag)
+            .collect();
+        assert_eq!(
+            unchecked,
+            ["Stop", "FocusSearch"],
+            "the set of bindings whose pointer route is unverified prose has \
+             changed. `Stop` has no on-screen Stop at all; `FocusSearch` has a \
+             control — the search well — that a pointer focuses by clicking, \
+             which iced does without sending a message. A new entry here is a \
+             new keyboard-only capability and needs to be argued, not added."
+        );
     }
 
     /// **Every play gesture goes through one arranger, and the mode cannot be

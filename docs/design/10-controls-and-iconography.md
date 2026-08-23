@@ -124,17 +124,61 @@ amendment.
 
 ### 1.1 The Library strip (`views/top_bar.rs`)
 
+> **Corrected 2026-08-24.** The table below said "Form today" and had not been
+> true for weeks: eight of its nine rows named controls `top_bar.rs` no longer
+> builds. The strip was emptied in stages — the pull removed on 2026-08-10,
+> shuffle made a property of the player the same day, and 44f2b76 replacing the
+> strip's remaining doors with the returns lane and the app bar. What
+> `top_bar.rs` builds now is the arrangement strip and nothing else.
+>
+> This was found by the audit that also made
+> `every_keyboard_binding_is_a_press_some_control_also_makes` check its own
+> pointer column instead of asserting that prose exists. **That test is now the
+> load-bearing copy of this mirror** — it fails the build when a door named
+> here is deleted, which is the failure this document could not produce. Read
+> the table below for the reasoning; read the test for what is true.
+
 | Control | Form today | Message | Band | Eye travel | Accelerators |
 |---|---|---|---|---|---|
-| Search well | recessed box, placeholder text, 360 px (`top_bar.rs:35,52`) | `SearchChanged` / `PlayFirstMatch` | B | top-left | any bare printable; `/`, `Ctrl+F`; `Enter` |
-| Group keys ×5 | caps-tracked words (`top_bar.rs:343`) | `GroupKeySelected` | C | top, left-centre | `1`–`5` |
-| `Play all` | word, Medium (`top_bar.rs:175–184`) | `PlayAll` | C | top-centre | — |
-| `Shuffle` | word | `Shuffle` | C | top-centre | — |
-| `Pull` | word | `Pull` | C/D | top-centre | `Ctrl+R` |
-| `Playlists` door | word (`top_bar.rs:222–240`) | `TogglePlaylists` | C | top-centre-right | `Ctrl+P` |
-| Counts | readout, `paper_faint` (`top_bar.rs:300–310`) | — | — | top-right | — |
-| `scanning…` / skipped / problem | readouts (`top_bar.rs:75–101`) | — | — | top-right | — |
-| `Settings` door | word, 84 px reserved (`top_bar.rs:259–289`, `theme.rs:2877`) | `ToggleSettings` | E | top-right corner | `Ctrl+,` |
+| Group keys ×5 | caps-tracked words (`top_bar.rs:145`) | `GroupKeySelected` | C | top, left-centre | `1`–`5` |
+
+Everything else that was here has moved, and the moves are the point:
+
+| Was | Is now | Message |
+|---|---|---|
+| Search well | the app bar's well (`views/search.rs`) | `SearchChanged`, `SearchConfirmed` |
+| `Play all` | each page's own header (`views/page.rs`) — a wall-wide act became a per-subject one | `PlayAll` |
+| `Shuffle` | the bottom bar's crossed-arrows glyph, lit — a player property since 2026-08-10, not an act (§3.2) | `ToggleShuffle` |
+| `Pull` | **gone**, 2026-08-10 | — |
+| `Playlists` door | **gone.** The returns lane's `Playlists` row is a door to the *place*; the summoned *panel* it used to open has no pointer door at all — see §1.1.1 | — |
+| Counts, `scanning…`, skipped, problem | Settings' library section (`views/settings.rs`) | — |
+| `Settings` door | the app bar's gear (`views/app_bar.rs`) | `ToggleSettings` |
+
+#### 1.1.1 The playlist panel has no door
+
+`Ctrl+P` (`Message::TogglePlaylists`) summons the panel and **nothing on
+screen does**. The pointer's only route to it is `Add to playlist`, on a
+record's context menu or its page, which opens the panel *as the picker* and
+leaves it standing once the pick lands.
+
+That is not merely a missing shortcut mirror. `App::drop_drag`'s `over_panel`
+branch — dragging a record from the wall onto a list — requires the panel to be
+open, so **a listener using only a pointer cannot reach the drag-into-a-playlist
+gesture at all** without first performing an unrelated add. The panel's own
+module doc names simultaneity as the whole reason it exists over a place; that
+reason is currently keyboard-gated.
+
+The fix is a design decision, not a repair, and it is recorded in
+`docs/BACKLOG.md` #8 rather than guessed at here. The three candidates:
+
+1. **A door somewhere visible.** Not an L8.4/L8.6 violation — the panel is a
+   distinct surface from the Playlists place, so this is its *first* door, not
+   a second one to the same destination. The question is where it goes now that
+   the strip that used to hold it is gone.
+2. **Make the lane's playlist rows drop targets**, so the drag gesture stops
+   needing the panel and the panel stays a picker.
+3. **Accept it**, and say so here — in which case `Pointer::Prose` in the test
+   gains a third entry and the "no exceptions left" claim goes with it.
 
 ### 1.2 The wall and its lanes (`views/shelf.rs`)
 
@@ -184,8 +228,8 @@ amendment.
 
 | Control | Form | Message | Band | Accelerators |
 |---|---|---|---|---|
-| Now-playing block | type, a door (`bottom_bar.rs:407–441`) | `ShowPlayingAlbum` | A | bar menu `Go to record` |
-| `Queue · N` door | word + reserved figure (`bottom_bar.rs:339–380`) | `ToggleQueue` | C | `Ctrl+U` |
+| Now-playing block | type, a door (`views/bottom_bar.rs`) — the zone's only door, and 160 px wider for it | `OpenPlayingSource`, handed in by `app.rs`; `ShowPlayingAlbum` has not existed since the block was rebuilt | A | ~~bar menu `Go to record`~~ — removed: the block's press leads to `Now playing` and the record is one step on, so the item was a second quieter answer (`menu.rs:367`) |
+| `Queue · N` door | **removed.** The queue's place was absorbed into `Now playing`, so its labelled control came off the bar with it (`bottom_bar.rs`, doc 12 §6.4) | — | C | `Ctrl+U`, which now sends `ShowNowPlaying` — the door it mirrors is the lane's `Now playing` row |
 | Previous · Play/Pause · Next | **drawn glyphs**, tooltipped (`bottom_bar.rs:616–735`) | … | A | `Space`, `Ctrl+←/→`, media keys |
 | Needle | object, 2 px + 12 px band | `Needle…` | B | `←/→`, `Shift+←/→` |
 | Speaker / mute | **drawn glyph** (`bottom_bar.rs:754–820`) | `ToggleMute` | C | `Ctrl+M` |
