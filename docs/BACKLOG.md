@@ -2,7 +2,7 @@
 
 > Deliberate deferrals, in one place. Everything here was consciously *not* done,
 > with the reason. Roadmap-level scope lives in `VISION.md`; this is the list of
-> known gaps and promises. Updated 2026-08-15.
+> known gaps and promises. Updated 2026-08-22.
 
 ## What the owner asked for
 
@@ -1447,6 +1447,20 @@ Newest first. Each was asked for in conversation and is now in the product.
 
   Read-only is now proven rather than promised: `touch` inside the share
   answers *Read-only file system*.
+
+- ~~**Still unverified: the portal folder chooser inside the sandbox.**~~
+  **Verified 2026-08-22, and it fails** — not at pick time, which is what this
+  entry expected somebody to check, but at the *next gvfs remount*. The picked
+  folder is stored as a document-portal path; the token outlives the mount it
+  points at, and every track under it stops resolving. Measured on the owner's
+  own machine: the token directory present and empty, 8 565 tracks listed and
+  none openable, no playback, no artwork, and **no message** — the `unavailable`
+  state answers *nothing found here* rather than *this cannot be read*.
+  Three further defects met it — a bundle install that can never update, a
+  release note promising updates it cannot deliver, and an in-app updater
+  correctly inert inside the sandbox. The plan for all four is
+  [ADR-0045](adr/0045-shipping-the-flatpak.md); §3 and §4 are the shipped-behaviour
+  defects and go first. The original entry follows.
 
 - **Still unverified: the portal folder chooser inside the sandbox.** A
   collection at `/mnt/music` — not under `~/Music`, not a desktop mount —

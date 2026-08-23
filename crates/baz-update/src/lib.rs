@@ -672,12 +672,16 @@ pub fn hand_off(path: &std::path::Path) -> Result<(), String> {
             .arg(path)
             .status();
     }
+    // **On Linux baz applies the update itself** ([`applies_in_place`]), which
+    // is the whole of the owner's ask: a button in Settings that updates baz,
+    // not one that hands back a `.tar.gz`.
+    if applies_in_place() {
+        return install_in_place(path);
+    }
     let (program, args): (&str, Vec<&std::ffi::OsStr>) = if cfg!(target_os = "windows") {
         ("msiexec", vec![std::ffi::OsStr::new("/i"), path.as_ref()])
-    } else if cfg!(target_os = "macos") {
-        ("open", vec![path.as_ref()])
     } else {
-        ("xdg-open", vec![path.as_ref()])
+        ("open", vec![path.as_ref()])
     };
     std::process::Command::new(program)
         .args(args)
@@ -823,8 +827,8 @@ pub fn handed_off_note() -> &'static str {
          download was checked against its published checksum and its \
          quarantine flag cleared."
     } else {
-        "The archive has been downloaded and checked against its published \
-         checksum. Unpack it over your existing baz, then quit and reopen."
+        "baz has been updated, and the download was checked against its \
+         published checksum first. Quit and reopen to run the new version."
     }
 }
 
@@ -1137,9 +1141,12 @@ d2a84f4b8b650937ec8f73cd8be2c74add5a911ba64df27458ed8229da804a26  baz-0.4.0-linu
         let note = super::handed_off_note();
         assert!(!note.is_empty());
         // Whatever the platform, the sentence has to leave a listener knowing
-        // that baz is still running and that they have something to do.
+        // that baz is still running and that they have something to do. Since
+        // 2026-08-23 Linux says *Quit and reopen* rather than *Unpack it*,
+        // because baz now installs the update itself
+        // ([`super::applies_in_place`]) — the act changed, so the words did.
         assert!(
-            note.contains("quit") || note.contains("Unpack"),
+            note.contains("uit") || note.contains("Unpack"),
             "the note does not say what to do next: {note}"
         );
         if cfg!(target_os = "macos") {

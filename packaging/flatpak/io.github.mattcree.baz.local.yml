@@ -1,0 +1,179 @@
+# LOCAL BUILD ONLY — generated, not the canonical manifest.
+#
+# Identical to io.github.mattcree.baz.yml except that it builds the working
+# tree (a `dir` source) instead of a tagged commit, so a local install can be
+# rebuilt and updated without cutting a release. The canonical manifest is the
+# one Flathub takes; edit that one, then regenerate this.
+#
+# Build and export to the local repo:
+#   flatpak-builder --user --force-clean \
+#     --repo="$HOME/.local/share/baz-repo" \
+#     build-dir packaging/flatpak/io.github.mattcree.baz.local.yml
+#   flatpak update -y io.github.mattcree.baz
+# Flatpak manifest for baz — the canonical copy.
+#
+# The copy Flathub builds from lives in the flathub/io.github.mattcree.baz
+# repository; this one is the source of truth and is what a change to baz's
+# runtime, permissions or build commands edits first. See README.md in this
+# directory for the submission path and for how `cargo-sources.json` is
+# generated (Flathub builds have no network, so every crate must be listed).
+#
+# Validate locally without building:
+#     flatpak-builder --show-deps packaging/flatpak/io.github.mattcree.baz.yml
+---
+id: io.github.mattcree.baz
+runtime: org.freedesktop.Platform
+runtime-version: "25.08"
+sdk: org.freedesktop.Sdk
+command: baz
+
+# Rust comes from the SDK extension rather than rustup: Flathub builds are
+# offline, so the toolchain has to be a declared dependency. It tracks stable,
+# which is what rust-toolchain.toml pins the rest of the project to; the two
+# can drift by a release and the manifest does not pretend otherwise.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+finish-args:
+  # Display. iced renders through wgpu, which needs the GPU node; X11 is the
+  # fallback for sessions that have no Wayland compositor.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+
+  # Audio. cpal opens ALSA's "default" PCM; inside the sandbox the runtime's
+  # ALSA configuration is installed below and routes that to the
+  # PulseAudio/PipeWire socket this grants. No other device access is needed
+  # — baz never touches a card directly (see ADR-0011 on why hardware volume
+  # is out of reach here).
+  - --socket=pulseaudio
+  - --env=ALSA_CONFIG_PATH=/app/etc/asound.conf
+
+  # The music. **Read-only by design**: baz never writes to a listener's
+  # files, and the sandbox is the place to make that structural rather than
+  # promised. Every grant here is `:ro` and that is not an oversight to be
+  # corrected later.
+  - --filesystem=xdg-music:ro
+
+  # **Anything the desktop has mounted for you.** `xdg-run/gvfs` is the FUSE
+  # mount point gvfs puts SMB, NFS, MTP and attached-device shares under, and
+  # without it a sandboxed baz cannot see a collection that lives on a NAS —
+  # which is not an edge case, it is how a large library is usually kept. It
+  # is also, concretely, how the owner's own 8 600 tracks are stored, so a
+  # Flathub baz without this grant would be unable to open the library it was
+  # developed against.
+  #
+  # This is the standard grant for the case and every media player on Flathub
+  # that reads network shares carries it. It grants no *new* directory: gvfs
+  # only exposes what the listener has already mounted in their own session,
+  # so the reach is the desktop's, not ours.
+  - --filesystem=xdg-run/gvfs:ro
+
+  # **And permission to talk to the daemon that owns those mounts.** The
+  # grant above makes the FUSE tree *visible*; it does not make it fully
+  # readable. Measured inside a real sandbox on 2026-08-20, with the
+  # filesystem grant and without this one:
+  #
+  #     $ ls '/run/user/1000/gvfs/smb-share:server=…,share=music'
+  #     ls: cannot access …: Input/output error
+  #     $ ls '/run/user/1000/gvfs/smb-share:server=…,share=music/CDs/FLAC'
+  #     65daysofstatic  ABBA  Alanis Morissette
+  #
+  # Traversal works and enumeration of the mount root does not, because gvfs
+  # answers that one over D-Bus. A listener whose library root *is* the share
+  # would have added a folder baz then reported as empty — the worst kind of
+  # failure, because nothing is broken and nothing says so. Adding this grant
+  # and re-running the same command lists `CDs  Other  #recycle`, which is
+  # what the same path lists outside the sandbox.
+  - --talk-name=org.gtk.vfs
+  - --talk-name=org.gtk.vfs.*
+
+  # **A collection kept somewhere else entirely** — `/mnt/music`, a second
+  # drive, a directory the listener chose years ago — is reached through the
+  # file chooser rather than by widening this list. baz's `Browse…` is
+  # `rfd` built portal-only (ADR-0025), so the pick goes through
+  # `org.freedesktop.portal.FileChooser` and the portal grants the sandbox
+  # access to what was picked. That is the correct shape: the listener grants
+  # the folder, rather than the packager guessing which folders exist.
+  #
+  # The typed path on the first-run screen is the one route that cannot work
+  # this way, because nothing granted it. It stays, because it is the only
+  # route that can name a share that is not mounted yet — and where it names
+  # something outside these grants, the honest fallback is still
+  #     flatpak override --user --filesystem=/srv/music:ro io.github.mattcree.baz
+
+  # MPRIS2. The well-known name and the per-instance fallback baz claims when
+  # a second copy is already on the bus (crates/baz/src/mpris/server.rs).
+  - --own-name=org.mpris.MediaPlayer2.baz
+  - --own-name=org.mpris.MediaPlayer2.baz.*
+
+# Nothing from the build tree belongs in the final image.
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /man
+  - /share/doc
+  - "*.a"
+  - "*.la"
+
+modules:
+  - name: baz
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        # Keep cargo's home inside the build dir so the offline sources
+        # flatpak-cargo-generator lays down are the ones used.
+        CARGO_HOME: /run/build/baz/cargo
+        # The static CPU runtime is pinned in Git LFS beside the model so the
+        # Flathub build needs no network access or unrecorded system library.
+        ORT_LIB_LOCATION: /run/build/baz/models/runtime/linux-x86_64
+    build-commands:
+      # --offline: no network in a Flathub build, by policy and by sandbox.
+      # --locked: the committed Cargo.lock is the dependency set, the same one
+      #   the CI gate and the release binaries were built from.
+      # --features device-output,vibe-analysis: the Baz release includes both
+      # playback and Vibe. State both explicitly so changing a Cargo default
+      # cannot silently change the Flatpak's capabilities.
+      - cargo --offline build --release --locked -p baz --features device-output,vibe-analysis
+      - install -Dm755 target/release/baz /app/bin/baz
+      - install -Dm644 models/vibe/audio_model_quantized.onnx /app/bin/models/vibe/audio_model_quantized.onnx
+      - install -Dm644 models/vibe/text_model_quantized.onnx /app/bin/models/vibe/text_model_quantized.onnx
+      - install -Dm644 models/vibe/tokenizer.json /app/bin/models/vibe/tokenizer.json
+      - install -Dm644 models/vibe/LICENSE /app/bin/models/vibe/LICENSE
+      - install -Dm644 models/vibe/MODEL_CARD.md /app/bin/models/vibe/MODEL_CARD.md
+      - install -Dm644 models/vibe/README.md /app/bin/models/vibe/README.md
+      # The desktop entry, the AppStream metadata and the icons are installed
+      # from the repository's own `packaging/` tree — the copies CI validates.
+      # They are not carried as separate `type: file` sources: a path relative
+      # to the manifest resolves here but not in the flathub/ repository the
+      # manifest is copied into, where the manifest sits at the root and
+      # `../packaging/…` is outside the checkout.
+      - install -Dm644 packaging/io.github.mattcree.baz.desktop
+        /app/share/applications/io.github.mattcree.baz.desktop
+      - install -Dm644 packaging/flatpak/io.github.mattcree.baz.metainfo.xml
+        /app/share/metainfo/io.github.mattcree.baz.metainfo.xml
+      - install -Dm644 packaging/flatpak/asound.conf /app/etc/asound.conf
+      # The icon, in the hicolor layout AppStream and every launcher expect.
+      # The basename is the application id, so the desktop entry's bare
+      # `Icon=io.github.mattcree.baz` resolves without a path.
+      - install -Dm644 packaging/icons/hicolor/scalable/apps/io.github.mattcree.baz.svg
+        /app/share/icons/hicolor/scalable/apps/io.github.mattcree.baz.svg
+      - for s in 16 24 32 48 64 128 256 512; do
+        install -Dm644 "packaging/icons/hicolor/${s}x${s}/apps/io.github.mattcree.baz.png"
+        "/app/share/icons/hicolor/${s}x${s}/apps/io.github.mattcree.baz.png";
+        done
+    sources:
+      # Flathub requires a tag *and* the commit it resolves to, so the build
+      # cannot follow a moved tag. Both are placeholders until the maintainer
+      # cuts a release: docs/RELEASING.md is the checklist.
+      - type: dir
+        path: ../..
+        skip: [target, .git, build-dir, .flatpak-builder]
+      # Every crate in Cargo.lock, as a vendored offline source. Generated by
+      # flatpak-builder-tools' flatpak-cargo-generator.py and never hand
+      # edited; regenerate it in the same commit as any Cargo.lock change.
+      # CI checks it against Cargo.lock on every PR (check-cargo-sources.py),
+      # so a stale copy is caught before it reaches a build.
+      - cargo-sources.json

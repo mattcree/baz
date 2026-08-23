@@ -1049,6 +1049,11 @@ fn updates_section(updating: &Updating, starts: bool) -> Element<'static, Messag
         Updating::Found(_) => Some(word_action(
             if baz_update::installs_itself() {
                 "Download it now"
+            } else if baz_update::applies_in_place() {
+                // The verb is what the press *does*. On Linux it installs, so
+                // saying "Download it" would undersell the act and leave a
+                // listener wondering what to do with the download.
+                "Update baz"
             } else {
                 "Download it"
             },
@@ -1087,9 +1092,9 @@ fn updates_line(updating: &Updating) -> (String, iced::Color) {
         ),
         Updating::Idle => (
             format!(
-                "You have baz {}. This copy is an archive, which baz cannot \
-                 replace for you — the download is checked and then handed to \
-                 your desktop to unpack.",
+                "You have baz {}. A new version is checked against its \
+                 published checksum and then installed over this one; you \
+                 restart baz to use it.",
                 env!("CARGO_PKG_VERSION")
             ),
             room.paper_faint,

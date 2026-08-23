@@ -1,0 +1,227 @@
+# ADR-0045: Shipping the Flatpak — publish the repository, not a bundle
+
+## Status
+
+Accepted 2026-08-23. Extends [ADR-0043](0043-installing-and-updating.md), which
+settled *how baz updates* and got the Flatpak half wrong; and
+[ADR-0025](0025-directory-picker-and-nas-honesty.md), whose portal-only folder picker turns out
+to produce a library that stops working.
+
+## Context
+
+**The Flatpak is the blessed Linux route and it is the only one that cannot be
+updated.** That is not a gap in the plan; it is the plan, executed. Three
+independent faults met on the owner's own machine on 2026-08-22, and each one
+alone would have been survivable.
+
+### 1. The release publishes the artifact that cannot update
+
+`.github/workflows/release.yml` builds a real OSTree repository and then throws
+it away:
+
+```yaml
+flatpak-builder --repo=repo …            # an OSTree repository
+flatpak build-bundle repo  ….flatpak     # one file, extracted from it
+```
+
+Only the bundle is uploaded. Installing a bundle creates a **stub remote** with
+no repository behind it:
+
+```text
+baz-origin  user,disabled,no-enumerate,no-gpg-verify
+```
+
+`flatpak update` therefore answers *Nothing to update* for ever. The thing that
+would have made updates work was built, in CI, on every release, and deleted.
+
+### 2. The release notes promise the update that cannot happen
+
+| You are on | Take | Updates by |
+|---|---|---|
+| Linux | `.flatpak` | **your software centre, automatically** |
+
+There is no remote, so no software centre will ever offer anything. baz told
+its listeners something untrue about itself, in the one document they read
+before installing.
+
+### 3. Inside the sandbox the app cannot make up the difference
+
+ADR-0043 §3 is right that `/app` is read only and that baz must not self-install
+inside a Flatpak. So Settings correctly draws no update control there and says
+*update it through your software centre* — which, per (1) and (2), cannot work.
+Three correct-looking decisions compose into a dead end.
+
+### 4. And the library quietly dies
+
+Unrelated in mechanism, identical in effect. `Browse…` is portal-only
+(ADR-0025), so picking a folder yields a document-portal path:
+
+```text
+/run/user/1000/doc/DCptc1v9zsH2128kYXc_yA/smb-share:server=…,share=music/…
+```
+
+The token survives a reboot; **what it points at does not**, once the gvfs
+mount underneath has gone and come back. Measured on the owner's machine: the
+token directory existed and was empty, and all **8 565** tracks resolved to
+nothing. Every record was still listed. Nothing played, and no artwork loaded,
+because both need to open the file. baz said nothing at all — the `unavailable`
+state exists and did not fire, because the *root* stat'd as absent rather than
+as unreadable.
+
+For anyone whose collection lives on a NAS — which is how a large collection is
+usually kept — the recommended route produces a library that works until the
+next remount and then silently stops.
+
+## Decision
+
+### §1 Publish the repository, and install from a `.flatpakref`
+
+The repository already exists in CI. Export it, and ship a **`.flatpakref`**
+beside the bundle.
+
+A `.flatpakref` is the whole fix. Installing one *adds the remote* and then
+installs from it, so `flatpak update` works from that moment on — which is
+precisely what a bundle cannot do:
+
+```ini
+[Flatpak Ref]
+Name=io.github.mattcree.baz
+Branch=master
+Url=https://mattcree.github.io/baz-repo/
+GPGKey=<base64 of the public key>
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+```
+
+**Hosting is GitHub Pages**, from a `baz-repo` repository whose only content is
+the OSTree store. It is static files over HTTPS, which is all an OSTree remote
+is.
+
+- **Static deltas** (`flatpak build-update-repo --generate-static-deltas`) or
+  every update refetches whole objects instead of differences.
+- **Prune to one version** (`--prune --prune-depth=1`). Pages soft-limits a
+  repository to 1 GB; baz installs at ~230 MB, so unbounded history would
+  breach it within a handful of releases. The cost is that only the newest
+  version is installable, which is what a `.flatpakref` offers anyway.
+- **Sign it.** A public remote that needs `--no-gpg-verify` is asking strangers
+  to accept unverified code. The key is free, unlike the Windows and macOS
+  certificates ADR-0043 §4 defers on cost, so there is no reason not to.
+
+**The 230 MB is a first-install cost, not a per-update one**, and this was
+nearly mis-designed on the strength of the number. OSTree is content addressed:
+the 256 MB model set is stored once and is byte-identical across releases, so a
+client that already has it downloads only what changed — the binary. Splitting
+the models into a Flatpak extension was considered for exactly this and is
+**not** worth it: it buys nothing OSTree does not already do, and costs a second
+ref to version and publish.
+
+### §2 Never state an update route that does not exist
+
+The release-notes table is generated by the workflow and must say what is true
+of the artifact beside it:
+
+| Take | Updates by |
+|---|---|
+| the `.flatpakref` | `flatpak update`, and your software centre |
+| the `.flatpak` bundle | **nothing — reinstall to upgrade** |
+| the `.tar.gz` | itself, from Settings (ADR-0043 §3 as amended 2026-08-23) |
+
+The bundle keeps its place: it is the one artifact that installs with no
+network and no remote, which is worth having. It simply may not claim otherwise.
+
+### §3 A library may not depend on a document-portal token
+
+**Store the host path, not the token.** When a pick returns a path under
+`/run/user/*/doc/`, take the document id from it and ask the Documents portal
+what it actually points at — `org.freedesktop.portal.Documents.Info` answers
+with the host path — and store *that*. baz already holds
+`--filesystem=xdg-run/gvfs:ro`, so a gvfs path is directly readable inside the
+sandbox; this was verified from inside the running sandbox on 2026-08-22.
+
+The token remains the fallback for a pick that resolves to nothing else, which
+is the case the portal exists for: a folder outside every grant baz holds.
+
+**And repair what is already stored.** A root under `/run/user/*/doc/` that no
+longer resolves should be re-resolved once at startup and rewritten when it can
+be. A listener should not have to know what a document portal is to get their
+music back.
+
+### §4 An unreachable root must say so
+
+The `unavailable` state and its *"Not reachable right now — n kept, nothing
+removed"* note already exist and did not fire, because they answer *the scan
+found nothing here* rather than *this root cannot be read*. A configured folder
+whose root fails to open is reported as unavailable, loudly, in the health log
+and on the folder row — before a listener presses play on 8 565 tracks that
+cannot open.
+
+### §5 Flathub is still the destination
+
+Nothing here replaces it. The manifest is the source of truth, CI validates the
+AppStream metadata on every release, the metainfo carries release entries back
+to 0.1.0, and the two network-share grants were found and fixed on 2026-08-20.
+This ADR is the road baz travels **until** that submission lands, and the
+`.flatpakref` remote is retired when it does.
+
+## Alternatives rejected
+
+- **Wait for Flathub.** It is a review queue with a schedule nobody here
+  controls, and until it clears, every Linux listener is on an install that
+  cannot be updated. A month of that is worse than a static repository that
+  takes an afternoon.
+- **Keep shipping bundles and tell people to reinstall.** Honest, and it
+  concedes the feature. An update path is not a nicety for a player that checks
+  for updates on launch.
+- **Let baz self-install inside the sandbox.** `/app` is read only by design and
+  making it writable would forfeit the sandbox. ADR-0043 §3 stands.
+- **A models extension to shrink updates.** See §1: OSTree already dedupes them.
+
+## Consequences
+
+- A second published surface — a Pages repository and a signing key — to keep
+  alive until Flathub replaces it.
+- One new secret in CI (the GPG private key) and one new job step.
+- The bundle stops being the headline Linux artifact and becomes the offline
+  one.
+- `baz-origin`-style stub remotes left by past bundle installs are dead ends;
+  upgrading from one means uninstalling and installing the `.flatpakref`, and
+  the release notes have to say so once.
+
+## Proved on 2026-08-23, before any of it was published
+
+`packaging/flatpak/test-repo.sh` runs the whole §1 sequence against
+`127.0.0.1`: export, sign, static deltas, prune, serve, install from the
+`.flatpakref`, publish a second version, update. Three things it settled that
+were otherwise going to be settled by a release:
+
+- **A `.flatpakref` install creates a real remote.** `baz-origin` came out as
+  `user,no-enumerate` **with a URL** — against the bundle's
+  `user,disabled,no-enumerate,no-gpg-verify` and no URL. That single difference
+  is the entire saga.
+- **Updating works.** A second version was published and fetched; the deployed
+  commit moved `1f494575` → `8a595aa3`.
+- **The models are stored once**, which is the claim §1 rests on. The store was
+  156 MB after the first version and **183 MB after the second** — 27 MB for
+  another whole copy of a 159 MB application. An extension to split them out
+  would have bought nothing, and this is the measurement that says so.
+
+**And one thing it caught.** After updating to a build stamped `0.4.2`,
+`flatpak info` still reported **`Version: 0.4.1`** — a Flatpak takes its
+version from the metainfo's `<release>` element, not from `Cargo.toml`. So a
+release that bumps the crate and forgets the metainfo ships a store listing
+that lies about which version it is offering. `docs/RELEASING.md` step 4
+already says to add the release entry; what is new is that it is now
+*load-bearing* rather than presentational, and the publishing job should refuse
+a tag whose metainfo does not name it.
+
+## Status of the work
+
+**Not built** — the harness above is a rehearsal on the loopback, not the
+publishing job. Staged so each step is separately useful:
+
+1. **§3 and §4 first** — they are defects in shipped behaviour and are
+   independent of how baz is distributed. A listener on the current Flatpak
+   gets a working library back without reinstalling anything.
+2. **§1 and §2 next** — the CI job, the key, the Pages repository, the
+   `.flatpakref`, and the corrected notes table. One release proves it: install
+   from the ref, publish the next version, press update.
+3. **§5 when the queue allows**, unchanged by any of the above.

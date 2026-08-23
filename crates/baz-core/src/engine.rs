@@ -4136,8 +4136,16 @@ impl ProducerTask {
             Ok(samples) => {
                 if !stop.load(Ordering::Acquire) {
                     let _ = self.bounds.push(bound);
-                    if push_with_backpressure(&mut self.ring, &samples, stop) {
-                        pushed += samples.len();
+                    // Decoded whole, so the tail is a slice rather than a
+                    // rolling window — the same split every later track takes.
+                    let body = if hold.is_armed() {
+                        hold.hold_tail_of(&samples)
+                    } else {
+                        &samples[..]
+                    };
+                    let body_len = body.len();
+                    if push_with_backpressure(&mut self.ring, body, stop) {
+                        pushed += body_len;
                     }
                 }
             }
@@ -4240,6 +4248,7 @@ fn at_rate(
 
 #[cfg(test)]
 mod tests {
+
     //! What the engine asks of a sink that has a rate and a buffer — i.e. of
     //! real hardware.
     //!

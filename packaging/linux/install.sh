@@ -94,10 +94,19 @@ manifest="$datadir/$app_id/installed-files"
 : > "/tmp/baz-install.$$"
 record() { printf '%s\n' "$1" >> "/tmp/baz-install.$$"; }
 
+# **Write beside, then rename over.** `cp` onto a destination truncates it in
+# place, and the kernel refuses that for a binary it is currently executing —
+# `ETXTBSY`. That makes the obvious thing, re-running this script to upgrade a
+# baz that is open, fail on the one file that matters. `rename(2)` has no such
+# problem: the running process keeps the inode it started from and the new file
+# takes the name, which is also what makes the swap atomic. It is what baz's
+# own in-app update does (`baz_update::install_in_place`), and it works here
+# for the same reason.
 place() { # source, destination, mode
     mkdir -p "$(dirname -- "$2")"
-    cp -f -- "$1" "$2"
-    chmod "$3" "$2"
+    cp -f -- "$1" "$2.new.$$"
+    chmod "$3" "$2.new.$$"
+    mv -f -- "$2.new.$$" "$2"
     record "$2"
 }
 

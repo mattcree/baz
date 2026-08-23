@@ -841,6 +841,12 @@ impl Config {
 
     /// Read a config document. Never fails: see the module's degradation note.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one read per key, and the whole point of this file is that each takes its own \
+                  default and leaves its neighbours alone; grouping the reads to shorten the \
+                  function would put a key's default somewhere other than beside the key"
+    )]
     pub fn from_toml(text: &str) -> Self {
         let Ok(table) = text.parse::<toml::Table>() else {
             return Self::default();

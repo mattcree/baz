@@ -4669,11 +4669,22 @@ impl App {
     }
 
     /// Pay the sample-copy cost only while an audio visualization is visible.
+    ///
+    /// **Visible is no longer the same as *on Now playing*.** Since the
+    /// backdrop became weather (2026-08-22) it is drawn behind every place, so
+    /// the tap has to follow the *drawing* rather than the room — and it did
+    /// not. The clock was fixed that day and this gate was left, which left a
+    /// backdrop that repainted ten times a second from a frame nobody was
+    /// filling: alive by every measure except the picture.
+    ///
+    /// The owner, 2026-08-23: *"I think it still sort of pauses despite being
+    /// blurred and showing through."* It did, and this is why.
+    ///
+    /// The condition is otherwise unchanged, and it is still a gate: nothing
+    /// sounding, or a mode that is off, and the copy is not paid anywhere.
     fn sync_visualization_tap(&self) {
         self.playback.set_visualization_enabled(
-            self.place == Place::NowPlaying
-                && self.player.now_playing().is_some()
-                && self.visualization.mode.active(),
+            self.player.now_playing().is_some() && self.visualization.mode.active(),
         );
     }
 
@@ -11673,7 +11684,7 @@ impl Shelf {
     }
 
     fn move_root(&mut self, index: usize, delta: i8) {
-        if self.scanning || self.folder_pending_removal.is_some() {
+        if self.folder_pending_removal.is_some() {
             return;
         }
         let Some(to) = shifted_index(self.roots.len(), index, delta) else {
@@ -16083,5 +16094,38 @@ mod tests {
                 "`{elsewhere}` navigates around the deliberate start boundary"
             );
         }
+    }
+
+    /// **The sample tap follows the drawing, not the room.**
+    ///
+    /// The backdrop became weather on 2026-08-22 and is drawn behind every
+    /// place; the clock was fixed that day and the *tap* was not, so away from
+    /// Now playing the veiled ground repainted ten times a second from a frame
+    /// nobody was filling. The owner, 2026-08-23: *"I think it still sort of
+    /// pauses despite being blurred and showing through."*
+    ///
+    /// A source guard because the failure is invisible to everything else: the
+    /// clock ticks, the widget repaints, every frame is well-formed, and the
+    /// picture is identical. It cannot be caught by a screenshot either — the
+    /// isolated harness routes ALSA to a null device, which consumes a track
+    /// as fast as it can read it, so nothing plays in real time to animate.
+    #[test]
+    fn the_visualization_tap_does_not_depend_on_the_place() {
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        let rest = source
+            .split_once("fn sync_visualization_tap(&self)")
+            .expect("the tap")
+            .1;
+        let body = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            !body.contains("Place::"),
+            "the visualization tap is gated on the place again; the backdrop is \
+             drawn everywhere, so a frozen frame is what that buys"
+        );
+        assert!(
+            body.contains("now_playing().is_some()") && body.contains("mode.active()"),
+            "the tap must still be a gate: nothing sounding, or no mode, and the \
+             sample copy is not paid at all"
+        );
     }
 }
