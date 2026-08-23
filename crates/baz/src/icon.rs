@@ -173,6 +173,13 @@ pub enum Glyph {
     /// have been a mark that lies. See [`DENSITY_COMPACT`].
     DensityCompact,
     /// The wall at its tightest hang — sixteen works. The fourth detent.
+    /// **Hang the collection as a list**: a cover at the left with its columns
+    /// beside it, which is the row's own anatomy at 16 px.
+    ///
+    /// Deliberately not a fifth density cell-grid. The four density marks say
+    /// *how big*; this one says *what shape*, and a mark that looked like one
+    /// more step of the same ladder would say the wrong thing.
+    LayoutList,
     DensityDense,
     /// Plain square artwork, used by Now playing's visual-mode detents.
     VisualCover,
@@ -1154,6 +1161,38 @@ const DENSITY_COMPACT: &[Outline] = &[
 /// can say: the cells minify to 2.25 px on a 1× display. That is legible as
 /// *many small works*, which is the whole of what this detent has to mean,
 /// and the mark's accessible name carries the rest.
+/// **The list mark**: one cover, and the columns that sit beside it.
+///
+/// The row's own anatomy, which is what makes it readable at 16 px without a
+/// legend — a square and three measures, not a grid of cells.
+const LAYOUT_LIST: &[Outline] = &[
+    // The cover, square and left.
+    &[
+        (0.125, 0.343_75),
+        (0.437_5, 0.343_75),
+        (0.437_5, 0.656_25),
+        (0.125, 0.656_25),
+    ],
+    // **Two measures beside it, not three.** Three fitted the drawing and not
+    // the pixel grid: at 20 px the bars and their gaps both land under one
+    // device pixel and smear into a single smudge, which is the mistake
+    // `DensityDense`'s own note warns about from the other end of the sheet.
+    // Two bars at 1.5 px with 1 px between them survive the raster, and *rows
+    // beside a cover* is the whole of what the mark has to say.
+    &[
+        (0.500, 0.375),
+        (0.875, 0.375),
+        (0.875, 0.468_75),
+        (0.500, 0.468_75),
+    ],
+    &[
+        (0.500, 0.531_25),
+        (0.781_25, 0.531_25),
+        (0.781_25, 0.625),
+        (0.500, 0.625),
+    ],
+];
+
 const DENSITY_DENSE: &[Outline] = &[
     &[
         (0.125, 0.125),
@@ -1568,10 +1607,11 @@ impl Glyph {
         Self::Repeat,
         Self::Equalizer,
         Self::Chromeless,
+        Self::LayoutList,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 42;
+    const COUNT: usize = 43;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1599,6 +1639,7 @@ impl Glyph {
             Self::DensityBalanced => DENSITY_BALANCED,
             Self::DensityCompact => DENSITY_COMPACT,
             Self::DensityDense => DENSITY_DENSE,
+            Self::LayoutList => LAYOUT_LIST,
             Self::Queue => QUEUE,
             Self::Open => OPEN,
             Self::Home => HOME,
@@ -1635,6 +1676,7 @@ impl Glyph {
             Self::Magnifier => 7,
             Self::Gear => 8,
             Self::Equalizer => 40,
+            Self::LayoutList => 42,
             Self::Chromeless => 41,
             Self::Plus => 9,
             Self::Minus => 10,

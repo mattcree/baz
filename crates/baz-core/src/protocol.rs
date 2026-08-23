@@ -126,6 +126,24 @@ pub enum Command {
         /// origin would make provenance something an edit can lie about.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<String>,
+        /// **Where a fade between records is allowed**, parallel to `paths`
+        /// (ADR-0044 §2).
+        ///
+        /// `fade_into_next[i]` says whether the seam *out of* `paths[i]` may
+        /// be crossfaded. The engine cannot answer this itself: it plays a
+        /// list of paths, and whether two of them are one record's consecutive
+        /// tracks is a library fact `baz-core` has never had and should not
+        /// grow. So the front end that built the run states it, which makes
+        /// [`Command::SetCrossfade`] mean *between records* rather than
+        /// *between tracks* without the engine learning what a record is.
+        ///
+        /// **Absent or short is `false`**, and that is the safe direction: a
+        /// missing flag costs a fade nobody notices, while a wrong `true`
+        /// fades across an album's own seam and destroys the thing gapless
+        /// exists to protect. A sender that predates this field, or one that
+        /// wants no fades at all, sends nothing and gets none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fade_into_next: Vec<bool>,
     },
     /// Edit the play queue **without interrupting the music**: remove, insert,
     /// append or reorder by sending the queue as it should now be (ADR-0014).
@@ -192,6 +210,24 @@ pub enum Command {
     UpdateQueue {
         /// The queue as it should now be, in play order.
         paths: Vec<PathBuf>,
+        /// **Where a fade between records is allowed**, parallel to `paths`
+        /// (ADR-0044 §2).
+        ///
+        /// `fade_into_next[i]` says whether the seam *out of* `paths[i]` may
+        /// be crossfaded. The engine cannot answer this itself: it plays a
+        /// list of paths, and whether two of them are one record's consecutive
+        /// tracks is a library fact `baz-core` has never had and should not
+        /// grow. So the front end that built the run states it, which makes
+        /// [`Command::SetCrossfade`] mean *between records* rather than
+        /// *between tracks* without the engine learning what a record is.
+        ///
+        /// **Absent or short is `false`**, and that is the safe direction: a
+        /// missing flag costs a fade nobody notices, while a wrong `true`
+        /// fades across an album's own seam and destroys the thing gapless
+        /// exists to protect. A sender that predates this field, or one that
+        /// wants no fades at all, sends nothing and gets none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fade_into_next: Vec<bool>,
     },
     /// Apply one absolute whole-queue edit and make `next` the successor of
     /// the current track (or the first entry while stopped). This is the
@@ -202,6 +238,24 @@ pub enum Command {
         paths: Vec<PathBuf>,
         /// Absolute position in `paths` that must be visited next.
         next: usize,
+        /// **Where a fade between records is allowed**, parallel to `paths`
+        /// (ADR-0044 §2).
+        ///
+        /// `fade_into_next[i]` says whether the seam *out of* `paths[i]` may
+        /// be crossfaded. The engine cannot answer this itself: it plays a
+        /// list of paths, and whether two of them are one record's consecutive
+        /// tracks is a library fact `baz-core` has never had and should not
+        /// grow. So the front end that built the run states it, which makes
+        /// [`Command::SetCrossfade`] mean *between records* rather than
+        /// *between tracks* without the engine learning what a record is.
+        ///
+        /// **Absent or short is `false`**, and that is the safe direction: a
+        /// missing flag costs a fade nobody notices, while a wrong `true`
+        /// fades across an album's own seam and destroys the thing gapless
+        /// exists to protect. A sender that predates this field, or one that
+        /// wants no fades at all, sends nothing and gets none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fade_into_next: Vec<bool>,
     },
     /// Start playback of the current queue position, or resume if paused.
     Play,
@@ -461,6 +515,27 @@ pub enum Command {
         bands_centidb: [i16; 10],
         /// The stated attenuation, in centidecibels.
         preamp_centidb: i16,
+    },
+    /// **How long a crossfade between records lasts**, in milliseconds, where
+    /// zero is off (ADR-0044 §6).
+    ///
+    /// Absolute, like every other setting here, and for the same reason: a
+    /// front end that missed an event must be able to state the answer rather
+    /// than nudge it.
+    ///
+    /// **This says how long, never where.** The engine plays a list of paths
+    /// and *album* is a library fact it has never had, so it cannot know which
+    /// seams are a record's own — the queue carries that, per item, as
+    /// `fade_into_next` (ADR-0044 §2). A duration with no flags set therefore
+    /// fades nothing, which is the safe direction for the two to disagree in.
+    ///
+    /// **It costs bit-perfect while it is non-zero** (ADR-0044 §5). Inside an
+    /// overlap the samples reaching the device are the sum of two files under
+    /// two ramps, which is a transformation, and [`Event::SignalPath`] says so
+    /// rather than keeping a badge baz would be lying with.
+    SetCrossfade {
+        /// The overlap, in milliseconds. Zero is off.
+        ms: u32,
     },
 }
 
@@ -1183,6 +1258,16 @@ pub enum ConversionReason {
     /// so every track is brought to it regardless of what the device could
     /// have played directly.
     FixedOutputRate,
+    /// **A crossfade is configured** ([`Command::SetCrossfade`]), so the
+    /// samples inside an overlap are the sum of two files under two ramps
+    /// (ADR-0044 §5).
+    ///
+    /// Reported while the setting is non-zero rather than only during an
+    /// actual overlap, because a readout that flickered between *bit-perfect*
+    /// and *mixing* every few minutes would describe a moment instead of the
+    /// path — and the honest claim is about what baz is prepared to do to the
+    /// samples, not about whether it happens to be doing it this second.
+    Crossfade,
 }
 
 /// Where baz's software gain stage is applied, in [`Event::VolumeChanged`] —
@@ -1280,17 +1365,23 @@ mod tests {
                     PathBuf::from("/music/b.wav"),
                 ],
                 origin: None,
+                fade_into_next: Vec::new(),
             },
             Command::UpdateQueue {
                 paths: vec![
                     PathBuf::from("/music/a.flac"),
                     PathBuf::from("/music/b.wav"),
                 ],
+                fade_into_next: Vec::new(),
             },
-            Command::UpdateQueue { paths: Vec::new() },
+            Command::UpdateQueue {
+                paths: Vec::new(),
+                fade_into_next: Vec::new(),
+            },
             Command::UpdateQueueNext {
                 paths: vec![PathBuf::from("/music/a.flac")],
                 next: 0,
+                fade_into_next: Vec::new(),
             },
             Command::Play,
             Command::Pause,
@@ -1821,6 +1912,7 @@ mod tests {
         let bare = serde_json::to_string(&Command::SetQueue {
             paths: vec![PathBuf::from("/music/a.flac")],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("serialize");
         assert_eq!(bare, r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#);
@@ -1828,6 +1920,7 @@ mod tests {
         let stated = serde_json::to_string(&Command::SetQueue {
             paths: vec![PathBuf::from("/music/a.flac")],
             origin: Some("playlist:3b1f00c2a49d7e60:Road Trip".to_owned()),
+            fade_into_next: Vec::new(),
         })
         .expect("serialize");
         assert_eq!(
@@ -1855,6 +1948,7 @@ mod tests {
             Command::SetQueue {
                 paths: vec![PathBuf::from("/music/a.flac")],
                 origin: None,
+                fade_into_next: Vec::new()
             }
         );
         // And an origin this engine will never look inside travels whole.
@@ -1864,6 +1958,7 @@ mod tests {
             Command::SetQueue {
                 paths: vec![PathBuf::from("/music/a.flac")],
                 origin: Some("moodboard:ff:Rainy Tuesday".to_owned()),
+                fade_into_next: Vec::new()
             }
         );
     }
@@ -1882,6 +1977,7 @@ mod tests {
                 serde_json::to_string(&Command::SetQueue {
                     paths: vec![PathBuf::from("/music/a.flac")],
                     origin: None,
+                    fade_into_next: Vec::new(),
                 })
                 .expect("serialize"),
                 r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#,
@@ -1892,6 +1988,7 @@ mod tests {
                 // this one does not stop the music.
                 serde_json::to_string(&Command::UpdateQueue {
                     paths: vec![PathBuf::from("/music/a.flac")],
+                    fade_into_next: Vec::new(),
                 })
                 .expect("serialize"),
                 r#"{"cmd":"update_queue","paths":["/music/a.flac"]}"#,
@@ -1899,8 +1996,11 @@ mod tests {
             (
                 // Emptying the queue is a legal edit, and an empty list must
                 // encode as `[]` rather than as an absent key.
-                serde_json::to_string(&Command::UpdateQueue { paths: Vec::new() })
-                    .expect("serialize"),
+                serde_json::to_string(&Command::UpdateQueue {
+                    paths: Vec::new(),
+                    fade_into_next: Vec::new(),
+                })
+                .expect("serialize"),
                 r#"{"cmd":"update_queue","paths":[]}"#,
             ),
             (
@@ -1910,6 +2010,7 @@ mod tests {
                         PathBuf::from("/music/b.flac"),
                     ],
                     next: 1,
+                    fade_into_next: Vec::new(),
                 })
                 .expect("serialize"),
                 r#"{"cmd":"update_queue_next","paths":["/music/a.flac","/music/b.flac"],"next":1}"#,

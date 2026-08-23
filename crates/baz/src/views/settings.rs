@@ -227,6 +227,7 @@ pub(crate) fn view<'a>(
     measuring: Measuring,
     updating: &'a Updating,
     check_on_start: bool,
+    crossfade_ms: u32,
     ink: Ink,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -245,6 +246,7 @@ pub(crate) fn view<'a>(
         _ => vec![
             output_section(output, player),
             replay_gain_section(player, ink, measuring),
+            crossfade_section(crossfade_ms),
             sleep_section(sleep),
             shortcuts_section(),
         ],
@@ -547,6 +549,56 @@ fn shortcuts_section() -> Element<'static, Message> {
 /// that keeps the run, the position and the queue exactly where they were, so
 /// the morning's first press carries on rather than starting over. Nothing is
 /// faded — a fade would be baz changing the volume the listener set.
+/// **Crossfade** (ADR-0044 §6): a switch and a duration, which were the
+/// owner's own two.
+///
+/// The off is the first choice rather than a separate switch, on the sleep
+/// timer's shape — one row of words where one is lit, instead of a toggle that
+/// disables a second control beside it.
+///
+/// **The second sentence is not decoration.** A listener who turns this on,
+/// plays an album and hears no fade between its tracks has met a deliberate
+/// decision, and without the words it reads as a bug. ADR-0044 §2 is the whole
+/// reason the setting is honest about meaning *between records*.
+fn crossfade_section(current: u32) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut choices = row![].spacing(theme::GAP_SM);
+    for choice in crate::app::CROSSFADE_CHOICES {
+        choices = choices.push(word_control(
+            choice.label,
+            choice.ms != current,
+            Message::CrossfadeSet(choice.ms),
+        ));
+    }
+    let note = if current == 0 {
+        "Off — each record ends where it ends.".to_owned()
+    } else {
+        format!(
+            "Overlapping by {:.0} s between records. It does not fade between \
+             the tracks of a record, and while it is on the signal path reports \
+             a mix rather than bit-perfect.",
+            f64::from(current) / 1000.0
+        )
+    };
+    column![
+        section_heading(
+            "Crossfade",
+            "Overlap the end of one record with the start of the next.",
+        ),
+        choices,
+        text(note)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(if current == 0 {
+                room.paper_faint
+            } else {
+                room.paper
+            }),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
 fn sleep_section(remaining: Option<std::time::Duration>) -> Element<'static, Message> {
     let room = theme::active();
     let mut choices = row![].spacing(theme::GAP_SM);

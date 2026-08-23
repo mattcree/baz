@@ -1456,6 +1456,13 @@ Newest first. Each was asked for in conversation and is now in the product.
   chooser inside the sandbox, which no automated probe can do. Worth ten
   minutes before submission.
 
+- ~~**Crossfade.**~~ **Shipped 2026-08-22** — ADR-0044, built in the shape it
+  describes. The producer mixes the overlap, the front end says where a fade is
+  allowed, `bit-perfect` becomes conditional and says so, and an album's own
+  seam is still sample-for-sample exact with a fade configured
+  (`a_record_is_bit_exact_with_a_crossfade_configured`). The original entry and
+  its three questions follow.
+
 - **Crossfade.** *(The owner: "another backlog item: crossfade" … "enable
   disable as a control and a setting for how long".)* So the surface is
   settled: a switch and a duration, in Settings → Playback beside the gapless

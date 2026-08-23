@@ -2073,6 +2073,49 @@ pub fn lane_ground(p: &Palette) -> container::Style {
 /// at [`Palette::paper_dim`] and lifts with the card, so the state reads as
 /// the row's and never as the tile's alone.
 #[must_use]
+/// **One row of the collection, hung as a list.**
+///
+/// The wall's states, in a row's vocabulary: the sounding record keeps a card
+/// whatever the pointer does, a selected row keeps a quieter one, and a
+/// resting row lifts one plane under the pointer. Three states a listener can
+/// tell apart by *ground*, never by hue — the collection's rule, and the
+/// owner is colour blind.
+///
+/// No border in any state. A selection does not wear playback's mark, which is
+/// the same law [`dest_row`] carries.
+pub fn list_row(
+    p: &Palette,
+    status: button::Status,
+    selected: bool,
+    playing: bool,
+) -> button::Style {
+    let lit = p.step_up(p.wall);
+    let carded = p.step_up(lit);
+    let background = match (playing, selected, status) {
+        (true, _, _) => Some(Background::Color(carded)),
+        (false, true, _) => Some(Background::Color(lit)),
+        (false, false, button::Status::Hovered | button::Status::Pressed) => {
+            Some(Background::Color(lit))
+        }
+        (false, false, _) => None,
+    };
+    button::Style {
+        snap: true,
+        background,
+        text_color: if playing || selected {
+            p.paper
+        } else {
+            p.paper_dim
+        },
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        ..button::Style::default()
+    }
+}
+
 pub fn dest_row(p: &Palette, here: bool, status: button::Status) -> button::Style {
     let lit = p.step_up(p.recess);
     let carded = p.step_up(lit);
@@ -3245,7 +3288,13 @@ pub fn app_bar_pad() -> Padding {
 /// buttons stand on the same two vertical lines in all eight places. A bar
 /// whose right cluster slid 120 px as you navigated would be the frame moving,
 /// which is the one thing the frame may not do.
-pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
+/// **Five detents since 2026-08-22**, not four: the density ladder's four
+/// sizes plus the shape mark that hangs the collection as a list. The slot is
+/// what the marks need, and a slot that reserved four while the run drew five
+/// pushed the fifth out of its own right-aligned container — drawn, and off
+/// the bar. That is the same failure the folder row had the same day, and the
+/// same lesson: a fixed width has to be derived from what stands in it.
+pub const APP_BAR_MARKS_W: f32 = 5.0 * STEPPER_HIT;
 
 /// The app bar's reserved slot for the **application's mark** (logical px) —
 /// [`SIDEBAR_GLYPH_PX`] **32**, the size the returns lane draws its own
@@ -9509,7 +9558,7 @@ mod tests {
                 && bar.contains("crate::views::status::bell(health, ink),")
                 && bar.contains("gear(ink)")
                 && bar.contains(
-                    "let furniture = row![marks(density, visualization, ink), application]"
+                    "let furniture = row![marks(density, layout, visualization, ink), application]"
                 ),
             "the trailing furniture's tenants changed; `APP_BAR_FURNITURE_W` is \
              what the budget spends on them"
@@ -9528,12 +9577,19 @@ mod tests {
             "the furniture's two seams are no longer the cluster's and the zone's"
         );
 
-        const { assert!(APP_BAR_MARKS_W == 128.0) }
+        // **160 since 2026-08-22**, when the run gained its fifth detent: the
+        // four density sizes and the shape mark that hangs the collection as a
+        // list. It was 128 for the four. The figure is pinned rather than
+        // derived because the point of pinning it is that the *bar* does not
+        // move by accident — a mark added without widening the slot is
+        // precisely what this catches, and it caught it.
+        const { assert!(APP_BAR_MARKS_W == 160.0) }
         const { assert!(APP_BAR_BUTTONS_W == 136.0) }
-        const { assert!(APP_BAR_FURNITURE_W == 280.0) }
-        // 718 since the mark and the history pair moved into the lane's
-        // head; it was 870 while this bar carried them.
-        const { assert!(APP_BAR_LINE == 718.0) }
+        const { assert!(APP_BAR_FURNITURE_W == 312.0) }
+        // 750 since the shape mark joined the density ladder; 718 for the four
+        // marks before it, and 870 while this bar still carried the
+        // application mark and the history pair.
+        const { assert!(APP_BAR_LINE == 750.0) }
         assert!(
             (walked - APP_BAR_LINE).abs() < f32::EPSILON,
             "the drawn line walks to {walked}, the declared budget is {APP_BAR_LINE}"

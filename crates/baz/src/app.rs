@@ -474,6 +474,47 @@ pub(crate) struct SleepChoice {
     pub(crate) minutes: Option<u32>,
 }
 
+/// **What the crossfade offers** (ADR-0044 §6): an off and five lengths.
+///
+/// A small set rather than a free field, on the sleep timer's argument — six
+/// numbers a listener picks from without reading beat a text box that can hold
+/// `0.5`. The lengths climb the way a listener thinks about a fade rather than
+/// linearly: two seconds is a boundary softened, twelve is two records playing
+/// together on purpose.
+pub(crate) const CROSSFADE_CHOICES: [CrossfadeChoice; 6] = [
+    CrossfadeChoice {
+        label: "Off",
+        ms: 0,
+    },
+    CrossfadeChoice {
+        label: "2 s",
+        ms: 2_000,
+    },
+    CrossfadeChoice {
+        label: "4 s",
+        ms: 4_000,
+    },
+    CrossfadeChoice {
+        label: "6 s",
+        ms: 6_000,
+    },
+    CrossfadeChoice {
+        label: "8 s",
+        ms: 8_000,
+    },
+    CrossfadeChoice {
+        label: "12 s",
+        ms: crate::config::MAX_CROSSFADE_MS,
+    },
+];
+
+/// One offered crossfade length, and the word for it.
+pub(crate) struct CrossfadeChoice {
+    pub(crate) label: &'static str,
+    /// The overlap in milliseconds; zero is off.
+    pub(crate) ms: u32,
+}
+
 /// What the sleep timer offers.
 pub(crate) const SLEEP_CHOICES: [SleepChoice; 6] = [
     SleepChoice {
@@ -808,6 +849,11 @@ pub(crate) enum Message {
     ContourReleased,
     /// **Set or clear the sleep timer**, in whole minutes. `None` is *off*.
     SleepTimerSet(Option<u32>),
+    /// **Set the crossfade between records**, in milliseconds; zero is off
+    /// (ADR-0044 §6).
+    CrossfadeSet(u32),
+    /// **Hang the collection as a wall or as a list** ([`shelf::Layout`]).
+    LayoutSet(shelf::Layout),
     /// One second of the sleep timer's own clock, which exists only while it
     /// is armed.
     SleepTimerTick,
@@ -1912,6 +1958,10 @@ struct App {
     /// for. Session state and deliberately not persisted: a timer that
     /// survived a restart would pause a listener who never set one.
     sleep: Option<Sleep>,
+    /// **The crossfade between records, in milliseconds**; zero is off
+    /// (ADR-0044 §6). Mirrors `config.toml` so the control can be drawn lit
+    /// on the first frame rather than after a round trip.
+    crossfade_ms: u32,
     /// When the meter was last sampled, so the rate divides by a real
     /// interval rather than by the timer's nominal one — a tick the event
     /// loop delivered late would otherwise read as a spike.
@@ -1923,6 +1973,9 @@ struct App {
     /// The density the wall opens at, read from the config for the same reason
     /// and handed to the shelf the same way (ADR-0017 step 6).
     density: shelf::Density,
+    /// **What shape the collection is hung in** ([`shelf::Layout`]), mirroring
+    /// `config.toml` so a new shelf opens in the shape the listener left.
+    layout: shelf::Layout,
     /// **Whether a drag from the file manager is over the window.**
     ///
     /// The one piece of drag state baz keeps: what it is *for* is the sentence
@@ -2113,6 +2166,22 @@ impl Blocked {
     }
 }
 
+/// **Which of a queue's seams a crossfade may cross** (ADR-0044 §2), read off
+/// the wall.
+///
+/// A free function rather than a method because every caller is already
+/// borrowing `self.playback` to send the command it is building.
+///
+/// Without a shelf there is no wall to ask, and every seam is `false` — the
+/// direction that protects a record. That covers Setup and Blocked, where
+/// nothing is playing anyway.
+fn fade_seams_of(screen: &Screen, paths: &[std::path::PathBuf]) -> Vec<bool> {
+    match screen {
+        Screen::Shelf(state) => vm::fade_seams(&state.albums, paths),
+        Screen::Setup(_) | Screen::Blocked(_) => vec![false; paths.len()],
+    }
+}
+
 impl App {
     /// Validate and install the Settings paste field as a local custom theme.
     /// Selection is persisted only after the complete document is safe and on
@@ -2239,6 +2308,9 @@ impl App {
         let density = stored
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
+        let layout = stored
+            .as_ref()
+            .map_or(shelf::Layout::Wall, |config| config.layout);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
         let saved_place = stored
             .as_ref()
@@ -2296,6 +2368,14 @@ impl App {
                 preamp_centidb: equalizer.preamp_centidb,
             });
         }
+        // **The crossfade is sent only when it is on**, for the equaliser's
+        // reason exactly: a listener who has never touched it reaches the
+        // engine having sent no crossfade command, and the bit-perfect claim
+        // is untouched by a feature they are not using (ADR-0044 §5).
+        let crossfade_ms = stored.as_ref().map_or(0, |config| config.crossfade_ms);
+        if crossfade_ms > 0 {
+            playback.send(Command::SetCrossfade { ms: crossfade_ms });
+        }
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -2317,7 +2397,7 @@ impl App {
             // (ADR-0041). This line used to read `Setup::fresh(Some(error))`,
             // which answered *"this library is from a newer baz"* by asking
             // *"where's your music?"* — the defect the owner reported.
-            match Shelf::open(dirs.clone(), group_key, density, lane_open) {
+            match Shelf::open(dirs.clone(), group_key, density, layout, lane_open) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(why) => (
                     Screen::Blocked(Blocked::new(why, config::library_db_file(), dirs)),
@@ -2332,10 +2412,12 @@ impl App {
             resource_meter: crate::resource::Meter::default(),
             resource_reading: None,
             sleep: None,
+            crossfade_ms: stored.as_ref().map_or(0, |config| config.crossfade_ms),
             resource_sampled: None,
             theme_json: String::new(),
             theme_notice: None,
             density,
+            layout,
             lane_open,
             lane: crate::lane::Lane::default(),
             lane_mark: (u64::MAX, u64::MAX),
@@ -3208,6 +3290,11 @@ impl App {
                 self.set_sleep_timer(minutes);
                 Task::none()
             }
+            Message::CrossfadeSet(ms) => {
+                self.set_crossfade(ms);
+                Task::none()
+            }
+            Message::LayoutSet(layout) => self.set_layout(layout),
             Message::SleepTimerTick => {
                 self.tick_sleep_timer();
                 Task::none()
@@ -3607,6 +3694,7 @@ impl App {
             vec![dir.clone()],
             self.group_key,
             self.density,
+            self.layout,
             self.lane_open,
         ) {
             Ok((state, task)) => {
@@ -3636,7 +3724,13 @@ impl App {
             Message::LibraryRetry => {
                 blocked.trouble = None;
                 let roots = blocked.roots.clone();
-                match Shelf::open(roots, self.group_key, self.density, self.lane_open) {
+                match Shelf::open(
+                    roots,
+                    self.group_key,
+                    self.density,
+                    self.layout,
+                    self.lane_open,
+                ) {
                     Ok((state, task)) => {
                         crate::baz_log!("[library] retry opened the library");
                         self.screen = Screen::Shelf(Box::new(state));
@@ -3689,7 +3783,13 @@ impl App {
         };
         crate::baz_log!("[library] set aside to {}", aside.display());
         let roots = std::mem::take(&mut blocked.roots);
-        match Shelf::open(roots.clone(), self.group_key, self.density, self.lane_open) {
+        match Shelf::open(
+            roots.clone(),
+            self.group_key,
+            self.density,
+            self.layout,
+            self.lane_open,
+        ) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -4441,6 +4541,20 @@ impl App {
             _ => return None,
         };
         self.density = self.density.step(delta);
+        // **The ladder is also the way back.** Pressing a size detent while the
+        // collection is hung as a list means *this size, on the wall* — the
+        // marks say how big, and asking how big is asking about works. Without
+        // this a listener who switched to a list could change the row pitch and
+        // never find their way out of it, because the shape mark goes lit and
+        // inert once it is the fact.
+        if self.layout == shelf::Layout::List {
+            let wall = shelf::Layout::Wall;
+            self.layout = wall;
+            persist(move |config| config.layout = wall);
+            if let Screen::Shelf(state) = &mut self.screen {
+                state.layout = wall;
+            }
+        }
         Some(match &mut self.screen {
             Screen::Shelf(state) => state.set_density(self.density),
             Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
@@ -5919,10 +6033,11 @@ impl App {
             return;
         };
         let paths = edited.paths();
-        if self
-            .playback
-            .send(Command::UpdateQueueNext { paths, next: at })
-        {
+        if self.playback.send(Command::UpdateQueueNext {
+            fade_into_next: fade_seams_of(&self.screen, &paths),
+            paths,
+            next: at,
+        }) {
             self.player.note_queue_edited_next(edited, at);
             self.queue_undo.push(before);
         } else {
@@ -5968,7 +6083,11 @@ impl App {
             addition
         };
         let paths = edited.paths();
-        if self.playback.send(Command::UpdateQueue { paths }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::UpdateQueue {
+            paths,
+            fade_into_next,
+        }) {
             self.player.note_queue_edited(edited);
             self.queue_undo.push(before);
         } else {
@@ -6233,7 +6352,12 @@ impl App {
         }
         let paths = queue.paths();
         let origin = run_origin(&queue);
-        if self.playback.send(Command::SetQueue { paths, origin }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::SetQueue {
+            paths,
+            origin,
+            fade_into_next,
+        }) {
             self.player.note_queue_sent(queue);
         }
     }
@@ -7935,7 +8059,12 @@ impl App {
         // There is no branch here any more and that is the reduction: what
         // shuffle changes is the walk, which the engine was told about above.
         let paths = queue.paths();
-        if !self.playback.send(Command::SetQueue { paths, origin }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if !self.playback.send(Command::SetQueue {
+            paths,
+            origin,
+            fade_into_next,
+        }) {
             self.player.engine_closed();
             return None;
         }
@@ -8017,6 +8146,44 @@ impl App {
 
     /// Arm the sleep timer, or turn it off. Setting it again while it is
     /// running restarts it, which is what pressing a duration means.
+    /// **Set the crossfade and remember it** (ADR-0044 §6).
+    ///
+    /// A standing preference, so it is persisted and handed to the engine,
+    /// which applies it at the next boundary rather than by tearing down the
+    /// play in progress. Where it may *happen* is not sent here — that travels
+    /// with the queue, as `fade_into_next`, and is recomputed whenever the run
+    /// changes.
+    fn set_crossfade(&mut self, ms: u32) {
+        let ms = ms.min(crate::config::MAX_CROSSFADE_MS);
+        self.crossfade_ms = ms;
+        persist(move |config| config.crossfade_ms = ms);
+        self.playback.send(Command::SetCrossfade { ms });
+    }
+
+    /// **Hang the collection as a wall or as a list** (the owner, 2026-08-22).
+    ///
+    /// A standing preference like the density beside it, so it is persisted and
+    /// survives a restart. The scroll offset is left where it is on purpose:
+    /// the shelves are the same shelves in either shape, so the record a
+    /// listener was looking at is still the record they are looking at — and
+    /// `Shelves` re-derives every run against the new row pitch on the next
+    /// frame, which is what keeps the offset meaning the same place.
+    fn set_layout(&mut self, layout: shelf::Layout) -> Task<Message> {
+        if self.layout == layout {
+            return Task::none();
+        }
+        self.layout = layout;
+        persist(move |config| config.layout = layout);
+        if let Screen::Shelf(state) = &mut self.screen {
+            state.layout = layout;
+            // A list wants a different thumbnail size than the wall, and the
+            // rows now on screen are not the rows that were: ask for what is
+            // visible rather than waiting for a scroll to do it.
+            return state.request_visible_thumbs();
+        }
+        Task::none()
+    }
+
     fn set_sleep_timer(&mut self, minutes: Option<u32>) {
         self.sleep = minutes.map(|minutes| Sleep {
             minutes,
@@ -8205,7 +8372,11 @@ impl App {
             return;
         };
         let paths = edited.paths();
-        if self.playback.send(Command::UpdateQueue { paths }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::UpdateQueue {
+            paths,
+            fade_into_next,
+        }) {
             self.player.note_queue_edited(edited);
             // The list the edit replaced, kept for the place's `Undo`
             // (doc 11 §5 P2) — pushed only on an accepted send, so the
@@ -8240,7 +8411,11 @@ impl App {
             return;
         };
         let paths = edited.paths();
-        if self.playback.send(Command::UpdateQueue { paths }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::UpdateQueue {
+            paths,
+            fade_into_next,
+        }) {
             self.player.note_queue_edited(edited);
             // **A hand reorder needs nothing undone.** It used to drop the
             // order shuffle would return to, because shuffle owned an order of
@@ -8384,7 +8559,11 @@ impl App {
             return;
         };
         let paths = edited.paths();
-        if self.playback.send(Command::UpdateQueue { paths }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::UpdateQueue {
+            paths,
+            fade_into_next,
+        }) {
             self.player.note_queue_edited(edited);
         } else {
             self.player.engine_closed();
@@ -8423,7 +8602,11 @@ impl App {
             return;
         };
         let paths = restored.paths();
-        if self.playback.send(Command::UpdateQueue { paths }) {
+        let fade_into_next = fade_seams_of(&self.screen, &paths);
+        if self.playback.send(Command::UpdateQueue {
+            paths,
+            fade_into_next,
+        }) {
             self.player.note_queue_edited(restored);
         } else {
             self.player.engine_closed();
@@ -8801,6 +8984,7 @@ impl App {
                     self.loudness_progress.into(),
                     &self.updating,
                     config::config_file().is_some_and(|path| config::load(&path).check_for_updates),
+                    self.crossfade_ms,
                     self.ink(),
                 )
             }
@@ -8971,6 +9155,7 @@ impl App {
                 state,
                 self.window.width,
                 hangs_works,
+                self.layout,
                 visualization,
                 self.window_maximized,
                 owns_chrome(),
@@ -9912,6 +10097,10 @@ pub(crate) struct Shelf {
     /// and <kbd>Ctrl</kbd>+scroll are the two ways to change it, and there is
     /// no third way anywhere in the Settings place.
     pub(crate) density: shelf::Density,
+    /// **What shape the collection is hung in** ([`shelf::Layout`]) — the wall
+    /// of covers, or one record per row. Orthogonal to `density`, which says
+    /// how big rather than what shape.
+    pub(crate) layout: shelf::Layout,
     /// The play ledger, read once at open — what [`GroupKey::Played`] shelves
     /// on, and the returns lane's order key for a record.
     ///
@@ -10254,6 +10443,7 @@ impl Shelf {
         roots: Vec<PathBuf>,
         group_key: GroupKey,
         density: shelf::Density,
+        layout: shelf::Layout,
         lane_open: bool,
     ) -> Result<(Self, Task<Message>), Blockage> {
         let t0 = Instant::now();
@@ -10290,6 +10480,7 @@ impl Shelf {
             library,
             group_key,
             density,
+            layout,
             history,
             albums: Vec::new(),
             groups: Vec::new(),
@@ -11127,7 +11318,10 @@ impl Shelf {
     /// each reader. `the_hang_holds_with_the_index_rail_taken_off_the_wall`
     /// asserts the hang survives that subtraction at every width in the band.
     pub(crate) fn grid(&self) -> shelf::Grid {
-        shelf::Grid::new(self.grid_size.width, self.density)
+        match self.layout {
+            shelf::Layout::Wall => shelf::Grid::new(self.grid_size.width, self.density),
+            shelf::Layout::List => shelf::Grid::list(self.grid_size.width, self.density),
+        }
     }
 
     /// How the wall is broken into shelves, for the current filter and grid.

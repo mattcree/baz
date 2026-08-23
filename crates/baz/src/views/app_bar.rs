@@ -187,6 +187,7 @@ pub(crate) fn view(
     shelf: &Shelf,
     window_w: f32,
     density: Option<crate::shelf::Density>,
+    layout: crate::shelf::Layout,
     visualization: Option<crate::visualizer::State>,
     maximized: bool,
     owns_chrome: bool,
@@ -216,7 +217,7 @@ pub(crate) fn view(
     ]
     .spacing(theme::CONTROL_CLUSTER_GAP)
     .align_y(iced::Alignment::Center);
-    let furniture = row![marks(density, visualization, ink), application]
+    let furniture = row![marks(density, layout, visualization, ink), application]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
@@ -341,11 +342,12 @@ pub(crate) fn view(
 /// slot is [`Space`] of exactly the same width.
 fn marks(
     density: Option<crate::shelf::Density>,
+    layout: crate::shelf::Layout,
     visualization: Option<crate::visualizer::State>,
     ink: Ink,
 ) -> Element<'static, Message> {
     let inner: Element<'static, Message> = match (density, visualization) {
-        (Some(current), None) => crate::views::density_marks(current, ink),
+        (Some(current), None) => crate::views::density_marks(current, layout, ink),
         (None, Some(current)) => crate::visualizer::marks(current, ink),
         (None, None) => Space::new()
             .width(Length::Fixed(theme::APP_BAR_MARKS_W))
@@ -827,7 +829,7 @@ mod tests {
             .1;
         let furniture = &furniture[..furniture.find(";\n").expect("a binding ends")];
         assert!(
-            furniture.contains("marks(density, visualization, ink)")
+            furniture.contains("marks(density, layout, visualization, ink)")
                 && furniture.contains("application")
                 && furniture.contains("theme::GAP_LG"),
             "the display options and the application's doors no longer stand \

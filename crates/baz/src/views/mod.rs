@@ -935,6 +935,7 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
 /// the controls (L8.3's split).
 pub(crate) fn density_marks(
     current: crate::shelf::Density,
+    layout: crate::shelf::Layout,
     ink: crate::motion::Ink,
 ) -> Element<'static, Message> {
     // One axis now, and that is a simplification the move paid for: the run
@@ -942,7 +943,69 @@ pub(crate) fn density_marks(
     // section rule in two others, so it carried a `DetentAxis` to say which.
     // A bar is horizontal in every place there is, so the parameter went with
     // the placements that needed it.
-    row(crate::shelf::Density::ALL.map(|step| density_mark(step, current, ink))).into()
+    // **Two axes, one run of marks** — how big, then what shape.
+    //
+    // The list mark sits after the density ladder rather than inside it: the
+    // four steps are one control with four detents, and a fifth detent that
+    // changed the *shape* would read as a looser or tighter hang. Its glyph is
+    // a cover with columns beside it for the same reason (`icon::LAYOUT_LIST`).
+    //
+    // Pressing it hangs the collection as a list; pressing any density mark
+    // sets that density **and returns to the wall**, so the ladder is also the
+    // way back and there is no state a listener can get stuck in.
+    let mut marks =
+        row(crate::shelf::Density::ALL.map(|step| density_mark(step, current, layout, ink)));
+    marks = marks.push(layout_mark(layout, ink));
+    marks.into()
+}
+
+/// The shape detent beside [`density_marks`]' four size detents.
+///
+/// Lit when the collection is hung as a list, and then inert — the active mark
+/// is the fact, and the way back is any density mark, exactly as the ladder's
+/// own detents behave.
+fn layout_mark(layout: crate::shelf::Layout, ink: crate::motion::Ink) -> Element<'static, Message> {
+    let room = theme::active();
+    let active = layout == crate::shelf::Layout::List;
+    let mark = container(
+        iced_image(crate::icon::handle(crate::icon::Glyph::LayoutList))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(
+                if active {
+                    theme::GLYPH_OPACITY_HOVER
+                } else {
+                    theme::GLYPH_OPACITY
+                } * ink.veil(),
+            ),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let boxed: Element<'static, Message> = if active {
+        container(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .into()
+    } else {
+        iced::widget::button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.recess, status))
+            .on_press(Message::LayoutSet(crate::shelf::Layout::List))
+            .into()
+    };
+    iced::widget::tooltip(
+        boxed,
+        text("List")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .style(move |_theme| theme::tooltip(room))
+    .into()
 }
 
 /// One detent of [`density_marks`]: the step's glyph in a
@@ -953,12 +1016,16 @@ pub(crate) fn density_marks(
 fn density_mark(
     step: crate::shelf::Density,
     current: crate::shelf::Density,
+    layout: crate::shelf::Layout,
     ink: crate::motion::Ink,
 ) -> Element<'static, Message> {
     use crate::shelf::Density;
 
     let room = theme::active();
-    let active = step == current;
+    // On a list the ladder is still the size control, but none of its detents
+    // is *the* fact any more — the shape mark is. So every step stays pressable
+    // and pressing one is also the way back to the wall.
+    let active = step == current && layout == crate::shelf::Layout::Wall;
     let glyph = match step {
         Density::Spacious => crate::icon::Glyph::DensitySpacious,
         Density::Balanced => crate::icon::Glyph::DensityBalanced,

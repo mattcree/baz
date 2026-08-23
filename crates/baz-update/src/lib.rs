@@ -686,6 +686,124 @@ pub fn hand_off(path: &std::path::Path) -> Result<(), String> {
         .map_err(|error| format!("could not start {program}: {error}"))
 }
 
+/// **Can baz apply an update to itself, here, now?**
+///
+/// Linux, and only Linux, because it is the one platform where a running
+/// program can be replaced without ceremony: `rename(2)` over a busy
+/// executable succeeds, the running process keeps the inode it started from,
+/// and the new file takes the name. Windows locks the image and macOS wants a
+/// bundle signature left intact, which is why both hand off to an installer at
+/// the next start instead ([`installs_itself`]).
+///
+/// **This reverses ADR-0043's Linux answer, at the owner's instruction**
+/// (2026-08-23): *"I can't update via the menu. I don't want that. I just want
+/// to be able to update in there… I just want to update like the other apps."*
+/// The ADR argued that unpacking an archive over an existing installation is a
+/// decision about a directory only its owner knows the shape of. That was true
+/// of a bare tarball and is not true of this one: the archive carries
+/// `install.sh`, which knows the layout, writes a manifest and is the same
+/// script that put baz there in the first place.
+#[must_use]
+pub const fn applies_in_place() -> bool {
+    cfg!(target_os = "linux")
+}
+
+/// **Where a standalone Linux baz is installed**, derived from the running
+/// binary.
+///
+/// `install.sh` places the binary at `<prefix>/bin/baz`, so the prefix is the
+/// grandparent of the running executable. Anything that does not have that
+/// shape — a binary run out of `target/release`, say — has no prefix baz may
+/// write to, and the caller reports that rather than guessing at `~/.local`
+/// and installing a second copy somewhere the listener is not running from.
+fn install_prefix() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|why| format!("cannot find myself: {why}"))?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    let prefix = exe
+        .parent()
+        .filter(|bin| bin.file_name().is_some_and(|name| name == "bin"))
+        .and_then(std::path::Path::parent)
+        .ok_or_else(|| {
+            format!(
+                "baz is running from {}, which is not an installed copy — \
+                 install it with the archive's install.sh first",
+                exe.display()
+            )
+        })?;
+    Ok(prefix.to_path_buf())
+}
+
+/// **Unpack the verified archive and run its own installer over this copy.**
+///
+/// The bytes have already been proved to be the published ones
+/// ([`fetch_verified`]) before anything here runs; nothing is unpacked, and no
+/// script is executed, until that has happened.
+///
+/// **The archive's `install.sh` does the placing, not this function.** It
+/// knows the four directories a desktop looks in, it keeps the manifest
+/// `uninstall.sh` reads, and it is the same script that made the installation
+/// being replaced. Re-implementing that here would be a second layout to keep
+/// in step with the first, and the two would drift on the first icon size
+/// anybody added.
+///
+/// `tar` rather than a crate: it is on every Linux that can run baz, and the
+/// alternative is two dependencies in a graph `deny.toml` keeps short on
+/// purpose.
+///
+/// # Errors
+///
+/// A prefix that cannot be derived, an archive `tar` will not read, an
+/// installer that is missing or fails, or a directory this process may not
+/// write to.
+fn install_in_place(archive: &std::path::Path) -> Result<(), String> {
+    let prefix = install_prefix()?;
+    let staging = archive.with_extension("unpacked");
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)
+        .map_err(|why| format!("could not make room to unpack: {why}"))?;
+    let untar = std::process::Command::new("tar")
+        .arg("-xzf")
+        .arg(archive)
+        .arg("-C")
+        .arg(&staging)
+        .status()
+        .map_err(|why| format!("could not run tar: {why}"))?;
+    if !untar.success() {
+        return Err("the download could not be unpacked".to_owned());
+    }
+    // The archive holds exactly one top-level directory, named for the
+    // release. Finding it rather than composing it means the version does not
+    // have to be spelled twice.
+    let root = std::fs::read_dir(&staging)
+        .map_err(|why| format!("could not read the unpacked archive: {why}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.is_dir())
+        .ok_or_else(|| "the download did not contain an installation".to_owned())?;
+    let installer = root.join("install.sh");
+    if !installer.exists() {
+        return Err("the download carries no installer".to_owned());
+    }
+    let ran = std::process::Command::new("sh")
+        .arg(&installer)
+        .arg("--prefix")
+        .arg(&prefix)
+        .current_dir(&root)
+        .status()
+        .map_err(|why| format!("could not run the installer: {why}"))?;
+    // Tidy up whether or not it worked: the archive is large and a failed
+    // install leaves nothing behind that a retry would want.
+    let _ = std::fs::remove_dir_all(&staging);
+    if !ran.success() {
+        return Err(format!(
+            "the installer refused to write to {} — check the permissions there",
+            prefix.display()
+        ));
+    }
+    let _ = std::fs::remove_file(archive);
+    Ok(())
+}
+
 /// **What just happened, in the words of the platform it happened on.**
 ///
 /// The three hand-offs do genuinely different things and a single sentence

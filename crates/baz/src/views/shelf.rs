@@ -126,7 +126,24 @@ pub(crate) fn view<'a>(
             &mut drawn,
         );
         for r in first_row..end_row {
-            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp, collecting));
+            // **One shape, one loop.** A list is a grid of one column, so the
+            // virtualisation, the runs and the group bands above are the
+            // wall's own — the only thing that differs is what a row draws.
+            grid = grid.push(match hang.layout {
+                crate::shelf::Layout::Wall => {
+                    shelf_row(shelf, player, hang, *run, r, lamp, collecting)
+                }
+                crate::shelf::Layout::List => {
+                    match shelf
+                        .visible
+                        .get(run.first + r)
+                        .and_then(|&index| shelf.albums.get(index))
+                    {
+                        Some(album) => list_row(shelf, player, hang, album, lamp),
+                        None => Space::new().height(Length::Fixed(hang.row_h)).into(),
+                    }
+                }
+            });
         }
         drawn += hang.spacer_height(end_row - first_row);
     }
@@ -168,6 +185,23 @@ pub(crate) fn view<'a>(
         .and_then(|index| runs.get(index))
         .copied();
     let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
+    // **The column heads stand outside the scrollable**, for two reasons and
+    // both of them are bugs avoided. Inside it they were a child the
+    // virtualisation knew nothing about, so every run sat one head lower than
+    // the offset arithmetic believed and the last spacer came up short — the
+    // wall's whole geometry is `run.top` in content coordinates, and a
+    // surprise child at the top invalidates all of it. And they name the
+    // columns, so they belong to the frame rather than to the content: a
+    // heading that scrolled away would leave the columns unlabelled exactly
+    // when a listener has read far enough to need them.
+    let wall: Element<'a, Message> = if hang.layout == crate::shelf::Layout::List {
+        column![list_head(hang), wall]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        wall.into()
+    };
     // **The collection is one Tab stop, and the arrows move inside it.**
     //
     // `crate::focus`'s first landing made the frame reachable and stopped
@@ -288,6 +322,211 @@ fn shelf_row<'a>(
         .align_y(alignment::Vertical::Top)
         .into()
 }
+
+/// **One record as a list row** — its cover small at the left, then its
+/// columns (the owner's mockup, 2026-08-22).
+///
+/// The wall's own gestures, unchanged: one press selects, the row carries the
+/// same [`Content::Album`] the tile does, and the pointer's enter/leave feed
+/// the same hover the tile feeds. A list is a shape, not a second interaction
+/// model — anything a record can do on the wall it can do here, and nothing
+/// here had to invent a message.
+///
+/// **The dot, not a colour.** The sounding record is marked by a dot before
+/// its title and by the row's own lit ink, never by hue alone: the wall's rule
+/// (`docs/design/impl`, and the owner is colour blind) is that every reading
+/// survives in shape or position.
+fn list_row<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    hang: Grid,
+    album: &'a vm::AlbumVm,
+    lamp: f32,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let playing = player.playing_album() == Some(album.id);
+    let selected = shelf.selection.is(Content::Album(album.id));
+    let hovered = shelf.hovered_album == Some(album.id);
+    let edge = hang.art;
+
+    let art: Element<'_, Message> = match shelf.thumb(album.id) {
+        Some(handle) => iced_image(handle.clone())
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .into(),
+        None => gradient_block(album.id, edge, 1.0),
+    };
+    let warmth = if playing { lamp } else { 0.0 };
+    let cover = container(art)
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(edge))
+        .style(move |_theme| theme::sleeve(room, warmth));
+
+    // The lamp keeps its place whether it is lit or not, so a title does not
+    // shift sideways when the music moves to it.
+    let dot: Element<'_, Message> = if playing {
+        container(lamp_dot())
+            .width(Length::Fixed(theme::GAP_MD))
+            .align_x(alignment::Horizontal::Center)
+            .into()
+    } else {
+        Space::new().width(Length::Fixed(theme::GAP_MD)).into()
+    };
+
+    let title_ink = if playing || selected || hovered {
+        room.paper
+    } else {
+        room.paper_dim
+    };
+    let meta_ink = room.paper_faint;
+
+    let cell = |content: String, width: Length, ink: iced::Color, right: bool| {
+        container(
+            text(content)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(ink)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(width)
+        .clip(true)
+        .align_x(if right {
+            alignment::Horizontal::Right
+        } else {
+            alignment::Horizontal::Left
+        })
+    };
+
+    let edition = vm::selected_edition(album, None);
+    let length = edition
+        .map(|edition| {
+            edition
+                .tracks
+                .iter()
+                .filter_map(|track| track.duration)
+                .sum::<std::time::Duration>()
+        })
+        .filter(|total| !total.is_zero())
+        .map_or_else(String::new, vm::format_duration);
+
+    let cells = row![
+        cover,
+        dot,
+        cell(
+            album.title.clone().unwrap_or_else(|| "Untitled".to_owned()),
+            Length::Fill,
+            title_ink,
+            false,
+        ),
+        cell(
+            album.artist.label().to_owned(),
+            Length::FillPortion(LIST_ARTIST_PORTION),
+            meta_ink,
+            false,
+        ),
+        cell(
+            album.year.map_or_else(String::new, |year| year.to_string()),
+            Length::Fixed(LIST_YEAR_W),
+            meta_ink,
+            true,
+        ),
+        cell(length, Length::Fixed(LIST_TIME_W), meta_ink, true),
+    ]
+    .spacing(theme::GAP_MD)
+    .align_y(alignment::Vertical::Center);
+
+    mouse_area(
+        button(
+            // **No horizontal padding**: the block's left edge is the wall's
+            // alignment line — `group_band` sits at `padding(0)` and a tile's
+            // mat starts there — so a row that inset itself would put every
+            // cover out of step with the header above it. The owner,
+            // 2026-08-22: *"padding and alignment is all off."*
+            container(cells)
+                .width(Length::Fill)
+                .height(Length::Fixed(hang.row_h))
+                .align_y(alignment::Vertical::Center),
+        )
+        .padding(0)
+        .style(move |_theme, status| theme::list_row(room, status, selected, playing))
+        .on_press(Message::ContentPressed(Content::Album(album.id))),
+    )
+    .on_enter(Message::TileEntered(album.id))
+    .on_exit(Message::TileLeft(album.id))
+    .into()
+}
+
+/// **The list's column heads**, drawn once above the rows rather than per
+/// group: they name the columns, and a name repeated at every letter would be
+/// furniture rather than a heading.
+fn list_head(hang: Grid) -> Element<'static, Message> {
+    let room = theme::active();
+    let head = |label: &'static str, width: Length, right: bool| {
+        container(
+            text(label)
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .color(room.paper_muted)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(width)
+        .clip(true)
+        .align_x(if right {
+            alignment::Horizontal::Right
+        } else {
+            alignment::Horizontal::Left
+        })
+    };
+    // **The head mirrors the scrollable's frame exactly, in two steps.**
+    //
+    // The rows live in a block of `block_width`, centred inside the
+    // scrollable's content area — which is `hang.width`, the measured width
+    // already less [`theme::WALL_RESERVE`] for the scrollbar's lane and the
+    // rail's. The head sits outside the scrollable, so its `Fill` is the
+    // *whole* viewport and neither number matches on its own: centring in
+    // `Fill` put the head 56 px right of its own columns, and left-aligning it
+    // there would lose the block's margin instead.
+    //
+    // So: a frame of `hang.width` pinned left, and the block centred inside
+    // it. Every column head then stands over its column at every width. The
+    // owner, 2026-08-23: *"the column names do not line up with the columns"*
+    // — and *"make sure you are using the UI as the cue here"*, which is how
+    // both halves of this were found.
+    container(
+        container(
+            container(
+                row![
+                    Space::new().width(Length::Fixed(hang.art)),
+                    Space::new().width(Length::Fixed(theme::GAP_MD)),
+                    head("ALBUM", Length::Fill, false),
+                    head("ARTIST", Length::FillPortion(LIST_ARTIST_PORTION), false),
+                    head("YEAR", Length::Fixed(LIST_YEAR_W), true),
+                    head("TIME", Length::Fixed(LIST_TIME_W), true),
+                ]
+                .spacing(theme::GAP_MD)
+                .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fixed(hang.block_width()))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .align_y(alignment::Vertical::Center),
+        )
+        .width(Length::Fixed(hang.width))
+        .align_x(alignment::Horizontal::Center),
+    )
+    .width(Length::Fill)
+    .align_x(alignment::Horizontal::Left)
+    .into()
+}
+
+/// How much of the row the artist column takes beside the album's `Fill`.
+/// Two to three: an album title is usually longer than the artist's name, and
+/// the mockup's proportions are the owner's own.
+const LIST_ARTIST_PORTION: u16 = 2;
+/// Four digits and their gutter.
+const LIST_YEAR_W: f32 = 56.0;
+/// `h:mm:ss` at its widest.
+const LIST_TIME_W: f32 = 72.0;
 
 /// A shelf's header where it lies, in the flow of the wall.
 ///
@@ -1367,7 +1606,7 @@ mod tests {
             bar.split("#[cfg(test)]")
                 .next()
                 .expect("a head")
-                .contains("crate::views::density_marks(current, ink)"),
+                .contains("crate::views::density_marks(current, layout, ink)"),
             "the app bar does not draw the marks it took"
         );
     }

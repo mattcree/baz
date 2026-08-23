@@ -1345,6 +1345,22 @@ struct Control<S: Sink> {
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
     queue: Vec<PathBuf>,
+    /// **Which of [`Self::queue`]'s seams may be crossfaded**, parallel to it
+    /// and set by the front end (ADR-0044 §2).
+    ///
+    /// Held beside the queue rather than inside it because the queue is a list
+    /// of paths and this is a statement *about the run*, which is exactly the
+    /// distinction that keeps `album` out of the engine. Short or empty reads
+    /// as `false`, so the two can only disagree in the direction that costs a
+    /// fade rather than the one that ruins a record.
+    fade_into_next: Vec<bool>,
+    /// **The crossfade overlap in milliseconds**, zero being off
+    /// ([`Command::SetCrossfade`]).
+    ///
+    /// Engine state rather than session state, like the volume and the
+    /// traversal: a listener who changes it has changed a standing preference,
+    /// not this play.
+    crossfade_ms: u32,
     /// **The order this engine walks its queue in** ([`crate::traversal`]) —
     /// engine state, not session state, so it survives every transport command
     /// exactly as the volume does.
@@ -1528,6 +1544,8 @@ impl<S: Sink> Control<S> {
             delivered,
             instruments,
             queue: Vec::new(),
+            fade_into_next: Vec::new(),
+            crossfade_ms: 0,
             traversal: Traversal::default(),
             repeat: Repeat::Off,
             order: Vec::new(),
@@ -1847,7 +1865,11 @@ impl<S: Sink> Control<S> {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::SetQueue { paths, origin } => {
+            Command::SetQueue {
+                paths,
+                origin,
+                fade_into_next,
+            } => {
                 let before = self.playing_index();
                 let changed = paths != self.queue;
                 // Before the queue moves: `stop_session` ends the play in
@@ -1857,12 +1879,21 @@ impl<S: Sink> Control<S> {
                 self.stop_session();
                 self.open_run(origin);
                 self.queue = paths;
+                self.fade_into_next = fade_into_next;
                 self.replan();
                 self.position = self.top();
                 self.announce_queue(changed, before);
             }
-            Command::UpdateQueue { paths } => self.update_queue(paths, None),
-            Command::UpdateQueueNext { paths, next } => self.update_queue(paths, Some(next)),
+            Command::UpdateQueue {
+                paths,
+                fade_into_next,
+            } => self.update_queue(paths, None, fade_into_next),
+            Command::UpdateQueueNext {
+                paths,
+                next,
+                fade_into_next,
+            } => self.update_queue(paths, Some(next), fade_into_next),
+            Command::SetCrossfade { ms } => self.set_crossfade(ms),
             Command::Play => {
                 if self.session.is_some() {
                     if self.paused {
@@ -2308,9 +2339,52 @@ impl<S: Sink> Control<S> {
 
     /// [`Command::UpdateQueue`]: replace the queue without interrupting the
     /// music (ADR-0014; the module docs carry the argument).
-    fn update_queue(&mut self, paths: Vec<PathBuf>, forced_next: Option<usize>) {
+    /// **Set the overlap, and say what it costs.**
+    ///
+    /// The duration is a standing preference, so it takes effect at the next
+    /// boundary the producer reaches rather than tearing down the play in
+    /// progress — changing it mid-track must not stop the music, on the same
+    /// rule every other setting here follows.
+    ///
+    /// Re-announcing the signal path is the honest half (ADR-0044 §5): a
+    /// configured fade means the samples inside an overlap are a sum, so the
+    /// `bit-perfect` claim stops being true the moment this becomes non-zero
+    /// and starts being true again when it returns to zero.
+    fn set_crossfade(&mut self, ms: u32) {
+        if self.crossfade_ms == ms {
+            return;
+        }
+        self.crossfade_ms = ms;
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        session.shared.crossfade_ms.store(ms, Ordering::Release);
+        // Re-state the chain now rather than at the next boundary: what baz is
+        // prepared to do to the samples has changed, and a fidelity readout
+        // that waited for the next track would be describing the old answer
+        // for the length of this one.
+        let signal = session.signal_path(session.current);
+        if signal.is_some() && signal != session.last_signal {
+            if let Some(event) = signal.clone() {
+                let _ = self.events.send(event);
+            }
+            session.last_signal = signal;
+        }
+    }
+
+    fn update_queue(
+        &mut self,
+        paths: Vec<PathBuf>,
+        forced_next: Option<usize>,
+        fade_into_next: Vec<bool>,
+    ) {
         if paths == self.queue {
-            return; // the engine already holds this queue: nothing to say
+            // The paths are unchanged, but where a fade is allowed may not be:
+            // a front end that regrouped the same list — or that has only just
+            // learned which of its entries are one record's — still has
+            // something to say, and it costs nothing to hear it.
+            self.fade_into_next = fade_into_next;
+            return; // the engine already holds this queue: nothing else to say
         }
         let before = self.playing_index();
         let playing = self.playing_track();
@@ -2320,6 +2394,7 @@ impl<S: Sink> Control<S> {
         // session that has started nothing has also been heard by nobody.
         let delivering = self.session.as_ref().is_some_and(Session::started);
         self.queue = paths;
+        self.fade_into_next = fade_into_next;
         // The plan is a permutation of the queue's positions, so a queue that
         // changed length has no plan until this runs. Before every use of
         // `successor`, `top` or `slot_of` below.
@@ -2674,15 +2749,29 @@ impl<S: Sink> Control<S> {
         };
         let plan: Arc<[usize]> = self.order[slot..end].into();
         let itinerary: Arc<[PathBuf]> = plan.iter().map(|&at| self.queue[at].clone()).collect();
-        self.session = Some(Session::start(
+        // The fade flags follow the plan the same way the paths do, so the
+        // producer never learns what a traversal is (ADR-0044 §2, and
+        // `ProducerTask::fade_into_next` on what shuffle does to the mapping).
+        let fades: Arc<[bool]> = plan
+            .iter()
+            .map(|&at| self.fade_into_next.get(at).copied().unwrap_or(false))
+            .collect();
+        let session = Session::start(
             itinerary,
             plan,
+            fades,
             seek_ms,
             track_ms,
             Arc::clone(&self.instruments),
             self.cfg,
             self.exclusive,
-        ));
+        );
+        // The standing preference, handed to the session that will act on it.
+        session
+            .shared
+            .crossfade_ms
+            .store(self.crossfade_ms, Ordering::Release);
+        self.session = Some(session);
         // Re-armed only now that a session exists to carry the continuation to
         // its first track start; [`Self::roll_play`] spends it there.
         self.resume_play = continues;
@@ -2752,6 +2841,14 @@ struct SessionShared {
     /// short so the output can be reopened. [`NO_RATE_CHANGE`] when the
     /// session simply ran out of queue.
     rate_change_at: AtomicUsize,
+    /// Engine → producer: the crossfade overlap in milliseconds, zero being
+    /// off ([`Command::SetCrossfade`]).
+    ///
+    /// Shared rather than copied into the session at construction because a
+    /// listener may change it mid-play, and the producer reads it once per
+    /// boundary — so a change takes effect at the next seam rather than
+    /// tearing down the play in progress.
+    crossfade_ms: AtomicU32,
 }
 
 impl Default for SessionShared {
@@ -2764,6 +2861,7 @@ impl Default for SessionShared {
             // Zero is a real queue index, so "no rate change" needs its own
             // value rather than the numeric default.
             rate_change_at: AtomicUsize::new(NO_RATE_CHANGE),
+            crossfade_ms: AtomicU32::new(0),
         }
     }
 }
@@ -2927,9 +3025,15 @@ impl Session {
     /// session always begins at slot 0 of the list it was handed, because
     /// [`Control::start_session`] hands it a list that begins where the run
     /// begins.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a session is opened with the whole of what it must know; a struct here would \
+                  be one type used once, at one call site"
+    )]
     fn start(
         queue: Arc<[PathBuf]>,
         plan: Arc<[usize]>,
+        fade_into_next: Arc<[bool]>,
         seek_ms: u64,
         track_ms: Option<u64>,
         instruments: Arc<Instruments>,
@@ -2950,6 +3054,7 @@ impl Session {
             bounds: bounds_tx,
             fails: fails_tx,
             shared: Arc::clone(&shared),
+            fade_into_next,
         };
         let producer = thread::spawn(move || task.run());
         let len = queue.len();
@@ -3037,7 +3142,17 @@ impl Session {
             BoundaryPolicy::BitPerfectReopen => ConversionReason::DeviceRateUnavailable,
             _ => ConversionReason::FixedOutputRate,
         };
-        let conversion = (source_rate_hz != output_rate_hz).then_some(why);
+        // **A configured crossfade is a conversion** (ADR-0044 §5): inside an
+        // overlap the samples are the sum of two files under two ramps. A rate
+        // conversion is the more specific answer where both are true, because
+        // it is the one a listener can act on by changing a device.
+        let conversion = if source_rate_hz != output_rate_hz {
+            Some(why)
+        } else if self.shared.crossfade_ms.load(Ordering::Acquire) > 0 {
+            Some(ConversionReason::Crossfade)
+        } else {
+            None
+        };
         // Two independent facts, three states (see `SignalChain`): whether baz
         // converts, and whether baz owns the device. Owning the device does not
         // give it modes it does not have, which is why the exclusive variant
@@ -3540,6 +3655,165 @@ struct ProducerTask {
     bounds: rtrb::Producer<TrackBound>,
     fails: rtrb::Producer<(usize, String)>,
     shared: Arc<SessionShared>,
+    /// **Which of this itinerary's seams may be crossfaded** (ADR-0044 §2),
+    /// in itinerary order, resolved from the queue's own flags at session
+    /// start.
+    ///
+    /// **The mapping is an approximation under shuffle, and deliberately the
+    /// conservative one.** `fade_into_next[i]` is a statement about the seam
+    /// out of *queue* position `i`, and a shuffled plan gives that track a
+    /// different successor. Carrying the flag anyway means a position that sits
+    /// inside a record — where the front end wrote `false` — never fades, which
+    /// is the direction that protects a record at the cost of the occasional
+    /// missed fade. The reverse mapping would fade an album seam whenever the
+    /// plan happened to reproduce one.
+    fade_into_next: Arc<[bool]>,
+}
+
+/// **The last `n` samples of a track, withheld so the next one can be summed
+/// into them** (ADR-0044 §1).
+///
+/// The producer already decodes every track after the anchor whole, so an
+/// overlap can be made where the samples already sit rather than by growing
+/// the realtime pump a second source and a mix stage. This is the state that
+/// makes that possible: what was held back, and how much of it is wanted.
+///
+/// The anchor is the awkward one — it is *streamed*, block by block, so its
+/// tail is not sitting anywhere to be taken. [`Self::take_from`] therefore
+/// works as a rolling window: every block goes in, and everything beyond the
+/// last `want` samples comes straight back out to be pushed.
+#[derive(Default)]
+struct HeldTail {
+    /// The withheld samples, oldest first. A deque because the anchor feeds
+    /// this a block at a time and the window has to roll: draining the front
+    /// of a `Vec` would memmove the whole tail on every block, and a tail is
+    /// hundreds of thousands of samples.
+    samples: std::collections::VecDeque<f32>,
+    /// How many samples the fade wants. Zero means no fade out of this track,
+    /// and then nothing is ever held.
+    want: usize,
+}
+
+impl HeldTail {
+    /// Arm the hold for a seam that may fade, or disarm it with zero.
+    fn arm(&mut self, want: usize) {
+        self.samples.clear();
+        self.want = want;
+    }
+
+    /// Whether anything is being held for a mix.
+    fn is_armed(&self) -> bool {
+        self.want > 0
+    }
+
+    /// **Roll the window over one streamed block**, moving whatever has aged
+    /// out of it into `spill` — which the caller pushes. For the anchor, which
+    /// is the one track the producer does not have whole.
+    fn absorb(&mut self, block: &[f32], spill: &mut Vec<f32>) {
+        spill.clear();
+        self.samples.extend(block.iter().copied());
+        let excess = self.samples.len().saturating_sub(self.want);
+        spill.extend(self.samples.drain(..excess));
+    }
+
+    /// **Split a whole decoded track**, returning the prefix to push and
+    /// keeping its tail. The cheap path: every track after the anchor is
+    /// already in memory, so the tail is a slice rather than a rolling window.
+    ///
+    /// A track shorter than the fade is held entirely, and the overlap is then
+    /// however much there was — [`mix_overlap`] takes the shorter of the two.
+    fn hold_tail_of<'a>(&mut self, samples: &'a [f32]) -> &'a [f32] {
+        let split = samples.len().saturating_sub(self.want);
+        self.samples.clear();
+        self.samples.extend(samples[split..].iter().copied());
+        &samples[..split]
+    }
+
+    /// Take the tail out for mixing, leaving the hold disarmed.
+    fn take(&mut self) -> Vec<f32> {
+        self.want = 0;
+        self.samples.drain(..).collect()
+    }
+
+    /// Give up the tail without mixing it — the boundary turned out not to be
+    /// one a fade may cross (a rate change, the end of the queue, a failure).
+    /// The audio is owed to the listener either way.
+    fn release(&mut self) -> Vec<f32> {
+        self.take()
+    }
+}
+
+/// **Sum a withheld tail into the head of the next track under equal-power
+/// ramps** (ADR-0044 §1), returning the overlap's length in samples.
+///
+/// `head` is modified in place: its first `overlap` samples become the mix,
+/// and the rest is left alone.
+///
+/// **Equal-power, not linear.** Two uncorrelated signals summed under linear
+/// ramps dip about 3 dB in the middle, which is audible as a hole; `sin`/`cos`
+/// holds the sum flat, which is what every crossfading mixer has done since
+/// tape.
+///
+/// `incoming_scale` is §3's ReplayGain pre-scale: the whole overlap plays
+/// under the *outgoing* track's gain, so the incoming head is scaled by the
+/// ratio of the two tracks' tags first, and lands where its own gain would
+/// have put it once the outgoing gain is applied downstream.
+fn mix_overlap(tail: &[f32], head: &mut [f32], incoming_scale: f32) -> usize {
+    let overlap = tail.len().min(head.len());
+    if overlap == 0 {
+        return 0;
+    }
+    // Ramp per *frame*, not per sample: a stereo pair must be scaled by one
+    // number or the image swings across the fade.
+    let frames = (overlap / CHANNELS).max(1);
+    for frame in 0..overlap / CHANNELS {
+        // 0 → π/2 across the overlap, so `cos` falls from 1 to 0 while `sin`
+        // rises from 0 to 1 and the two hold `cos² + sin² = 1` between them.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a fade is at most a few hundred thousand frames; f32 is exact far past that"
+        )]
+        let phase = (frame as f32 / frames as f32) * std::f32::consts::FRAC_PI_2;
+        let (rising, falling) = (phase.sin(), phase.cos());
+        for channel in 0..CHANNELS {
+            let at = frame * CHANNELS + channel;
+            head[at] = head[at] * incoming_scale * rising + tail[at] * falling;
+        }
+    }
+    overlap
+}
+
+/// **What the incoming track's head is scaled by during an overlap**
+/// (ADR-0044 §3).
+///
+/// The fade plays under the outgoing track's gain because that is where the
+/// next track's boundary is placed, so the incoming samples are pre-divided by
+/// the difference between the two tracks' tagged gains. In album mode within
+/// one record both tags are the same and this is exactly 1 — which is also the
+/// case a fade is skipped in anyway.
+///
+/// **Tags, not the resolved gain.** The producer knows what the files declare;
+/// the engine resolves what is actually applied from the tags, the mode, the
+/// pre-amps and anything baz measured itself. Where those disagree the
+/// pre-scale is off by that difference for the length of the fade, which
+/// ADR-0044 §3 states rather than solves.
+fn incoming_prescale(outgoing: ReplayGainTags, incoming: ReplayGainTags) -> f32 {
+    let (Some(out_centidb), Some(in_centidb)) =
+        (outgoing.track_gain_centidb, incoming.track_gain_centidb)
+    else {
+        // One of them says nothing, so there is no ratio to take and no honest
+        // guess to make. Unity leaves the fade at the outgoing gain, which is
+        // the stated inexactness rather than a new one.
+        return 1.0;
+    };
+    let difference_db = f64::from(in_centidb - out_centidb) / 100.0;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a gain ratio is a small positive number; f32 is the sample type anyway"
+    )]
+    {
+        10f64.powf(difference_db / 20.0) as f32
+    }
 }
 
 /// What decode-ahead found at a queue position.
@@ -3571,6 +3845,31 @@ impl ProducerTask {
     /// Under the ADR-0009 default the run also **ends** at the first track
     /// stored at a different sample rate, handing that index back to the
     /// engine so a new session can reopen the output at it.
+    /// **How long the overlap out of itinerary slot `at` is**, in interleaved
+    /// samples, or zero where this seam may not fade (ADR-0044 §2).
+    ///
+    /// Read per boundary rather than once per session, so a listener who
+    /// changes the setting mid-play gets it at the next seam instead of
+    /// having the play in progress torn down.
+    fn fade_samples_after(&self, at: usize, stream_rate: u32) -> usize {
+        if !self.fade_into_next.get(at).copied().unwrap_or(false) {
+            return 0;
+        }
+        let ms = u64::from(self.shared.crossfade_ms.load(Ordering::Acquire));
+        if ms == 0 {
+            return 0;
+        }
+        let frames = u64::from(stream_rate) * ms / 1000;
+        usize::try_from(frames)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(CHANNELS)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the decode-ahead loop is one sequence and reads as one; splitting it would \
+                  hide the ordering the gapless splice depends on"
+    )]
     fn produce(&mut self) {
         let stop = Arc::clone(&self.shared);
         let stop = &stop.stop;
@@ -3594,7 +3893,13 @@ impl ProducerTask {
         // everything and so needs no comparison.
         let follow = (self.boundary == BoundaryPolicy::BitPerfectReopen).then_some(stream_rate);
         let mut pending: Option<Prefetch> = self.spawn_prefetch(idx + 1, follow);
-        let mut pushed = self.push_anchor(idx, src, stream_rate, stop);
+        // The seam out of the anchor is decided before a sample of it is
+        // pushed, because the anchor is streamed and its tail has to be held
+        // back as it goes rather than taken at the end.
+        let mut hold = HeldTail::default();
+        hold.arm(self.fade_samples_after(idx, stream_rate));
+        let mut outgoing_gain = src.replay_gain();
+        let mut pushed = self.push_anchor(idx, src, stream_rate, stop, &mut hold);
 
         // Subsequent tracks, one decode ahead.
         let mut i = idx + 1;
@@ -3611,6 +3916,16 @@ impl ProducerTask {
                     // purpose. Publishing the index is the whole handover: the
                     // engine drains the output, reopens it at this track's
                     // rate, and starts a fresh session here.
+                    //
+                    // **A fade never crosses a rate change** (ADR-0044 §5):
+                    // the incoming track's samples do not exist in this
+                    // session, so there is nothing to mix into — but the tail
+                    // held back for a fade that will not happen is still the
+                    // listener's audio, and goes out unmixed.
+                    let owed = hold.release();
+                    if !owed.is_empty() {
+                        push_with_backpressure(&mut self.ring, &owed, stop);
+                    }
                     self.shared.rate_change_at.store(i, Ordering::Release);
                     break;
                 }
@@ -3639,29 +3954,70 @@ impl ProducerTask {
                     .map(|samples| (samples, duration_ms, format))
             }) {
                 Ok((
-                    samples,
+                    mut samples,
                     duration_ms,
                     (source_rate, source_bits, source_channels, replay_gain),
                 )) => {
+                    // **The overlap, made where the samples already sit**
+                    // (ADR-0044 §1). The outgoing tail was withheld rather
+                    // than pushed, so summing it into this track's head costs
+                    // the realtime path nothing.
+                    let overlap = if hold.is_armed() {
+                        let tail = hold.take();
+                        let scale = incoming_prescale(outgoing_gain, replay_gain);
+                        mix_overlap(&tail, &mut samples, scale)
+                    } else {
+                        0
+                    };
+                    // **The boundary sits at the end of the overlap**
+                    // (ADR-0044 §3), so the whole fade plays under the
+                    // outgoing track's gain — which is what the pre-scale
+                    // above was computed against.
                     let _ = self.bounds.push(TrackBound {
                         index: i,
-                        start_sample: pushed,
+                        start_sample: pushed + overlap,
                         duration_ms,
                         replay_gain,
                         source_rate,
                         source_bits,
                         source_channels,
                     });
-                    if !push_with_backpressure(&mut self.ring, &samples, stop) {
+                    // Arm the *next* seam before pushing, because arming is
+                    // what decides how much of this track is held back.
+                    hold.arm(self.fade_samples_after(i, stream_rate));
+                    let body = if hold.is_armed() {
+                        hold.hold_tail_of(&samples)
+                    } else {
+                        &samples[..]
+                    };
+                    let body_len = body.len();
+                    if !push_with_backpressure(&mut self.ring, body, stop) {
                         break;
                     }
-                    pushed += samples.len();
+                    pushed += body_len;
+                    outgoing_gain = replay_gain;
                 }
                 Err(e) => {
+                    // A track that failed is not a track to fade into, and the
+                    // tail held for it is still owed.
+                    let owed = hold.release();
+                    if !owed.is_empty() && !push_with_backpressure(&mut self.ring, &owed, stop) {
+                        break;
+                    }
+                    pushed += owed.len();
                     let _ = self.fails.push((i, e.to_string()));
                 }
             }
             i += 1;
+        }
+
+        // **The queue ran out with a tail held back.** There is no incoming
+        // track to fade into — the run simply ends — so the last seconds of
+        // the last track go out as they are. Without this the fade would eat
+        // the end of the music.
+        let owed = hold.release();
+        if !owed.is_empty() {
+            push_with_backpressure(&mut self.ring, &owed, stop);
         }
 
         if let Some((_, handle)) = pending {
@@ -3724,6 +4080,7 @@ impl ProducerTask {
         mut src: AudioSource,
         stream_rate: u32,
         stop: &AtomicBool,
+        hold: &mut HeldTail,
     ) -> usize {
         let bound = TrackBound {
             index: idx,
@@ -3737,6 +4094,8 @@ impl ProducerTask {
             replay_gain: src.replay_gain(),
         };
         let mut pushed = 0usize;
+        // Reused across blocks so a rolling hold does not allocate per block.
+        let mut spill: Vec<f32> = Vec::new();
         if src.sample_rate() == stream_rate {
             let _ = self.bounds.push(bound);
             loop {
@@ -3745,10 +4104,24 @@ impl ProducerTask {
                 }
                 match src.next_block() {
                     Ok(Some(block)) => {
-                        if !push_with_backpressure(&mut self.ring, block, stop) {
-                            break;
+                        // **The anchor is the one track not held whole**, so
+                        // its tail is withheld as a rolling window instead of
+                        // taken at the end (ADR-0044 §1). With no fade out of
+                        // it the block goes straight through, untouched.
+                        if hold.is_armed() {
+                            hold.absorb(block, &mut spill);
+                            if !spill.is_empty()
+                                && !push_with_backpressure(&mut self.ring, &spill, stop)
+                            {
+                                break;
+                            }
+                            pushed += spill.len();
+                        } else {
+                            if !push_with_backpressure(&mut self.ring, block, stop) {
+                                break;
+                            }
+                            pushed += block.len();
                         }
-                        pushed += block.len();
                     }
                     Ok(None) => break,
                     Err(e) => {
@@ -3898,6 +4271,79 @@ mod tests {
     //!   `tests/playback.rs` (`discard_buffered_empties_the_device_ring`,
     //!   `device_sink_reopens_at_the_requested_rate`, feature
     //!   `device-output`).
+
+    /// **Equal-power, which is the whole reason the ramps are not linear.**
+    ///
+    /// Two uncorrelated signals summed under linear ramps dip about 3 dB in
+    /// the middle, which is audible as a hole. `sin`/`cos` hold `sin² + cos² =
+    /// 1`, so a constant summed into a constant stays that constant across the
+    /// whole overlap — which is the strongest statement of "no hole" available
+    /// without a spectrum.
+    #[test]
+    fn an_overlap_holds_its_power_across_the_fade() {
+        let tail = vec![1.0_f32; 400];
+        let mut head = vec![1.0_f32; 400];
+        let overlap = super::mix_overlap(&tail, &mut head, 1.0);
+        assert_eq!(overlap, 400);
+        for (at, sample) in head.iter().enumerate().take(overlap) {
+            // sin + cos peaks at √2 for equal inputs; the invariant that
+            // matters is that it never *dips* below either source.
+            assert!(
+                *sample >= 0.999,
+                "sample {at} dipped to {sample} — a hole in the fade"
+            );
+            assert!(*sample <= std::f32::consts::SQRT_2 + 0.001);
+        }
+    }
+
+    /// **A fade starts on the outgoing track and ends on the incoming one.**
+    #[test]
+    fn an_overlap_begins_as_the_tail_and_ends_as_the_head() {
+        let tail = vec![1.0_f32; 200];
+        let mut head = vec![0.0_f32; 200];
+        super::mix_overlap(&tail, &mut head, 1.0);
+        assert!(
+            (head[0] - 1.0).abs() < 1e-6,
+            "the fade must open on the tail"
+        );
+        assert!(
+            head[198] < 0.05,
+            "the tail must be gone by the end of the overlap"
+        );
+    }
+
+    /// **The overlap is only ever as long as the shorter side.** A track
+    /// shorter than the fade is mixed for its whole length and no further.
+    #[test]
+    fn an_overlap_cannot_be_longer_than_the_track_it_mixes_into() {
+        let tail = vec![0.5_f32; 1000];
+        let mut head = vec![0.5_f32; 40];
+        assert_eq!(super::mix_overlap(&tail, &mut head, 1.0), 40);
+        let mut nothing: Vec<f32> = Vec::new();
+        assert_eq!(super::mix_overlap(&tail, &mut nothing, 1.0), 0);
+    }
+
+    /// **The ReplayGain pre-scale is the ratio of the two tags, and unity
+    /// whenever it cannot be** (ADR-0044 §3).
+    ///
+    /// Equal gains — which is every pair inside one album in album mode — must
+    /// be exactly 1, because that case has to cost nothing.
+    #[test]
+    fn the_prescale_is_unity_without_two_tags_to_compare() {
+        use crate::replaygain::ReplayGainTags;
+        let tagged = |centidb| ReplayGainTags {
+            track_gain_centidb: Some(centidb),
+            ..ReplayGainTags::default()
+        };
+        assert!((super::incoming_prescale(tagged(-600), tagged(-600)) - 1.0).abs() < 1e-6);
+        // The incoming track is 6 dB quieter, so it is pre-scaled down by half.
+        let half = super::incoming_prescale(tagged(0), tagged(-602));
+        assert!((half - 0.5).abs() < 0.01, "expected about 0.5, got {half}");
+        // One of them says nothing: there is no ratio, so nothing is applied.
+        let untagged = ReplayGainTags::default();
+        assert!((super::incoming_prescale(tagged(-600), untagged) - 1.0).abs() < 1e-6);
+        assert!((super::incoming_prescale(untagged, tagged(-600)) - 1.0).abs() < 1e-6);
+    }
 
     use std::sync::Mutex;
     use std::time::Instant;
@@ -4145,6 +4591,7 @@ mod tests {
             self.send(Command::SetQueue {
                 paths: vec![self.track.clone()],
                 origin: None,
+                fade_into_next: Vec::new(),
             });
             self.send(Command::Play);
             loop {
@@ -4274,6 +4721,7 @@ mod tests {
         harness.send(Command::SetQueue {
             paths: Vec::new(),
             origin: None,
+            fade_into_next: Vec::new(),
         });
         assert!(
             discarded(&wait_until(&harness, mark, discarded)),
@@ -4295,6 +4743,7 @@ mod tests {
         // Append a second entry: the playing one survives at position 0.
         harness.send(Command::UpdateQueue {
             paths: vec![harness.track.clone(), harness.track.clone()],
+            fade_into_next: Vec::new(),
         });
         // Give the engine every chance to misbehave before concluding it did
         // not: many pump iterations' worth of idle time.
@@ -4314,7 +4763,10 @@ mod tests {
         let harness = Harness::start();
         harness.play_until_audio_flows();
         let mark = harness.mark();
-        harness.send(Command::UpdateQueue { paths: Vec::new() });
+        harness.send(Command::UpdateQueue {
+            paths: Vec::new(),
+            fade_into_next: Vec::new(),
+        });
         assert!(
             discarded(&wait_until(&harness, mark, discarded)),
             "removing the playing track must discard the sink's buffered audio"
@@ -4432,6 +4884,7 @@ mod tests {
             .send(Command::SetQueue {
                 paths: queue,
                 origin: None,
+                fade_into_next: Vec::new(),
             })
             .expect("engine accepts commands");
         cmd_tx.send(Command::Play).expect("engine accepts commands");
@@ -4904,6 +5357,7 @@ mod tests {
             .send(Command::SetQueue {
                 paths: queue,
                 origin: None,
+                fade_into_next: Vec::new(),
             })
             .expect("engine accepts commands");
         for command in before_play {

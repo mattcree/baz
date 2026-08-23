@@ -356,6 +356,28 @@ impl Density {
 
     /// The work size the column count aims at (logical px).
     #[must_use]
+    /// **The cover's edge in a list row** (logical px).
+    ///
+    /// Small, and it is the row's height less its padding — the four steps
+    /// give a list more rows on screen the way they give the wall more
+    /// columns. A thumbnail rather than a work: at this size the cover is
+    /// there to identify the record at a glance, not to be looked at, which is
+    /// what the wall is for.
+    pub const fn list_art(self) -> f32 {
+        match self {
+            Self::Spacious => 64.0,
+            // **[`crate::theme::BAR_COVER`]**, which is the sounding record's
+            // cover in the bottom bar. The owner, 2026-08-22: *"make the icon
+            // for the albums roughly the same size as the icon on the now
+            // playing bar."* The first cut was 44 and read as a favicon: a
+            // cover has to be large enough to recognise a record by, and the
+            // bar already settled what that size is.
+            Self::Balanced => crate::theme::BAR_COVER,
+            Self::Compact => 44.0,
+            Self::Dense => 36.0,
+        }
+    }
+
     pub const fn art_target(self) -> f32 {
         match self {
             Self::Spacious => 320.0,
@@ -441,6 +463,48 @@ impl Density {
     }
 }
 
+/// **What shape the collection is hung in** — the wall, or a list.
+///
+/// Orthogonal to [`Density`], which says how *big*: a list still has a row
+/// pitch, and a listener who set one and then went back to the wall expects
+/// their hang to be where they left it. Two axes, two preferences.
+///
+/// The owner, 2026-08-22: *"we need an option to show library and playlists as
+/// a list view with the album artwork at the left and a few columns, using a
+/// similar grouping strategy."* The last clause is why this is a `Grid` and not
+/// a second view: the shelves, the runs, the group bands and the index rail are
+/// the wall's, and a list that re-derived any of them would be a second
+/// grouping to keep in step with the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layout {
+    /// Works hung as a grid of covers — what baz has always drawn.
+    #[default]
+    Wall,
+    /// One record per row: its cover small at the left, then its columns.
+    List,
+}
+
+impl Layout {
+    /// The spelling `config.toml` uses.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Wall => "wall",
+            Self::List => "list",
+        }
+    }
+
+    /// Read a spelling back. Anything unknown is the wall, which is the
+    /// shape every other reading of a broken config degrades to.
+    #[must_use]
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "list" => Self::List,
+            _ => Self::Wall,
+        }
+    }
+}
+
 /// The hang, resolved for one grid width: how many columns, how large the
 /// works are, and what sits between them.
 ///
@@ -468,7 +532,20 @@ pub struct Grid {
     /// Row pitch (logical px): the work, the gap to its label, the label, and
     /// the hang to the row below.
     pub row_h: f32,
+    /// Which shape this grid was resolved for ([`Layout`]).
+    pub layout: Layout,
+    /// The block's width (logical px) — what one row spans.
+    ///
+    /// Derived for the wall (`columns × art + gutters`) and the whole measure
+    /// for a list, so [`Self::block_width`] can answer both without knowing
+    /// which it is holding.
+    pub block: f32,
 }
+
+/// Breathing room above and below a list row's cover, so the row pitch is the
+/// cover plus one gap rather than the cover exactly. Small on purpose: a list
+/// earns its place by fitting more records on screen than the wall does.
+const LIST_ROW_PAD: f32 = 12.0;
 
 impl Grid {
     /// Resolve the hang for a grid of `width` logical pixels at `density`.
@@ -516,6 +593,48 @@ impl Grid {
             gutter,
             margin: ((width - block) / 2.0).max(0.0),
             row_h: art + GAP_LG + LABEL_H + hang,
+            layout: Layout::Wall,
+            block,
+        }
+    }
+
+    /// **Resolve a list of `width` logical pixels**, at `density`.
+    ///
+    /// One record per row, so `columns` is 1 and the whole virtualisation the
+    /// wall already has — [`Self::rows`], [`Self::visible_rows`],
+    /// [`Self::spacer_height`], [`Run`] — works unchanged. That is the point
+    /// of resolving a list *as a grid* rather than as a second view: a wall of
+    /// 500 genre shelves and a list of 500 costs the same per frame, and the
+    /// group bands and index rail are the same code.
+    ///
+    /// **Density still means something here.** It is the row pitch and the
+    /// cover's edge rather than the number of columns, so the four steps stay
+    /// four steps: a listener who likes it tight gets more rows on screen,
+    /// exactly as they get more covers on the wall.
+    #[must_use]
+    pub fn list(width: f32, density: Density) -> Self {
+        let width = width.max(0.0);
+        let art = density.list_art();
+        // **A list is inset the way the wall is inset.** The wall centres its
+        // block and the margin that leaves is `hang`; a list that ran edge to
+        // edge put every cover hard against the lane, which is half of the
+        // owner's *"padding and alignment is all off"*. Taking the same margin
+        // keeps the two shapes on one rhythm and keeps the group bands — which
+        // sit at the block's edge in both — telling the truth about where a
+        // row begins.
+        let hang = density.hang();
+        let margin = hang.min(width / 4.0);
+        Self {
+            width,
+            density,
+            hang,
+            columns: 1,
+            art,
+            gutter: 0.0,
+            margin,
+            row_h: art + LIST_ROW_PAD,
+            layout: Layout::List,
+            block: (width - 2.0 * margin).max(0.0),
         }
     }
 
@@ -566,14 +685,12 @@ impl Grid {
     /// fill them — so a partial last row, and a search narrowed to one result,
     /// stay left-aligned in the block instead of re-centring on their own
     /// contents.
+    /// The cast the wall's derivation needed is gone with it: the block is a
+    /// field now, computed once where the columns are, so both shapes can
+    /// answer this the same way.
     #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "column counts are far below f32's exact-integer range"
-    )]
-    pub fn block_width(self) -> f32 {
-        let count = self.columns as f32;
-        count * self.art + (count - 1.0).max(0.0) * self.gutter
+    pub const fn block_width(self) -> f32 {
+        self.block
     }
 
     /// Total rows needed for `items` laid out over this grid's columns.
@@ -2169,5 +2286,62 @@ mod tests {
         // is meant to sit at the cap, and Dense's 176 … 240 is 4/3 to within a
         // third of a pixel and is written as whole numbers instead.
         assert!((ART_MAX - 4.0 / 3.0 * ART_MIN).abs() < f32::EPSILON);
+    }
+
+    /// **A list is a grid of one column**, which is what lets the wall's
+    /// virtualisation, runs and group bands carry it unchanged (the owner,
+    /// 2026-08-22: *"using a similar grouping strategy"*).
+    ///
+    /// If this ever stops being true, a list has become a second view with a
+    /// second grouping to keep in step with the first — which is the thing the
+    /// design refuses.
+    #[test]
+    fn a_list_is_a_grid_of_one_column() {
+        for width in [400.0_f32, 900.0, 1280.0, 2560.0] {
+            for density in Density::ALL {
+                let list = Grid::list(width, density);
+                assert_eq!(list.columns, 1, "a list row holds one record");
+                assert_eq!(list.layout, Layout::List);
+                // One row per record, so the run maths the wall uses is the
+                // list's maths too.
+                assert_eq!(list.rows(7), 7);
+                assert_eq!(list.rows(0), 0);
+                // **The block is the measure less its two margins**, which is
+                // the inset the wall takes and a list must take with it: the
+                // group bands sit at the block's edge in both shapes, so a
+                // list that ran edge to edge put every cover out of step with
+                // its own header (the owner, 2026-08-22: *"padding and
+                // alignment is all off"*).
+                assert!(list.margin > 0.0, "a list needs its inset");
+                assert!(
+                    (list.block_width() + 2.0 * list.margin - width).abs() < 0.001,
+                    "block {} plus two margins of {} should be the width {width}",
+                    list.block_width(),
+                    list.margin
+                );
+                // Tighter steps put more rows on screen, which is what density
+                // means here.
+                assert!(list.row_h > 0.0);
+            }
+        }
+        // The ladder is monotonic in the same direction as the wall's.
+        let spacious = Grid::list(1280.0, Density::Spacious).row_h;
+        let dense = Grid::list(1280.0, Density::Dense).row_h;
+        assert!(
+            dense < spacious,
+            "a denser step must fit more rows, not fewer"
+        );
+    }
+
+    /// **The two shapes are two preferences, and the spelling round-trips.**
+    #[test]
+    fn a_layout_survives_being_written_and_read_back() {
+        for layout in [Layout::Wall, Layout::List] {
+            assert_eq!(Layout::from_code(layout.code()), layout);
+        }
+        // Anything else is the wall: a config baz cannot read must not leave a
+        // listener in a shape they did not choose.
+        assert_eq!(Layout::from_code("grid"), Layout::Wall);
+        assert_eq!(Layout::from_code(""), Layout::Wall);
     }
 }

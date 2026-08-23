@@ -3867,6 +3867,7 @@ fn an_exclusive_engine_plays_and_reports_an_exclusive_chain() {
         .send(Command::SetQueue {
             paths: vec![track.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");

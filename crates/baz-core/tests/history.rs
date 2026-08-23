@@ -173,6 +173,7 @@ fn a_run_of_playback_writes_exactly_the_expected_lines() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -224,6 +225,7 @@ fn an_engine_with_no_ledger_writes_nothing() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -240,6 +242,7 @@ fn a_track_left_early_is_recorded_as_a_skip() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { position: 0, .. }));
@@ -273,6 +276,7 @@ fn a_queue_entry_that_was_jumped_over_is_never_recorded() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone(), rig.a.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     // Straight to the last entry: nothing before it is ever delivered.
     rig.send(Command::JumpTo { position: 2 });
@@ -289,6 +293,7 @@ fn stopping_mid_track_still_files_the_play() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -309,6 +314,7 @@ fn shutting_the_engine_down_files_the_play_in_progress() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -328,6 +334,7 @@ fn seeking_inside_a_track_is_one_play() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -353,6 +360,7 @@ fn restarting_a_track_is_a_second_play() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -376,6 +384,7 @@ fn pausing_adds_nothing_to_what_was_heard() {
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -415,6 +424,7 @@ fn the_play_recorded_event_follows_the_line_into_the_file() {
     rig.send(Command::SetQueue {
         paths: vec![rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     let event = rig.wait_for(|event| matches!(event, Event::PlayRecorded { .. }));
@@ -450,6 +460,7 @@ fn the_read_surfaces_answer_from_a_real_run() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -495,6 +506,7 @@ fn a_run_told_which_list_it_came_from_says_so_in_the_ledger() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: Some("playlist:3b1f00c2a49d7e60:Road Trip".to_owned()),
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -559,6 +571,7 @@ fn a_run_that_named_no_list_still_credits_the_records_it_played() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -584,12 +597,14 @@ fn a_second_run_replaces_the_first_runs_origin() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone()],
         origin: Some("playlist:1f:Road Trip".to_owned()),
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
     rig.send(Command::SetQueue {
         paths: vec![rig.b.clone()],
         origin: None,
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -618,6 +633,7 @@ fn an_older_baz_reads_every_play_in_a_marked_ledger() {
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
         origin: Some("playlist:1f:Road Trip".to_owned()),
+        fade_into_next: Vec::new(),
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));

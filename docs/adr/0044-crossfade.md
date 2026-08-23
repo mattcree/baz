@@ -163,8 +163,32 @@ otherwise be read as a bug: **it does not fade between the tracks of a record.**
 
 ## Status of the work
 
-**Not built.** This record exists because `docs/BACKLOG.md` said the questions
-had to be answered before any of it was written, and they now are. The
-implementation is `docs/WORK.md` item 69 and is a piece of its own: a producer
-change, a protocol field, a settings surface, and a test that a gapless album
-is still bit-exact with a fade configured.
+**Built 2026-08-22**, in the shape this record describes and with the test it
+named.
+
+- **The producer mixes it.** `HeldTail` withholds the outgoing tail — a rolling
+  window for the streamed anchor, a slice for every track after it, which are
+  decoded whole — and `mix_overlap` sums it into the incoming head under
+  `sin`/`cos` ramps. The realtime pump is not touched.
+- **The front end says where.** `vm::fade_seams` reads the wall and marks every
+  seam that is *not* two consecutive tracks of one edition; the flags travel on
+  `SetQueue`/`UpdateQueue`/`UpdateQueueNext` as `fade_into_next`, additive and
+  wire-stable, and `command_wire_format_is_stable` passes unchanged.
+- **The surface** is an off and five lengths in Settings → Playback, with the
+  sentence §6 asked for: it does not fade between the tracks of a record.
+- **`bit-perfect` is conditional and says so** through
+  `ConversionReason::Crossfade`. The warning that names a device to change
+  stays silent for it — a fade is a choice, not a fault — while the readout
+  reports *Mixing*.
+
+**The test §2 asked for is `a_record_is_bit_exact_with_a_crossfade_configured`**
+(`crates/baz-core/tests/engine.rs`): an album's own seam, with an eight-second
+fade switched on, is sample-for-sample what it was.
+`a_fade_between_records_overlaps_them_by_the_configured_length` is its
+complement, and `a_zero_crossfade_leaves_the_run_untouched` pins that off means
+off.
+
+**Three edges the writing found**, each of which would otherwise have been a
+defect: a held tail is still owed to the listener when the queue runs out, when
+a rate change ends the session, and when the incoming track fails to decode.
+All three release it unmixed rather than swallowing the end of the music.

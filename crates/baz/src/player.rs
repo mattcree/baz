@@ -837,6 +837,15 @@ impl SignalPath {
     #[must_use]
     pub fn warning(self) -> Option<SignalWarning> {
         let reason = self.chain.conversion_reason()?;
+        // **A crossfade is a choice, not a fault.** This warning exists to
+        // name a device or a setting that is standing between the file and the
+        // sink and to say what would remove it; a listener who turned a fade
+        // on has nothing to fix, and "Baz is resampling 44.1 → 44.1 kHz" would
+        // be false as well as unhelpful. The path still *says* it is mixing —
+        // that is the note below, and ADR-0044 §5's honesty is kept there.
+        if matches!(reason, ConversionReason::Crossfade) {
+            return None;
+        }
         let source = vm::format_sample_rate(self.source_rate_hz);
         let output = vm::format_sample_rate(self.output_rate_hz);
         let remedy = match reason {
@@ -2334,6 +2343,16 @@ impl PlayerState {
                 ),
             });
         };
+        // A fade does not change the rate, so the rate-shaped sentence every
+        // other reason wants would be a lie with two identical numbers in it.
+        if matches!(reason, ConversionReason::Crossfade) {
+            return Some(SignalNote {
+                label: "Mixing".to_owned(),
+                detail: "A crossfade is configured, so between records the samples are the sum \
+                         of two files. Everywhere else they are the file's own."
+                    .to_owned(),
+            });
+        }
         let source = vm::format_sample_rate(path.source_rate_hz);
         let output = vm::format_sample_rate(path.output_rate_hz);
         let because = match reason {

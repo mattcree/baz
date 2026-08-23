@@ -178,6 +178,18 @@ const THEME: &str = "theme";
 /// The number of concurrent local Vibe model sessions.
 const VIBE_WORKERS: &str = "vibe_workers";
 const CHECK_FOR_UPDATES: &str = "check_for_updates";
+/// The crossfade overlap between records, in milliseconds; zero is off.
+const CROSSFADE_MS: &str = "crossfade_ms";
+/// Whether the collection is hung as a wall of covers or as a list of rows.
+const LAYOUT: &str = "layout";
+/// **The longest crossfade offered**, in milliseconds.
+///
+/// Twelve seconds. Past that an overlap stops being a boundary treatment and
+/// becomes a mix nobody asked for, and the memory it costs — the producer
+/// holds the whole tail — grows with it: twelve seconds at 48 kHz stereo is
+/// about 4.6 MB, which is the ceiling worth paying without a reason.
+pub const MAX_CROSSFADE_MS: u32 = 12_000;
+
 /// The default number of concurrent local Vibe model sessions.
 ///
 /// **Four, and the number is a memory decision measured rather than guessed.**
@@ -362,6 +374,21 @@ pub struct Config {
     pub check_for_updates: bool,
     /// Concurrent local CLAP model sessions used by a Vibe scan.
     pub vibe_workers: usize,
+    /// **What shape the collection is hung in** — the wall of covers, or one
+    /// record per row with its cover small at the left.
+    ///
+    /// Orthogonal to [`Self::density`], which says how big rather than what
+    /// shape, so a listener keeps their hang across a switch either way.
+    pub layout: crate::shelf::Layout,
+    /// **The crossfade between records, in milliseconds**; zero is off
+    /// (ADR-0044 §6).
+    ///
+    /// Off by default, because an album-first player's default boundary is the
+    /// one the record was mastered with. It never applies inside a record —
+    /// `vm::fade_seams` decides where it may happen at all, and the words in
+    /// Settings say so, because it is the thing that would otherwise be read
+    /// as a bug.
+    pub crossfade_ms: u32,
     /// The selected visual room. A missing or invalid custom document falls
     /// back safely at theme resolution without discarding this preference.
     pub theme: String,
@@ -399,6 +426,8 @@ impl Default for Config {
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            crossfade_ms: 0,
+            layout: crate::shelf::Layout::Wall,
             theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Library,
         }
@@ -602,6 +631,34 @@ fn clamp_centidb(value: i16) -> i16 {
 /// filters rather than a bad config. Each value is clamped through
 /// `equalizer::Band`, so a hand-edited ±9000 becomes ±1200 rather than a
 /// refusal to read the file at all.
+/// **What shape the collection is hung in** — the wall, or a list.
+///
+/// A spelling this build does not know is the wall, on this file's own rule: a
+/// value baz cannot read takes its default and leaves its neighbours alone,
+/// and the wall is the shape baz has always drawn.
+fn read_layout(table: &toml::Table) -> crate::shelf::Layout {
+    table
+        .get(LAYOUT)
+        .and_then(toml::Value::as_str)
+        .map_or(crate::shelf::Layout::Wall, crate::shelf::Layout::from_code)
+}
+
+/// **The crossfade overlap, in milliseconds** (ADR-0044 §6).
+///
+/// Per key and defensive like every other value in this file: a length this
+/// build cannot read, or one past [`MAX_CROSSFADE_MS`], takes the default of
+/// *off* and leaves its neighbours alone. Off is the right degradation — a
+/// configuration baz cannot understand must not start mixing a listener's
+/// records together.
+fn read_crossfade(table: &toml::Table) -> u32 {
+    table
+        .get(CROSSFADE_MS)
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value <= MAX_CROSSFADE_MS)
+        .unwrap_or(0)
+}
+
 fn read_equalizer(table: &toml::Table) -> StoredEqualizer {
     // A struct rather than the four-tuple this was: `let (a, b, c, d) = …`
     // spread the call site over six lines and tipped `from_toml` past its
@@ -736,6 +793,19 @@ impl Config {
              {VIBE_WORKERS} = {}",
             self.vibe_workers,
         );
+        let _ = writeln!(
+            out,
+            "# crossfade between records in milliseconds, 0 is off \
+             (never inside a record; max {MAX_CROSSFADE_MS})\n\
+             {CROSSFADE_MS} = {}",
+            self.crossfade_ms,
+        );
+        let _ = writeln!(
+            out,
+            "# how the collection is hung: \"wall\" of covers, or \"list\" of rows\n\
+             {LAYOUT} = {}",
+            toml_string(self.layout.code()),
+        );
         write_flag(
             &mut out,
             "look for a newer baz once, when it starts; nothing else reaches the network",
@@ -855,6 +925,8 @@ impl Config {
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_VIBE_WORKERS).contains(value))
             .unwrap_or(DEFAULT_VIBE_WORKERS);
+        let crossfade_ms = read_crossfade(&table);
+        let layout = read_layout(&table);
         // Per key and defensive, like every other value in this file: a value
         // baz cannot read takes its own default and leaves its neighbours
         // alone.
@@ -893,6 +965,8 @@ impl Config {
             visualization_foreground,
             now_playing_facts,
             vibe_workers,
+            crossfade_ms,
+            layout,
             theme,
             last_place,
         }
@@ -1518,6 +1592,8 @@ preamp_centidb = -9000
                 visualization_foreground: crate::visualizer::Foreground::JewelCase,
                 now_playing_facts: true,
                 vibe_workers: DEFAULT_VIBE_WORKERS,
+                crossfade_ms: 0,
+                layout: crate::shelf::Layout::Wall,
                 theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
                 last_place: Place::Library,
             };
@@ -1884,6 +1960,8 @@ preamp_centidb = -9000
             visualization_foreground: crate::visualizer::Foreground::JewelCase,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            crossfade_ms: 0,
+            layout: crate::shelf::Layout::Wall,
             theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Library,
         };
@@ -1917,6 +1995,8 @@ preamp_centidb = -9000
             visualization_foreground: crate::visualizer::Foreground::None,
             now_playing_facts: false,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            crossfade_ms: 0,
+            layout: crate::shelf::Layout::Wall,
             theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::Playlist(42),
         };
@@ -2089,6 +2169,8 @@ preamp_centidb = -9000
             visualization_foreground: crate::visualizer::Foreground::Cover,
             now_playing_facts: true,
             vibe_workers: DEFAULT_VIBE_WORKERS,
+            crossfade_ms: 0,
+            layout: crate::shelf::Layout::Wall,
             theme: crate::theme_file::DEFAULT_SELECTION.to_owned(),
             last_place: Place::NowPlaying,
         };

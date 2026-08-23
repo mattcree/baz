@@ -624,6 +624,7 @@ fn full_lifecycle_event_ordering() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -678,6 +679,7 @@ fn pause_resume_output_is_bit_identical() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -719,6 +721,7 @@ fn bad_file_is_reported_and_skipped() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.bad.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -753,6 +756,7 @@ fn stop_mid_track_then_play_restarts() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -799,6 +803,7 @@ fn shutdown_while_playing_terminates_cleanly() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -845,6 +850,7 @@ fn set_queue_does_not_autoplay_and_empty_queue_ends() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     // The queue is news, and the only news: it is announced, and nothing else
@@ -865,6 +871,7 @@ fn next_past_last_track_ends_queue() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -906,6 +913,7 @@ fn send_after_shutdown_is_an_error() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("a fresh engine accepts commands");
 }
@@ -936,6 +944,7 @@ fn seek_while_playing_lands_on_the_target_sample() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -987,6 +996,7 @@ fn seek_while_paused_moves_the_position_without_playing() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1049,6 +1059,7 @@ fn seek_past_track_end_advances_to_the_next_track() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1079,6 +1090,7 @@ fn seek_past_track_end_advances_to_the_next_track() {
         .send(Command::SetQueue {
             paths: vec![f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1101,6 +1113,7 @@ fn seek_while_stopped_is_a_no_op() {
         .send(Command::SetQueue {
             paths: vec![f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (1, None)); // the SetQueue above
@@ -1128,6 +1141,7 @@ fn progress_cadence_is_quarter_second_and_immediate_after_transitions() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1204,6 +1218,7 @@ fn elapsed_is_wall_clock_true_across_a_resampled_track() {
         .send(Command::SetQueue {
             paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1273,6 +1288,7 @@ fn nothing_is_resampled_when_the_output_can_run_at_the_source_rate() {
         .send(Command::SetQueue {
             paths: vec![f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1308,6 +1324,7 @@ fn the_signal_path_reports_a_direct_chain_at_the_source_rate() {
         .send(Command::SetQueue {
             paths: vec![f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1338,6 +1355,7 @@ fn the_signal_path_is_stated_once_while_it_does_not_change() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1376,6 +1394,7 @@ fn a_rate_change_replays_both_tracks_unconverted() {
         .send(Command::SetQueue {
             paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1410,6 +1429,7 @@ fn a_rate_change_restates_the_signal_path() {
         .send(Command::SetQueue {
             paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1454,6 +1474,7 @@ fn a_fixed_output_rate_reports_a_converting_chain() {
         .send(Command::SetQueue {
             paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1554,6 +1575,7 @@ fn device_engine_spawns_or_reports_cleanly() {
                 .send(Command::SetQueue {
                     paths: vec![f.b.clone()],
                     origin: None,
+                    fade_into_next: Vec::new(),
                 })
                 .expect("send");
             engine.send(Command::Play).expect("send");
@@ -1574,6 +1596,7 @@ fn device_engine_spawns_or_reports_cleanly() {
         .send(Command::SetQueue {
             paths: vec![f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1640,6 +1663,7 @@ fn device_engine_transport_survives_repeated_session_abandonment() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone(), f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1727,6 +1751,7 @@ fn device_engine_follows_the_source_rate() {
         .send(Command::SetQueue {
             paths: vec![f.tail_48k.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -1803,6 +1828,7 @@ fn play_with_volume(queue: &[PathBuf], capacity: usize, before_play: &[Command])
         .send(Command::SetQueue {
             paths: queue.to_vec(),
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     for command in before_play {
@@ -2066,6 +2092,7 @@ fn a_mid_playback_volume_change_ramps_monotonically_and_drops_nothing() {
         .send(Command::SetQueue {
             paths: vec![f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2164,6 +2191,7 @@ fn volume_survives_pause_resume_seek_and_track_boundaries() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -2400,6 +2428,7 @@ fn previous_past_the_threshold_restarts_the_current_track() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2444,6 +2473,7 @@ fn previous_before_the_threshold_steps_back_a_queue_position() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2494,6 +2524,7 @@ fn previous_at_the_head_of_the_queue_restarts() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2537,6 +2568,7 @@ fn previous_while_paused_moves_and_resumes() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2579,6 +2611,7 @@ fn previous_while_stopped_is_a_no_op() {
         .send(Command::SetQueue {
             paths: vec![f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (1, None)); // the SetQueue above
@@ -2617,6 +2650,7 @@ fn jump_to_plays_the_named_entry_from_its_start() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2655,6 +2689,7 @@ fn jump_to_the_playing_entry_restarts_it() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2686,6 +2721,7 @@ fn jump_to_while_paused_moves_and_resumes() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2722,6 +2758,7 @@ fn jump_to_while_stopped_starts_playing_there() {
         .send(Command::SetQueue {
             paths: vec![f.b.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (2, None));
@@ -2750,6 +2787,7 @@ fn jump_to_out_of_range_ends_the_queue() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2801,6 +2839,7 @@ fn an_edit_that_misses_the_playing_track_leaves_the_audio_untouched() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2811,6 +2850,7 @@ fn an_edit_that_misses_the_playing_track_leaves_the_audio_untouched() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(
@@ -2847,6 +2887,7 @@ fn removing_a_later_track_leaves_the_playing_one_alone() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2855,6 +2896,7 @@ fn removing_a_later_track_leaves_the_playing_one_alone() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.a.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (1, Some(0)));
@@ -2881,6 +2923,7 @@ fn reordering_the_queue_reroutes_the_rest_of_the_run() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2890,6 +2933,7 @@ fn reordering_the_queue_reroutes_the_rest_of_the_run() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.a.clone(), f.dc.clone(), f.b.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (3, Some(0)));
@@ -2920,6 +2964,7 @@ fn removing_the_playing_track_continues_at_the_entry_that_took_its_place() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -2929,6 +2974,7 @@ fn removing_the_playing_track_continues_at_the_entry_that_took_its_place() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.dc.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     // The edit is announced with the position it moved the run to, and the
@@ -2970,13 +3016,17 @@ fn an_edit_that_empties_the_queue_ends_the_run() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
     assert_eq!(next_transport_event(&events), started(&f.a, 0));
 
     engine
-        .send(Command::UpdateQueue { paths: Vec::new() })
+        .send(Command::UpdateQueue {
+            paths: Vec::new(),
+            fade_into_next: Vec::new(),
+        })
         .expect("send");
     assert_eq!(next_transport_event(&events), Event::QueueEnded);
     assert_eq!(next_queue_changed(&events), (0, None));
@@ -3000,6 +3050,7 @@ fn a_redundant_edit_says_nothing() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (2, None));
@@ -3007,6 +3058,7 @@ fn a_redundant_edit_says_nothing() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.a.clone(), f.b.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_no_event_within(&events, Duration::from_millis(120));
@@ -3027,6 +3079,7 @@ fn an_edit_while_paused_stays_paused() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -3042,6 +3095,7 @@ fn an_edit_while_paused_stays_paused() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (3, Some(1)));
@@ -3080,6 +3134,7 @@ fn an_edit_does_not_rewind_a_paused_seek() {
         .send(Command::SetQueue {
             paths: vec![f.chirp.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -3090,6 +3145,7 @@ fn an_edit_does_not_rewind_a_paused_seek() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.dc.clone(), f.chirp.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (2, Some(1)));
@@ -3131,6 +3187,7 @@ fn transport_commands_after_an_edit_speak_the_new_queues_indices() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -3139,6 +3196,7 @@ fn transport_commands_after_an_edit_speak_the_new_queues_indices() {
     engine
         .send(Command::UpdateQueue {
             paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (3, Some(1)));
@@ -3555,6 +3613,7 @@ fn an_active_replay_gain_reports_a_software_gain_path_at_unity_volume() {
         .send(Command::SetQueue {
             paths: vec![f.rg_a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -3650,6 +3709,7 @@ fn the_readout_reports_the_source_and_figure_for_each_mode() {
             .send(Command::SetQueue {
                 paths: vec![(*path).clone()],
                 origin: None,
+                fade_into_next: Vec::new(),
             })
             .expect("send");
         engine.send(replay_gain(*mode)).expect("send");
@@ -3681,6 +3741,7 @@ fn redundant_replay_gain_commands_are_silent() {
         .send(Command::SetQueue {
             paths: vec![f.dc.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -3706,6 +3767,7 @@ fn replay_gain_settings_survive_the_transport() {
         .send(Command::SetQueue {
             paths: vec![f.rg_a.clone(), f.rg_b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     let settings = Command::SetReplayGain {
@@ -3830,6 +3892,7 @@ fn play_with_measurements(
         .send(Command::SetQueue {
             paths: queue.to_vec(),
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     for command in commands {
@@ -3943,6 +4006,7 @@ fn an_engine_with_no_measurements_attached_is_unchanged() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -4026,6 +4090,7 @@ fn the_handle_reports_a_measured_source_too() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -4106,6 +4171,7 @@ fn a_shuffled_run_is_gapless_and_bit_identical() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -4116,6 +4182,113 @@ fn a_shuffled_run_is_gapless_and_bit_identical() {
     assert_eq!(next_transport_event(&events), Event::QueueEnded);
     engine.shutdown();
     assert_samples_eq(&collect(output), &want, "shuffled gapless output");
+}
+
+/// **A record is still bit-exact with a crossfade configured** — ADR-0044 §2
+/// stated as a test, and the one this feature could most easily have broken.
+///
+/// The setting means *between records*, and the front end says where that is:
+/// an album played front to back sends `fade_into_next: false` at every
+/// internal seam. So a fade may be switched on, and generous, and the album's
+/// own splice must come out sample-for-sample what it was — the same
+/// assertion `a_shuffled_run_is_gapless_and_bit_identical` makes, with the
+/// feature that could ruin it turned on.
+#[test]
+fn a_record_is_bit_exact_with_a_crossfade_configured() {
+    let f = fixtures();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    let (engine, events, output) = spawn_offline(paced_config(), want.len()).expect("spawn engine");
+    engine
+        .send(Command::SetCrossfade { ms: 8_000 })
+        .expect("send");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+            origin: None,
+            // Two consecutive tracks of one record: the seam between them is
+            // exactly the one a fade may not cross.
+            fade_into_next: vec![false, false],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+    assert_samples_eq(&collect(output), &want, "gapless output under a crossfade");
+}
+
+/// **A fade between records overlaps them, and loses nothing.**
+///
+/// The complement of the test above: with the seam marked fadeable, the two
+/// tracks must *not* concatenate — the output is shorter than the sum, by the
+/// overlap, because the tail of one is summed into the head of the next
+/// instead of being played after it.
+///
+/// The length is the assertion because it is the one thing that is exactly
+/// predictable: equal-power ramps make the samples inside the overlap a
+/// function of both files, but the arithmetic of where they sit is not a
+/// matter of taste.
+#[test]
+fn a_fade_between_records_overlaps_them_by_the_configured_length() {
+    let f = fixtures();
+    let plain = f.a_ref.len() + f.b_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), plain).expect("spawn engine");
+    let ms = 250;
+    engine.send(Command::SetCrossfade { ms }).expect("send");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+            origin: None,
+            fade_into_next: vec![true, false],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+
+    let got = collect(output).len();
+    let overlap = (RATE as usize) * (ms as usize) / 1000 * CHANNELS;
+    let overlap = overlap.min(f.a_ref.len()).min(f.b_ref.len());
+    assert_eq!(
+        got,
+        plain - overlap,
+        "a {ms} ms fade should overlap the two records by {overlap} samples"
+    );
+}
+
+/// **Turning the crossfade off costs bit-perfect nothing.**
+///
+/// Zero is off, and off has to mean the path is what it was — otherwise the
+/// setting would be a one-way door for the claim baz makes loudest.
+#[test]
+fn a_zero_crossfade_leaves_the_run_untouched() {
+    let f = fixtures();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    let (engine, events, output) = spawn_offline(paced_config(), want.len()).expect("spawn engine");
+    engine.send(Command::SetCrossfade { ms: 0 }).expect("send");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+            origin: None,
+            // Fadeable, but there is no fade to have.
+            fade_into_next: vec![true, false],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &want,
+        "a zero crossfade is not a crossfade",
+    );
 }
 
 /// **The queue is never permuted.** The owner's decision, asserted as a
@@ -4135,6 +4308,7 @@ fn changing_the_traversal_never_touches_the_queue() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     assert_eq!(next_queue_changed(&events), (2, None));
@@ -4185,6 +4359,7 @@ fn a_shuffled_pass_plays_every_entry_once_and_then_ends() {
         .send(Command::SetQueue {
             paths: queue,
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -4218,6 +4393,7 @@ fn repeat_all_walks_the_run_again_from_the_top() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -4273,6 +4449,7 @@ fn repeat_one_restarts_natural_ends_but_explicit_next_still_navigates() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine
@@ -4343,6 +4520,7 @@ fn skipping_follows_the_traversal_in_both_directions() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.a.clone(), f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::JumpTo { position: 2 }).expect("send");
@@ -4383,6 +4561,7 @@ fn turning_shuffle_on_mid_run_lets_the_sounding_track_play_out() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone(), f.b.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -4426,6 +4605,7 @@ fn a_downmixed_track_says_so_on_the_signal_path() {
         .send(Command::SetQueue {
             paths: vec![f.surround.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
@@ -4461,6 +4641,7 @@ fn an_ordinary_track_reports_its_two_channels() {
         .send(Command::SetQueue {
             paths: vec![f.a.clone()],
             origin: None,
+            fade_into_next: Vec::new(),
         })
         .expect("send");
     engine.send(Command::Play).expect("send");
