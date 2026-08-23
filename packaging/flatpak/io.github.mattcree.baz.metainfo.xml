@@ -157,6 +157,32 @@
     cannot do are stated on the front page rather than discovered.
   -->
   <releases>
+    <release version="0.5.0" date="2026-08-23" type="stable">
+      <description>
+        <p>
+          The collection can hang as a list — one record per row with its
+          cover, album, artist, year and length — using the same grouping and
+          index rail as the wall.
+        </p>
+        <p>
+          Crossfade between records, off by default, with a switch and a
+          duration in Settings. It never fades between the tracks of one
+          record.
+        </p>
+        <p>
+          baz can find an update again: it had been asking for an endpoint
+          that excludes prereleases, so every version reported itself as the
+          newest. On Linux it now installs the update itself rather than
+          handing over an archive.
+        </p>
+        <p>
+          The background visualisation keeps moving behind every screen
+          instead of freezing, and several interface faults are fixed: a
+          folder can be removed while a scan runs, a long path no longer
+          hides its row's controls, and Settings is no longer reopened into.
+        </p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-08-20" type="stable">
       <description>
         <p>

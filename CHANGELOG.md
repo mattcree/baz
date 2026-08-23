@@ -24,6 +24,8 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-23
+
 ### Added
 
 - **baz updates itself on Windows and macOS, without ever asking you to quit
@@ -35,6 +37,14 @@ Every release is built from a tag by CI, gated on the full test suite — see
   moment it can replace baz cleanly. Saying no starts baz and asks again next
   time. Almost every launch has nothing to ask about, and on those it is
   invisible. ADR-0043 §5.
+
+- **The collection can hang as a list.** A fifth mark in the app bar beside
+  the four density steps hangs the Library as one record per row: its cover at
+  the size the bottom bar draws it, then album, artist, year and length. It
+  uses the wall's own shelves, so the grouping key, the group headings and the
+  index rail are the same in both shapes — a list is the wall with one column.
+  Density still applies, as the row pitch. Any density mark returns you to the
+  wall.
 
 - **A dropped file lands where you are standing.** Dropping music onto an open
   playlist adds it to that playlist, and onto a new list's draft adds it to the
@@ -74,10 +84,60 @@ Every release is built from a tag by CI, gated on the full test suite — see
   and governs both halves — unticked, baz makes no network request at all.
   *Download it now* ends at a file waiting for the next launch rather than at
   a request to close baz.
-- **The Linux archive is unchanged and ships no launcher.** Nothing can unpack
-  a tarball over your installation for you, so Settings still hands the
-  verified download to your desktop. The Flatpak is still updated by the store
-  that owns it.
+- **baz updates itself on Linux now, from Settings.** Press *Check for
+  updates* and then *Update baz*: the download is checked against its published
+  checksum, unpacked, and installed over the copy you are running by the
+  archive's own `install.sh`. You restart baz to use it. This replaces the old
+  answer, which handed you a `.tar.gz` and left the unpacking to you. Inside a
+  Flatpak nothing here runs — `/app` is read only and the store owns the
+  update, which is `docs/adr/0045-shipping-the-flatpak.md`'s subject.
+
+- **Crossfade between records.** Settings → Playback offers an off and five
+  lengths up to twelve seconds, and baz overlaps the end of one record with the
+  start of the next under equal-power ramps. **It never fades between the
+  tracks of a record** — that seam is what gapless exists for, and the engine
+  cannot recognise it, so the front end marks every seam that is not two
+  consecutive tracks of one edition and the queue carries the answer. A skip
+  does not fade: *next* means now. While a fade is configured the signal path
+  reports a mix rather than `bit-perfect`, because inside an overlap the
+  samples are the sum of two files and keeping the badge would be a lie about
+  the one thing baz says loudest. Off by default. ADR-0044.
+
+### Fixed
+
+- **The background visualisation was frozen everywhere but Now playing.** It
+  redrew ten times a second behind every other screen, from a frame nobody was
+  filling: the engine's sample tap was still gated on the room while the
+  backdrop had become weather drawn everywhere. Alive by every measure except
+  the picture.
+- **A pinned section heading no longer paints a slab.** It was a flat opaque
+  wall, which was right until the backdrop moved behind it and wrong after —
+  the collection sits on 40 % wall over a moving picture, and 100 % is a
+  rectangle of a different colour laid across it.
+- **A folder can be removed while a scan is running.** *Remove*, *Up* and
+  *Down* were dead for the duration, and a drive that has gone away is exactly
+  what keeps a scan up — so the control was unavailable precisely when it was
+  wanted. The scan is re-aimed at the new folder list instead.
+- **A long folder path no longer hides that row's controls.** It took the whole
+  line and laid *Remove* out past the right edge: drawn, and unreachable.
+- **Settings is not reopened into.** baz came back up on the screen you left it
+  on, including Settings — a task you had finished rather than a place you were.
+- **The settings scrollbar sits at the edge of the panel** rather than at the
+  form's right edge with a 150 px gutter beyond it.
+- **baz can find an update at all.** Every check baz has ever made asked
+  GitHub for `/releases/latest`, which excludes prereleases and drafts — and
+  every baz tag is `0.*`, which the release workflow marks a prerelease by
+  rule. The endpoint answered `404`, baz read that as *this repository has no
+  releases*, and Settings said *you have the newest* no matter how far behind
+  you were. Installing v0.4.0 and pressing the button reproduced it exactly:
+  *"You have baz 0.4.0, which is the newest"*, with v0.4.1 published. baz now
+  asks for the release list, which holds no opinion about stability, and takes
+  the highest version among the published entries — highest, not most
+  recently created, so a patch backported onto an older line cannot be offered
+  as an upgrade. Drafts are refused here as well as by the endpoint. A live
+  check against the real repository is now a test, `#[ignore]`d so CI stays
+  offline, because no fixture could have caught a defect in which document was
+  asked for.
 
 ## [0.4.1] - 2026-08-20
 
@@ -3198,7 +3258,8 @@ a promise about the next commit.
   output (which is also what puts hardware volume out of reach).
   `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/compare/v0.4.1...main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.5.0...main
+[0.5.0]: https://github.com/mattcree/baz/releases/tag/v0.5.0
 [0.4.1]: https://github.com/mattcree/baz/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mattcree/baz/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mattcree/baz/releases/tag/v0.3.0
