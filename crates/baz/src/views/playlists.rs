@@ -188,6 +188,137 @@ fn band<'a>(wall: &Wall<'_>, group: usize, hang: Grid) -> Element<'a, Message> {
 
 /// One row of cells, at the block's width so a partial last row stays
 /// left-aligned with the full rows above it.
+/// **One playlist as a list row** — its sleeve small at the left, then its
+/// name, what it holds and how long it runs.
+///
+/// The Library's row anatomy (`views::shelf::list_row`) applied to a list
+/// rather than a record, so the two places read as one product in either
+/// shape. The name is a door for the same reason it is there: a row with no
+/// way through is a row you can only play.
+fn list_row<'a>(
+    shelf: &'a Shelf,
+    playlist: &'a PanelRow,
+    hang: Grid,
+    hovered: bool,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let selected = shelf.selection.is(Content::Playlist(playlist.id));
+    let edge = hang.art;
+    let sleeve =
+        crate::views::playlist_sleeve_of(shelf, playlist.id, &playlist.art, &playlist.name, edge);
+    let ink = if selected || hovered {
+        room.paper
+    } else {
+        room.paper_dim
+    };
+    let name: Element<'a, Message> = button(
+        text(playlist.name.clone())
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(ink)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::OpenPlaylist(playlist.id))
+    .into();
+
+    let meta = |content: String, width: Length| {
+        container(
+            text(content)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(width)
+        .clip(true)
+        .align_x(alignment::Horizontal::Right)
+    };
+    let held = if playlist.entries == 1 {
+        "1 track".to_owned()
+    } else {
+        format!("{} tracks", playlist.entries)
+    };
+    let runs_for = playlist.seconds.map_or_else(String::new, |seconds| {
+        crate::vm::format_duration(std::time::Duration::from_secs(seconds))
+    });
+
+    mouse_area(
+        button(
+            container(
+                row![
+                    container(sleeve)
+                        .width(Length::Fixed(edge))
+                        .height(Length::Fixed(edge)),
+                    container(name).width(Length::Fill).clip(true),
+                    meta(held, Length::Fixed(LIST_HELD_W)),
+                    meta(runs_for, Length::Fixed(LIST_TIME_W)),
+                ]
+                .spacing(theme::GAP_MD)
+                .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(hang.row_h))
+            .align_y(alignment::Vertical::Center),
+        )
+        .padding(0)
+        .style(move |_theme, status| theme::list_row(room, status, selected, false))
+        .on_press(Message::ContentPressed(Content::Playlist(playlist.id))),
+    )
+    .on_enter(Message::PlaylistTileEntered(playlist.id))
+    .on_exit(Message::PlaylistTileLeft(playlist.id))
+    .into()
+}
+
+/// **One of the two making verbs, as a list row.** The wall draws them as
+/// ghost tiles; a list has no tile to ghost, so they are a row with the same
+/// mark and the same word.
+fn ghost_row(
+    hang: Grid,
+    glyph: icon::Glyph,
+    word: &'static str,
+    press: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    mouse_area(
+        button(
+            container(
+                row![
+                    container(
+                        iced_image(icon::handle(glyph))
+                            .width(Length::Fixed(theme::ICON_PX))
+                            .height(Length::Fixed(theme::ICON_PX))
+                            .opacity(theme::GLYPH_OPACITY),
+                    )
+                    .width(Length::Fixed(hang.art))
+                    .height(Length::Fixed(hang.art))
+                    .align_x(alignment::Horizontal::Center)
+                    .align_y(alignment::Vertical::Center),
+                    text(word)
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_dim),
+                ]
+                .spacing(theme::GAP_MD)
+                .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(hang.row_h))
+            .align_y(alignment::Vertical::Center),
+        )
+        .padding(0)
+        .style(move |_theme, status| theme::list_row(room, status, false, false))
+        .on_press(press),
+    )
+    .into()
+}
+
+/// What a playlist holds, right-aligned.
+const LIST_HELD_W: f32 = 88.0;
+/// `h:mm:ss` at its widest.
+const LIST_TIME_W: f32 = 72.0;
+
 fn cells_row<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
@@ -197,6 +328,36 @@ fn cells_row<'a>(
     first: usize,
     len: usize,
 ) -> Element<'a, Message> {
+    // **One row per list when the collection is hung as a list.** The shape is
+    // the whole place's, not the Library's alone: switching to a list and
+    // finding Playlists still a wall — or, as it was until this was written,
+    // finding its sleeves collapsed to 44 px because the grid handed it one
+    // column and a thumbnail's art edge — is the control not meaning what it
+    // says. The owner, 2026-08-23: *"please implement the grid view in
+    // playlists."*
+    if hang.layout == crate::shelf::Layout::List {
+        return match wall.cells.get(first) {
+            Some(Cell::New) => ghost_row(
+                hang,
+                icon::Glyph::Plus,
+                "New playlist",
+                Message::NewPlaylistOpen,
+            ),
+            Some(Cell::Smart) => ghost_row(
+                hang,
+                icon::Glyph::Queue,
+                "New smart playlist",
+                Message::NewSmartPlaylistOpen,
+            ),
+            Some(Cell::List(playlist)) => list_row(
+                shelf,
+                playlist,
+                hang,
+                playlists.hovered == Some(playlist.id),
+            ),
+            None => Space::new().height(Length::Fixed(hang.row_h)).into(),
+        };
+    }
     let mut cells = row![].spacing(hang.gutter);
     for offset in 0..len {
         match wall.cells.get(first + offset) {

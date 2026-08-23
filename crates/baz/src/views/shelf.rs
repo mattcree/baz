@@ -185,23 +185,13 @@ pub(crate) fn view<'a>(
         .and_then(|index| runs.get(index))
         .copied();
     let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
-    // **The column heads stand outside the scrollable**, for two reasons and
-    // both of them are bugs avoided. Inside it they were a child the
-    // virtualisation knew nothing about, so every run sat one head lower than
-    // the offset arithmetic believed and the last spacer came up short — the
-    // wall's whole geometry is `run.top` in content coordinates, and a
-    // surprise child at the top invalidates all of it. And they name the
-    // columns, so they belong to the frame rather than to the content: a
-    // heading that scrolled away would leave the columns unlabelled exactly
-    // when a listener has read far enough to need them.
-    let wall: Element<'a, Message> = if hang.layout == crate::shelf::Layout::List {
-        column![list_head(hang), wall]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    } else {
-        wall.into()
-    };
+    // **No column heads.** They were drawn once, outside the scrollable, and
+    // the owner had them removed the same day: *"can you remove the headers on
+    // the 'table' in the library"*. A row of four small caps over a collection
+    // of records is furniture explaining what the covers, the names and the
+    // times already say, and it made the place read as a spreadsheet rather
+    // than a shelf. The columns keep their measures; nothing labels them.
+    let wall: Element<'a, Message> = wall.into();
     // **The collection is one Tab stop, and the arrows move inside it.**
     //
     // `crate::focus`'s first landing made the frame reachable and stopped
@@ -397,27 +387,35 @@ fn list_row<'a>(
         })
     };
 
-    let edition = vm::selected_edition(album, None);
-    let length = edition
-        .map(|edition| {
-            edition
-                .tracks
-                .iter()
-                .filter_map(|track| track.duration)
-                .sum::<std::time::Duration>()
-        })
-        .filter(|total| !total.is_zero())
-        .map_or_else(String::new, vm::format_duration);
+    let length = playing_time(album);
+
+    // **The title is a door** (the owner, 2026-08-23: *"the list view should
+    // allow you to click through to the album, not just play it"*).
+    //
+    // A row had no way through. The wall's tile carries Open in its hover veil,
+    // and a veil over a 64 px row is not available — so the title takes the
+    // job, which is what a title does in every list there has ever been. The
+    // row itself is unchanged: press selects, press again plays.
+    //
+    // `word_button` is the same paint the ARTIST group header wears, and the
+    // record page's `Artist ›` breadcrumb before it — doors in this product
+    // look like this one.
+    let title: Element<'a, Message> = button(
+        text(album.title.clone().unwrap_or_else(|| "Untitled".to_owned()))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(title_ink)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::AlbumClicked(album.id))
+    .into();
 
     let cells = row![
         cover,
         dot,
-        cell(
-            album.title.clone().unwrap_or_else(|| "Untitled".to_owned()),
-            Length::Fill,
-            title_ink,
-            false,
-        ),
+        container(title).width(Length::Fill).clip(true),
         cell(
             album.artist.label().to_owned(),
             Length::FillPortion(LIST_ARTIST_PORTION),
@@ -456,67 +454,21 @@ fn list_row<'a>(
     .into()
 }
 
-/// **The list's column heads**, drawn once above the rows rather than per
-/// group: they name the columns, and a name repeated at every letter would be
-/// furniture rather than a heading.
-fn list_head(hang: Grid) -> Element<'static, Message> {
-    let room = theme::active();
-    let head = |label: &'static str, width: Length, right: bool| {
-        container(
-            text(label)
-                .size(theme::SIZE_CAPTION)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .color(room.paper_muted)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(width)
-        .clip(true)
-        .align_x(if right {
-            alignment::Horizontal::Right
-        } else {
-            alignment::Horizontal::Left
+/// **How long a record runs**, for the list's last column.
+///
+/// The selected edition's tracks summed, and empty where the scan could not
+/// read a duration cheaply — a blank cell is honest and a `0:00` is not.
+fn playing_time(album: &vm::AlbumVm) -> String {
+    vm::selected_edition(album, None)
+        .map(|edition| {
+            edition
+                .tracks
+                .iter()
+                .filter_map(|track| track.duration)
+                .sum::<std::time::Duration>()
         })
-    };
-    // **The head mirrors the scrollable's frame exactly, in two steps.**
-    //
-    // The rows live in a block of `block_width`, centred inside the
-    // scrollable's content area — which is `hang.width`, the measured width
-    // already less [`theme::WALL_RESERVE`] for the scrollbar's lane and the
-    // rail's. The head sits outside the scrollable, so its `Fill` is the
-    // *whole* viewport and neither number matches on its own: centring in
-    // `Fill` put the head 56 px right of its own columns, and left-aligning it
-    // there would lose the block's margin instead.
-    //
-    // So: a frame of `hang.width` pinned left, and the block centred inside
-    // it. Every column head then stands over its column at every width. The
-    // owner, 2026-08-23: *"the column names do not line up with the columns"*
-    // — and *"make sure you are using the UI as the cue here"*, which is how
-    // both halves of this were found.
-    container(
-        container(
-            container(
-                row![
-                    Space::new().width(Length::Fixed(hang.art)),
-                    Space::new().width(Length::Fixed(theme::GAP_MD)),
-                    head("ALBUM", Length::Fill, false),
-                    head("ARTIST", Length::FillPortion(LIST_ARTIST_PORTION), false),
-                    head("YEAR", Length::Fixed(LIST_YEAR_W), true),
-                    head("TIME", Length::Fixed(LIST_TIME_W), true),
-                ]
-                .spacing(theme::GAP_MD)
-                .align_y(alignment::Vertical::Center),
-            )
-            .width(Length::Fixed(hang.block_width()))
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fixed(hang.width))
-        .align_x(alignment::Horizontal::Center),
-    )
-    .width(Length::Fill)
-    .align_x(alignment::Horizontal::Left)
-    .into()
+        .filter(|total| !total.is_zero())
+        .map_or_else(String::new, vm::format_duration)
 }
 
 /// How much of the row the artist column takes beside the album's `Fill`.
