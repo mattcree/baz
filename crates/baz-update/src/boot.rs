@@ -137,9 +137,15 @@ fn accepted(version: &str) -> bool {
         .set_level(rfd::MessageLevel::Info)
         .set_title("baz")
         .set_description(format!(
+            // **"when it was downloaded", not "it has been checked".** The
+            // digest is re-checked here, but against a marker sitting in the
+            // same user-writable directory as the installer, so it proves the
+            // download is intact and not that it is the published one (see
+            // `stage`'s docs). This dialog is the last thing a listener reads
+            // before an elevation prompt, so it may claim only what is true.
             "baz {version} is ready to install.\n\n\
-             It has already been downloaded and checked against its published \
-             checksum. You are running {running}.\n\n\
+             It was checked against its published checksum when it was \
+             downloaded. You are running {running}.\n\n\
              Install it now? baz will start once the installer has finished."
         ))
         .set_buttons(rfd::MessageButtons::YesNo)

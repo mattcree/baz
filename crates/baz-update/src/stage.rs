@@ -8,12 +8,35 @@
 //!
 //! [`crate::fetch_verified`] already proved these bytes are the ones published
 //! beside the release's own `SHA256SUMS`, and then it put them in a
-//! **user-writable cache directory** and let a session end. Anything on the
-//! machine could have touched the file in between; the launcher that picks it
-//! up is about to hand it to `msiexec`. So the digest travels in the marker
-//! and [`ready`] hashes the file again before it is offered. Hashing 190 MB
-//! costs a fraction of a second and happens only on the one launch where an
-//! update is actually waiting.
+//! **user-writable cache directory** and let a session end. So the digest
+//! travels in the marker and [`ready`] hashes the file again before it is
+//! offered. Hashing 190 MB costs a fraction of a second and happens only on
+//! the one launch where an update is actually waiting.
+//!
+//! # What the second check proves, and what it does not
+//!
+//! **It is an integrity check, not a provenance one**, and this module said
+//! otherwise until 2026-08-23 — *"anything on the machine could have touched
+//! the file in between"*, as though re-hashing answered that. It does not.
+//! The digest is read back out of **the same user-writable directory as the
+//! payload**, so whatever could rewrite the installer could rewrite the marker
+//! beside it, and the pair would still agree. `ready` would offer it, and on
+//! Windows the launcher hands it to `msiexec` with a per-machine scope and an
+//! elevation prompt.
+//!
+//! What it does catch is every way a stage goes bad on its own: a download
+//! truncated by a session that was killed mid-write, a cache a disk corrupted,
+//! a partial copy. Those are the realistic failures and it is worth having for
+//! them — `a_payload_that_no_longer_matches_its_marker_is_refused`.
+//!
+//! **The gap is pinned as a test**
+//! (`a_rewritten_pair_is_offered_because_the_digest_has_no_provenance`) rather
+//! than described here, so it stays true. Closing it needs one of two things
+//! that cost money or privilege: a signed installer, so `msiexec` checks a
+//! publisher this file cannot forge, or a staging directory an unprivileged
+//! process cannot write. ADR-0043 §4 defers signing on cost; until one of them
+//! lands, nothing here may tell a listener the file has been *verified* at the
+//! moment it is offered — only that it was verified when it was downloaded.
 //!
 //! That second check is also what makes a *stale* stage harmless rather than
 //! dangerous: a truncated download from a session that was killed mid-write
@@ -27,7 +50,7 @@
 //! update nobody accepted should not sit in a backup forever. The cache
 //! directory is the one place with both properties.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The marker file's name, beside the installer it describes.
 const MARKER: &str = "pending.toml";
@@ -108,11 +131,27 @@ pub fn parse(text: &str) -> Option<Pending> {
 /// A platform with no cache directory, or one that will not take the file.
 pub fn hold(pending: &Pending, bytes: &[u8]) -> Result<PathBuf, String> {
     let dir = dir().ok_or_else(|| "this platform has no cache directory".to_owned())?;
+    hold_in(&dir, pending, bytes)
+}
+
+/// [`hold`], into a directory the caller names.
+///
+/// The seam the round trip is tested through. Every function here reached the
+/// staging directory by calling [`dir`], which is `dirs::cache_dir()` — so the
+/// whole hold → pending → ready → discard cycle could only be exercised by
+/// writing into the real user's cache, and it therefore was not exercised at
+/// all: `hold`, `pending`, `ready` and `discard` had no test callers between
+/// them (audit finding 6, 2026-08-23).
+///
+/// # Errors
+///
+/// Any I/O error creating the directory or writing the payload or the marker.
+pub fn hold_in(dir: &Path, pending: &Pending, bytes: &[u8]) -> Result<PathBuf, String> {
     // An older stage is not merged with a newer one — it is replaced, so a
     // superseded installer never sits beside a current one waiting to be
     // picked by a name comparison.
-    discard();
-    std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    discard_in(dir);
+    std::fs::create_dir_all(dir).map_err(|error| format!("{}: {error}", dir.display()))?;
     let path = dir.join(&pending.file_name);
     std::fs::write(&path, bytes).map_err(|error| format!("{}: {error}", path.display()))?;
     let marker = dir.join(MARKER);
@@ -129,8 +168,13 @@ fn marker_bytes(pending: &Pending) -> Vec<u8> {
 /// **What is waiting, if anything.**
 #[must_use]
 pub fn pending() -> Option<Pending> {
-    let text = std::fs::read_to_string(dir()?.join(MARKER)).ok()?;
-    parse(&text)
+    pending_in(&dir()?)
+}
+
+/// [`pending`], from a directory the caller names.
+#[must_use]
+pub fn pending_in(dir: &Path) -> Option<Pending> {
+    parse(&std::fs::read_to_string(dir.join(MARKER)).ok()?)
 }
 
 /// **The staged installer, if it is still exactly what was staged.**
@@ -140,7 +184,13 @@ pub fn pending() -> Option<Pending> {
 /// and every one of them means *do not offer this*.
 #[must_use]
 pub fn ready(pending: &Pending) -> Option<PathBuf> {
-    let path = dir()?.join(&pending.file_name);
+    ready_in(&dir()?, pending)
+}
+
+/// [`ready`], in a directory the caller names.
+#[must_use]
+pub fn ready_in(dir: &Path, pending: &Pending) -> Option<PathBuf> {
+    let path = dir.join(&pending.file_name);
     let bytes = std::fs::read(&path).ok()?;
     crate::digest_matches(&bytes, &pending.sha256).then_some(path)
 }
@@ -152,13 +202,18 @@ pub fn ready(pending: &Pending) -> Option<PathBuf> {
 /// directory that will not delete is not a thing to tell a listener about.
 pub fn discard() {
     if let Some(dir) = dir() {
-        let _ = std::fs::remove_dir_all(dir);
+        discard_in(&dir);
     }
+}
+
+/// [`discard`], for a directory the caller names.
+pub fn discard_in(dir: &Path) {
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Pending, marker, parse};
+    use super::{Pending, discard_in, hold_in, marker, parse, pending_in, ready_in};
 
     fn sample() -> Pending {
         Pending {
@@ -218,5 +273,100 @@ mod tests {
         ] {
             assert_eq!(parse(text), None, "{text:?} was accepted");
         }
+    }
+
+    /// **The whole cycle, in a directory of its own.** Audit finding 6.
+    ///
+    /// `hold` → `pending` → `ready` → `discard` had no test callers between
+    /// them, because every one of them found its directory through
+    /// `dirs::cache_dir()` and exercising them meant writing into the real
+    /// user's cache. This is the round trip that could not be written.
+    #[test]
+    fn a_stage_survives_being_written_and_picked_up_again() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes = b"an installer, near enough".as_slice();
+        let mut waiting = sample();
+        waiting.sha256 = sha256_of(bytes);
+
+        let path = hold_in(dir.path(), &waiting, bytes).expect("hold");
+        assert!(path.exists(), "the payload is where hold said it is");
+
+        let read_back = pending_in(dir.path()).expect("a marker is waiting");
+        assert_eq!(read_back.version, waiting.version);
+        assert_eq!(read_back.sha256, waiting.sha256);
+        assert_eq!(
+            ready_in(dir.path(), &read_back).as_deref(),
+            Some(path.as_path()),
+            "an untouched stage is offered"
+        );
+
+        discard_in(dir.path());
+        assert!(
+            pending_in(dir.path()).is_none(),
+            "and discard leaves nothing"
+        );
+    }
+
+    /// **A payload that changed under us is not offered.**
+    ///
+    /// This is what the second digest check is *for*: a download truncated by
+    /// a session that died mid-write, or a cache a disk corrupted.
+    #[test]
+    fn a_payload_that_no_longer_matches_its_marker_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bytes = b"the whole installer".as_slice();
+        let mut waiting = sample();
+        waiting.sha256 = sha256_of(bytes);
+        let path = hold_in(dir.path(), &waiting, bytes).expect("hold");
+
+        std::fs::write(&path, b"the whole install").expect("truncate it");
+        assert!(
+            ready_in(dir.path(), &waiting).is_none(),
+            "a truncated payload must not be offered"
+        );
+    }
+
+    /// **And what the second check does *not* prove.**
+    ///
+    /// The digest is read back out of the same user-writable directory as the
+    /// payload, so anything able to rewrite one can rewrite the other and the
+    /// pair still agrees. That is provenance the check does not give, the
+    /// module said it did until 2026-08-23, and the fix is a signature or a
+    /// directory the user cannot write — neither of which is free. Pinned as
+    /// a test so the limitation is a fact in the suite rather than a sentence
+    /// in a comment.
+    #[test]
+    fn a_rewritten_pair_is_offered_because_the_digest_has_no_provenance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut waiting = sample();
+        waiting.sha256 = sha256_of(b"the published installer");
+        hold_in(dir.path(), &waiting, b"the published installer").expect("hold");
+
+        // Stand in for anything with write access to the cache.
+        let substituted = b"something else entirely".as_slice();
+        std::fs::write(dir.path().join(&waiting.file_name), substituted).expect("swap");
+        let mut forged = waiting.clone();
+        forged.sha256 = sha256_of(substituted);
+        std::fs::write(dir.path().join(super::MARKER), marker(&forged)).expect("forge");
+
+        let read_back = pending_in(dir.path()).expect("a marker is waiting");
+        assert!(
+            ready_in(dir.path(), &read_back).is_some(),
+            "the pair agrees, so it is offered — this is the gap, not a bug in the test"
+        );
+    }
+
+    fn sha256_of(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hasher
+            .finalize()
+            .iter()
+            .fold(String::new(), |mut acc, byte| {
+                use std::fmt::Write as _;
+                let _ = write!(acc, "{byte:02x}");
+                acc
+            })
     }
 }

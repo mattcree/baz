@@ -258,7 +258,23 @@ a background transfer costs them nothing and interrupts nothing.
 against the release's published `SHA256SUMS`. Then the file sits in a
 user-writable cache directory across a reboot, and the thing that picks it up
 is about to hand it to `msiexec`. So the digest travels in the marker and the
-launcher hashes the file again. That second check is also what makes a
+launcher hashes the file again.
+
+**Amended 2026-08-24: the second proof is integrity, not provenance**, and
+this section implied otherwise. The digest is read back out of the *same
+user-writable directory* as the payload, so anything able to rewrite the
+installer can rewrite the marker beside it and the pair still agrees — the
+launcher then hands it to `msiexec` at `perMachine` scope behind an elevation
+prompt, with baz's own dialog vouching for it. The check earns its place
+against the realistic failure, a stage truncated by a session that was killed
+mid-write, and it is worth keeping for that. It does not make the offer safe
+against a hostile local process, and §4's deferral of signing is therefore
+also a deferral of *this*: an unsigned installer staged where its user can
+write it has no publisher for `msiexec` to check. Until signing lands, or the
+stage moves somewhere unprivileged code cannot write, the launcher says only
+that the download *was checked when it was downloaded*. The gap is pinned in
+`stage.rs` as `a_rewritten_pair_is_offered_because_the_digest_has_no_provenance`
+so it stays a fact rather than a paragraph. That second check is also what makes a
 half-written stage — a session killed mid-download — harmless: it fails, it is
 thrown away, and the next session stages it again.
 
