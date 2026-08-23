@@ -99,6 +99,27 @@ pub trait Sink {
     /// destination.
     fn drain_buffered(&mut self) {}
 
+    /// **Has this sink given up on its destination?**
+    ///
+    /// The other half of [`Self::drain_buffered`]'s contract above. A sink
+    /// that bounds its wait has to be able to *say* that it gave up, or the
+    /// engine goes on handing samples to a device nobody is listening to and
+    /// the listener sees a progress bar advancing over silence.
+    ///
+    /// `DeviceSink` carried exactly this as an inherent method and nothing
+    /// outside its own tests ever called it — because the engine is generic
+    /// over this trait and could not see it. Audit finding 1, 2026-08-23.
+    ///
+    /// **Terminal, not transient.** Once true it stays true: the stream is
+    /// gone and only a reopen replaces it. So a caller may act on the first
+    /// `true` and stop asking.
+    ///
+    /// The default is `false`, correct for every sink that cannot fail —
+    /// [`OfflineSink`]'s `write` is its own destination.
+    fn failed(&self) -> bool {
+        false
+    }
+
     /// Ask the output to carry a linear `gain` in **its own** attenuator, so
     /// that baz does not have to scale the samples.
     ///
@@ -276,5 +297,21 @@ mod tests {
         sink.discard_buffered();
         sink.write(&[5.0, 6.0]);
         assert_eq!(sink.samples(), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    }
+
+    /// **A sink that cannot fail never says it has**, which is what stops the
+    /// engine's new terminal check from ending every offline run.
+    ///
+    /// The engine calls `failed()` once per pump iteration and stops the run
+    /// on `true` (audit finding 1). The whole integration suite drives
+    /// `spawn_offline`, so a default of `true` — or an `OfflineSink` that
+    /// inherited one — would end every run at the first block and take the
+    /// suite with it. That is the aggregate guard; this is the direct one.
+    #[test]
+    fn a_sink_that_cannot_fail_reports_that_it_has_not() {
+        let mut sink = OfflineSink::with_capacity(8);
+        assert!(!sink.failed(), "an offline sink has no destination to lose");
+        sink.write(&[0.1, 0.2]);
+        assert!(!sink.failed(), "and writing to it does not change that");
     }
 }

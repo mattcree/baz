@@ -723,6 +723,14 @@ fn offer(
 const WRITE_STALL_BUDGET: Duration = Duration::from_secs(5);
 
 impl Sink for DeviceSink {
+    /// Whether this stream has been given up on — either cpal reported an
+    /// error, or [`WRITE_STALL_BUDGET`] expired against a device that stopped
+    /// draining. The inherent method of the same name has been here all along;
+    /// what it lacked was a way for the engine to ask (audit finding 1).
+    fn failed(&self) -> bool {
+        Self::failed(self)
+    }
+
     /// Push samples toward the device, sleeping on backpressure while the
     /// callback drains the ring. Runs on the engine's consumer (pump)
     /// thread — see the module docs for why blocking is acceptable here.

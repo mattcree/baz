@@ -797,6 +797,12 @@ fn open_hardware_volume(card_index: i32) -> (Option<Mixer>, Option<HardwareVolum
 }
 
 impl Sink for ExclusiveSink {
+    /// Whether this stream has been given up on — `WRITE_STALL_BUDGET` expired
+    /// against a device that stopped accepting frames, or a recovery failed.
+    fn failed(&self) -> bool {
+        self.failed
+    }
+
     /// Convert and hand `samples` to the device, waiting for space rather than
     /// for a callback.
     ///

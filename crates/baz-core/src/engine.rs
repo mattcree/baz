@@ -1098,6 +1098,14 @@ impl Sink for Output {
         }
     }
 
+    fn failed(&self) -> bool {
+        match self {
+            Self::Shared(sink) => sink.failed(),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.failed(),
+        }
+    }
+
     fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
         match self {
             Self::Shared(sink) => sink.negotiate_rate(desired),
@@ -1802,6 +1810,19 @@ impl<S: Sink> Control<S> {
             &self.visualization,
         );
         self.report_session(false);
+        // **A sink that has given up is not a sink to keep feeding.**
+        //
+        // `Sink::failed` is terminal: cpal reported an error, or the write
+        // budget expired against a device that stopped draining. Without this
+        // the engine went on handing blocks to a dead stream and the listener
+        // watched a progress bar advance over silence, with nothing said.
+        // The flag existed on `DeviceSink` and nothing could read it, because
+        // the engine is generic over the trait and the trait did not have it.
+        // Audit finding 1, 2026-08-23.
+        if self.sink.failed() {
+            self.fail_the_stream();
+            return;
+        }
         if self.session.as_ref().is_some_and(Session::complete) {
             if self.session.as_ref().is_some_and(Session::superseded) {
                 // Edited over, and it ran out of queue before it reached the
@@ -1861,6 +1882,29 @@ impl<S: Sink> Control<S> {
         } else {
             thread::sleep(STARVED_POLL);
         }
+    }
+
+    /// **The output died under us**: say which track it took, and stop.
+    ///
+    /// Reported as [`Event::TrackFailed`] because that is what happened — the
+    /// track stopped playing and the reason is not the file's — and because a
+    /// front end already surfaces it. A new event would be a wire change for a
+    /// case every listener reads the same way.
+    ///
+    /// The run is stopped rather than skipped: the next track would meet the
+    /// same dead stream, and walking the whole queue announcing failures is
+    /// noise on top of silence. Reopening the output is a listener's act — a
+    /// device change, or restarting baz.
+    fn fail_the_stream(&mut self) {
+        let path = self.playing_track().map(|(_, path)| path);
+        self.stop_session();
+        if let Some(path) = path {
+            let _ = self.events.send(Event::TrackFailed {
+                path,
+                reason: "the audio device stopped accepting audio".to_owned(),
+            });
+        }
+        let _ = self.events.send(Event::Stopped);
     }
 
     fn handle(&mut self, command: Command) {
