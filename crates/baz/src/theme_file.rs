@@ -150,36 +150,23 @@ pub fn resolve(selection: &str) -> Result<&'static Palette, String> {
 }
 
 pub fn preview(selection: &str) -> Result<Preview, String> {
-    let palette = match selection {
-        "closing-time" => theme::CLOSING_TIME,
-        "stone" => theme::STONE,
-        "plaster" => theme::PLASTER,
-        "reading-room" => theme::READING_ROOM,
-        "blue-hour" => theme::BLUE_HOUR,
-        "sea-glass" => theme::SEA_GLASS,
-        other => {
-            let id = custom_id(other).ok_or_else(|| format!("unknown selected theme {other:?}"))?;
-            let dir = themes_dir().ok_or_else(|| "no config directory is available".to_owned())?;
-            let path = dir.join(format!("{id}.json"));
-            let text = std::fs::read_to_string(&path)
-                .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-            let (doc, palette) = parse(&text)?;
-            if doc.id != id {
-                return Err(format!("document id {:?} does not match {id:?}", doc.id));
-            }
-            return Ok(Preview {
-                name: doc.name,
-                colors: [
-                    palette.recess,
-                    palette.wall,
-                    palette.plinth,
-                    palette.plinth_lit,
-                    palette.paper,
-                    palette.lamp,
-                ],
-            });
-        }
-    };
+    // **One list of rooms, not two.** This carried its own `match` with six
+    // built-in arms while `resolve` carried sixteen, so every room added after
+    // it fell through to the custom-document branch, failed `custom_id`, and
+    // Settings drew *"Selected theme unavailable: unknown selected theme"* in
+    // the alert ink — beside a room the listener was already standing in,
+    // because `resolve` had put them there. Ten of the sixteen, each also
+    // losing its swatch strip.
+    //
+    // `resolve` is total over every built-in and every readable custom
+    // document; `export_document` leans on it for exactly this reason. Routing
+    // through it means a room added to `Room::ALL` cannot be missing here,
+    // because there is no second list to forget to update.
+    //
+    // The name comes back with the palette: a built-in's is its own, and a
+    // custom document's is written over it when the document is parsed (see
+    // `resolve`), so there is nothing left for this function to look up.
+    let palette = resolve(selection)?;
     Ok(Preview {
         name: palette.name.to_owned(),
         colors: [
@@ -304,7 +291,18 @@ fn validate_id(id: &str) -> Result<(), String> {
 
 fn color(field: &str, value: &str, alpha: bool) -> Result<Color, String> {
     let expected = if alpha { 9 } else { 7 };
-    if value.len() != expected || !value.starts_with('#') {
+    // **`len()` is bytes and the format is characters**, and the slicing below
+    // is by byte index. `"#aé123"` is seven bytes, satisfies a check written
+    // for seven characters, and then `&value[1..3]` lands inside `é` — *byte
+    // index 3 is not a char boundary* — which is a panic, not an error.
+    //
+    // It reaches here from `import`, where the document is pasted or picked,
+    // and from `resolve` at launch. The second is the bad one: `theme::install`
+    // runs in `app::run` before a window exists and `custom:<id>` is persisted,
+    // so one accented byte in a colour is a crash on every start until somebody
+    // finds and hand-edits the JSON. This module's promise is that a typo is
+    // diagnosed rather than acted on (module docs), and a panic is neither.
+    if !value.is_ascii() || value.len() != expected || !value.starts_with('#') {
         return Err(format!(
             "{field} must be {}",
             if alpha { "#RRGGBBAA" } else { "#RRGGBB" }
@@ -501,6 +499,18 @@ mod tests {
                 "{room:?} has no entry in BUILTINS, so Settings cannot offer it"
             );
         }
+        // **Sweep every consumer of the list, not the first one.** This test
+        // swept `resolve` and passed while `preview` knew six of the sixteen,
+        // so Settings called a room unavailable in the alert ink while the
+        // listener stood in it. Settings calls both for the same id, so both
+        // belong here — and the next reader added to this module belongs here
+        // too, which is the point of saying so.
+        for (id, _) in BUILTINS {
+            assert!(
+                preview(id).is_ok(),
+                "Settings offers {id:?} and preview cannot describe it"
+            );
+        }
         assert_eq!(
             BUILTINS.len(),
             Room::ALL.len(),
@@ -538,6 +548,23 @@ mod tests {
         assert!(
             parse(&serde_json::to_string(&doc).expect("test document serializes"))
                 .expect_err("unsafe colour must fail")
+                .contains("colors.wall")
+        );
+        // **A colour whose bytes are not its characters.** Seven bytes, six
+        // characters, and the byte slice that reads the first pair lands inside
+        // the `é`. Before 2026-08-23 this was a panic rather than a message —
+        // and because `resolve` runs before the window exists, a persisted
+        // `custom:<id>` made it a crash on every launch.
+        doc = document_from_palette("safe-room", &theme::CLOSING_TIME);
+        doc.colors.wall = "#aé123".to_owned();
+        assert_eq!(
+            doc.colors.wall.len(),
+            7,
+            "the fixture must pass a byte-length check"
+        );
+        assert!(
+            parse(&serde_json::to_string(&doc).expect("test document serializes"))
+                .expect_err("a non-ASCII colour must be refused, not panic")
                 .contains("colors.wall")
         );
         doc = document_from_palette("safe-room", &theme::CLOSING_TIME);

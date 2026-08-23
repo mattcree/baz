@@ -376,7 +376,9 @@ fn debug_section(
     section.push(log).into()
 }
 
-/// Six coordinated built-ins plus the bounded local JSON extension surface.
+/// Sixteen coordinated built-ins plus the bounded local JSON extension
+/// surface. It said six until 2026-08-23, two lines above a heading that
+/// already read *Sixteen coordinated rooms*.
 #[expect(
     clippy::too_many_lines,
     reason = "one small form is clearest as one composition beside its validation workflow"
