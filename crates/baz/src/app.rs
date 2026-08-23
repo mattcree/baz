@@ -13244,6 +13244,29 @@ fn persist(change: impl FnOnce(&mut config::Config)) {
         crate::baz_log!("[config] no config directory on this system; nothing is being remembered");
         return;
     };
+    // **A document baz could not read is not a document baz may overwrite.**
+    //
+    // `config::load` answers a parse failure with the defaults, which is right
+    // for reading — one bad key must not stop baz starting. It was wrong here:
+    // this read the defaults, applied one field, and wrote the complete
+    // document back, so a single unbalanced quote plus any later volume nudge
+    // cost a listener their folders, theme, equaliser curves, Vibe curves,
+    // crossfade and last place. `persist` fires from about twenty sites,
+    // including `last_place` on every clean quit, so the window was every
+    // session. Audit finding 2, 2026-08-23.
+    //
+    // Refusing is the whole fix: the file stays exactly as the listener left
+    // it, and it is the only copy of what they chose. Settings not being
+    // remembered for a session is a smaller loss than settings being deleted,
+    // and the log line says which key to go and look at.
+    if let Err(why) = config::readable(&path) {
+        crate::baz_log!(
+            "[config] {} could not be read ({why}); nothing will be written over it \
+             until it parses — this session's changes are not being remembered",
+            path.display()
+        );
+        return;
+    }
     let stored = config::load(&path);
     let mut config = stored.clone();
     change(&mut config);

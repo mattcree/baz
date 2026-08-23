@@ -1140,7 +1140,36 @@ pub fn store(path: &Path, config: &Config) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, config.to_toml())
+    // **Not `std::fs::write`**, which truncates and then writes: a kill or a
+    // full disk in between leaves an empty `config.toml`, and the next setting
+    // a listener touches writes the defaults over the wreckage — losing their
+    // folders, theme, equaliser curves, crossfade and everything else at once
+    // (audit finding 2, 2026-08-23). The disk-full case is not hypothetical:
+    // the updater stages a 154 MB archive into the cache on the same
+    // filesystem. `durable::write` renames a synced temp file into place, so a
+    // crash leaves either the old document or the whole new one.
+    baz_core::durable::write(path, config.to_toml().as_bytes())
+}
+
+/// **Could the document at `path` be read?**
+///
+/// [`Config::from_toml`] answers a parse failure with the defaults, which is
+/// the right answer for *reading* — one broken key must not stop baz starting.
+/// It is the wrong answer for *writing*: a caller that reads the defaults,
+/// changes one field and stores the result has silently replaced a document it
+/// could not understand. So a writer asks this first.
+///
+/// A file that is absent is readable — there is nothing to lose, and this is
+/// every first run.
+///
+/// # Errors
+///
+/// The parse error, when there is a file and it is not TOML.
+pub fn readable(path: &Path) -> Result<(), toml::de::Error> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => text.parse::<toml::Table>().map(|_| ()),
+        Err(_) => Ok(()),
+    }
 }
 
 /// **The launcher reads this file too, and the two readers have to agree.**
@@ -2220,5 +2249,56 @@ preamp_centidb = -9000
         // …and it does not survive a rewrite, so the key leaves a listener's
         // file the first time baz saves anything.
         assert!(!stale.to_toml().contains("run_column"));
+    }
+
+    /// **A document baz cannot read is not a document baz may overwrite.**
+    ///
+    /// `from_toml` answering with the defaults is right for reading and was
+    /// being used for writing too: read the defaults, change one field, store
+    /// the whole thing. One unbalanced quote plus the next volume nudge and a
+    /// listener's folders, theme, curves and crossfade were gone. Audit
+    /// finding 2, 2026-08-23.
+    #[test]
+    fn an_unreadable_document_is_refused_rather_than_replaced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+
+        // Absent is readable: there is nothing to lose, and this is first run.
+        assert!(readable(&path).is_ok());
+
+        std::fs::write(&path, "volume = 618\ngroup_key = \"year\"\n").expect("seed");
+        assert!(readable(&path).is_ok(), "valid TOML is readable");
+
+        std::fs::write(&path, "theme = \"unclosed\ngroup_key = \"year\"\n").expect("seed");
+        assert!(
+            readable(&path).is_err(),
+            "an unparsable document must be refused"
+        );
+        // And what is on disk is untouched by having been examined.
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("read")
+                .contains("unclosed")
+        );
+    }
+
+    /// **Storing does not truncate first.** The difference from `fs::write`,
+    /// and the reason a crash or a full disk cannot empty the file.
+    #[test]
+    fn storing_replaces_the_document_atomically() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("config.toml");
+        let config = Config::default();
+        store(&path, &config).expect("store creates its directory and writes");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("volume"), "the document was written");
+        // No temp files left beside it.
+        let strays: Vec<_> = std::fs::read_dir(path.parent().expect("parent"))
+            .expect("read_dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "config.toml")
+            .collect();
+        assert!(strays.is_empty(), "left debris: {strays:?}");
     }
 }

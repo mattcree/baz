@@ -71,8 +71,6 @@
 //! writer wins per file.
 
 use std::borrow::Cow;
-use std::fs::OpenOptions;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::library::FileStamp;
@@ -918,46 +916,12 @@ impl Folder {
 /// data is synced before the rename, so a crash leaves either the old file
 /// or the complete new one, never a torn one.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), PlaylistError> {
-    let fail = |source: std::io::Error| PlaylistError::Io {
+    // One implementation, in `crate::durable`, because `baz`'s config needed
+    // the same guarantee and had `std::fs::write` instead (audit finding 2).
+    crate::durable::write(path, bytes).map_err(|source| PlaylistError::Io {
         path: path.to_path_buf(),
         source,
-    };
-    let directory = path.parent().unwrap_or_else(|| Path::new(""));
-    let pid = std::process::id();
-    for attempt in 0u32..1024 {
-        // `.tmp`, not `.m3u8`: enumeration must never list a half-written
-        // file, and a leftover from a crash is visibly debris, not a list.
-        let candidate = directory.join(format!(".baz-playlist-{pid}-{attempt}.tmp"));
-        let mut file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(fail(error)),
-        };
-        let written = file
-            .write_all(bytes)
-            .and_then(|()| file.sync_data())
-            .and_then(|()| {
-                drop(file);
-                std::fs::rename(&candidate, path)
-            });
-        return match written {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                // Best effort: the temp file is debris either way, and the
-                // error worth reporting is the write's.
-                let _ = std::fs::remove_file(&candidate);
-                Err(fail(error))
-            }
-        };
-    }
-    Err(fail(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "could not find a free temp-file name",
-    )))
+    })
 }
 
 #[cfg(test)]

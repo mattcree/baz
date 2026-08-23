@@ -26,6 +26,7 @@
 #![forbid(unsafe_code)]
 
 pub mod analysis;
+pub mod durable;
 pub mod engine;
 pub mod equalizer;
 pub mod history;
