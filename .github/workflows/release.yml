@@ -527,10 +527,34 @@ jobs:
 
           | You are on | Take | Updates by |
           |---|---|---|
-          | Linux | \`.flatpak\` — \`flatpak install ./baz-*.flatpak\` | your software centre, automatically |
+          | Linux | \`.tar.gz\`, then \`./install.sh\` inside it | itself, in place — baz downloads the next release and installs over itself when you press Update |
           | Windows | \`.msi\` | itself: baz downloads the next one quietly and offers it the next time you start it |
           | macOS | \`.dmg\`, then drag baz to Applications | itself, the same way |
-          | anything | \`.tar.gz\` / \`.zip\` — the plain binary | nothing; you come back here |
+          | Linux, sandboxed | \`.flatpak\` — \`flatpak install ./baz-*.flatpak\` | **nothing — you come back here.** See below |
+          | anything | the plain binary out of the archive, run where it lies | nothing; you come back here |
+
+          **About the \`.flatpak\`.** It is a single-file bundle, and a bundle
+          carries no remote, so \`flatpak update\` has nowhere to look and your
+          software centre will never offer you a new baz. That is a property of
+          shipping bundles rather than a repository, it is not something baz
+          can fix from inside the sandbox, and earlier releases described it
+          wrongly. Take it if you want the sandbox and are content to update by
+          hand; take the \`.tar.gz\` otherwise. A Flathub submission is the
+          real fix and is tracked in
+          [\`docs/adr/0045-shipping-the-flatpak.md\`](https://github.com/mattcree/baz/blob/v$VERSION/docs/adr/0045-shipping-the-flatpak.md).
+
+          \`install.sh\` puts baz in \`~/.local\` with no privilege at all
+          (\`--system\` for \`/usr/local\`, which is the only mode wanting
+          \`sudo\`), and \`uninstall.sh\` beside it removes exactly what it
+          wrote. Updating in place needs the install directory to still be
+          writable by you, so a \`--system\` install updates only if you can
+          write \`/usr/local\`.
+
+          **Nothing here is signed.** Windows SmartScreen and macOS Gatekeeper
+          will both tell you so. Downloads are checked against the
+          \`SHA256SUMS\` published beside them, over TLS, which proves the file
+          arrived intact — not that it came from us. A signing key is the only
+          thing that would prove that, and this project does not have one yet.
 
           The \`.msi\` and the \`.dmg\` install a second small executable,
           \`baz-boot\`, which is what the Start-menu entry and the app icon

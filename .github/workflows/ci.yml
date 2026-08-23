@@ -135,7 +135,13 @@ jobs:
     name: packaging metadata
     runs-on: ubuntu-latest
     steps:
+      # `fetch-tags` so the manifest-pin check below can resolve the release
+      # tag the manifest names. Without it the check has no tag to dereference
+      # and skips, which is the same as not having it.
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
       # desktop-file-utils -> desktop-file-validate; appstream -> appstreamcli;
       # python3-yaml so the manifest parse below does not depend on whatever
       # the runner image happens to preinstall.
@@ -238,6 +244,13 @@ jobs:
       # This is where that list is caught drifting from Cargo.lock.
       - name: Vendored crate list matches Cargo.lock
         run: python3 packaging/flatpak/check-cargo-sources.py
+      # Flathub pins the source by tag *and* commit so a moved tag cannot
+      # change what is built. Every tag here is annotated, so the obvious
+      # `git rev-parse vX.Y.Z` yields the tag object's hash — 40 valid-looking
+      # characters that are not the commit, and that Flathub fails to check
+      # out. This is RELEASING.md step 10 as a check rather than a sentence.
+      - name: Flathub manifest pins the tag's actual commit
+        run: python3 packaging/flatpak/check-manifest-pin.py
       # The three names that must never drift apart: the desktop entry's
       # basename, the AppStream component id, and the MPRIS DesktopEntry
       # constant the binary advertises (crates/baz/src/mpris/mod.rs).

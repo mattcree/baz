@@ -15,9 +15,9 @@ below rather than implied.
 for a dry run that builds and checksums everything and publishes nothing.
 
 ```
-version ──┐
-          ├──> build (linux-x86_64, windows-x86_64, macos-universal)
-gate ─────┘         └──> publish (SHA256SUMS + draft GitHub Release)
+version ──┬──> build (linux-x86_64, windows-x86_64 + .msi, macos-universal + .dmg) ──┐
+gate ─────┴──> flatpak (single-file .flatpak bundle) ────────────────────────────────┴──> publish
+                                                          (SHA256SUMS + draft GitHub Release)
 ```
 
 - **`version`** reads `[workspace.package] version` from `Cargo.toml` and, on a
@@ -30,7 +30,14 @@ gate ─────┘         └──> publish (SHA256SUMS + draft GitHub Re
   gate]`, so there is no path from a tag to an artifact that skips it. It is
   the same workflow file PRs are held to, called rather than copied, so the two
   definitions of "green" cannot drift apart.
-- **`build`** produces one Baz archive per platform.
+- **`build`** produces one Baz archive per platform, and on two of them an
+  installer beside it: `cargo-wix` builds the `.msi`, `packaging/macos/dmg.sh`
+  the `.dmg`. Both are the *same* binary the archive holds, packaged again —
+  not a second build.
+- **`flatpak`** builds the Linux bundle. It has the same `needs: [version,
+  gate]` as `build` and no `if:`, so a dry run covers it. What it does *not*
+  do is publish the OSTree repository it builds through, which is why a
+  `.flatpak` bundle cannot update itself — see ADR-0045.
 - **`publish`** computes every SHA-256 in one place, verifies the sums file
   against the files it describes, and creates the release **as a draft** —
   ENGINEERING's "a human owns the trunk" applies at least as much to what
@@ -44,6 +51,12 @@ gate ─────┘         └──> publish (SHA256SUMS + draft GitHub Re
 | `linux-x86_64` | `ubuntu-latest` | `x86_64-unknown-linux-gnu` |
 | `windows-x86_64` | `windows-latest` | `x86_64-pc-windows-msvc` |
 | `macos-universal` | `macos-latest` (arm64) | `aarch64-apple-darwin` + `x86_64-apple-darwin`, combined with `lipo` |
+| `flatpak` | `ubuntu-latest` | `x86_64`, built in the Freedesktop SDK |
+
+Each of the first three also carries `install.sh` (Linux), and Windows and
+macOS additionally emit an installer: `baz-X.Y.Z-windows-x86_64.msi` and
+`baz-X.Y.Z-macos-universal.dmg`. The installers place `baz-boot` beside `baz`
+and point the Start-menu entry and app icon at it; ADR-0043 says why.
 
 macOS ships as one universal binary rather than two downloads because an
 ordinary person should not have to know which Mac they own; the arm64 runner
@@ -97,12 +110,33 @@ Not reproducible, and not claimed to be:
   Treat `SHA256SUMS` as "this is the file that CI produced", published beside
   the public log of the run that produced it — not as "you can rebuild this
   byte for byte".
-- **The current archives are not signed.** The beta distributes these GitHub
-  Release archives directly, with published SHA-256 checksums. Baz has no
-  automatic updater: listeners manually verify, replace and relaunch. This is
-  not a claim of signature-backed authenticity; adding an automatic updater or
-  presenting stronger provenance requires a separately approved signing and
-  distribution design.
+- **Nothing published here is signed.** The archives, the `.msi` and the
+  `.dmg` all ship unsigned, with published SHA-256 checksums beside them.
+  Windows SmartScreen and macOS Gatekeeper will both say so, in those words,
+  to every listener who runs an installer.
+
+  **Baz has updated itself since v0.5.0**, so the sentence that used to sit
+  here — "listeners manually verify, replace and relaunch" — stopped being
+  true and is corrected rather than quietly deleted. Settings → Updates
+  downloads the next release, checks it against the `SHA256SUMS` published
+  beside it, and installs it: in place on Linux, via `msiexec` on Windows.
+  ADR-0043 is the design.
+
+  That check is done over the network at download time, against a file served
+  by GitHub over TLS, and it is worth exactly what that is worth. It is *not*
+  a signature. Two consequences follow, and neither is fixed:
+
+  1. Nothing proves the release came from this project rather than from
+     whoever could serve those bytes. A signing key is the only thing that
+     would, and ADR-0043 §4 defers acquiring one on cost.
+  2. The staged installer is re-checked before it is offered, but against a
+     digest stored beside it in the same user-writable directory, so that
+     second check proves the download is intact and not that it is ours
+     (`crates/baz-update/src/stage.rs`, and the backlog item it points at).
+
+  Treat `SHA256SUMS` as "this is the file CI produced", published next to the
+  public log of the run that produced it. Presenting stronger provenance
+  needs the signing and distribution design ADR-0043 §4 still defers.
 
 ## Rehearsing it locally, before any of the above
 
@@ -130,6 +164,7 @@ appstreamcli validate --no-net packaging/flatpak/io.github.mattcree.baz.metainfo
 python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' \
   packaging/flatpak/io.github.mattcree.baz.yml
 python3 packaging/flatpak/check-cargo-sources.py
+python3 packaging/flatpak/check-manifest-pin.py
 
 # 3. The release build, exactly as .github/workflows/release.yml runs it.
 toolbox run -c baz-dev env CARGO_INCREMENTAL=0 \
@@ -164,7 +199,10 @@ With the pinned 156 MB Vibe model set included, the Linux archive currently
 comes out at about 154 MB. The last line is the workflow's own self-check — it
 proves the sums file describes the files beside it — and it passes.
 
-**Build the Flatpak too**, which the dry run does not cover at all:
+**The dry run covers the Flatpak** — the `flatpak` job has no `if:` — so you
+no longer have to build it locally to know it builds. Do it anyway when you
+have touched the manifest, the metainfo or `cargo-sources.json`, because the
+job proves the bundle *builds* and not that it *runs*:
 `packaging/flatpak/README.md` §"Building it". Budget fifteen minutes and 10 GB
 of scratch space, and keep it off a tmpfs.
 
@@ -202,10 +240,104 @@ of scratch space, and keep it off a tmpfs.
    will reject it if step 3 was missed.
 9. Review the draft release, then publish it.
 10. Update the Flathub manifest's `tag` and `commit` — `commit` must be the full
-    SHA the tag resolves to (`git rev-parse vX.Y.Z`), because Flathub requires
-    both so a moved tag cannot change what is built. Regenerate
+    SHA of the **commit**, which is `git rev-parse vX.Y.Z^{commit}` and not
+    `git rev-parse vX.Y.Z`. Every tag here is annotated, so the second form
+    prints the hash of the *tag object* — a different, equally valid-looking
+    40-character SHA that Flathub will fail to check out. `^{commit}`
+    dereferences it. Flathub wants both fields so a moved tag cannot change
+    what is built, which is exactly why putting the wrong SHA in the second
+    one defeats the point of having it.
+
+    You do not have to get this right from memory:
+    `python3 packaging/flatpak/check-manifest-pin.py` compares the manifest's
+    `commit` against the commit its own `tag` resolves to, and if you have
+    pasted the tag object's hash it says so and prints the command that gives
+    the right one. CI's packaging job runs it on every push, with tags
+    fetched so it cannot skip. Regenerate
     `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
     `packaging/flatpak/README.md` has the commands.
+
+## v0.5.0 release record
+
+Cut on 2026-08-23 from annotated tag `v0.5.0`, resolving to commit `0908e1b`.
+The dry run was
+[32642628559](https://github.com/mattcree/baz/actions/runs/32642628559) and the
+tagged publish run
+[32643790251](https://github.com/mattcree/baz/actions/runs/32643790251). Seven
+assets: three archives, `.msi`, `.dmg`, `.flatpak`, and `SHA256SUMS`.
+
+**This is the release whose updater was proved on real hardware, which no
+earlier one was.** v0.4.1 was installed on the maintainer's machine from its
+own `.tar.gz` via `install.sh`; baz was then driven through Settings → Updates
+by hand, and it downloaded v0.5.0, checked it, and installed over itself. The
+receipt is the binary: `/usr/local/bin/baz` went from SHA-256 `fb6e6c88…` to
+`ea8a0b65…`, and `ea8a0b65…` is byte-identical to the binary inside the
+`v0.5.0` archive downloaded separately from the release page. The upgrade path
+that every previous release record described only as machinery has now carried
+a real installation forward once.
+
+Two things had to be fixed to get there, both found by doing it rather than by
+reading it:
+
+- `crates/baz-update`'s endpoint was `/releases/latest`, which **excludes
+  prereleases**. Every baz release so far is one, so the updater had been
+  asking a URL that returns 404 for this project since the day it shipped. It
+  now reads `/releases?per_page=20` and picks the newest published non-draft
+  itself.
+- `install.sh` copied over the running executable with `cp`, which truncates
+  in place; the kernel refuses that for a running program (`ETXTBSY`). It now
+  writes beside the target and `mv -f`s over it.
+
+Both are in v0.5.0 — meaning **v0.4.1 and earlier cannot update themselves
+in-place on Linux and never could**, and a listener on one of those has to
+install v0.5.0 by hand once before the updater starts working for them. That
+is a real one-time cost of shipping an updater nobody had run.
+
+## v0.4.1 release record
+
+Cut on 2026-08-21 from annotated tag `v0.4.1`, resolving to commit `02ef1b1`.
+The dry run was
+[32421656692](https://github.com/mattcree/baz/actions/runs/32421656692) and the
+tagged publish run
+[32429339362](https://github.com/mattcree/baz/actions/runs/32429339362).
+
+A two-item patch on the day after v0.4.0: Updates moved into its own Settings
+section, and Flatpak playback was fixed — the sandbox had no route to the
+desktop sound server, so the one artifact the release notes recommended to
+Linux listeners was the one that could not make a sound.
+
+## v0.4.0 release record
+
+Cut on 2026-08-20 from annotated tag `v0.4.0`, resolving to commit `45d5bc5`.
+The tagged publish run was
+[32413661268](https://github.com/mattcree/baz/actions/runs/32413661268), and
+the dry run that finally went green
+[32412003020](https://github.com/mattcree/baz/actions/runs/32412003020).
+
+**It took six dispatches to get there, and the record is the point of keeping
+this section.** Runs
+[32406323401](https://github.com/mattcree/baz/actions/runs/32406323401),
+[32407018059](https://github.com/mattcree/baz/actions/runs/32407018059),
+[32408728771](https://github.com/mattcree/baz/actions/runs/32408728771) and
+[32410313034](https://github.com/mattcree/baz/actions/runs/32410313034) all
+died in the Windows job's new `Installer (msi)` step, on two distinct causes:
+
+- `Error[2] (Generic): The app's version 0.4.0+dry.fc1c6b4 is a prerelease,
+  but we couldn't convert the prerelease components to an integer.` A dispatch
+  appends SemVer build metadata, and MSI's `ProductVersion` is four numbers.
+  The step now passes `${VERSION%%+*}` as `--install-version` while the
+  filename keeps the full string. **Only a dry run can hit this**, because
+  only a dry run has a `+dry.SHA` version — the failure lives exactly in the
+  rehearsal path, and a project that only ever tagged would have met it never.
+- `main.wxs(63) : error LGHT0103 : The system cannot find the file
+  'target\release\baz.exe'.` twice. `cargo wix --no-build` looks in the
+  native `target/release`, and the matrix cross-builds into
+  `target/x86_64-pc-windows-msvc/release`. Fixed with `--target-bin-dir`.
+
+Both are failures of the packaging step and not of the program, which is the
+kind of thing that reaches listeners as "the installer is broken" and never
+appears in a test suite. The dry run has now earned its place at four
+consecutive releases.
 
 ## v0.3.0 release record
 
@@ -241,6 +373,13 @@ took, which is the statement itself rather than a guess about its output.
 
 Publishing the draft is the owner's own step, as it was for `v0.1.0` and
 `v0.2.0`.
+
+**And for `v0.2.0` and `v0.3.0` it was never taken.** Both are still drafts on
+the releases page today, visible only to people with push access. `v0.1.0`,
+`v0.4.0`, `v0.4.1` and `v0.5.0` are published prereleases. This is not a
+machinery failure — the drafts are complete and their artifacts verified — but
+anything reasoning about "the last release" should mean the last *published*
+one, which is what the updater's `/releases` walk now also does.
 
 ## v0.2.0 release record
 
