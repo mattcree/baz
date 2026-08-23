@@ -724,8 +724,9 @@ const WRITE_STALL_BUDGET: Duration = Duration::from_secs(5);
 
 impl Sink for DeviceSink {
     /// Whether this stream has been given up on — either cpal reported an
-    /// error, or [`WRITE_STALL_BUDGET`] expired against a device that stopped
-    /// draining. The inherent method of the same name has been here all along;
+    /// error, or this module's write-stall budget expired against a device that
+    /// stopped draining. The inherent method of the same name has been here all
+    /// along;
     /// what it lacked was a way for the engine to ask (audit finding 1).
     fn failed(&self) -> bool {
         Self::failed(self)
