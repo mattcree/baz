@@ -412,6 +412,35 @@ where
                             && bounds.contains(position)
                         {
                             *phase = Phase::Armed(position);
+                            // **The child sees the press too, and that is what
+                            // makes the release branch below mean anything.**
+                            //
+                            // It did not, and the artist and album labels on a
+                            // playlist therefore did nothing at all — the owner,
+                            // 2026-08-23: *"in the playlist view the links to
+                            // the artist and album don't work"*. The release
+                            // branch forwards to the child and lets it win, but
+                            // an `iced` button publishes on release **only if it
+                            // saw the press first**: that is what arms it. With
+                            // the press withheld, every label was a button that
+                            // could never fire, and the row's own click ran
+                            // instead.
+                            //
+                            // Forwarding costs nothing here. A button acts on
+                            // release, so this publishes nothing; what it does
+                            // is let the children arm. The wrapper still owns
+                            // the gesture — it returns `Captured` either way, so
+                            // a drag can still start anywhere in the row.
+                            self.content.as_widget_mut().update(
+                                &mut tree.children[0],
+                                event,
+                                layout,
+                                cursor,
+                                renderer,
+                                clipboard,
+                                shell,
+                                viewport,
+                            );
                             return event::Status::Captured;
                         }
                     }
@@ -737,6 +766,34 @@ mod tests {
         }
 
         /// A wired row carrying one independently actionable metadata label.
+        /// A row whose named route is a **real `button`**, which is what
+        /// `page::metadata_label` builds for a playlist's artist and album.
+        ///
+        /// The distinction is the whole bug. A `mouse_area` with `on_release`
+        /// acts on the release alone; a `button` publishes on release **only
+        /// if it saw the press**, and the wrapper used to withhold it. So
+        /// `linked()` below passed for months while every real label was a
+        /// control that could not fire.
+        fn buttoned() -> Self {
+            Self::build(
+                Source::new(
+                    iced::widget::button(
+                        Space::new()
+                            .width(Length::Fixed(W))
+                            .height(Length::Fixed(H)),
+                    )
+                    .on_press(Msg::Link),
+                    &theme::CLOSING_TIME,
+                )
+                .wires(Wires::new(
+                    Msg::Lift,
+                    Msg::Moved,
+                    Msg::Dropped,
+                    Some(Msg::Click),
+                )),
+            )
+        }
+
         fn linked() -> Self {
             Self::build(
                 Source::new(
@@ -854,6 +911,44 @@ mod tests {
         let (status, messages) = row.released(on_row(33.0, 13.0));
         assert_eq!(status, event::Status::Captured);
         assert_eq!(messages, vec![Msg::Click]);
+    }
+
+    /// **A child that arms on the press still wins the release.**
+    ///
+    /// The owner, 2026-08-23: *"in the playlist view the links to the artist
+    /// and album don't work."* They were `button`s, and the wrapper captured
+    /// the press without showing it to them, so they were never armed and
+    /// published nothing on release — the row's own click ran instead, every
+    /// time.
+    ///
+    /// `a_named_child_route_wins_the_release_without_disabling_drag` did not
+    /// catch it because its child is a `mouse_area` with `on_release`, which
+    /// needs no press. Same contract, the other kind of child, and this one
+    /// fails against the old wrapper.
+    #[test]
+    fn a_child_that_arms_on_the_press_still_wins_the_release() {
+        let mut row = Row::buttoned();
+        let (status, messages) = row.press(on_row(30.0, 10.0));
+        assert_eq!(status, event::Status::Captured);
+        assert!(messages.is_empty(), "arming still says nothing");
+        let (status, messages) = row.released(on_row(30.0, 10.0));
+        assert_eq!(
+            (status, messages),
+            (event::Status::Captured, vec![Msg::Link]),
+            "the button's own route must win the release, not the row's click"
+        );
+    }
+
+    #[test]
+    fn a_button_child_does_not_stop_a_drag() {
+        let mut row = Row::buttoned();
+        let (_, messages) = row.press(on_row(30.0, 10.0));
+        assert!(messages.is_empty());
+        let (_, messages) = row.moved(on_row(30.0 + THRESHOLD_PX + 1.0, 10.0));
+        assert!(
+            matches!(messages.as_slice(), [Msg::Lift(_)]),
+            "a row with a link in it is still draggable"
+        );
     }
 
     #[test]

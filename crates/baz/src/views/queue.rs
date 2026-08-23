@@ -174,6 +174,55 @@ pub(crate) fn view<'a>(
     )
 }
 
+/// **Which record a queued track belongs to**, for the row's two doors.
+///
+/// It was matched on the album *title* plus a `filed_under` artist that falls
+/// back to the **queue's** artist when the item declares none — and a playlist
+/// spanning artists has no single artist, so the fallback is whatever the list
+/// is filed under and matches nothing. Every row in a mixed playlist therefore
+/// resolved to no record, which is why its album link did nothing: the message
+/// was `None`, so there was no link to press.
+///
+/// So identity, not strings. The title narrows the search — a few hundred
+/// albums to a handful — and the **path** decides, because a path is in
+/// exactly one edition of exactly one record. The old comparison stays as the
+/// first attempt for the ordinary case where the item names its own artist,
+/// which costs one string compare and answers most rows without touching a
+/// track list.
+fn album_of<'a>(
+    shelf: &'a Shelf,
+    item: &crate::vm::QueueItemVm,
+    queue_artist: &str,
+) -> Option<&'a crate::vm::AlbumVm> {
+    let title = item.album.as_deref();
+    if let Some(filed_under) = item.album_artist.as_deref()
+        && let Some(album) = shelf
+            .albums
+            .iter()
+            .find(|album| album.title.as_deref() == title && album.artist.label() == filed_under)
+    {
+        return Some(album);
+    }
+    let holds = |album: &crate::vm::AlbumVm| {
+        album
+            .editions
+            .iter()
+            .any(|edition| edition.tracks.iter().any(|track| track.path == item.path))
+    };
+    shelf
+        .albums
+        .iter()
+        .filter(|album| title.is_none() || album.title.as_deref() == title)
+        .find(|album| holds(album))
+        .or_else(|| {
+            // A title that does not match anything on the wall — a renamed
+            // record, a stale playlist entry — still has a path, and the path
+            // is the truth.
+            let _ = queue_artist;
+            shelf.albums.iter().find(|album| holds(album))
+        })
+}
+
 /// The title of an unsaved list. An artist's implicit list is deliberately
 /// named like the playlist it is about to become: `All Anne-Marie Puig`, not
 /// the generic action label printed on the artist tile.
@@ -519,24 +568,24 @@ fn queue_row(
             .color(room.paper_faint)
             .into(),
     };
-    let filed_under = item.album_artist.as_deref().unwrap_or(queue_artist);
-    let album_id = item.album.as_deref().and_then(|title| {
-        shelf
-            .albums
-            .iter()
-            .find(|album| {
-                album.title.as_deref() == Some(title) && album.artist.label() == filed_under
-            })
-            .map(|album| album.id)
-    });
+    let record = album_of(shelf, item, queue_artist);
+    let album_id = record.map(|album| album.id);
     let body = page::track_row(page::TrackRow {
         marker,
         artwork: Some(playlist_page::row_art(shelf, album_id)),
         title: row_state.title.into(),
         ink,
-        under: row_state
-            .artist
-            .map(|artist| (Cow::Owned(artist), room.paper_dim, None)),
+        // **Both lines are doors** (the owner, 2026-08-23: *"in the playlist
+        // view the links to the artist and album don't work"*). The album's
+        // was wired and could not resolve; the artist's was never wired at
+        // all — it passed `None` where the message goes.
+        under: row_state.artist.map(|artist| {
+            (
+                Cow::Owned(artist),
+                room.paper_dim,
+                record.map(|album| Message::OpenArtist(crate::vm::artist_id(&album.artist))),
+            )
+        }),
         context: Some((
             item.album
                 .clone()
