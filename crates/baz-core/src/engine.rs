@@ -3622,16 +3622,67 @@ fn visualize_then_shape(
     fader.apply(block, rate);
 }
 
+/// **Wait a little for a thread to notice `stop`, then stop waiting.**
+///
+/// Every abandon path in this file used to `join()` outright, on the strength
+/// of the producer observing `stop` "in every backpressure and decode loop".
+/// It does — but it reaches those loops only after `AudioSource::open`, which
+/// is a `File::open` plus a Symphonia probe, and on a hard NFS mount or a
+/// slept NAS that blocks for the mount timeout or forever. Those are
+/// first-class cases here (ADR-0025). A blocking `open` cannot be interrupted
+/// by a flag, so the only fix available is to stop waiting for it. Audit
+/// finding 5, 2026-08-23.
+///
+/// **The grace period is what keeps the ordinary case ordinary.** A producer
+/// that is between blocks notices `stop` in microseconds, so almost every
+/// abandon still completes synchronously and every test still observes a
+/// stopped producer. Only a thread genuinely stuck in the kernel is left
+/// behind, and then it is left behind rather than taking the engine — and
+/// through `EngineHandle::drop`, the whole process — down with it.
+///
+/// **What a detached producer can still do: nothing that reaches a listener.**
+/// It owns its ring's producer end and writes nowhere else; the consumer goes
+/// with the session, so its next push fails and it returns. It holds an open
+/// file and some memory until the blocking call returns.
+fn join_or_detach<T: Send + 'static>(handle: thread::JoinHandle<T>, grace: Duration) {
+    let deadline = Instant::now() + grace;
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            // Reaped on a thread of its own so the panic-swallowing is
+            // unchanged and no handle is leaked.
+            thread::spawn(move || {
+                let _ = handle.join();
+            });
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    let _ = handle.join();
+}
+
+/// How long an abandon waits for a thread to notice `stop` before leaving it.
+///
+/// Far longer than a producer between blocks needs — those exit in
+/// microseconds — and short enough that a listener pressing Stop, or quitting,
+/// never reads it as the application having frozen.
+const ABANDON_GRACE: Duration = Duration::from_millis(250);
+
 impl Drop for Session {
-    /// Abort: release the producer (it observes `stop` in every
-    /// backpressure and decode loop) and join it, prefetch included. Ring
-    /// audio not yet delivered is discarded. Natural completion takes the
-    /// same path — the flag is simply set after the producer already
+    /// Abort: release the producer and wait briefly for it, prefetch
+    /// included. Ring audio not yet delivered is discarded. Natural completion
+    /// takes the same path — the flag is simply set after the producer already
     /// finished.
+    ///
+    /// **Briefly, not indefinitely** ([`join_or_detach`]). The producer does
+    /// observe `stop` in every backpressure and decode loop, and that was the
+    /// whole justification for an unconditional join — but it reaches those
+    /// loops only after opening a file, and an open on a dead mount answers to
+    /// no flag. This runs on the engine thread, which `EngineHandle::drop`
+    /// joins, so an unconditional join here made a slept NAS a hung process.
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Release);
         if let Some(handle) = self.producer.take() {
-            let _ = handle.join();
+            join_or_detach(handle, ABANDON_GRACE);
         }
     }
 }
@@ -4021,8 +4072,12 @@ impl ProducerTask {
         }
 
         if let Some((_, handle)) = pending {
-            // The prefetch loop observes `stop`, so this join is bounded.
-            let _ = handle.join();
+            // **This comment used to say the join was bounded because the
+            // prefetch loop observes `stop`.** It does, after
+            // `AudioSource::open` has returned — so the claim held for every
+            // case except the one that matters. Same treatment as the abandon
+            // path: wait for it to notice, then leave it.
+            join_or_detach(handle, ABANDON_GRACE);
         }
     }
 
@@ -4196,6 +4251,11 @@ fn prefetch(
     stop: &AtomicBool,
     follow: Option<u32>,
 ) -> Result<Prefetched, PlaybackError> {
+    // **No stop check precedes this open, and none can help.** An `Err` here
+    // is recorded as a *track failure*, so cancelling through it would invent
+    // one; and once `File::open` is in the kernel no flag reaches it anyway.
+    // The producer's loop already tests `stop` before each iteration, and the
+    // abandon paths no longer wait on this thread (see `join_or_detach`).
     let src = AudioSource::open(path)?;
     if let Some(stream_rate) = follow
         && src.sample_rate() != stream_rate
@@ -4280,6 +4340,59 @@ mod tests {
     //!   `tests/playback.rs` (`discard_buffered_empties_the_device_ring`,
     //!   `device_sink_reopens_at_the_requested_rate`, feature
     //!   `device-output`).
+
+    /// **A thread stuck in the kernel does not take the engine with it.**
+    /// Audit finding 5, 2026-08-23.
+    ///
+    /// The producer observes `stop` in every backpressure and decode loop,
+    /// which was the whole justification for joining it outright — but it
+    /// reaches those loops only after `AudioSource::open`, and an open on a
+    /// hard mount or a slept NAS answers to no flag. `Session::drop` runs on
+    /// the engine thread and `EngineHandle::drop` joins *that*, so one
+    /// unreachable file made quitting a hung process.
+    #[test]
+    fn an_abandon_does_not_wait_for_a_thread_that_will_not_stop() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+
+        let release = Arc::new(AtomicBool::new(false));
+        let held = Arc::clone(&release);
+        let stuck = std::thread::spawn(move || {
+            // Stands in for a blocking open: it is not watching `stop`.
+            while !held.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        let grace = Duration::from_millis(50);
+        let started = Instant::now();
+        super::join_or_detach(stuck, grace);
+        let waited = started.elapsed();
+
+        assert!(
+            waited >= grace && waited < grace * 20,
+            "abandon should give up at about the grace, waited {waited:?}"
+        );
+        // Let the detached thread finish so the test leaves nothing behind.
+        release.store(true, Ordering::Release);
+    }
+
+    /// **And a thread that stops promptly is still joined**, so the ordinary
+    /// abandon stays synchronous and every test still observes a stopped
+    /// producer.
+    #[test]
+    fn an_abandon_still_waits_for_a_thread_that_stops() {
+        use std::time::{Duration, Instant};
+
+        let quick = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(5)));
+        let started = Instant::now();
+        super::join_or_detach(quick, Duration::from_secs(5));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "a prompt thread must be joined, not waited out"
+        );
+    }
 
     /// **Equal-power, which is the whole reason the ramps are not linear.**
     ///
