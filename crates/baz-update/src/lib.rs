@@ -168,9 +168,25 @@ pub const fn installs_itself() -> bool {
 // If an automatic check is ever wanted, this is where the interval goes, and
 // the setting to go with it.
 
-/// The releases endpoint. Public, unauthenticated, and rate limited far above
-/// once a day.
-pub const ENDPOINT: &str = "https://api.github.com/repos/mattcree/baz/releases/latest";
+/// **The releases endpoint.** Public, unauthenticated, and rate limited far
+/// above once a day.
+///
+/// **Not `/releases/latest`, and the difference is the whole feature.** That
+/// endpoint answers with the newest release GitHub considers *stable*, and it
+/// excludes every prerelease and every draft. baz is pre-1.0 and
+/// `.github/workflows/release.yml` marks every `0.*` tag a prerelease by
+/// rule, so for the whole life of the project `/releases/latest` has answered
+/// `404` — which the fetch below reads as *this repository has no releases* and
+/// [`check`] reports as *you have the newest*. Every shipped baz has
+/// therefore told its listener it was up to date however far behind it was,
+/// and would have gone on doing so until 1.0.0. Proved by installing v0.4.0
+/// and pressing the button: *"You have baz 0.4.0, which is the newest"*, with
+/// v0.4.1 published.
+///
+/// The list endpoint holds no opinion about stability — prereleases are
+/// simply in it. `per_page` bounds a document baz reads four fields out of;
+/// it is not a page anybody will turn.
+pub const ENDPOINT: &str = "https://api.github.com/repos/mattcree/baz/releases?per_page=20";
 
 /// **Is `candidate` newer than `running`?**
 ///
@@ -207,6 +223,98 @@ fn parse(version: &str) -> Option<(u32, u32, u32)> {
         return None;
     }
     Some((major, minor, patch))
+}
+
+/// **Every top-level release object in the array, as its own slice.**
+///
+/// The list endpoint returns many releases where the old one returned a
+/// single object, and that changes what the small readers below are allowed
+/// to see. [`tag_of`] and [`asset_url`] scan forwards for the first field
+/// that matches; pointed at the whole array they would happily read the tag
+/// of one release and the assets of another. So the array is cut into
+/// elements first, and every field is read from inside exactly one of them.
+///
+/// Brace depth, with strings and their escapes respected, because a release
+/// body is free text a listener wrote and may contain any bracket it likes.
+/// Anything unbalanced simply yields fewer elements, which is silence.
+fn releases(json: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut depth = 0_usize;
+    let mut start = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (at, byte) in json.bytes().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = at;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    found.push(&json[start..=at]);
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// **Is this release a draft?**
+///
+/// An unauthenticated caller is not shown drafts at all, so in practice this
+/// never fires — which is exactly why it is here. baz cannot see the auth
+/// state of the request that produced a document, and *the endpoint would
+/// never send me one* is an assumption about somebody else's server. A
+/// release whose `draft` field is missing or is not a plain boolean is
+/// **treated as a draft and skipped**, on the same rule the rest of this file
+/// follows: every doubt resolves to silence.
+fn is_draft(release: &str) -> bool {
+    let Some(at) = release.find("\"draft\"") else {
+        return true;
+    };
+    let rest = &release[at + "\"draft\"".len()..];
+    let Some(colon) = rest.find(':') else {
+        return true;
+    };
+    let rest = rest[colon + 1..].trim_start();
+    !rest.starts_with("false")
+}
+
+/// **The newest published release in the array, and the tag that names it.**
+///
+/// *Newest* is the greatest version, not the most recently created. GitHub
+/// returns the list in creation order, and creation order is not version
+/// order the moment a patch is backported onto an older line — publishing
+/// 0.4.2 after 0.5.0 would otherwise offer every listener a downgrade. The
+/// comparison is the same version parse [`is_newer`] uses, so a tag this
+/// cannot read is not a candidate.
+#[must_use]
+pub fn newest_published(json: &str) -> Option<(String, &str)> {
+    releases(json)
+        .into_iter()
+        .filter(|release| !is_draft(release))
+        .filter_map(|release| {
+            let tag = tag_of(release)?;
+            let version = parse(&tag)?;
+            Some((version, tag, release))
+        })
+        .max_by_key(|(version, _, _)| *version)
+        .map(|(_, tag, release)| (tag, release))
 }
 
 /// The `tag_name` out of GitHub's release JSON, without a JSON parser.
@@ -381,6 +489,18 @@ fn get(url: &str) -> Result<Vec<u8>, String> {
     get_maybe(url)?.map_err(|NotFound| format!("{url} is not there"))
 }
 
+/// **The tag names the release; a sentence names a version.**
+///
+/// Tags are written `v0.4.1`, and every line this reaches sets it beside a
+/// bare `CARGO_PKG_VERSION`: *You have baz 0.4.0* directly above *baz v0.4.1
+/// has been released* reads as two different kinds of thing. Only the
+/// rendering changes — nothing downstream matches this against a tag, because
+/// the asset and checksum URLs come out of the release document and the
+/// staged marker only records what to say at the next start.
+fn display_version(tag: &str) -> String {
+    tag.strip_prefix('v').unwrap_or(tag).to_owned()
+}
+
 /// **Ask whether there is a newer baz, and where its installer is.**
 ///
 /// Blocking, and meant for a worker thread. `Ok(None)` is the ordinary
@@ -397,19 +517,23 @@ pub fn check() -> Result<Option<Update>, String> {
         return Ok(None);
     };
     let json = String::from_utf8_lossy(&body);
-    let Some(tag) = tag_of(&json) else {
+    // **One release is chosen before a single field is read out of it.** The
+    // endpoint returns the list, and the assets named in it belong to whichever
+    // release they sit inside; reading across the whole document would let baz
+    // pair one release's tag with another release's installer.
+    let Some((tag, release)) = newest_published(&json) else {
         return Ok(None);
     };
     if !is_newer(&tag, env!("CARGO_PKG_VERSION")) {
         return Ok(None);
     }
-    let Some(asset) = asset_url(&json, asset_suffix()) else {
+    let Some(asset) = asset_url(release, asset_suffix()) else {
         // A release with no installer for this platform is not an error and
         // not an update: it is a release we cannot install, and the honest
         // answer is silence.
         return Ok(None);
     };
-    let Some(sums) = asset_url(&json, "SHA256SUMS") else {
+    let Some(sums) = asset_url(release, "SHA256SUMS") else {
         // **No checksums, no update.** The verification is not a nicety that
         // degrades to a warning; without it there is nothing to verify
         // against and baz will not hand an unverified file to an installer.
@@ -420,7 +544,7 @@ pub fn check() -> Result<Option<Update>, String> {
         return Ok(None);
     }
     Ok(Some(Update {
-        version: tag,
+        version: display_version(&tag),
         asset,
         file_name,
         sums,
@@ -658,6 +782,139 @@ mod tests {
         ] {
             assert_eq!(tag_of(refused), None, "{refused} was read as a tag");
         }
+    }
+
+    /// A release list in GitHub's shape, newest first, every entry a
+    /// prerelease — which is what this repository actually returns.
+    const LIST: &str = r#"[
+      {"tag_name":"v0.4.1","draft":false,"prerelease":true,"body":"a note with a { brace and a \\"quote\\"","assets":[
+        {"browser_download_url":"https://github.com/mattcree/baz/releases/download/v0.4.1/baz-0.4.1-linux-x86_64.tar.gz"},
+        {"browser_download_url":"https://github.com/mattcree/baz/releases/download/v0.4.1/SHA256SUMS"}]},
+      {"tag_name":"v0.4.0","draft":false,"prerelease":true,"assets":[
+        {"browser_download_url":"https://github.com/mattcree/baz/releases/download/v0.4.0/baz-0.4.0-linux-x86_64.tar.gz"},
+        {"browser_download_url":"https://github.com/mattcree/baz/releases/download/v0.4.0/SHA256SUMS"}]}
+    ]"#;
+
+    /// **A prerelease is still a release, and this is the bug that shipped.**
+    ///
+    /// Every baz tag is `0.*`, and `release.yml` marks every `0.*` a
+    /// prerelease, so `/releases/latest` answered `404` and a listener on
+    /// v0.4.0 was told they had the newest while v0.4.1 sat published. The
+    /// list endpoint has no such opinion. If this test ever goes quiet again,
+    /// the update feature is dead and nothing else will say so.
+    #[test]
+    fn a_prerelease_is_still_a_release() {
+        let (tag, release) = super::newest_published(LIST).expect("a published release");
+        assert_eq!(tag, "v0.4.1");
+        assert!(super::is_newer(&tag, "0.4.0"), "0.4.1 is newer than 0.4.0");
+        assert!(
+            super::asset_url(release, ".tar.gz")
+                .is_some_and(|url| url.ends_with("baz-0.4.1-linux-x86_64.tar.gz")),
+            "the newest release's own archive"
+        );
+    }
+
+    /// **Every field comes out of one release**, never read across the array.
+    ///
+    /// The readers scan forwards for the first field that matches, so pointed
+    /// at the whole document they would pair v0.4.1's tag with whichever
+    /// asset appeared first. Handing a listener an installer from a different
+    /// release than the one they were told about is the failure this guards.
+    #[test]
+    fn fields_are_read_out_of_one_release_and_not_across_the_array() {
+        let (_, release) = super::newest_published(LIST).expect("a published release");
+        for suffix in [".tar.gz", "SHA256SUMS"] {
+            let url = super::asset_url(release, suffix).expect("an asset");
+            assert!(
+                url.contains("/download/v0.4.1/"),
+                "{url} came from another release"
+            );
+        }
+    }
+
+    /// **Newest means the greatest version, not the most recent publish.**
+    ///
+    /// A patch backported onto an older line is created *after* the newer
+    /// minor and GitHub lists it first. Taking the list's order would offer
+    /// every 0.5.0 listener a downgrade to 0.4.2 and call it an update.
+    #[test]
+    fn creation_order_is_not_version_order() {
+        let out_of_order = r#"[
+          {"tag_name":"v0.4.2","draft":false,"prerelease":true,"assets":[]},
+          {"tag_name":"v0.5.0","draft":false,"prerelease":true,"assets":[]}
+        ]"#;
+        let (tag, _) = super::newest_published(out_of_order).expect("a published release");
+        assert_eq!(tag, "v0.5.0");
+    }
+
+    /// **A draft is not published, and doubt about that is also a draft.**
+    ///
+    /// An unauthenticated caller is never shown drafts, so this is a guard
+    /// against an assumption rather than an observation — and a release whose
+    /// `draft` field is missing or malformed is skipped on the same rule.
+    #[test]
+    fn a_draft_is_never_offered() {
+        let with_draft = r#"[
+          {"tag_name":"v0.9.0","draft":true,"prerelease":true,"assets":[]},
+          {"tag_name":"v0.8.0","assets":[]},
+          {"tag_name":"v0.4.1","draft":false,"prerelease":true,"assets":[]}
+        ]"#;
+        let (tag, _) = super::newest_published(with_draft).expect("a published release");
+        assert_eq!(
+            tag, "v0.4.1",
+            "a draft or an unreadable draft field was taken"
+        );
+    }
+
+    /// **Nothing published is silence, not an error.**
+    ///
+    /// A repository before its first tag, and a fork permanently. The list
+    /// endpoint answers `[]` with a `200` where the old one answered `404`,
+    /// so this is the case that used to arrive as [`super::NotFound`].
+    #[test]
+    fn an_empty_list_offers_nothing() {
+        assert!(super::newest_published("[]").is_none());
+        assert!(super::newest_published("").is_none());
+    }
+
+    /// **A listener is shown a version, never a tag.**
+    ///
+    /// The two sentences sit one above the other in Settings, and the running
+    /// version arrives from `CARGO_PKG_VERSION` with no `v` on it.
+    #[test]
+    fn what_is_shown_is_a_version_and_not_a_tag() {
+        assert_eq!(super::display_version("v0.4.1"), "0.4.1");
+        assert_eq!(super::display_version("0.4.1"), "0.4.1");
+    }
+
+    /// **The one test that would have caught the bug that shipped.**
+    ///
+    /// Every fixture above passes against `/releases/latest` too — the defect
+    /// was never in the reading, it was in which document was asked for, and
+    /// only a real call can see that. `#[ignore]`d because CI does not go to
+    /// the network; run it by hand after touching [`super::ENDPOINT`]:
+    ///
+    /// ```text
+    /// cargo test -p baz-update -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "goes to the network; run by hand after touching ENDPOINT"]
+    fn the_live_endpoint_still_answers_with_a_release() {
+        let body = super::get_maybe(super::ENDPOINT)
+            .expect("the releases endpoint")
+            .unwrap_or_else(|super::NotFound| panic!("{} answered 404", super::ENDPOINT));
+        let json = String::from_utf8_lossy(&body);
+        let (tag, release) =
+            super::newest_published(&json).expect("a published release on the real repository");
+        println!("live: newest published is {tag}");
+        assert!(
+            super::is_newer(&tag, "0.4.0"),
+            "{tag} should be newer than the v0.4.0 that was told it was current"
+        );
+        assert!(
+            super::asset_url(release, "SHA256SUMS").is_some(),
+            "a release baz would refuse for having no checksums"
+        );
     }
 
     /// **A download URL is data, and data does not get to say where we go.**
