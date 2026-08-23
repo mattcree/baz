@@ -13,7 +13,18 @@ PACKAGES=(
   libxkbcommon-devel libxkbcommon-x11
   # Headless render verification: agents screenshot the real UI on a private
   # display and diff it (that is how the views/ split was proven pixel-identical).
-  xorg-x11-server-Xvfb ImageMagick
+  # `xdotool` drives that display: an agent presses baz's own controls rather
+  # than asserting about a still. It was hand-installed in the maintainer's
+  # container and missing from this list, so a rebuilt container silently lost
+  # the ability to click — found on 2026-08-23 when the container vanished and
+  # this script would not have brought it back.
+  xorg-x11-server-Xvfb ImageMagick xdotool
+  # The X client libraries winit dlopens to open a window. They arrived in the
+  # maintainer's container as somebody else's dependency and were never listed,
+  # so a container built from this script alone could compile baz and not run
+  # it: "Create event loop: XNotSupported(libXcursor.so.1: cannot open shared
+  # object file)". Found on 2026-08-23, rebuilding the container from scratch.
+  libXcursor libXi libXrandr libXinerama
   # Release/Flatpak manifest checks documented in docs/RELEASING.md.
   python3-pyyaml desktop-file-utils appstream
 )
