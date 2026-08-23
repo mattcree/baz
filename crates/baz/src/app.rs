@@ -5331,8 +5331,8 @@ impl App {
                 }
                 state.vibe.begin_request();
                 if state.vibe.has_features() {
-                    state.vibe.compose(&state.albums, &state.edition_choice);
-                    return Some(Task::none());
+                    let answer = state.vibe.compose(&state.albums, &state.edition_choice);
+                    return Some(Self::after_compose(answer));
                 }
                 // **A cold index is the ordinary first run, not a reason to
                 // do nothing.** This arm required the store to *already
@@ -5370,7 +5370,11 @@ impl App {
                         .vibe
                         .rebuild_profile(&state.albums, &state.edition_choice);
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.compose(&state.albums, &state.edition_choice);
+                        let answer = state.vibe.compose(&state.albums, &state.edition_choice);
+                        return Some(Task::batch([
+                            Self::after_compose(answer),
+                            self.next_vibe_job(),
+                        ]));
                     }
                 }
                 Some(self.next_vibe_job())
@@ -5396,7 +5400,11 @@ impl App {
                         );
                     }
                     if !state.vibe.analyzing && state.vibe.awaiting_create {
-                        state.vibe.compose(&state.albums, &state.edition_choice);
+                        let answer = state.vibe.compose(&state.albums, &state.edition_choice);
+                        return Some(Task::batch([
+                            Self::after_compose(answer),
+                            self.next_vibe_job(),
+                        ]));
                     }
                 }
                 Some(self.next_vibe_job())
@@ -5418,8 +5426,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_length(*length);
                 }
-                self.recompose();
-                Some(Task::none())
+                Some(self.recompose())
             }
             // **A word from the vocabulary**, appended with a comma. Design 21
             // §4: a chip is a way of writing the one request, never a second
@@ -5453,8 +5460,7 @@ impl App {
                 }
                 // The words have settled and been counted, which is the
                 // moment they are worth composing from.
-                self.recompose();
-                Some(Task::none())
+                Some(self.recompose())
             }
             // **A row explains itself.** Selecting one marks its dot, drops a
             // tick to the axis and writes the why-line; selecting it again
@@ -5479,10 +5485,7 @@ impl App {
             // Not during it: design 21 §6's refusal stands, because a list
             // that changed under a dragging hand could not be read and you
             // would be tuning against a moving target.
-            Message::ContourReleased => {
-                self.recompose();
-                Some(Task::none())
-            }
+            Message::ContourReleased => Some(self.recompose()),
             Message::PlaylistImageChoose(id) => Some(pick_playlist_image(*id)),
             Message::PlaylistImagePicked(id, choice) => {
                 let (id, choice) = (*id, choice.clone());
@@ -5579,7 +5582,8 @@ impl App {
                     // filled the form.
                     if state.vibe.has_features() && !state.vibe.preparing {
                         let (albums, chosen) = (&state.albums, &state.edition_choice);
-                        state.vibe.compose(albums, chosen);
+                        let answer = state.vibe.compose(albums, chosen);
+                        return Some(Self::after_compose(answer));
                     }
                 }
                 Some(Task::none())
@@ -5588,8 +5592,7 @@ impl App {
                 if let Screen::Shelf(state) = &mut self.screen {
                     state.vibe.set_points(*count);
                 }
-                self.recompose();
-                Some(Task::none())
+                Some(self.recompose())
             }
             Message::VibeLine(lane) => {
                 if let Screen::Shelf(state) = &mut self.screen {
@@ -6821,15 +6824,39 @@ impl App {
     /// a gesture — design 21 §6's one deliberate refusal, which this does not
     /// touch: a result that changed under a dragging hand could not be read,
     /// so the curve recomposes on release.
-    fn recompose(&mut self) {
+    /// **Turn a compose's answer into the work it still needs.**
+    ///
+    /// `Compose::NeedsEmbedding` means the words have no vector yet, and
+    /// getting one is a 350 MiB model on a shared mutex — so it goes to the
+    /// blocking pool and comes back as `VibeEmbedded`, which composes again
+    /// with it in hand. The same task the debounced live count already used;
+    /// what changed is that the interface thread no longer does it inline
+    /// (audit finding 3).
+    fn after_compose(answer: crate::vibe::Compose) -> Task<Message> {
+        match answer {
+            crate::vibe::Compose::Done => Task::none(),
+            crate::vibe::Compose::NeedsEmbedding(prompt) => {
+                Task::perform(crate::vibe::embed(prompt), |(prompt, result)| {
+                    Message::VibeEmbedded(prompt, result)
+                })
+            }
+        }
+    }
+
+    /// Compose again at the seed the request stands at, and hand back whatever
+    /// that still needs — a length detent and a released contour handle both
+    /// arrive here, and neither may run the text tower between two frames.
+    fn recompose(&mut self) -> Task<Message> {
         if let Screen::Shelf(state) = &mut self.screen
             && state.vibe.has_features()
             && !state.vibe.preparing
             && state.vibe.open
         {
             let (albums, chosen) = (&state.albums, &state.edition_choice);
-            state.vibe.recompose(albums, chosen);
+            let answer = state.vibe.recompose(albums, chosen);
+            return Self::after_compose(answer);
         }
+        Task::none()
     }
 
     /// **Begin listening to whatever has not been heard**, or do nothing if

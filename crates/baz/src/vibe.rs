@@ -1102,6 +1102,19 @@ pub(crate) struct State {
     /// Whether a live count is in flight, so the page can say *counting…*
     /// rather than show a stale number as though it were current.
     pub(crate) counting: bool,
+    /// **The vector for a phrase, kept so a compose need not pay for it
+    /// again**, with the phrase it belongs to.
+    ///
+    /// The text tower is roughly 350 MiB and the first call loads it. Until
+    /// 2026-08-23 `create` embedded the prompt itself, on the interface
+    /// thread, and it ran on every Compose, every *another version*, every
+    /// length detent and every released contour handle — re-doing, between two
+    /// frames, work the debounced count had just done in the background for
+    /// the same words. It also contended `baz_vibe`'s process-wide text mutex
+    /// with that background task, whose doc claimed the two could not race:
+    /// they can, because the debounce fires on typing and Compose is pressed
+    /// right after typing. Audit finding 3.
+    embedded: Option<(String, Result<Vec<f32>, String>)>,
     /// Whether *another version* is what produced the compose being run, so
     /// the diff can name the right cause.
     varied: bool,
@@ -1227,6 +1240,7 @@ impl Default for State {
             selected_row: None,
             live: None,
             counting: false,
+            embedded: None,
             varied: false,
             profile: Profile::default(),
             count_due: None,
@@ -2028,8 +2042,19 @@ impl State {
         self.counting = false;
         let Ok(embedding) = embedding else {
             self.live = None;
+            // **The failure is remembered too, against these exact words.**
+            // Without it `create` would find no vector, ask for one, fail,
+            // compose again and ask again — an embed loop on a model that is
+            // not going to load.
+            self.embedded = Some((
+                prompt.to_owned(),
+                Err(embedding.as_ref().err().cloned().unwrap_or_default()),
+            ));
             return;
         };
+        // Kept for `create`, which would otherwise embed these same words
+        // again on the interface thread. One clone per settled phrase.
+        self.embedded = Some((prompt.to_owned(), Ok(embedding.clone())));
         // Borrowed, never cloned: this runs once per settled phrase and the
         // whole point of the readout is that it costs a scan of vectors that
         // are already resident.
@@ -2146,8 +2171,12 @@ impl State {
     /// changed length or a moved line changes only what that change implies,
     /// and the diff's sentence names it. Pressing *Compose* is what draws a
     /// different one.
-    pub(crate) fn recompose(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
-        self.create(albums, chosen);
+    pub(crate) fn recompose(
+        &mut self,
+        albums: &[AlbumVm],
+        chosen: &HashMap<u64, EditionKey>,
+    ) -> Compose {
+        self.create(albums, chosen)
     }
 
     /// **Compose: a new list every press.**
@@ -2163,19 +2192,47 @@ impl State {
     /// seed, here, in the one place a press arrives — so the diff can always
     /// name the cause, and *a new draw of the same request* is a cause a
     /// listener performed rather than something that happened to them.
-    pub(crate) fn compose(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+    pub(crate) fn compose(
+        &mut self,
+        albums: &[AlbumVm],
+        chosen: &HashMap<u64, EditionKey>,
+    ) -> Compose {
         self.variation = self.variation.wrapping_add(1);
         self.varied = true;
-        self.create(albums, chosen);
+        self.create(albums, chosen)
     }
 
     /// One compose at the seed the request currently stands at.
-    fn create(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) {
+    fn create(&mut self, albums: &[AlbumVm], chosen: &HashMap<u64, EditionKey>) -> Compose {
         self.open = true;
         self.awaiting_create = false;
         let request = self.effective_request();
+        // **Words with no vector yet are not composed here.** Embedding is the
+        // caller's errand, off this thread; the answer comes back through
+        // `accept_embedding`, which composes again with it in hand. An empty
+        // request needs no vector — the shape alone chooses the walk.
+        let embedding: &[f32] = if request.trim().is_empty() {
+            &[]
+        } else {
+            match &self.embedded {
+                Some((words, Ok(vector))) if words == &request => vector,
+                // The tower would not answer for these words. Say so, and do
+                // not ask again — the same words get the same answer.
+                Some((words, Err(why))) if words == &request => {
+                    self.error = Some(why.clone());
+                    self.preview = None;
+                    self.counting = false;
+                    return Compose::Done;
+                }
+                _ => {
+                    self.counting = true;
+                    return Compose::NeedsEmbedding(request);
+                }
+            }
+        };
         let generated = generate(
             &request,
+            embedding,
             &self.contour,
             self.length,
             self.variation,
@@ -2185,16 +2242,11 @@ impl State {
                 chosen,
             },
         );
-        let mut preview = match generated {
-            Ok(preview) => {
-                self.error = None;
-                preview
-            }
-            Err(error) => {
-                self.error = Some(error);
-                None
-            }
-        };
+        // Generating cannot fail now that it does not embed: the only error it
+        // ever produced was the text tower's, and that arrives through
+        // `accept_embedding` instead, which sets `self.error` itself.
+        self.error = None;
+        let mut preview = generated;
         if let Some(preview) = &mut preview {
             preview.diff = self
                 .preview
@@ -2203,6 +2255,7 @@ impl State {
         }
         self.varied = false;
         self.preview = preview;
+        Compose::Done
     }
 
     pub(crate) fn remove_preview(&mut self, row: usize) {
@@ -2351,6 +2404,22 @@ pub(crate) fn prepare(
     std::future::ready(Err(
         "This is the light build; local sonic analysis is not included.".to_owned(),
     ))
+}
+
+/// **What a compose needs before it can happen.**
+///
+/// `create` used to embed the prompt itself and therefore always finished,
+/// which is why it was allowed to return nothing — and why it ran the 350 MiB
+/// text tower between two frames (audit finding 3). Now the vector is
+/// somebody else's errand, a compose can be waiting on one, and the caller has
+/// to be told which.
+#[must_use]
+pub(crate) enum Compose {
+    /// A list stands, or an error is on the page. Nothing further is owed.
+    Done,
+    /// These words have no vector yet. Embed them off this thread; the answer
+    /// arrives at `accept_embedding`, which composes again with it in hand.
+    NeedsEmbedding(String),
 }
 
 /// **Embed one settled phrase**, off the interface thread.
@@ -2526,11 +2595,16 @@ fn engine_contour(contour: &Contour) -> baz_vibe::Contour {
 )]
 fn generate(
     prompt: &str,
+    // The prompt's vector, already computed off this thread. Empty for a
+    // request with no words, which chooses by shape alone.
+    embedding: &[f32],
     contour: &Contour,
     length: MixLength,
     variation: u64,
     from: Drawn<'_>,
-) -> Result<Option<Generated>, String> {
+) -> Option<Generated> {
+    // No `Result`: the one thing that could fail here was embedding the
+    // prompt, which is no longer this function's job (audit finding 3).
     let Drawn {
         features,
         albums,
@@ -2571,7 +2645,7 @@ fn generate(
         }
     }
     if candidates.is_empty() {
-        return Ok(None);
+        return None;
     }
     let known: Vec<_> = items.values().filter_map(|item| item.duration).collect();
     let average_seconds = if known.is_empty() {
@@ -2591,10 +2665,16 @@ fn generate(
     // times at different lengths — so the text tower is paid for once per
     // press rather than once per attempt, and so every attempt is choosing
     // from the same eligible set the readouts are describing.
+    // **The interface thread does not run the text tower.** It is ~350 MiB and
+    // its mutex is shared with the debounced live count, so embedding here
+    // stalled the window — no frames, no input — and did it again for every
+    // length detent and every released contour handle. The vector arrives from
+    // `accept_embedding` instead; a caller with no vector for these words asks
+    // for one and composes when it lands (see `Compose::NeedsEmbedding`).
     let request = if prompt.trim().is_empty() {
         None
     } else {
-        Some(baz_vibe::embed_request(prompt).map_err(|error| error.to_string())?)
+        Some(embedding.to_vec())
     };
     let engine_contour = engine_contour(contour);
     let pool = baz_vibe::eligible(request.as_deref(), &candidates);
@@ -2637,9 +2717,7 @@ fn generate(
         }
         limit = adjusted;
     }
-    let Some((selection, _)) = best else {
-        return Ok(None);
-    };
+    let (selection, _) = best?;
     // The chosen tracks and their levels stay in step: a path the projection
     // no longer holds drops it from every lane's row too, so a dot on a line
     // is always the track beside it rather than the one that used to be
@@ -2675,7 +2753,7 @@ fn generate(
         prompt.trim(),
         length.minutes()
     );
-    Ok(Some(Generated {
+    Some(Generated {
         description,
         request: prompt.trim().to_owned(),
         items: selected,
@@ -2696,7 +2774,7 @@ fn generate(
         asked_positions: limit,
         contour: contour.clone(),
         diff: None,
-    }))
+    })
 }
 
 #[cfg(not(feature = "vibe-analysis"))]
@@ -2706,12 +2784,13 @@ fn generate(
 )]
 fn generate(
     _prompt: &str,
+    _embedding: &[f32],
     _contour: &Contour,
     _length: MixLength,
     _variation: u64,
     _from: Drawn<'_>,
-) -> Result<Option<Generated>, String> {
-    Ok(None)
+) -> Option<Generated> {
+    None
 }
 
 /// **Everything a compose draws from**, so the request and the library it is
@@ -3732,5 +3811,84 @@ mod tests {
         assert!(!message.contains("/mount/"));
         assert!(!message.contains("main_data_offset"));
         assert!(message.contains("retry"));
+    }
+
+    /// **The interface thread never runs the text tower.** Audit finding 3.
+    ///
+    /// `create` used to call `embed_request` inline — a ~350 MiB model behind
+    /// a process-wide mutex shared with the debounced live count — on Compose,
+    /// on *another version*, on every length detent and every released contour
+    /// handle. It asks for a vector now and composes when one arrives.
+    #[test]
+    fn composing_asks_for_a_vector_rather_than_making_one() {
+        let albums = vec![album()];
+        let chosen = HashMap::new();
+        let mut state = State::default();
+        state.set_words(true);
+        state.prompt = "warm hypnotic music".to_owned();
+
+        // No vector for these words yet: the compose defers.
+        let asked = state.recompose(&albums, &chosen);
+        let Compose::NeedsEmbedding(words) = asked else {
+            panic!("a compose with unembedded words must ask for a vector");
+        };
+        assert_eq!(words, "warm hypnotic music");
+        assert!(state.counting, "and should say it is working");
+
+        // The vector arrives from off-thread, and the next compose uses it.
+        state.accept_embedding(&words, &Ok(vec![0.5_f32; 8]), &albums, &chosen);
+        assert!(
+            matches!(state.recompose(&albums, &chosen), Compose::Done),
+            "the kept vector must be reused, not asked for again"
+        );
+        // And again, for a repeated press — this is the *another version* path.
+        assert!(matches!(state.compose(&albums, &chosen), Compose::Done));
+    }
+
+    /// **Words the tower refused are not asked about twice.**
+    ///
+    /// Without remembering the failure, `create` finds no vector, asks for
+    /// one, fails, composes again on the answer and asks again — an embed
+    /// loop against a model that is not going to load. Introduced and caught
+    /// while fixing finding 3.
+    #[test]
+    fn a_failed_embedding_is_reported_once_and_not_retried() {
+        let albums = vec![album()];
+        let chosen = HashMap::new();
+        let mut state = State::default();
+        state.set_words(true);
+        state.prompt = "something".to_owned();
+
+        let Compose::NeedsEmbedding(words) = state.recompose(&albums, &chosen) else {
+            panic!("expected a request for a vector");
+        };
+        state.accept_embedding(
+            &words,
+            &Err("the model would not load".to_owned()),
+            &albums,
+            &chosen,
+        );
+
+        assert!(
+            matches!(state.recompose(&albums, &chosen), Compose::Done),
+            "a refused phrase must not be asked about again"
+        );
+        assert_eq!(state.error.as_deref(), Some("the model would not load"));
+        assert!(
+            !state.counting,
+            "and the page must stop saying it is working"
+        );
+    }
+
+    /// **A request with no words needs no vector at all** — the shape alone
+    /// chooses the walk, so this path must never defer.
+    #[test]
+    fn a_shape_only_request_composes_immediately() {
+        let albums = vec![album()];
+        let chosen = HashMap::new();
+        let mut state = State::default();
+        state.set_words(false);
+        state.prompt = "ignored while the words are folded away".to_owned();
+        assert!(matches!(state.recompose(&albums, &chosen), Compose::Done));
     }
 }
