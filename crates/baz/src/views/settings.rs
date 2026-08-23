@@ -249,17 +249,34 @@ pub(crate) fn view<'a>(
             shortcuts_section(),
         ],
     };
-    let content = container(
-        scrollable(
+    // **The scrollbar belongs to the panel, not to the form.**
+    //
+    // The owner, 2026-08-22: *"the scrollable area is a bit odd on that
+    // settings page… where the scroll appears seems wrong."* It was: the
+    // scrollable was *inside* a container fixed at [`content_width`], so the
+    // bar rode the form's right edge and left a dead gutter — about 150 px at
+    // a 1280-wide window — between itself and the edge of the region it
+    // appeared to scroll. A bar floating in the middle of a panel reads as a
+    // divider, not a control.
+    //
+    // So the nesting is inverted: the scrollable fills the panel and the form
+    // keeps its measure inside it. [`content_width`]'s argument is untouched —
+    // it is about how long a line may be, which is a typographic decision and
+    // has nothing to do with where a scrollbar lives. `max_width` rather than a
+    // fixed width so a narrow window still yields the form to the gutter
+    // instead of sliding it under the bar.
+    let content = scrollable(
+        container(
             Column::with_children(blocks)
                 .spacing(theme::GAP_XL)
-                .padding(theme::scroll_gutter()),
+                .max_width(content_width(window_width, beside_the_list)),
         )
-        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .height(Length::Fill),
+        .width(Length::Fill)
+        .padding(theme::scroll_gutter()),
     )
-    .width(Length::Fixed(content_width(window_width, beside_the_list)))
+    .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+    .width(Length::Fill)
     .height(Length::Fill);
 
     let body: Element<'_, Message> = if beside_the_list {
@@ -1205,7 +1222,6 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
             folder_count,
             &folder,
             pending,
-            library.scanning,
             library.now_ns,
         ));
     }
@@ -1415,7 +1431,6 @@ fn folder_block(
     count: usize,
     folder: &FolderRow,
     pending: bool,
-    scanning: bool,
     now_ns: i64,
 ) -> Element<'static, Message> {
     let room = theme::active();
@@ -1428,21 +1443,13 @@ fn folder_block(
         .into()
     } else {
         row![
-            word_control(
-                "Up",
-                !scanning && index > 0,
-                Message::MoveMusicFolderUp(index),
-            ),
+            word_control("Up", index > 0, Message::MoveMusicFolderUp(index)),
             word_control(
                 "Down",
-                !scanning && index + 1 < count,
+                index + 1 < count,
                 Message::MoveMusicFolderDown(index),
             ),
-            word_control(
-                "Remove",
-                !scanning,
-                Message::ConfirmRemoveMusicFolder(index),
-            ),
+            word_control("Remove", true, Message::ConfirmRemoveMusicFolder(index)),
         ]
         .spacing(theme::GAP_XXS)
         .into()
@@ -1470,12 +1477,27 @@ fn folder_block(
     column![
         container(
             row![
-                text(folder.path.display().to_string())
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .color(room.paper)
-                    .wrapping(text::Wrapping::None),
-                Space::new().width(Length::Fill),
+                // **The path yields, the controls never do.** It is unbounded
+                // text on a fixed-height row, so without a width of its own it
+                // takes the whole line and lays `controls` out past the right
+                // edge — present, drawn, and unreachable. The owner, 2026-08-22:
+                // *"can't even remove the folder as there's no option… had to
+                // make the window wider"*, against a 95-character portal path.
+                //
+                // A folder whose path is long is exactly the folder somebody
+                // wants to remove — a document-portal handle, a deep share — so
+                // the row has to survive its own worst case. `Fill` plus a clip
+                // gives the remainder to the path and keeps `Remove` on screen
+                // at every window width.
+                container(
+                    text(folder.path.display().to_string())
+                        .size(theme::SIZE_BODY)
+                        .line_height(theme::LEADING_BODY)
+                        .color(room.paper)
+                        .wrapping(text::Wrapping::None),
+                )
+                .width(Length::Fill)
+                .clip(true),
                 controls,
             ]
             .spacing(theme::GAP_SM)
@@ -1951,6 +1973,68 @@ mod tests {
             ..AnalysisProgress::default()
         };
         assert!(super::measuring_line(many).contains("7 could not be measured"));
+    }
+
+    /// **A long path may not push the folder controls off the row.**
+    ///
+    /// The owner, 2026-08-22, against a 95-character document-portal path:
+    /// *"can't even remove the folder as there's no option"* — then *"had to
+    /// make the window wider"*, which is the whole diagnosis. The path was
+    /// unbounded `Wrapping::None` text on a fixed-height row, so it took the
+    /// line and `Remove` was laid out past the right edge: drawn, and
+    /// unreachable.
+    ///
+    /// The folder with a pathological path is precisely the one somebody needs
+    /// to remove, so the guard is that the path is the part that yields.
+    #[test]
+    fn a_long_folder_path_cannot_hide_its_controls() {
+        let source = include_str!("settings.rs").replace("\r\n", "\n");
+        let rest = source
+            .split_once("fn folder_block(")
+            .expect("the folder block")
+            .1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        let row = body.split_once("row![").expect("the path row").1;
+        let row = &row[..row.find("controls,").expect("the controls")];
+        assert!(
+            row.contains("Length::Fill") && row.contains(".clip(true)"),
+            "the folder path is unbounded again, and will push Remove off the row"
+        );
+        assert!(
+            !row.contains("Space::new().width(Length::Fill)"),
+            "a Fill spacer collapses to zero once the path overflows; it cannot hold the \
+             controls on screen"
+        );
+    }
+
+    /// **A folder can be removed while a scan is running** (the owner,
+    /// 2026-08-22: *"I can't seem to remove a music library… or rather remove
+    /// a drive"*).
+    ///
+    /// `Remove`, `Up` and `Down` were each gated on `!scanning`, which killed
+    /// the whole row for the duration — and a drive that has gone away is
+    /// exactly what keeps a scan up, so the control was unavailable precisely
+    /// when it was wanted, with nothing in the row saying why. The enable
+    /// conditions are now about the list alone: an end row cannot move past
+    /// the end, and removal is always offered. `Shelf::retarget_scan` is what
+    /// makes that safe, and it has no unit-test seam of its own, so this
+    /// guards the half that can be read.
+    #[test]
+    fn a_folder_can_be_removed_while_a_scan_is_running() {
+        let source = include_str!("settings.rs").replace("\r\n", "\n");
+        let rest = source
+            .split_once("fn folder_block(")
+            .expect("the folder block")
+            .1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            !body.contains("scanning"),
+            "a folder control is gated on the scan again"
+        );
+        assert!(
+            body.contains(r#"word_control("Remove", true,"#),
+            "Remove is conditional on something"
+        );
     }
 
     /// **A pass that has never run says nothing at all.**

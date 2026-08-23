@@ -213,6 +213,40 @@ impl History {
 }
 
 impl Place {
+    /// **Where a close on this place should reopen.**
+    ///
+    /// Most places are destinations: you were browsing a record, an artist, a
+    /// list, the collection, and coming back to it is the whole point of
+    /// remembering. Two are not, and the distinction is what a listener is
+    /// *doing* rather than where the code happens to be.
+    ///
+    /// The owner, 2026-08-22: *"it's unexpected that you'd be looking at
+    /// something like the settings screen after opening the app — you would
+    /// probably not want that even if that was the last thing you were looking
+    /// at."* That is the rule, and it is about errands. Settings and the
+    /// unsaved creation flow are places you go to *do one thing*; you finish
+    /// it and leave. Reopening into one puts a listener back inside a task
+    /// they had already closed, in front of a screen with no music on it.
+    ///
+    /// [`Self::NewPlaylist`] answers with [`Self::Playlists`] rather than the
+    /// collection, because the drafts it makes live there and that is the
+    /// nearest place its work survives in. Settings has no such neighbour, so
+    /// it answers with the default.
+    ///
+    /// **[`Self::Queue`] deliberately stays.** It is transient in the lane's
+    /// sense — no resident destination, reached only from a sounding run — but
+    /// the run itself is restored from the session snapshot, so the thing it
+    /// is a view of is still there when baz opens. An errand is a task you
+    /// finished; the queue is a run you were in the middle of.
+    #[must_use]
+    pub fn to_reopen_in(self) -> Self {
+        match self {
+            Self::NewPlaylist => Self::Playlists,
+            Self::Settings => Self::default(),
+            other => other,
+        }
+    }
+
     /// Stable, human-readable spelling used by `config.toml`.
     ///
     /// Subject places carry their existing stable id after a colon. This is
@@ -733,5 +767,30 @@ mod tests {
         assert!(!history.visit(Place::Album(7)));
         assert_eq!(history.back(), Some(Place::Library));
         assert_eq!(history.forward(), Some(Place::Album(7)));
+    }
+
+    /// **An errand is not somewhere to reopen** (the owner, 2026-08-22).
+    ///
+    /// Settings and the unsaved creation flow are tasks a listener finishes
+    /// and leaves; every other place is somewhere they were, and coming back
+    /// to it is why the preference exists at all. The queue is in the second
+    /// group on purpose — the run it views is restored with it.
+    #[test]
+    fn an_errand_is_not_reopened_into() {
+        assert_eq!(Place::Settings.to_reopen_in(), Place::default());
+        assert_eq!(Place::NewPlaylist.to_reopen_in(), Place::Playlists);
+        for kept in [
+            Place::Library,
+            Place::Playlists,
+            Place::Favourites,
+            Place::Home,
+            Place::NowPlaying,
+            Place::Queue,
+            Place::Artist(7),
+            Place::Album(7),
+            Place::Playlist(7),
+        ] {
+            assert_eq!(kept.to_reopen_in(), kept, "{kept:?} is a destination");
+        }
     }
 }

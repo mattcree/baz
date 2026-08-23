@@ -4352,10 +4352,31 @@ pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -
 #[must_use]
 pub fn shelf_header_band(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(p.wall)),
+        background: Some(Background::Color(alpha(p.wall, STICKY_BAND))),
         ..container::Style::default()
     }
 }
+
+/// **How opaque a pinned header's ground is** — dense enough to take the rows
+/// sliding under it, short of opaque so it belongs to the same surface as
+/// everything around it.
+///
+/// It was a flat `wall` until 2026-08-23, and that was right while the wall was
+/// the only thing behind it. Since the backdrop became weather it is not: away
+/// from Now playing the collection sits on `wall` at
+/// `views::now_playing::FROST` — 40 % — over a moving picture, and a band at
+/// 100 % is a rectangle of a visibly different colour laid across it. The
+/// owner: *"the background colour of the section titles when in sticky mode is
+/// the wrong colour."*
+///
+/// **It only became visible when the weather started moving.** The tap that
+/// fills the backdrop's frame was gated on Now playing, so everywhere else the
+/// picture was frozen and usually near enough to `wall` that the slab hid in
+/// it. Two defects, one of them masking the other.
+///
+/// With nothing sounding there is no weather, the ground is `wall`, and 92 % of
+/// `wall` over `wall` is `wall` — so the quiet case is unchanged.
+const STICKY_BAND: f32 = 0.92;
 
 /// The primary action (Play album): a lamp **outline**, and the only control
 /// in baz drawn in the accent.

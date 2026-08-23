@@ -6091,12 +6091,7 @@ impl App {
         // last usable preference when the library did not open, instead of
         // replacing it with the latent `Library` value behind either screen.
         if matches!(self.screen, Screen::Shelf(_)) {
-            let place = if self.place == Place::NewPlaylist {
-                Place::Playlists
-            } else {
-                self.place
-            };
-            persist(|config| config.last_place = place);
+            persist(|config| config.last_place = self.place.to_reopen_in());
         }
         iced::exit()
     }
@@ -11497,6 +11492,33 @@ impl Shelf {
             index + 1,
             to + 1
         );
+        self.retarget_scan();
+    }
+
+    /// **A scan in flight is walking the old list**, so an edit to the list
+    /// has to hand it the new one.
+    ///
+    /// The owner, 2026-08-22: *"I can't seem to remove a music library… or
+    /// rather remove a drive."* Every folder control used to be dead while a
+    /// scan ran, and the folder somebody most wants gone — a drive that has
+    /// gone away — is exactly the one that keeps a scan up. So the controls
+    /// stay live and the scan is re-aimed instead.
+    ///
+    /// Restarting is the whole mechanism: [`Self::start_scan`] replaces
+    /// `scan_rx`, and the walker treats the dropped receiver as `Walk::Stopped`
+    /// — *"UI hung up; prune nothing"* — so the old worker retires at its next
+    /// send rather than racing the new one into the index. `Incremental` is
+    /// the mode because nothing about the files changed; only which folders
+    /// baz holds did, which is the same reason adding one starts this scan and
+    /// not a force sync.
+    ///
+    /// **Only when one was already running.** Editing the list in a quiet
+    /// moment must not start a scan nobody asked for.
+    fn retarget_scan(&mut self) {
+        if self.scanning {
+            crate::baz_log!("[scan] folder list edited; re-aiming the scan in flight");
+            self.start_scan(scan::ScanMode::Incremental);
+        }
     }
 
     /// Stop holding a folder, and **forget its tracks** (ADR-0022 §4).
@@ -11531,6 +11553,7 @@ impl Shelf {
         self.no_art.clear();
         self.no_artist_image.clear();
         self.rebuild_shelves();
+        self.retarget_scan();
         self.request_visible_thumbs()
     }
 
