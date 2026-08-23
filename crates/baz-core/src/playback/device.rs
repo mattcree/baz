@@ -170,7 +170,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rtrb::{Producer, RingBuffer};
@@ -644,33 +644,96 @@ impl DeviceSink {
     }
 }
 
+/// **Offer `samples` to the ring, giving up if the device stops draining.**
+///
+/// Free rather than a method, and taking its budget rather than reading the
+/// constant, because a `DeviceSink` owns a `cpal::Stream` and cannot be built
+/// without hardware — so as a method this loop was unreachable from a test,
+/// which is how it kept its missing deadline. With the pieces passed in, a
+/// ring whose consumer never reads is the whole fixture.
+///
+/// # The deadline, and why it is here at all
+///
+/// Until 2026-08-23 the only way out was `failed`, and the only writer of that
+/// flag is cpal's error callback. So a stall the host *reports* was handled
+/// and a stall it does not report was not: a PipeWire node that stops
+/// draining, a PCM left SUSPENDED across suspend/resume, a backend that
+/// quietly stops calling us — each of them spun here at 200 µs for ever.
+///
+/// The cost is not a lost stream. This runs on the engine's own thread, so
+/// [`crate::engine`]'s pump stops reading commands — Stop, Pause, Next, Seek
+/// and the volume are accepted by the interface and never acted on — and
+/// `EngineHandle::drop` joins that thread, so quitting hangs the process.
+/// After which the listener reaches for `kill -9`, and nothing is written back.
+///
+/// The rule is [`Sink`]'s own; this module's docs already claimed to hold it;
+/// and `exclusive.rs` already implements it, its own budget crediting *this*
+/// module with the rule it did not have.
+///
+/// **Progress resets the budget**: a slow device is not a wedged one, and a
+/// long write must not fail for being long.
+fn offer(
+    producer: &mut Producer<f32>,
+    failed: &AtomicBool,
+    written: &mut u64,
+    samples: &[f32],
+    budget: Duration,
+) {
+    let mut offset = 0;
+    let mut deadline = Instant::now() + budget;
+    while offset < samples.len() {
+        if failed.load(Ordering::Acquire) {
+            // The stream is dead; drop the rest rather than spin forever.
+            return;
+        }
+        let free = producer.slots();
+        if free == 0 {
+            if Instant::now() >= deadline {
+                // Fail the stream, so every later write returns at once and
+                // anything supervising it can see what happened.
+                failed.store(true, Ordering::Release);
+                return;
+            }
+            thread::sleep(Duration::from_micros(200));
+            continue;
+        }
+        deadline = Instant::now() + budget;
+        let n = free.min(samples.len() - offset);
+        if let Ok(mut chunk) = producer.write_chunk(n) {
+            let (a, b) = chunk.as_mut_slices();
+            let a_len = a.len();
+            a.copy_from_slice(&samples[offset..offset + a_len]);
+            b.copy_from_slice(&samples[offset + a_len..offset + n]);
+            chunk.commit_all();
+            offset += n;
+            *written += n as u64;
+        }
+    }
+}
+
+/// How long [`Sink::write`] keeps offering frames to a device accepting none
+/// before it gives up and fails the stream.
+///
+/// The same five seconds `exclusive.rs` uses, and deliberately the same
+/// number: the two backends implement one rule from [`crate::playback::sink`]
+/// — *a stalled device that will never drain must not wedge the engine* — and
+/// two budgets would be two rules. Far past any legitimate backpressure, since
+/// the whole device ring is milliseconds, and short enough that a listener
+/// reads it as a fault rather than a hang.
+const WRITE_STALL_BUDGET: Duration = Duration::from_secs(5);
+
 impl Sink for DeviceSink {
     /// Push samples toward the device, sleeping on backpressure while the
     /// callback drains the ring. Runs on the engine's consumer (pump)
     /// thread — see the module docs for why blocking is acceptable here.
     fn write(&mut self, samples: &[f32]) {
-        let mut offset = 0;
-        while offset < samples.len() {
-            if self.failed.load(Ordering::Acquire) {
-                // The stream is dead; drop the rest rather than spin forever.
-                return;
-            }
-            let free = self.producer.slots();
-            if free == 0 {
-                thread::sleep(Duration::from_micros(200));
-                continue;
-            }
-            let n = free.min(samples.len() - offset);
-            if let Ok(mut chunk) = self.producer.write_chunk(n) {
-                let (a, b) = chunk.as_mut_slices();
-                let a_len = a.len();
-                a.copy_from_slice(&samples[offset..offset + a_len]);
-                b.copy_from_slice(&samples[offset + a_len..offset + n]);
-                chunk.commit_all();
-                offset += n;
-                self.written += n as u64;
-            }
-        }
+        offer(
+            &mut self.producer,
+            &self.failed,
+            &mut self.written,
+            samples,
+            WRITE_STALL_BUDGET,
+        );
     }
 
     /// Drop every sample already queued for the device, so the next
@@ -750,6 +813,76 @@ impl Sink for DeviceSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A device that stops draining fails the stream; it does not wedge the
+    /// engine.** Audit finding 1, 2026-08-23.
+    ///
+    /// The consumer is held and never read, so the ring fills and stays full —
+    /// which is a PipeWire node that stopped draining, or a PCM left SUSPENDED
+    /// across a suspend, or any stall cpal does not report as a stream error.
+    /// Before the deadline this call never returned, on the engine's own
+    /// thread: transport commands stopped being read and quitting hung the
+    /// process, because `EngineHandle::drop` joins that thread.
+    #[test]
+    fn a_device_that_never_drains_fails_the_stream_instead_of_hanging() {
+        let (mut producer, _consumer) = RingBuffer::<f32>::new(8);
+        let failed = AtomicBool::new(false);
+        let mut written = 0u64;
+        let budget = Duration::from_millis(120);
+
+        let started = Instant::now();
+        // More than the ring holds, so the loop must block on backpressure.
+        offer(&mut producer, &failed, &mut written, &[0.5; 64], budget);
+        let took = started.elapsed();
+
+        assert!(
+            failed.load(Ordering::Acquire),
+            "a wedged device must fail the stream"
+        );
+        assert!(
+            took >= budget && took < budget * 12,
+            "should give up at about the budget, took {took:?}"
+        );
+        assert_eq!(written, 8, "only what the ring accepted was counted");
+
+        // And once failed, later writes return at once rather than re-waiting.
+        let started = Instant::now();
+        offer(&mut producer, &failed, &mut written, &[0.5; 64], budget);
+        assert!(
+            started.elapsed() < budget,
+            "a failed stream must not spend the budget again"
+        );
+    }
+
+    /// **A draining device is never failed, however long the write.** The
+    /// budget resets on progress, so a slow consumer is not a wedged one.
+    #[test]
+    fn progress_keeps_the_budget_alive() {
+        let (mut producer, mut consumer) = RingBuffer::<f32>::new(8);
+        let failed = AtomicBool::new(false);
+        let mut written = 0u64;
+        let budget = Duration::from_millis(60);
+
+        let drain = std::thread::spawn(move || {
+            let mut taken = 0;
+            while taken < 256 {
+                if let Ok(chunk) = consumer.read_chunk(1) {
+                    chunk.commit_all();
+                    taken += 1;
+                } else {
+                    std::thread::sleep(Duration::from_micros(50));
+                }
+            }
+        });
+        offer(&mut producer, &failed, &mut written, &[0.25; 256], budget);
+        drain.join().expect("drain");
+
+        assert!(
+            !failed.load(Ordering::Acquire),
+            "a device that keeps draining must not be failed"
+        );
+        assert_eq!(written, 256, "every sample was delivered");
+    }
 
     /// **The process's first cpal call is made on a thread that is not the
     /// caller's** — the structural half of the Windows access-violation fix
