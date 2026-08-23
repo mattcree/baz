@@ -569,6 +569,88 @@ Newest first. Each was asked for in conversation and is now in the product.
 
   </details>
 
+## Audit of 2026-08-23 — findings
+
+Five independent reviewers over the whole tree at v0.5.0, each finding
+adversarially verified by a second reviewer told to refuse anything it could
+not fail itself. Fifteen findings survived; they are recorded here as twelve
+items because the synthesis merged the duplicates.
+
+**Read the verdict first, because it is the context for everything below.**
+161k lines, 24 panic sites outside tests, nearly all locally proved.
+`index.rs` gets downgrade safety exactly right — `refuse_newer` runs *before*
+`journal_mode`, so a build that refuses a newer database has not touched the
+file header on its way to saying so — and every migration wraps DDL, backfill
+and version bump in one transaction. The cpal callback is real realtime code:
+wait-free pops, plain stores rather than RMWs, no allocation, no locks. The
+updater's parsing discipline is better than most shipping software. Five
+reviewers each tried to break something and could not.
+
+### The theme behind the findings
+
+**Prose standing in for a guard.** In six places a doc comment asserts a
+safety property the adjacent code does not have, and in every case the
+assertion is what stopped anyone checking:
+
+| The claim | Where | The reality |
+|---|---|---|
+| "nothing waits indefinitely on a callback that may never run again" | `device.rs:735` | finding 1 |
+| "the prefetch loop observes `stop`, so this join is bounded" | `engine.rs:4024` | finding 5 |
+| "they cannot [race]: there is one debounced count and one compose" | `semantic.rs:72` | finding 3 |
+| "anything on the machine could have touched the file in between" | `stage.rs:9`, ADR-0043 §4 | finding 6 |
+| "a key added … by hand survives a write by this one" | `config::persist` | finding 2 |
+| "baz has no automatic updater" | `RELEASING.md:100` | finding 9 |
+
+The docs here are unusually good, which is exactly what makes this dangerous:
+reviewers reported treating a confident comment as evidence and having to
+force themselves back to the code. **The rule worth adopting: when a doc
+comment asserts a bound, an exclusion or a verification, the sentence names
+the mechanism — `WRITE_STALL_BUDGET`, `write_atomic`, the mutex, the test —
+or it does not get written.**
+
+Three more, briefly. **Unbounded waits converge on one thread and that thread
+is joined on quit**, so any of them turns quit into a hung process — whose
+next move is `kill -9`, which is finding 2's trigger. **The second copy is the
+one that rots**: findings 1, 2, 5, 7 and 10 are each "this pattern is applied
+correctly elsewhere in this repo" — `exclusive.rs` has the deadline,
+`playlist.rs` has `write_atomic`, `decode_open` has the stop check, `resolve`
+has all sixteen rooms, `dmg.sh` has `mktemp`. Good baseline, weak guards: an
+exhaustiveness test must sweep *every* consumer, not the first.
+**Where behaviour is hard to reach the suite reaches for the source text** —
+85 source-scanning tests, 23 in `app.rs` — and findings 6 and 8 are both cases
+where the proxy stopped tracking the property.
+
+### The findings
+
+| # | Finding | Where | Status |
+|---|---|---|---|
+| 1 | **`DeviceSink::write` can spin forever.** Its only exit is `self.failed`, written solely by cpal's error callback, so any stall the host does not *report* — a PipeWire node that stops draining, a PCM left SUSPENDED across suspend/resume — spins at 200 µs indefinitely. It runs on the engine thread, so Stop/Pause/Next/Seek are accepted and never acted on, and `EngineHandle::drop` joins that thread, so quit hangs. `exclusive.rs:813` already has `WRITE_STALL_BUDGET`. **`failed()` has no callers outside tests**, so nothing supervises the stream even when cpal *does* report. Device output is unconditional in the GUI binary, so this is the path every user is on. | `playback/device.rs:651` | open |
+| 2 | **config.toml has no durability story and a bad byte is permanent.** `fs::write` truncates then writes; a parse failure falls back to `Config::default()`, and the next `persist` — volume, layout, theme, `last_place` on every clean quit — writes the defaults back. Lost: `music_dirs`, theme, EQ curves, Vibe curves, crossfade, ReplayGain. `write_atomic` already exists at `baz-core/src/playlist.rs:920`. | `config.rs:1143`, `:851` | open |
+| 3 | **Vibe compose runs a 350 MiB ONNX embedding on the interface thread**, contending a process-wide mutex with the debounced live count. The docs claim the two cannot race; they can — the 400 ms debounce fires on typing and Compose is pressed right after typing. The window stops rendering and stops accepting input, against a stated hard rule. | `baz/src/vibe.rs:2597` | open |
+| 4 | **A non-ASCII byte in a theme colour is a launch crash loop.** `value.len()` is bytes, the format check means characters: `"#aé123"` is seven bytes, passes both guards, and `&value[1..3]` panics on a char boundary. `theme::install` runs at `app.rs:153` before the window exists and `custom:<id>` persists, so it crashes on every start until the JSON is hand-edited. **Reproduced.** | `theme_file.rs:314` | open |
+| 5 | **Blocking I/O on the producer thread, joined unconditionally.** `prefetch` opens a file and probes it before any stop check, so a slept NAS blocks for the mount timeout or forever; `Session::drop` joins it. Treat as a class — `find_anchor` and `push_anchor` are the other sites. | `engine.rs:4023` | open |
+| 6 | **The staged installer has no provenance, and the check that pretends to give it has no tests.** `ready` re-hashes the payload against a digest read from the same user-writable directory, so anything that can rewrite the `.msi` rewrites the digest beside it; it covers truncation only. With `perMachine`, baz's own dialog vouches for the elevation. `hold`/`pending`/`ready`/`discard` and `install_in_place` have zero test callers. | `baz-update/stage.rs:142` | open |
+| 7 | **`preview` knows 6 of 16 rooms; ten show a false "unavailable" error** and lose their swatch, while `resolve` has correctly stood the listener in the room. No test names `preview`. | `theme_file.rs:160` | open |
+| 8 | **The accessibility mirror table is prose nobody reads**, and one row names a door deleted a fortnight ago — so `Ctrl+P` is the only way to raise the playlists panel and the test written to refuse keyboard-only routes is green. | `app.rs:14101` | open |
+| 9 | **`RELEASING.md` denies the existence of the self-updater** and is the operator's checklist. Also: the pipeline diagram omits the flatpak/`.msi`/`.dmg` jobs, release records stop at v0.3.0, and step 10's `git rev-parse vX.Y.Z` returns the tag object rather than the commit Flathub needs — it must be `^{commit}`. | `docs/RELEASING.md:100` | open |
+| 10 | **`install.sh` builds its root-written manifest at a predictable `/tmp` path** with `$$` as the only entropy, and `uninstall.sh` feeds each line to `rm -f` as root. Kernel hardening reduces it to a denial of service, hence low. `dmg.sh:33` already uses `mktemp`. | `packaging/linux/install.sh:94` | open |
+| 11 | **Visualization seqlock has no acquire fence**, and its fallback injects silence: a reader landing inside `capture`'s 512 stores burns all three attempts and returns a zeroed frame, which `History::capture` writes into the scrolling ring — so the dropout *scrolls across the display* rather than flickering for a frame. | `engine.rs:722` | open |
+| 12 | **Nothing constructs an `App`**; the 16k-line shell is guarded by 23 substring scans of its own source. Already recorded policy and the stated blocker is real — listed because it is the enabling condition for findings 7 and 8. The scans slice on `"\n    }\n"`, so extracting a helper silently shrinks the inspected region while every assertion still passes. | `app.rs:14286` | open |
+
+### What the audit did **not** cover
+
+Read-and-grep only. **Nothing was built and no test suite was run** — CI's green
+state is taken on trust; the one dynamic check was reproducing finding 4.
+Out of scope: real hardware (no playback, device switching, suspend/resume or
+exclusive mode anywhere — finding 1 is reasoned, not reproduced); Windows and
+macOS entirely; DSP correctness (resampler, EQ coefficients, ReplayGain values,
+the crossfade curve — read for bounds, never verified numerically);
+`baz-vibe` internals beyond `semantic.rs`'s threading; performance at scale
+(including the unquantified observation that `view()` does a synchronous
+`config::load` per frame while Settings is open, `app.rs:8983`); supply chain
+(no `cargo audit`, no licence review); fuzzing (targets read, none run);
+accessibility and colour beyond the mirror tests; MPRIS conformance; and UI/UX.
+
 ## Known gaps in shipped features
 
 - ~~**Search folds case and nothing else, so `and` never finds `&`.**~~
