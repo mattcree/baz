@@ -91,8 +91,24 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # The manifest lives beside the desktop entry so an uninstall can find it
 # without being told where the install went.
 manifest="$datadir/$app_id/installed-files"
-: > "/tmp/baz-install.$$"
-record() { printf '%s\n' "$1" >> "/tmp/baz-install.$$"; }
+
+# **`mktemp`, not `/tmp/baz-install.$$`.** `--system` runs this as root, `$$`
+# is a small guessable number, and `uninstall.sh` later hands every line of
+# this file to `rm -f` as root. A local user who wins the race — or who simply
+# pre-creates the handful of likely names — chooses what a root uninstall
+# deletes. `fs.protected_symlinks` blocks the symlink half of that on any
+# current kernel, which is why this was a low finding rather than an urgent
+# one, but "a sysctl is holding it" is not the same as "it cannot happen", and
+# `dmg.sh` already does this correctly.
+#
+# The trap covers the `set -eu` exits between here and the copy below, so a
+# failed install stops leaving its working file behind as well.
+scratch=$(mktemp "${TMPDIR:-/tmp}/baz-install.XXXXXX") || {
+    echo "install.sh: could not create a temporary file" >&2
+    exit 1
+}
+trap 'rm -f "$scratch"' EXIT INT TERM
+record() { printf '%s\n' "$1" >> "$scratch"; }
 
 # **Write beside, then rename over.** `cp` onto a destination truncates it in
 # place, and the kernel refuses that for a binary it is currently executing —
@@ -140,9 +156,8 @@ if [ -f "$entry" ]; then
 fi
 
 mkdir -p "$(dirname -- "$manifest")"
-cp -f "/tmp/baz-install.$$" "$manifest"
+cp -f "$scratch" "$manifest"
 printf '%s\n' "$manifest" >> "$manifest"
-rm -f "/tmp/baz-install.$$"
 
 # Caches, both optional. The icon resolves without either; these only make the
 # lookup faster and the menu entry appear without a re-login.

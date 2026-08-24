@@ -277,12 +277,14 @@ mod imp {
             }
         }
 
-        /// The most recent delivered-audio snapshot, or silence without an
-        /// engine. Reading it never locks the playback thread.
-        pub fn visualization(&self) -> VisualizationFrame {
-            self.handle
-                .as_ref()
-                .map_or_else(VisualizationFrame::default, EngineHandle::visualization)
+        /// The most recent delivered-audio snapshot. Reading it never locks
+        /// the playback thread.
+        ///
+        /// `None` covers both "there is no engine" and "the sample handoff
+        /// was mid-write"; neither is silence, and this used to answer both
+        /// with a zeroed frame that the caller could not tell apart from one.
+        pub fn visualization(&self) -> Option<VisualizationFrame> {
+            self.handle.as_ref().and_then(EngineHandle::visualization)
         }
 
         /// Send a command; `false` means the engine is gone (the caller

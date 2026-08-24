@@ -719,8 +719,38 @@ impl VisualizationTap {
         self.sequence.fetch_add(1, Ordering::Release);
     }
 
-    fn snapshot(&self) -> VisualizationFrame {
-        for _ in 0..3 {
+    /// Read a consistent frame, or `None` if the writer held the payload for
+    /// every attempt.
+    ///
+    /// # Why this is an `Option` and not a zeroed frame
+    ///
+    /// It used to return `VisualizationFrame::default()` when it gave up,
+    /// which is not "no frame" — it is **a frame of silence**, and it is
+    /// indistinguishable from one. The caller that matters writes what it gets
+    /// into a scrolling ring, so a reader that lost the race put a notch of
+    /// digital black into the history and then *scrolled it across the
+    /// display* for the width of the whole visualization. A dropout the eye
+    /// follows across the screen is a worse artefact than the missed frame it
+    /// stands in for. `None` lets the caller keep what it already had, which
+    /// is what a dropped frame should look like.
+    ///
+    /// # The fence
+    ///
+    /// The payload loads are `Relaxed` and mean nothing on their own; the
+    /// sequence comparison is what makes them a snapshot. An `Acquire` *load*
+    /// orders operations that follow it, so the closing load could not stop
+    /// the payload loads being reordered after it — the check would then be
+    /// validating reads that had not happened yet. `fence(Acquire)` is the
+    /// half that orders what came *before*, and it is what makes the second
+    /// comparison mean anything at all.
+    fn snapshot(&self) -> Option<VisualizationFrame> {
+        // The writer holds the payload for `VISUAL_SAMPLE_COUNT` relaxed
+        // stores per audio callback and is otherwise idle, so a reader loses
+        // only by arriving inside that window. Three attempts was tight enough
+        // that ordinary contention reached the fallback; the cost of a spin
+        // here is nanoseconds on a UI thread, and the cost of giving up is a
+        // frame nobody draws.
+        for _ in 0..16 {
             let before = self.sequence.load(Ordering::Acquire);
             if !before.is_multiple_of(2) {
                 std::hint::spin_loop();
@@ -736,11 +766,13 @@ impl VisualizationTap {
             for (sample, slot) in frame.side.iter_mut().zip(&self.side) {
                 *sample = f32::from_bits(slot.load(Ordering::Relaxed));
             }
-            if self.sequence.load(Ordering::Acquire) == before {
-                return frame;
+            std::sync::atomic::fence(Ordering::Acquire);
+            if self.sequence.load(Ordering::Relaxed) == before {
+                return Some(frame);
             }
+            std::hint::spin_loop();
         }
-        VisualizationFrame::default()
+        None
     }
 }
 
@@ -867,8 +899,14 @@ impl EngineHandle {
     }
 
     /// Read the latest visualization snapshot without locking the engine.
+    ///
+    /// `None` means the sample handoff was mid-write for every attempt, not
+    /// that the audio is silent. A caller drawing a live visualization should
+    /// keep the frame it already has; one that cannot should draw nothing.
+    /// Returning a zeroed frame instead — which this did until 2026-08-24 —
+    /// puts fabricated silence into whatever the caller does with it.
     #[must_use]
-    pub fn visualization(&self) -> VisualizationFrame {
+    pub fn visualization(&self) -> Option<VisualizationFrame> {
         self.visualization.snapshot()
     }
 
@@ -4537,16 +4575,62 @@ mod tests {
             frame[1] = -0.25;
         }
         tap.capture(&samples, RATE);
-        assert_eq!(tap.snapshot(), VisualizationFrame::default());
+        // Disabled, the tap holds nothing — and answers with a *readable*
+        // frame of zeros, which is different from the `None` that means "the
+        // writer had the payload". Silence you can read is a fact; silence
+        // invented because a read failed is not.
+        assert_eq!(tap.snapshot(), Some(VisualizationFrame::default()));
 
         tap.set_enabled(true);
         tap.capture(&samples, RATE);
-        let frame = tap.snapshot();
+        let frame = tap.snapshot().expect("an idle tap reads first time");
         assert_eq!(frame.sample_rate, RATE);
         assert!((frame.samples[0] - 0.125).abs() < f32::EPSILON);
         // `(0.5 - -0.25) / 2`: the half-difference, which is the fact mono
         // cannot carry.
         assert!((frame.side[0] - 0.375).abs() < f32::EPSILON);
+    }
+
+    /// **A reader that loses the race gets nothing, not silence.**
+    ///
+    /// The distinction is the whole finding. `snapshot` used to answer a lost
+    /// race with `VisualizationFrame::default()` — a frame whose samples are
+    /// all zero, which is exactly what a frame of digital silence looks like
+    /// and is indistinguishable from one. `App`'s `CaseTick` writes what it
+    /// gets into a scrolling ring, so one lost race put a notch of black into
+    /// the history and then carried it across the width of the display.
+    ///
+    /// Left odd, the sequence says a writer holds the payload, so every
+    /// attempt is refused and the reader comes back empty — which is a state
+    /// the caller can act on by keeping the frame it already had.
+    #[test]
+    fn a_reader_that_cannot_get_a_consistent_frame_reports_that_rather_than_silence() {
+        let tap = VisualizationTap::default();
+        tap.set_enabled(true);
+        let mut samples = [0.0_f32; 512];
+        for frame in samples.chunks_exact_mut(2) {
+            frame[0] = 0.5;
+            frame[1] = 0.5;
+        }
+        tap.capture(&samples, RATE);
+        let good = tap.snapshot().expect("an idle tap reads first time");
+        assert!((good.samples[0] - 0.5).abs() < f32::EPSILON);
+
+        // A writer that began and has not finished: odd sequence, payload
+        // in flight.
+        tap.sequence
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        assert_eq!(
+            tap.snapshot(),
+            None,
+            "a mid-write tap answered with a frame — and a zeroed frame here \
+             is silence the caller cannot tell from real silence"
+        );
+
+        // And it recovers on its own once the writer publishes.
+        tap.sequence
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        assert!(tap.snapshot().is_some(), "the tap did not recover");
     }
 
     /// **Mid and side reconstruct the two channels exactly.**
@@ -4573,7 +4657,7 @@ mod tests {
                 frame[1] = right;
             }
             tap.capture(&samples, RATE);
-            let frame = tap.snapshot();
+            let frame = tap.snapshot().expect("an idle tap reads first time");
             let (mid, side) = (frame.samples[0], frame.side[0]);
             assert!(
                 ((mid + side) - left).abs() < 1e-6 && ((mid - side) - right).abs() < 1e-6,
@@ -4597,7 +4681,7 @@ mod tests {
             frame[1] = value;
         }
         tap.capture(&samples, RATE);
-        let frame = tap.snapshot();
+        let frame = tap.snapshot().expect("an idle tap reads first time");
         assert!(
             frame.side.iter().all(|sample| sample.abs() < 1e-7),
             "a mono record was published with a stereo image"
@@ -4620,7 +4704,7 @@ mod tests {
         visualize_then_shape(&tap, &mut block, RATE, &mut fader, &mut equalizer);
 
         assert!(block.iter().all(|sample| *sample == 0.0));
-        let frame = tap.snapshot();
+        let frame = tap.snapshot().expect("an idle tap reads first time");
         assert_eq!(frame.sample_rate, RATE);
         assert!(
             frame

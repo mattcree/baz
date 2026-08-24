@@ -4615,9 +4615,16 @@ impl App {
                     self.case_rotation.tick(now);
                 }
                 if self.place == Place::NowPlaying && self.visualization.mode.records_history() {
-                    let audio = self.playback.visualization();
-                    self.visualization_history
-                        .capture(self.visualization.mode, &audio);
+                    // A frame the tap could not read consistently is skipped,
+                    // not captured. The ring scrolls, so writing a zeroed
+                    // frame here would draw a notch of silence and then carry
+                    // it across the whole display — an artefact the eye
+                    // follows, standing in for a frame nobody would have
+                    // noticed missing.
+                    if let Some(audio) = self.playback.visualization() {
+                        self.visualization_history
+                            .capture(self.visualization.mode, &audio);
+                    }
                 }
             }
             Message::CasePressed(at)
@@ -8955,7 +8962,8 @@ impl App {
                     .visualization
                     .mode
                     .active()
-                    .then(|| self.playback.visualization());
+                    .then(|| self.playback.visualization())
+                    .flatten();
                 let fact = self
                     .visualization
                     .facts
@@ -9339,7 +9347,8 @@ impl App {
                 .visualization
                 .mode
                 .active()
-                .then(|| self.playback.visualization());
+                .then(|| self.playback.visualization())
+                .flatten();
             iced::widget::stack![
                 views::now_playing::backdrop(
                     state,
