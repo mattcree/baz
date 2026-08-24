@@ -363,7 +363,7 @@ mod tests {
         )
         .expect("this view's source")
         .replace("\r\n", "\n");
-        let code = source.split("#[cfg(test)]").next().expect("a source head");
+        let code = crate::shipped::head(&source);
         let tile = code
             .find("crate::views::list_tile::view(")
             .expect("the shared tile is used");

@@ -2182,6 +2182,102 @@ fn fade_seams_of(screen: &Screen, paths: &[std::path::PathBuf]) -> Vec<bool> {
     }
 }
 
+/// Everything the shell needs and cannot make: the outside world, gathered.
+///
+/// [`App::assemble`] derives the whole of `App` from one of these, so the
+/// boundary between "what baz reads from the machine" and "what baz decides"
+/// is a struct rather than a convention. [`Outside::real`] is what `main`
+/// runs; a test builds one by hand.
+struct Outside {
+    stored: Option<config::Config>,
+    output_choices: Vec<OutputChoice>,
+    output_devices_error: Option<String>,
+    playback: Playback,
+    mpris: Mpris,
+    history_ledger: Option<Arc<HistoryLedger>>,
+    resume: crate::session::Snapshot,
+}
+
+impl Outside {
+    /// The real one: read the config, open the device, take the bus, open the
+    /// ledger, and pick up an interrupted session.
+    fn real() -> Self {
+        let stored = config::config_file().map(|path| config::load(&path));
+        let configured_output = stored
+            .as_ref()
+            .and_then(|config| config.output_device.as_deref());
+        let (output_choices, output_devices_error) =
+            crate::playback::output_choices(configured_output);
+        // Engine first: open failure must not kill the app — it becomes
+        // Availability::NoDevice state that the bottom bar reports.
+        let playback = Playback::start(configured_output);
+        // Desktop integration is an enhancement: this spawns a thread and
+        // returns, and an absent session bus costs one stdout line (see
+        // crate::mpris).
+        let mpris = Mpris::start();
+        // **The play ledger, handed to the engine.** ADR-0018 built it and put
+        // the whole of a front end's involvement in one call; nothing in this
+        // crate made it, so nothing was being recorded and PLAYED had nothing
+        // to sort by. This is that call.
+        //
+        // The engine is the only thing that knows what actually reached the
+        // output and for how long, which is why the ledger is written there
+        // and not here (`baz_core::history`). A ledger that cannot be opened
+        // is carried on without: `set_history(None)` is the engine's own
+        // default, so the failure costs the record of *this* session and
+        // nothing else — no dialog, no degraded playback, and the file is
+        // tried again next launch.
+        let history_ledger = match HistoryLedger::open_default() {
+            Ok(ledger) => {
+                let ledger = Arc::new(ledger);
+                crate::baz_log!("[history] recording to {}", ledger.path().display());
+                playback.set_history(Some(Arc::clone(&ledger)));
+                Some(ledger)
+            }
+            Err(error) => {
+                crate::baz_log!("[history] not recording: {error}");
+                None
+            }
+        };
+        Self {
+            stored,
+            output_choices,
+            output_devices_error,
+            playback,
+            mpris,
+            history_ledger,
+            resume: read_snapshot(),
+        }
+    }
+
+    /// An outside world that touches nothing, for tests.
+    ///
+    /// No device, no session bus, no ledger, and — the part that matters most
+    /// — **no XDG path at all**. `stored` is handed over rather than read, so
+    /// a test cannot pick up the config of whoever is running it, and cannot
+    /// write over it either. `music_dirs` is left empty by the caller unless
+    /// it means otherwise, which keeps `Shelf::open` and the library database
+    /// out of the picture entirely.
+    ///
+    /// The returned recorder is where the shell's asks of the engine land.
+    #[cfg(test)]
+    fn none(stored: config::Config) -> (Self, Arc<std::sync::Mutex<Vec<crate::playback::Ask>>>) {
+        let (playback, asks) = Playback::recording();
+        (
+            Self {
+                stored: Some(stored),
+                output_choices: Vec::new(),
+                output_devices_error: None,
+                playback,
+                mpris: Mpris::silent(),
+                history_ledger: None,
+                resume: crate::session::Snapshot::default(),
+            },
+            asks,
+        )
+    }
+}
+
 impl App {
     /// Validate and install the Settings paste field as a local custom theme.
     /// Selection is persisted only after the complete document is safe and on
@@ -2211,27 +2307,81 @@ impl App {
         Task::none()
     }
 
+    fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
+        Self::assemble(Outside::real(), started, cli_dir)
+    }
+
+    /// A real `App`, assembled against an outside world that touches nothing.
+    ///
+    /// This is the seam the audit asked for. Until it existed, nothing in the
+    /// suite constructed an `App` at all, so the shell's behaviour was pinned
+    /// by reading its own source for substrings — assertions that go on
+    /// passing when the code they describe moves into a helper, and that can
+    /// only ever say "the source mentions this", never "baz did this".
+    ///
+    /// What it costs to be safe: no audio device, no session bus (a developer
+    /// machine *has* one, and a test that spawned the real handle would put
+    /// `org.mpris.MediaPlayer2.baz` on it and take the desktop's media keys),
+    /// no play ledger, and no XDG path — the config is handed in, not read,
+    /// and with no `music_dirs` the library database is never opened. The
+    /// returned recorder holds every ask the shell made of the engine.
+    ///
+    /// It lands in [`Screen::Setup`], which is what a first run is. A test
+    /// needing a populated shelf needs more than this and does not have it
+    /// yet; `docs/BACKLOG.md` #12 says so rather than leaving it to be
+    /// discovered.
+    #[cfg(test)]
+    pub(crate) fn headless(
+        stored: config::Config,
+    ) -> (Self, Arc<std::sync::Mutex<Vec<crate::playback::Ask>>>) {
+        let (outside, asks) = Outside::none(stored);
+        let (app, _task) = Self::assemble(outside, Instant::now(), None);
+        (app, asks)
+    }
+
+    /// Build the shell from an already-gathered outside world.
+    ///
+    /// Everything `App` cannot make for itself — the config file, the audio
+    /// engine, the desktop bus, the play ledger, the interrupted session —
+    /// arrives in [`Outside`], and everything below this line is derivation
+    /// from it. The split exists so a test can hand over an outside world that
+    /// touches nothing: no device, no bus, no ledger, and above all none of
+    /// the XDG paths that belong to whoever is running the suite.
+    ///
+    /// It is deliberately the *same* function the product runs, not a
+    /// simplified twin. A twin is how you end up asserting about a shell that
+    /// nobody ships.
     #[expect(
         clippy::too_many_lines,
         reason = "a launch is one composition of independent restores — the \
-                  engine, the library, the config's standing decisions, the \
-                  run's snapshot — and each is three lines that only mean \
-                  anything beside the others. It has crossed and re-crossed \
-                  the limit as those decisions came and went; splitting it \
-                  would name four functions after the order they happen to run"
+                  library, the config's standing decisions, the run's snapshot \
+                  — and each is three lines that only mean anything beside the \
+                  others. It has crossed and re-crossed the limit as those \
+                  decisions came and went; splitting it would name four \
+                  functions after the order they happen to run. What *was* \
+                  separable came out on 2026-08-24: everything it reads from \
+                  the machine is `Outside` now, which is a boundary rather \
+                  than a slice of the sequence"
     )]
-    fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
-        let stored = config::config_file().map(|path| config::load(&path));
+    fn assemble(
+        outside: Outside,
+        started: Instant,
+        cli_dir: Option<PathBuf>,
+    ) -> (Self, Task<Message>) {
+        let Outside {
+            stored,
+            output_choices,
+            output_devices_error,
+            playback,
+            mpris,
+            history_ledger,
+            resume,
+        } = outside;
         let configured_output = stored
             .as_ref()
             .and_then(|config| config.output_device.as_deref());
         let output_choice = OutputChoice::from_config(configured_output);
         let active_output_choice = output_choice.clone();
-        let (output_choices, output_devices_error) =
-            crate::playback::output_choices(configured_output);
-        // Engine first: open failure must not kill the app — it becomes
-        // Availability::NoDevice state that the bottom bar reports.
-        let playback = Playback::start(configured_output);
         let availability = playback.availability();
         let mut player = PlayerState::new(availability.clone());
         // The one pull in an event-driven machine, and ADR-0011 provides it
@@ -2251,10 +2401,6 @@ impl App {
                 state.applied.clipping_prevented,
             );
         }
-        // Desktop integration is an enhancement: this spawns a thread and
-        // returns, and an absent session bus costs one stdout line (see
-        // crate::mpris).
-        let mpris = Mpris::start();
         let saved_volume = stored
             .as_ref()
             .map_or(Volume::UNITY, |config| config.volume);
@@ -2290,18 +2436,6 @@ impl App {
         // so the failure costs the record of *this* session and nothing else —
         // no dialog, no degraded playback, and the file is tried again next
         // launch.
-        let history_ledger = match HistoryLedger::open_default() {
-            Ok(ledger) => {
-                let ledger = Arc::new(ledger);
-                crate::baz_log!("[history] recording to {}", ledger.path().display());
-                playback.set_history(Some(Arc::clone(&ledger)));
-                Some(ledger)
-            }
-            Err(error) => {
-                crate::baz_log!("[history] not recording: {error}");
-                None
-            }
-        };
         let group_key = stored
             .as_ref()
             .map_or(GroupKey::Artist, |config| config.group_key);
@@ -2376,7 +2510,6 @@ impl App {
         if crossfade_ms > 0 {
             playback.send(Command::SetCrossfade { ms: crossfade_ms });
         }
-        let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
         // them. Pointing baz at a folder for an afternoon must not silently
@@ -14153,18 +14286,10 @@ mod tests {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).expect("a readable module");
-                // The *test module*, which is last — not the first
-                // `#[cfg(test)]`, which in several view modules is a constant
-                // kept for an audit and sits above the controls.
-                let live = text
-                    .rsplit_once("#[cfg(test)]\nmod ")
-                    .map_or(text.as_str(), |(head, _)| head);
-                for line in live.lines() {
-                    if !line.trim_start().starts_with("//") {
-                        source.push_str(line);
-                        source.push('\n');
-                    }
-                }
+                // Shipped code, comments removed — `crate::shipped` says why
+                // both halves matter and carries the tests for them.
+                source.push_str(&crate::shipped::code(&text));
+                source.push('\n');
             }
         }
         source
@@ -14743,10 +14868,7 @@ mod tests {
         // control sends is the removal half-done. Read off the shipped half
         // of the file only — this test names both literals, and a sweep that
         // found its own assertion would never be able to pass.
-        let code = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a source has a head");
+        let code = crate::shipped::head(&source);
         assert!(
             !code.contains("fn play_all(&mut self"),
             "`play_all` outlived the button the owner removed"
@@ -14837,10 +14959,7 @@ mod tests {
         )
         .expect("the shell source")
         .replace("\r\n", "\n");
-        let code = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production code");
+        let code = crate::shipped::head(&source);
         assert!(code.contains("|config| config.volume"));
         assert!(code.contains("position: saved_volume.position()"));
         assert!(code.contains("matches!(&event, Event::VolumeChanged { .. })"));
@@ -14950,7 +15069,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
         .expect("app.rs is this file");
-        let shipped = source.split("#[cfg(test)]").next().unwrap_or_default();
+        let shipped = crate::shipped::head(&source);
         let discarded = shipped.matches("let _ = self.note_place_left").count();
         assert_eq!(
             discarded, 2,
@@ -15250,28 +15369,61 @@ mod tests {
     /// just pressed play.
     #[test]
     fn the_sleep_timer_pauses_once_and_clears_itself() {
-        let source = include_str!("app.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a head");
-        let body = source
-            .split_once("fn tick_sleep_timer(&mut self)")
-            .expect("the tick")
-            .1;
-        let body = &body[..body.find("\n    }\n").expect("a function ends")];
-        assert!(
-            body.contains("self.sleep = None;") && body.contains("Command::Pause"),
-            "the sleep timer no longer pauses, or no longer disarms itself"
+        // **Run the timer instead of reading it.** The forbidden list this
+        // replaces — `Command::Stop`, `Message::Quit`, `SetVolume` — was the
+        // weakest kind of assertion: it went green the moment any of those
+        // moved behind a helper call, and it could only ever name the three
+        // wrongs somebody had thought of. Driving a real `App` and comparing
+        // the *whole* record of what it asked the engine for is exhaustive by
+        // construction, so nothing has to be guessed in advance.
+        let (mut app, asks) = App::headless(config::Config::default());
+        app.player.note_queue_sent(restored());
+        app.player.apply(
+            &Event::TrackStarted {
+                path: PathBuf::from("/m/2.flac"),
+                position: 1,
+            },
+            &[],
         );
-        for forbidden in ["Command::Stop", "Message::Quit", "SetVolume"] {
-            assert!(
-                !body.contains(forbidden),
-                "the sleep timer does more than pause: {forbidden}"
-            );
-        }
+        app.sleep = Some(Sleep {
+            minutes: 30,
+            fires_at: Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .expect("a second ago"),
+        });
+        asks.lock().expect("the recorder").clear();
+
+        app.tick_sleep_timer();
+        assert!(app.sleep.is_none(), "the sleep timer did not disarm itself");
+        assert_eq!(
+            *asks.lock().expect("the recorder"),
+            vec![crate::playback::Ask::Command(Command::Pause)],
+            "the sleep timer asked the engine for something other than a pause"
+        );
+
+        // And it fires once. A second tick on a disarmed timer is silence,
+        // not a pause a listener who just pressed play would feel.
+        asks.lock().expect("the recorder").clear();
+        app.tick_sleep_timer();
+        assert!(
+            asks.lock().expect("the recorder").is_empty(),
+            "a disarmed sleep timer went off again"
+        );
         // Its clock exists only while it is armed — the rule every other
         // per-second wake-up in this file follows.
-        let subs = source
+        //
+        // Still read from source, because a `Subscription` cannot be looked
+        // inside: there is nothing to interrogate about one but the code that
+        // built it. The head is taken at the *test module* rather than at the
+        // first `#[cfg(test)]` — this test used to do the latter and broke the
+        // day a `#[cfg(test)]` helper was added above the function it wanted,
+        // which is the fragility that made these scans a finding in the first
+        // place.
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        let head = source
+            .rsplit_once("#[cfg(test)]\nmod ")
+            .map_or(source.as_str(), |(head, _)| head);
+        let subs = head
             .split_once("fn add_place_clocks")
             .expect("the clocks")
             .1;
@@ -15307,10 +15459,7 @@ mod tests {
     /// which is exactly what a reader of this file can check.
     #[test]
     fn no_floating_layer_comes_and_goes_from_the_tree() {
-        let source = include_str!("app.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a head");
+        let source = crate::shipped::head(include_str!("app.rs"));
         let assembly = source
             .split_once("// **Every floating layer is stacked always**")
             .expect("the layer assembly")
@@ -15351,10 +15500,7 @@ mod tests {
     /// `prepare` creates.
     #[test]
     fn a_cold_index_still_composes_on_the_one_press() {
-        let source = include_str!("app.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a head");
+        let source = crate::shipped::head(include_str!("app.rs"));
         let arm = source
             .split_once("Message::VibeCreate => {")
             .expect("the compose arm")
@@ -16340,21 +16486,63 @@ mod tests {
     /// as fast as it can read it, so nothing plays in real time to animate.
     #[test]
     fn the_visualization_tap_does_not_depend_on_the_place() {
-        let source = include_str!("app.rs").replace("\r\n", "\n");
-        let rest = source
-            .split_once("fn sync_visualization_tap(&self)")
-            .expect("the tap")
-            .1;
-        let body = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        // **Asked of a real `App`, not of this file's text.** This used to
+        // read `sync_visualization_tap`'s source and assert it contained no
+        // `Place::` — which passes just as happily when the gate moves into a
+        // helper, and which could never say what the tap actually did. Now
+        // every place is visited and the recorded ask is compared.
+        let (mut app, asks) = App::headless(config::Config::default());
+        app.visualization.mode = crate::visualizer::Mode::Spectrum;
         assert!(
-            !body.contains("Place::"),
-            "the visualization tap is gated on the place again; the backdrop is \
-             drawn everywhere, so a frozen frame is what that buys"
+            app.visualization.mode.active(),
+            "the fixture picked an inactive mode; the sweep below would prove nothing"
         );
-        assert!(
-            body.contains("now_playing().is_some()") && body.contains("mode.active()"),
-            "the tap must still be a gate: nothing sounding, or no mode, and the \
-             sample copy is not paid at all"
+        app.player.note_queue_sent(restored());
+        app.player.apply(
+            &Event::TrackStarted {
+                path: PathBuf::from("/m/2.flac"),
+                position: 1,
+            },
+            &[],
         );
+
+        let places = [
+            Place::Library,
+            Place::Playlists,
+            Place::NewPlaylist,
+            Place::Favourites,
+            Place::Home,
+            Place::NowPlaying,
+            Place::Queue,
+            Place::Artist(7),
+            Place::Album(42),
+            Place::Playlist(987_654_321),
+            Place::Settings,
+        ];
+        for place in places {
+            app.place = place;
+            asks.lock().expect("the recorder").clear();
+            app.sync_visualization_tap();
+            assert_eq!(
+                *asks.lock().expect("the recorder"),
+                vec![crate::playback::Ask::Visualization(true)],
+                "the tap answered differently in {place:?} — the backdrop is drawn \
+                 everywhere, so a place-gated tap buys a frozen frame"
+            );
+        }
+
+        // And it is still a gate. Nothing sounding is nothing to sample, in
+        // every one of those places, so the copy is not paid at all.
+        app.player.apply(&Event::Stopped, &[]);
+        for place in places {
+            app.place = place;
+            asks.lock().expect("the recorder").clear();
+            app.sync_visualization_tap();
+            assert_eq!(
+                *asks.lock().expect("the recorder"),
+                vec![crate::playback::Ask::Visualization(false)],
+                "with nothing playing the tap stayed on in {place:?}"
+            );
+        }
     }
 }

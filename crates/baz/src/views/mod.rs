@@ -1176,10 +1176,7 @@ mod tests {
                 .replace("\r\n", "\n");
             // Only what ships: test modules (this one included) may name the
             // room's words in order to ban them.
-            let source = source
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head");
+            let source = crate::shipped::head(&source);
             for line in source.lines() {
                 if line.trim_start().starts_with("//") {
                     continue;
@@ -1283,10 +1280,7 @@ mod tests {
             let source = std::fs::read_to_string(&path)
                 .expect("a view source")
                 .replace("\r\n", "\n");
-            let source = source
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head");
+            let source = crate::shipped::head(&source);
             let name = path.file_name().expect("a file name").to_string_lossy();
             for (at, _) in source.match_indices("theme::track_row(") {
                 // Comments name the function too; only calls are call sites.
@@ -1341,10 +1335,7 @@ mod tests {
             let source = std::fs::read_to_string(&path)
                 .expect("a view source")
                 .replace("\r\n", "\n");
-            let source = source
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head");
+            let source = crate::shipped::head(&source);
             let name = path.file_name().expect("a file name").to_string_lossy();
             // `page.rs` is where both live; it defines them rather than using
             // them.
@@ -1397,10 +1388,7 @@ mod tests {
             let source = std::fs::read_to_string(root.join("views").join(page))
                 .expect("a view source")
                 .replace("\r\n", "\n");
-            let code = source
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head");
+            let code = crate::shipped::head(&source);
             for line in code.lines() {
                 let line = line.trim_start();
                 assert!(
@@ -1413,7 +1401,7 @@ mod tests {
         let shell = std::fs::read_to_string(root.join("app.rs"))
             .expect("the shell's source")
             .replace("\r\n", "\n");
-        let shell = shell.split("#[cfg(test)]").next().expect("a head");
+        let shell = crate::shipped::head(&shell);
         for call in ["views::artist::view(", "views::home::view("] {
             let at = shell.find(call).expect("the page is composed here");
             // The argument list, to its own closing parenthesis — the calls

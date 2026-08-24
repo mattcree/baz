@@ -172,12 +172,9 @@ mod tests {
     fn both_persistence_states_reach_one_playlist_page() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for file in ["src/views/playlist.rs", "src/views/queue.rs"] {
-            let source = std::fs::read_to_string(root.join(file))
-                .expect("a playlist state's source")
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head")
-                .to_owned();
+            let whole =
+                std::fs::read_to_string(root.join(file)).expect("a playlist state's source");
+            let source = crate::shipped::head(&whole).to_owned();
             assert!(
                 source.contains("playlist_page::view("),
                 "{file} bypasses the shared playlist page"

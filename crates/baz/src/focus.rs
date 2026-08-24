@@ -519,10 +519,7 @@ mod tests {
     #[test]
     fn a_region_announces_instead_of_drawing_a_ring() {
         let source = include_str!("focus.rs").replace("\r\n", "\n");
-        let shipped = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a source has a head");
+        let shipped = crate::shipped::head(&source);
         let rest = shipped
             .split_once("fn announced(")
             .expect("the region's arrival")
@@ -550,10 +547,7 @@ mod tests {
     #[test]
     fn a_control_with_nothing_to_press_is_skipped_rather_than_focused() {
         let source = include_str!("focus.rs").replace("\r\n", "\n");
-        let shipped = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a source has a head");
+        let shipped = crate::shipped::head(&source);
         let rest = shipped.split_once("fn operate(").expect("the traversal").1;
         let body = &rest[..rest.find("\n    }\n").expect("a method ends")];
         assert!(

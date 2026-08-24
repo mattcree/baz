@@ -1266,7 +1266,7 @@ mod tests {
     #[test]
     fn the_trailing_cluster_leads_with_its_reserved_slot() {
         let source = include_str!("bottom_bar.rs").replace("\r\n", "\n");
-        let code = source.split("#[cfg(test)]").next().expect("a head");
+        let code = crate::shipped::head(&source);
         let controls = code
             .split_once("let controls = row![")
             .expect("the trailing cluster")
@@ -1467,10 +1467,7 @@ mod tests {
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        let shipped = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("this module has a non-test head");
+        let shipped = crate::shipped::head(&source);
         // **All three lines**, not just the title. They carried the same
         // `Wrapping::None` and the same clip, so they had the same failure.
         assert_eq!(
@@ -1495,10 +1492,7 @@ mod tests {
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        let shipped = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("this module has a non-test head");
+        let shipped = crate::shipped::head(&source);
         // **The heart is a sibling of the door, not a child of it.** Nested,
         // it would either steal the block's press or issue it.
         let block = {

@@ -181,6 +181,28 @@ mod imp {
         /// Take-once slot the subscription stream drains (module docs).
         events: Arc<Mutex<Option<UnboundedReceiver<PlayerEvent>>>>,
         availability: Availability,
+        /// Where a test-built `Playback` writes what the shell asked the
+        /// engine for. `None` in every real one, and the only thing that
+        /// distinguishes a recording `Playback` from an unavailable one.
+        ///
+        /// The shell already tolerates having no engine — `send` returning
+        /// `false` is a state it is required to handle — so recording rather
+        /// than dispatching costs the production path nothing and needs no
+        /// second code path through `App`.
+        #[cfg(test)]
+        recorder: Option<Arc<Mutex<Vec<Ask>>>>,
+    }
+
+    /// One thing the shell asked of the engine, as a test can read it back.
+    ///
+    /// Wider than `Command` because two of the asks worth pinning are not
+    /// commands: the visualization tap is a method on the handle, and so is
+    /// the ledger hand-off.
+    #[cfg(test)]
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Ask {
+        Command(Command),
+        Visualization(bool),
     }
 
     impl Playback {
@@ -227,6 +249,8 @@ mod imp {
                         handle: Some(handle),
                         events: Arc::new(Mutex::new(Some(rx))),
                         availability: Availability::Ready,
+                        #[cfg(test)]
+                        recorder: None,
                     }
                 }
                 Err(error) => {
@@ -244,6 +268,38 @@ mod imp {
                 handle: None,
                 events: Arc::new(Mutex::new(None)),
                 availability: Availability::NoDevice(reason),
+                #[cfg(test)]
+                recorder: None,
+            }
+        }
+
+        /// A `Playback` with no engine that writes down what it was asked for.
+        ///
+        /// This is the seam that lets a test assert baz *did* something rather
+        /// than that its source *mentions* doing it. `App`'s command path is
+        /// unchanged and untested-for: `send` still reports `false`, exactly
+        /// as it does on a machine with no sound card, which the shell already
+        /// has to survive.
+        #[cfg(test)]
+        pub fn recording() -> (Self, Arc<Mutex<Vec<Ask>>>) {
+            let recorder = Arc::new(Mutex::new(Vec::new()));
+            (
+                Self {
+                    handle: None,
+                    events: Arc::new(Mutex::new(None)),
+                    availability: Availability::Ready,
+                    recorder: Some(Arc::clone(&recorder)),
+                },
+                recorder,
+            )
+        }
+
+        #[cfg(test)]
+        fn record(&self, ask: Ask) {
+            if let Some(recorder) = &self.recorder
+                && let Ok(mut asks) = recorder.lock()
+            {
+                asks.push(ask);
             }
         }
 
@@ -272,6 +328,8 @@ mod imp {
 
         /// Turn the engine's lock-free visualization sample tap on or off.
         pub fn set_visualization_enabled(&self, enabled: bool) {
+            #[cfg(test)]
+            self.record(Ask::Visualization(enabled));
             if let Some(handle) = &self.handle {
                 handle.set_visualization_enabled(enabled);
             }
@@ -290,6 +348,15 @@ mod imp {
         /// Send a command; `false` means the engine is gone (the caller
         /// should downgrade the state machine, never assume success).
         pub fn send(&self, command: Command) -> bool {
+            // A recorder stands in for a working engine, and must answer like
+            // one. Reporting `false` here would put the shell down its
+            // engine-has-gone path on every command, which is a different
+            // program from the one under test.
+            #[cfg(test)]
+            if self.recorder.is_some() {
+                self.record(Ask::Command(command));
+                return true;
+            }
             self.handle
                 .as_ref()
                 .is_some_and(|handle| handle.send(command).is_ok())
@@ -325,4 +392,7 @@ mod imp {
     }
 }
 
+/// What a test-built [`Playback`] wrote down. See [`Playback::recording`].
+#[cfg(test)]
+pub use imp::Ask;
 pub use imp::Playback;

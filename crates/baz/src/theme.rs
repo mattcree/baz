@@ -6205,10 +6205,7 @@ mod tests {
             // does exactly that — is not a consumer, and a test that could
             // not tell the difference would punish the file for explaining
             // itself.
-            let code: String = source
-                .split("#[cfg(test)]")
-                .next()
-                .unwrap_or_default()
+            let code: String = crate::shipped::head(&source)
                 .lines()
                 .filter(|line| {
                     let line = line.trim_start();
@@ -8574,11 +8571,7 @@ mod tests {
             // that *names* a size to assert which rung a title lands on is not
             // a view setting type, and a check that could not tell the
             // difference would punish a module for testing itself.
-            let source = source
-                .split("#[cfg(test)]")
-                .next()
-                .unwrap_or_default()
-                .to_owned();
+            let source = crate::shipped::head(&source).to_owned();
             for (at, _) in source.match_indices("theme::SIZE_") {
                 let window = &source[at..source.len().min(at + 80)];
                 if window.contains("theme::LEADING_") || window.contains(".text_size(") {
@@ -8766,7 +8759,7 @@ mod tests {
         // name the symmetric form in order to forbid it, and a census that
         // counted them would be counting the guard as the breach.
         let app_bar = read("app_bar.rs");
-        let app_bar = app_bar.split("#[cfg(test)]").next().expect("a head");
+        let app_bar = crate::shipped::head(&app_bar);
         assert!(
             app_bar.contains("theme::app_bar_pad()"),
             "the app bar no longer hangs from the one gutter"

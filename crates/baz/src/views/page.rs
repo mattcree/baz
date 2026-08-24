@@ -1216,10 +1216,7 @@ mod tests {
 
     #[test]
     fn the_flexible_track_identity_is_clipped_before_fixed_columns() {
-        let source = include_str!("page.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("page source has a non-test head");
+        let source = crate::shipped::head(include_str!("page.rs"));
         assert!(
             source.contains("container(stack).width(Length::Fill).clip(true)"),
             "long title and metadata ink can escape into the Album column"
@@ -1239,10 +1236,7 @@ mod tests {
             )
             .expect("a view's own source")
             .replace("\r\n", "\n");
-            source
-                .split("#[cfg(test)]")
-                .next()
-                .expect("a source has a head")
+            crate::shipped::head(&source)
                 .lines()
                 .filter(|line| {
                     let line = line.trim_start();
@@ -1425,10 +1419,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/page.rs"),
         )
         .expect("this module's own source");
-        source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("a source has a head")
+        crate::shipped::head(&source)
             .lines()
             .filter(|line| {
                 let line = line.trim_start();

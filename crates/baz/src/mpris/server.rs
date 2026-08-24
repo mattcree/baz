@@ -82,6 +82,22 @@ impl Mpris {
         }
     }
 
+    /// A handle that reaches no bus and starts no thread.
+    ///
+    /// `start` is safe on a machine with no session bus — that is the whole
+    /// point of it never failing — but it is *not* safe in a test, because a
+    /// developer's machine has a session bus and a test that spawned this
+    /// would put a real `org.mpris.MediaPlayer2.baz` on it and take the
+    /// desktop's media keys for the length of the run.
+    #[cfg(test)]
+    pub(crate) fn silent() -> Self {
+        let (updates, _) = channel();
+        Self {
+            updates,
+            requests: Arc::new(Mutex::new(None)),
+        }
+    }
+
     /// Hand the server thread the current state. A closed channel (no bus,
     /// or the thread gave up) is not an error worth reporting per event —
     /// the reason was printed once when it happened.

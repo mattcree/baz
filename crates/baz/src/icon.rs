@@ -2279,8 +2279,11 @@ mod tests {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("a source file baz ships");
-            // Shipped code only: this module's own tests name glyphs too.
-            let code = source.split("#[cfg(test)]").next().unwrap_or_default();
+            // Shipped code only, and code only: this module's own tests name
+            // glyphs, and its doc comments discuss marks that are not on the
+            // sheet — `Glyph::Baz` is one, named in ADR-0040's amendment as an
+            // option rather than a thing anybody draws.
+            let code = crate::shipped::code(&source);
             for (at, _) in code.match_indices("Glyph::") {
                 let rest = &code[at + "Glyph::".len()..];
                 let name: String = rest

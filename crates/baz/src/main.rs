@@ -97,6 +97,7 @@ mod search;
 mod selection;
 mod session;
 mod shelf;
+mod shipped;
 mod spine;
 mod stereo;
 mod theme;

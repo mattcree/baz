@@ -278,6 +278,13 @@ mod absent {
             Self
         }
 
+        /// Nothing to silence either — API parity with the Linux handle so
+        /// `App::headless` carries no `cfg`.
+        #[cfg(test)]
+        pub(crate) fn silent() -> Self {
+            Self
+        }
+
         /// Nothing to publish to.
         pub(crate) fn publish(&self, _snapshot: Snapshot, _seeked: bool) {}
 
