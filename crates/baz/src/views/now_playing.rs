@@ -262,12 +262,41 @@ pub(crate) fn view<'a>(
         if player.transport_pending() {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         }
+        // **The place with nothing in it says how to put something in it.**
+        //
+        // It was the two words alone, centred in the whole body — 1 370 x 760
+        // of nothing with `Nothing playing` in the middle of it, and the same
+        // two words already in the bottom bar four inches below. A listener who
+        // arrives here has pressed *Now playing* and found the one surface in
+        // baz that is only ever about a record, empty, with no way on from it.
+        //
+        // The shape is the wall's own empty state
+        // (`views::shelf::empty_state`): the statement, then lines that name a
+        // route, left-aligned inside a centred block. **It names controls
+        // rather than growing one** — doc 07's L8.6 is why the withdrawn
+        // `Queue album` was never built, and a second `Play all` here would be
+        // that same fault with a friendlier excuse. Both routes it names are
+        // resident and one press each: the `All songs` tile is the first thing
+        // on Home whenever `CONTINUE` is absent, and `Play album` is on every
+        // record's page.
         let room = theme::active();
+        let line = |content: &'static str| {
+            text(content)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint)
+        };
         return container(
-            text("Nothing playing")
-                .size(theme::SIZE_EMPHASIS)
-                .line_height(theme::LEADING_EMPHASIS)
-                .color(room.paper_dim),
+            column![
+                text("Nothing playing")
+                    .size(theme::SIZE_EMPHASIS)
+                    .line_height(theme::LEADING_EMPHASIS)
+                    .color(room.paper_dim),
+                line("All songs on Home starts the whole collection."),
+                line("Open a record and press Play album for one of them."),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_x(iced::Alignment::Start),
         )
         .center(Length::Fill)
         .into();
