@@ -625,6 +625,28 @@ pub(crate) fn group_band<'a>(
     block: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
+    // **A run with no name gets its height and not its rule.**
+    //
+    // The rule's whole sentence is *this band is a section and it runs to
+    // here* — it is the extent of a heading, and it says that by starting
+    // where the word stops. Handed no word it started at the block's left
+    // edge and crossed the wall on its own: on the Playlists root, whose lead
+    // run holds `New playlist`, `New smart playlist` and `Favourites` and is
+    // deliberately unlabelled, a photographed frame at 1600 x 900 shows a bare
+    // 1 190 px hairline above them with nothing on it. A line that names a
+    // section it cannot name is worse than no line, and it was the first thing
+    // in that place.
+    //
+    // The band's *height* stays, because that is the reason the lead run draws
+    // one at all: the create tiles stand on the wall's own rhythm rather than
+    // one heading higher than every lettered run below them
+    // (`views::playlists::band`).
+    if label.trim().is_empty() {
+        return container(Space::new())
+            .width(Length::Fixed(block))
+            .height(Length::Fixed(hang.header_h()))
+            .into();
+    }
     let word = text(theme::tracked(&label.to_uppercase()))
         .size(theme::SIZE_EMPHASIS)
         .line_height(theme::LEADING_EMPHASIS)
@@ -1456,6 +1478,22 @@ mod tests {
             band.contains(".width(Length::Fill)"),
             "the heading rule has a length of its own instead of taking what \
              the word leaves, so a long name will collide with it"
+        );
+        // **And an unnamed run gets the height without the line.** The rule
+        // says *this section runs to here* by starting where the word stops,
+        // so with no word it started at the block's left edge and crossed the
+        // wall on its own — which is what the Playlists root's deliberately
+        // unlabelled lead run drew above its create tiles: a bare 1 190 px
+        // hairline naming nothing, first thing in the place.
+        assert!(
+            band.contains("if label.trim().is_empty()"),
+            "an unnamed run draws the rule again, which puts a line across \
+             the wall that names no section"
+        );
+        assert!(
+            band.find("if label.trim().is_empty()") < band.find("rule::horizontal(1)"),
+            "the empty-label return is no longer ahead of the rule, so it \
+             cannot be what stops it being drawn"
         );
     }
     use super::RULE_LANE_H;
