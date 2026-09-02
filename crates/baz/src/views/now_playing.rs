@@ -1252,7 +1252,7 @@ mod tests {
     #[test]
     fn every_colour_on_this_page_comes_from_the_room_or_the_record() {
         let source = include_str!("now_playing.rs").replace("\r\n", "\n");
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         for (line_no, line) in shipped.lines().enumerate() {
             let code = line.trim_start();
             if code.starts_with("//") || code.starts_with("///") {
@@ -1313,7 +1313,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/now_playing.rs"),
         )
         .expect("this file");
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         assert!(
             shipped.contains("padding([theme::GAP_SM, MARGIN])"),
             "the source band is not padded to the place's own margin — its \
@@ -1416,7 +1416,7 @@ mod tests {
 
     #[test]
     fn the_sounding_library_track_carries_the_shared_favourite_action() {
-        let source = crate::shipped::head(include_str!("now_playing.rs"));
+        let source = crate::shipped::code(include_str!("now_playing.rs"));
         assert!(source.contains("crate::views::page::favourite_slot(path, selected)"));
         assert!(source.contains("favourite: Option<(&'a std::path::Path, bool)>"));
     }
@@ -2034,7 +2034,7 @@ mod tests {
         .replace("\r\n", "\n");
         // Inspect production code only: the guard's own needles necessarily
         // contain the words it checks have not returned.
-        let place = crate::shipped::head(&place);
+        let place = crate::shipped::code(&place);
         let app = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )

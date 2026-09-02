@@ -55,6 +55,26 @@ pub(crate) fn head(source: &str) -> &str {
 /// Line-based, so a trailing `// ...` after code survives and a `/* */` block
 /// is not handled. Both are deliberate: this is a filter for prose that
 /// occupies whole lines, which is the shape every comment in this crate takes.
+///
+/// # This is what a scan should read, and on 2026-09-02 forty of them did
+///
+/// It shipped with two callers against [`head`]'s forty-two, which is the
+/// 2026-08-23 audit's own *"the second copy is the one that rots"* happening
+/// to the fix for that audit. The class it prevents is not hypothetical and
+/// cost two hours the same day: a doc comment written to explain a *number* —
+/// naming `theme::SIZE_META` while quoting the design system's published digit
+/// advance — failed
+/// `theme::every_type_size_a_view_sets_is_drawn_with_its_own_leading`, because
+/// that scan asked "does a view set a size here" of a file including its
+/// prose. Every scan that asks what a module *draws*, *calls* or *reaches for*
+/// has that hole while it reads [`head`].
+///
+/// **Two scans in this crate read comments on purpose** and keep [`head`]:
+/// `app::tests::no_floating_layer_comes_and_goes_from_the_tree`, whose region
+/// is delimited by a comment, and
+/// `app::tests::every_place_that_leaves_work_behind_is_awaited`, whose last
+/// assertion requires a sentence explaining why a call site is safe. Both say
+/// so at the call. A third would want the same line.
 #[cfg(test)]
 pub(crate) fn code(source: &str) -> String {
     head(source)

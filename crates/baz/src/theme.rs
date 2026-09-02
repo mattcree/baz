@@ -6233,7 +6233,7 @@ mod tests {
             // does exactly that — is not a consumer, and a test that could
             // not tell the difference would punish the file for explaining
             // itself.
-            let code: String = crate::shipped::head(&source)
+            let code: String = crate::shipped::code(&source)
                 .lines()
                 .filter(|line| {
                     let line = line.trim_start();
@@ -8796,7 +8796,7 @@ mod tests {
         // name the symmetric form in order to forbid it, and a census that
         // counted them would be counting the guard as the breach.
         let app_bar = read("app_bar.rs");
-        let app_bar = crate::shipped::head(&app_bar);
+        let app_bar = crate::shipped::code(&app_bar);
         assert!(
             app_bar.contains("theme::app_bar_pad()"),
             "the app bar no longer hangs from the one gutter"

@@ -174,7 +174,7 @@ mod tests {
         for file in ["src/views/playlist.rs", "src/views/queue.rs"] {
             let whole =
                 std::fs::read_to_string(root.join(file)).expect("a playlist state's source");
-            let source = crate::shipped::head(&whole).to_owned();
+            let source = crate::shipped::code(&whole);
             assert!(
                 source.contains("playlist_page::view("),
                 "{file} bypasses the shared playlist page"

@@ -764,7 +764,7 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/equalizer.rs"),
         )
         .expect("this file");
-        let code = crate::shipped::head(&src);
+        let code = crate::shipped::code(&src);
         let slot = code
             .split_once("fn keeping(")
             .expect("the keeping slot")

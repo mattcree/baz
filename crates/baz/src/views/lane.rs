@@ -945,7 +945,7 @@ mod tests {
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         let rest = code.split_once("fn mark()").expect("zone 1").1;
         let body = &rest[..rest.find("\n}\n").expect("a function ends")];
         assert!(
@@ -1075,7 +1075,7 @@ mod tests {
     #[test]
     fn playlists_and_records_share_one_unheaded_list_and_one_scroller() {
         let source = source();
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         let sections = body(&source, "fn sections<'a>(");
         assert!(
             !sections.contains("heading(") && !sections.contains("PLAYLISTS"),
@@ -1356,7 +1356,7 @@ mod tests {
             assert!(row <= content);
         }
         let source = source();
-        let head = crate::shipped::head(&source);
+        let head = crate::shipped::code(&source);
         assert!(
             head.contains("right: theme::SIDEBAR_PAD - theme::WALL_SCROLLBAR_W")
                 && head.contains("left: theme::SIDEBAR_PAD"),

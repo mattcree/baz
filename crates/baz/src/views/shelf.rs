@@ -1459,7 +1459,7 @@ mod tests {
     #[test]
     fn a_section_heading_carries_a_rule_to_the_end_of_its_block() {
         let source = include_str!("shelf.rs").replace("\r\n", "\n");
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         let rest = shipped
             .split_once("pub(crate) fn group_band<'a>(")
             .expect("the one heading band")
@@ -1587,7 +1587,7 @@ mod tests {
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         assert!(
             !code.contains("density_marks") && !code.contains("density_control"),
             "the wall is drawing the display options again — they are the app \
@@ -1610,7 +1610,7 @@ mod tests {
         .expect("the app bar's source")
         .replace("\r\n", "\n");
         assert!(
-            crate::shipped::head(&bar)
+            crate::shipped::code(&bar)
                 .contains("crate::views::density_marks(current, layout, ink)"),
             "the app bar does not draw the marks it took"
         );

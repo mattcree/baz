@@ -829,7 +829,7 @@ mod tests {
     fn new_playlist_owns_the_composer_and_home_keeps_only_its_shortcut() {
         // The head only: this test's own words are in the same file, which is
         // how the first version of it failed against itself.
-        let source = crate::shipped::head(include_str!("home.rs"));
+        let source = crate::shipped::code(include_str!("home.rs"));
         for gone in [
             "fn vibe_creator",
             "Make a mix",
@@ -1153,7 +1153,7 @@ mod tests {
         )
         .expect("this file")
         .replace("\r\n", "\n");
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         let tile = shipped
             .split_once("fn all_songs_tile<'a>(")
             .expect("the tile")
@@ -1253,7 +1253,7 @@ mod tests {
         )
         .expect("this file")
         .replace("\r\n", "\n");
-        let shipped = crate::shipped::head(&source);
+        let shipped = crate::shipped::code(&source);
         let band = shipped
             .split_once("fn collection(shelf: &Shelf)")
             .expect("the collection band")

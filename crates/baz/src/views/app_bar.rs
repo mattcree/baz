@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn the_band_hangs_from_the_gutter_the_theme_derives() {
         let source = source();
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         assert!(
             code.contains(".padding(theme::app_bar_pad())"),
             "the band no longer takes its padding from the theme"
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn the_bar_holds_the_window_and_the_application_and_nothing_else() {
         let source = source();
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         for tenant in [
             "views::search::well",
             "Message::ToggleSettings",
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn the_whole_band_moves_the_window_and_the_controls_keep_their_presses() {
         let source = source();
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         let rest = code
             .split_once("let band = mouse_area(")
             .expect("the band is the handle")
@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn the_bar_has_one_arrangement_and_it_is_the_stated_order() {
         let source = source();
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         assert!(
             code.contains("let mut line = row![search, gap, furniture]")
                 && code.contains("line = line.push(buttons)"),

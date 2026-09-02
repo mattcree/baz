@@ -14868,7 +14868,7 @@ mod tests {
         // control sends is the removal half-done. Read off the shipped half
         // of the file only — this test names both literals, and a sweep that
         // found its own assertion would never be able to pass.
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         assert!(
             !code.contains("fn play_all(&mut self"),
             "`play_all` outlived the button the owner removed"
@@ -14959,7 +14959,7 @@ mod tests {
         )
         .expect("the shell source")
         .replace("\r\n", "\n");
-        let code = crate::shipped::head(&source);
+        let code = crate::shipped::code(&source);
         assert!(code.contains("|config| config.volume"));
         assert!(code.contains("position: saved_volume.position()"));
         assert!(code.contains("matches!(&event, Event::VolumeChanged { .. })"));
@@ -15069,6 +15069,10 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
         .expect("app.rs is this file");
+        // **`head` and not `code`**: the last assertion in this test requires
+        // a *comment* to be present — the sentence saying why a discarding
+        // call site is safe — so this is one of the two scans in the crate
+        // that read prose on purpose.
         let shipped = crate::shipped::head(&source);
         let discarded = shipped.matches("let _ = self.note_place_left").count();
         assert_eq!(
@@ -15459,6 +15463,11 @@ mod tests {
     /// which is exactly what a reader of this file can check.
     #[test]
     fn no_floating_layer_comes_and_goes_from_the_tree() {
+        // **`head` and not `code` here**, deliberately: the region this scan
+        // reads is delimited by a comment, so stripping the prose would strip
+        // the anchor. It is one of two scans in this crate that read comments
+        // on purpose — see `every_place_that_leaves_work_behind_is_awaited`
+        // for the other — and the other forty moved to `code` on 2026-09-02.
         let source = crate::shipped::head(include_str!("app.rs"));
         let assembly = source
             .split_once("// **Every floating layer is stacked always**")
@@ -15500,7 +15509,7 @@ mod tests {
     /// `prepare` creates.
     #[test]
     fn a_cold_index_still_composes_on_the_one_press() {
-        let source = crate::shipped::head(include_str!("app.rs"));
+        let source = crate::shipped::code(include_str!("app.rs"));
         let arm = source
             .split_once("Message::VibeCreate => {")
             .expect("the compose arm")

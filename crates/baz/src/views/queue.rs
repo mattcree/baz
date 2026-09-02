@@ -743,7 +743,7 @@ mod tests {
         // needles in halves; that works for a handful and not for twenty, so
         // this one takes the same cut `views::page::tests::pages` takes and
         // searches only what the module actually builds.
-        let source = crate::shipped::head(&source).to_owned();
+        let source = crate::shipped::code(&source);
 
         // The window: both persistence states spend the saved playlist's one
         // fixed-pitch row window. Both spacers are built and every drawn
