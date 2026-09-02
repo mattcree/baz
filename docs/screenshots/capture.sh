@@ -17,8 +17,13 @@
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb \
 #     cargo build --release -p baz
-#   toolbox run -c baz-dev docs/screenshots/capture.sh           # real library
-#   FIXTURE=1 toolbox run -c baz-dev docs/screenshots/capture.sh # safe fallback
+#   toolbox run -c baz-dev docs/screenshots/capture.sh                # /tmp/baz-shots
+#   toolbox run -c baz-dev env PUBLISH=1 docs/screenshots/capture.sh  # docs/screenshots
+#   toolbox run -c baz-dev env FIXTURE=1 docs/screenshots/capture.sh  # clean-room library
+#
+# **`toolbox run` does not forward your shell's environment**, so every
+# variable goes through `env` as above. Setting `FIXTURE=1` in the shell and
+# then calling `toolbox run` photographs the real library and says nothing.
 #
 # **The real library is what ships.** The owner asked twice for real music, and a
 # generated wall reads as generated however good its sleeves are. It costs
@@ -85,7 +90,24 @@ set -uo pipefail
 REPO=${REPO:-$(git rev-parse --show-toplevel)}
 BIN=${BIN:-$REPO/target/tb/release/baz}
 FIX=${FIX:-/tmp/baz-shot-fix}
-OUT=${OUT:-$REPO/docs/screenshots}
+# **The destructive form is the one somebody typed on purpose.**
+#
+# `OUT` defaulted to `$REPO/docs/screenshots`, which is where the images
+# Flathub and the README point at live — and `toolbox run` does **not**
+# forward a shell's environment, which the header above says in its own
+# words. So the documented invocation overwrote the store's pictures, and an
+# exploratory run by somebody reading the interface was indistinguishable
+# from an intended one. That happened on 2026-09-02 and `git status` is what
+# caught it.
+#
+# A scratch directory by default; `PUBLISH=1` to write where the manifest
+# reads. Nothing else changed: `OUT` still wins when it is set, which is what
+# a caller wanting a third location has always used.
+if [ "${PUBLISH:-0}" = "1" ]; then
+  OUT=${OUT:-$REPO/docs/screenshots}
+else
+  OUT=${OUT:-/tmp/baz-shots}
+fi
 DISP=${DISP:-:198}
 S=${S:-/tmp/baz-shot-scratch}
 # 16:9 at a size a store page shows without shrinking, and comfortably over

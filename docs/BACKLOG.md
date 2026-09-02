@@ -1733,10 +1733,25 @@ Flathub and the README point at, and a reviewer's exploratory run is
 indistinguishable from an intended one. It happened on 2026-09-02 and was
 caught by `git status`.
 
-**Proposal.** `OUT` defaults to a scratch directory and writing into
-`docs/screenshots` becomes explicit — `PUBLISH=1`, or an `--publish` flag —
-so the destructive form is the one somebody typed on purpose. Ten minutes, and
-it removes a footgun from the one script whose whole job is to be re-run.
+~~**Proposal.** `OUT` defaults to a scratch directory and writing into
+`docs/screenshots` becomes explicit.~~ **Done 2026-09-02.** The default is
+`/tmp/baz-shots`; `PUBLISH=1` writes where the manifest reads; `OUT` still wins
+when it is set. The header now spells every invocation through `env`, because
+the variable not reaching the container is half of what made this dangerous.
+
+**And the store's four pictures are deliberately *not* refreshed**, though the
+interface changed under them and this script's own header says it is re-run
+when it does. **The maintainer's NAS is not mounted.** Every frame taken on
+2026-09-02 carries `3 folders are not reachable` in the alert ink, `11 tracks
+skipped` in the bar, and `· drive not connected` on all eleven rows of the
+record page. Publishing those would put a broken-looking library on Flathub to
+fix a stale one, which is the wrong trade — the committed frames are a baz
+whose room picker is a list of names, and that is still a working baz.
+
+**What it needs is ten minutes with the shares mounted**, and it is worth
+doing before the next release: `toolbox run -c baz-dev env PUBLISH=1
+docs/screenshots/capture.sh`, then look at the four the metainfo points at
+before committing them.
 
 ### `app.rs` is 13 106 lines of code behind a 7 553-line `impl App`
 
