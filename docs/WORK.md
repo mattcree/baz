@@ -2072,7 +2072,117 @@ because a player without it is missing a floor rather than a feature.
 
     Frames of all six are at `docs/design/impl/liquid-glass/`.
 
+### Phase J — the 2026-09-02 interface and quality pass
+
+The owner asked for a review of code structure and quality with a plan and its
+execution, for the backlog's remainder to be proposed on and worked, and — the
+part he pressed — for the interface to be judged against the established
+heuristics and improved, *"even just proportion, how things are laid out."*
+
+**The method was the frames, not the reading.** Every item below was found by
+rendering the real binary at 1600 × 900 through `docs/screenshots/capture.sh`
+in the isolated harness, against the owner's own library, and measuring
+pixels — and three of them had a doc comment or a passing test saying they were
+already right. That is the 2026-08-23 audit's own theme (*prose standing in for
+a guard*) reaching the one area that audit put out of scope: **UI/UX**.
+
+86. **Done 2026-09-02 — every fitted line in the product was measured 23 % narrow.**
+    `views::text_width` scaled with `PxScale::from(size)`. `ab_glyph` inherited
+    rusttype's `Scale`, where that number is the face's *height* — ascent to
+    descent — not its em square, which is what `text.size(n)` means. The
+    bundled Plex faces carry `unitsPerEm` 1000 against a height of 1300, so
+    every advance came back at 0.769 of its drawn width.
+
+    The wall drew `Now That I've Found You: A Collecti` — cut mid-glyph, no
+    ellipsis, over the tile's own edge — which is the exact failure
+    `fitted_line`'s doc comment names the exact album for. The returns lane's
+    `upbeat energetic danc …` was the same arithmetic one step on. The check
+    that would have caught it is arithmetic `.interface-design/system.md` §8
+    already published: eight Plex digits at `SIZE_META` are 57.60 px and this
+    said 44.31, and §8.1's HarfBuzz-measured `STAMP_W` is 50.21 where this said
+    38.62. Both ratios are exactly 1000/1300.
+
+    Fixing it exposed the defect underneath: the ellipsis waited at the lane's
+    far edge while the words stopped where they stopped, and a gap reads as a
+    space *in the title*. The prefix is its own words now and the dots follow
+    it.
+
+87. **Done 2026-09-02 — the equaliser draws the ten band frequencies it has
+    always promised.** An iced `Stack` sizes to its base layer and bounds every
+    other layer by it. The panel made the response curve the base and the ten
+    strips a layer, so the strips were laid out one label lane short and `32`,
+    `63`, `125` … `16k` were never drawn in any build. The module doc has said
+    *"the band's own frequency under it"* since the panel was written and
+    `a_band_label_is_short_enough_to_stand_under_its_fader` passed throughout,
+    because it measures the string. The same bug stood the pre-amp — outside
+    the stack — one label lane above the ten it belongs to, so an equaliser's
+    eleventh fader did not share the other ten's zero line.
+
+88. **Done 2026-09-02 — the wall stops moving sideways when the collection
+    outgrows the window.** The rail's lane was reserved as the scrollbar's
+    `spacing`, and iced spends a bar's spacing only while the bar is visible.
+    So the columns moved 56 px — half the reservation — on whether the wall
+    currently held more than a screenful: Library at x 266 with 374 records,
+    Playlists at x 321 with four tiles, one identical 1 190 px block, its last
+    column under its own index rail. The reservation is the content's now, in
+    one place both collections take their x from (`views::shelf::hung_body`).
+
+89. **Done 2026-09-02 — the room picker shows you the rooms.** Sixteen names
+    with one swatch strip, for the selected room, below all sixteen. Finding
+    out what `Fernlight` looks like meant selecting it and scrolling past the
+    other fifteen; comparing two meant doing it twice from memory. Every
+    built-in wears its own six planes on its own row now, in the elevation
+    order, so the strip reads as a tonal ramp before it is a hue and a reader
+    who cannot separate two colours still gets dark from light, the treads'
+    spacing, and the lamp always last. The trailing block is the custom
+    document's row and the failure text, which is all it was still needed for.
+
+90. **Done 2026-09-02 — a run with no name gets the heading's height and not
+    its rule.** The rule says *this section runs to here* by starting where the
+    word stops; handed no word it started at the block's left edge and crossed
+    the wall. The Playlists root's deliberately unlabelled lead run therefore
+    opened the place with a bare 1 190 px hairline naming nothing.
+
+91. **Done 2026-09-02 — Now playing with nothing in it says how to put
+    something in it.** Two words centred in 1 370 × 760, with the same two words
+    already in the bottom bar. It takes the wall's own empty-state shape and
+    **names controls rather than growing one** — L8.6 is why `Queue album` was
+    withdrawn, and a second `Play all` here would be that fault with a
+    friendlier excuse.
+
+92. **Done 2026-09-02 — a quiet act hangs from the aside's lane.** `page::act`'s
+    doc has claimed L5 compliance since the two pages merged while the button
+    carried symmetric padding: `Play album` at x 293, `DETAILS` at 294, `Add to
+    playlist…` at **305**. The lead-in moved to the right, where it is still the
+    air between two acts drawn as a pair. Item 77's quiet-act *chip* is
+    untouched and still wants its nineteen-site pass; this is the alignment
+    underneath it either way.
+
+93. **Done 2026-09-02 — forty source scans stop reading their own prose as
+    code.** `shipped::code` was built by the audit's finding 12 and shipped with
+    two callers against `head`'s forty-two. Forty converted; the two that read
+    comments on purpose keep `head` and say so at the call.
+
+94. **Done 2026-09-02 — the launcher's two tests stop racing for the file they
+    exec.** The recurrence `BACKLOG.md` asked for before chasing either CI
+    flake. `ETXTBSY`: both tests copy `baz-boot` and execute the copy
+    concurrently in one process, and a fork holds the other test's open write
+    descriptor across its own exec. Serialising copy-through-to-exit closes the
+    window; eight consecutive full-workspace runs, clean.
+
+
 ## Doing
+
+- **The 2026-09-02 pass is landed and its remainder is proposed, not started.**
+  Items 86–94 are on `main`, each with the frame that found it and a guard that
+  fails without it. What the same pass found and did **not** build is in
+  `BACKLOG.md` under *Findings of the 2026-09-02 interface pass*, with a
+  proposal per item: the search dropover's repetition and its stray left edge,
+  a wholly-unreachable record saying so once instead of eleven times, the
+  record page's two side-by-side scroll regions, and the two structural items
+  — `app.rs` at 13 106 lines of code behind a 7 553-line `impl App`, and the
+  design system's own drift from what the product now draws. None of them is a
+  guess-and-ship and each names what it would cost.
 
 - **Waiting on the owner for five decisions** — doc 19 §5, which now carries
   the quorum's four open questions beside my own: which layout, which section

@@ -625,12 +625,12 @@ where the proxy stopped tracking the property.
 | # | Finding | Where | Status |
 |---|---|---|---|
 | 1 | **`DeviceSink::write` can spin forever.** Its only exit is `self.failed`, written solely by cpal's error callback, so any stall the host does not *report* — a PipeWire node that stops draining, a PCM left SUSPENDED across suspend/resume — spins at 200 µs indefinitely. It runs on the engine thread, so Stop/Pause/Next/Seek are accepted and never acted on, and `EngineHandle::drop` joins that thread, so quit hangs. `exclusive.rs:813` already has `WRITE_STALL_BUDGET`. **`failed()` has no callers outside tests**, so nothing supervises the stream even when cpal *does* report. Device output is unconditional in the GUI binary, so this is the path every user is on. | `playback/device.rs:651` | **fixed 2026-08-23** — deadline added, `Sink::failed` added to the trait and acted on by the pump. **One gap remains and is not covered by a test:** `spawn_offline` hardcodes its sink, so there is no seam to inject a failing one, and the engine's reaction — `TrackFailed` plus `Stopped` — is proved only by reading. A `spawn_with(sink)` seam would close it. |
-| 2 | **config.toml has no durability story and a bad byte is permanent.** `fs::write` truncates then writes; a parse failure falls back to `Config::default()`, and the next `persist` — volume, layout, theme, `last_place` on every clean quit — writes the defaults back. Lost: `music_dirs`, theme, EQ curves, Vibe curves, crossfade, ReplayGain. `write_atomic` already exists at `baz-core/src/playlist.rs:920`. | `config.rs:1143`, `:851` | open |
+| 2 | **config.toml has no durability story and a bad byte is permanent.** `fs::write` truncates then writes; a parse failure falls back to `Config::default()`, and the next `persist` — volume, layout, theme, `last_place` on every clean quit — writes the defaults back. Lost: `music_dirs`, theme, EQ curves, Vibe curves, crossfade, ReplayGain. `write_atomic` already exists at `baz-core/src/playlist.rs:920`. | `config.rs:1143`, `:851` | **fixed 2026-08-23** (`68ccab2`). `persist` writes through a temporary and renames — `config.rs:1143` says so where `fs::write` used to be — and a parse failure no longer answers `Config::default()`, so the next `persist` cannot write the defaults back over `music_dirs`, the theme or the curves. Covered by `storing_does_not_truncate_first` and a misread round trip. *(Status corrected 2026-09-02: this table said open against a landed fix.)* |
 | 3 | **Vibe compose runs a 350 MiB ONNX embedding on the interface thread**, contending a process-wide mutex with the debounced live count. The docs claim the two cannot race; they can — the 400 ms debounce fires on typing and Compose is pressed right after typing. The window stops rendering and stops accepting input, against a stated hard rule. | `baz/src/vibe.rs:2597` | **fixed 2026-08-23.** `create` takes a vector rather than making one; the caller embeds off-thread and composes when it lands. **Not driven end to end** — the composer needs a built vibe index, which the harness has no cheap way to produce, so it is covered by state-machine tests rather than by pressing Compose. |
-| 4 | **A non-ASCII byte in a theme colour is a launch crash loop.** `value.len()` is bytes, the format check means characters: `"#aé123"` is seven bytes, passes both guards, and `&value[1..3]` panics on a char boundary. `theme::install` runs at `app.rs:153` before the window exists and `custom:<id>` persists, so it crashes on every start until the JSON is hand-edited. **Reproduced.** | `theme_file.rs:314` | open |
-| 5 | **Blocking I/O on the producer thread, joined unconditionally.** `prefetch` opens a file and probes it before any stop check, so a slept NAS blocks for the mount timeout or forever; `Session::drop` joins it. Treat as a class — `find_anchor` and `push_anchor` are the other sites. | `engine.rs:4023` | open |
+| 4 | **A non-ASCII byte in a theme colour is a launch crash loop.** `value.len()` is bytes, the format check means characters: `"#aé123"` is seven bytes, passes both guards, and `&value[1..3]` panics on a char boundary. `theme::install` runs at `app.rs:153` before the window exists and `custom:<id>` persists, so it crashes on every start until the JSON is hand-edited. **Reproduced.** | `theme_file.rs:314` | **fixed 2026-08-23** (`9467d45`). The guard is `!value.is_ascii()` ahead of the length and prefix checks, so a colour carrying a non-ASCII byte is refused rather than sliced on something that is not a char boundary; the comment at `theme_file.rs:296` keeps the reproduction. *(Status corrected 2026-09-02.)* |
+| 5 | **Blocking I/O on the producer thread, joined unconditionally.** `prefetch` opens a file and probes it before any stop check, so a slept NAS blocks for the mount timeout or forever; `Session::drop` joins it. Treat as a class — `find_anchor` and `push_anchor` are the other sites. | `engine.rs:4023` | **answered 2026-08-23** (`368adda`), and the answer is the bound rather than the check. The open still cannot be cancelled — an `Err` there is recorded as a track failure, so cancelling through it would invent one, and no flag reaches `File::open` once it is in the kernel — so what changed is that **the abandon paths no longer wait on the producer**: `join_or_detach`. A slept NAS can no longer turn quit into a hung process, which was this finding's consequence. Recorded at the call. *(Status corrected 2026-09-02.)* |
 | 6 | **The staged installer has no provenance, and the check that pretends to give it has no tests.** `ready` re-hashes the payload against a digest read from the same user-writable directory, so anything that can rewrite the `.msi` rewrites the digest beside it; it covers truncation only. With `perMachine`, baz's own dialog vouches for the elevation. `hold`/`pending`/`ready`/`discard` and `install_in_place` have zero test callers. | `baz-update/stage.rs:142` | **partly fixed 2026-08-24.** The test seam (`hold_in`/`pending_in`/`ready_in`/`discard_in`) exists and the round trip is covered, including a test that pins the gap itself. Every claim of provenance is corrected — `stage`'s docs, the launcher's dialog, ADR-0043 §4 — so nothing tells a listener the file is *verified* when it is offered, only that it was verified when downloaded. **The gap itself is open and needs a decision with a cost:** sign the installer, or stage where an unprivileged process cannot write. Until then an unsigned MSI staged in a user-writable cache is handed to `msiexec` at `perMachine` scope. |
-| 7 | **`preview` knows 6 of 16 rooms; ten show a false "unavailable" error** and lose their swatch, while `resolve` has correctly stood the listener in the room. No test names `preview`. | `theme_file.rs:160` | open |
+| 7 | **`preview` knows 6 of 16 rooms; ten show a false "unavailable" error** and lose their swatch, while `resolve` has correctly stood the listener in the room. No test names `preview`. | `theme_file.rs:160` | **fixed 2026-08-23** (`9467d45`). `preview` routes through `resolve`, so there is no second list of rooms to forget, and `settings_offers_every_room_the_resolver_knows_and_can_describe_them` sweeps `preview` over all sixteen — the *sweep every consumer, not the first one* this table's own theme asks for. The swatches those ten rooms were losing are now on every row (`WORK.md` item 89). *(Status corrected 2026-09-02.)* |
 | 8 | **The playlist panel has no pointer door, and a drag gesture is behind it.** `Ctrl+P` summons the panel and nothing on screen does. The pointer's only route is `Add to playlist`, which opens it *as the picker* and leaves it standing — so `drop_drag`'s `over_panel` branch, dragging a record from the wall onto a list, is unreachable by pointer without first doing an unrelated add. The panel's own module doc names simultaneity as the reason it exists over a place, and that reason is currently keyboard-gated. | `crates/baz/src/app.rs` (`CONTROLS`), `views/playlist_panel.rs`, `docs/design/10-controls-and-iconography.md` §1.1.1 | **needs a decision (Matt).** The mirror is fixed and now machine-checked — the test fails the build if a door named in it is deleted, which is how this went unnoticed since 44f2b76. The gap itself is a design choice between: (1) give the panel a door somewhere visible — not an L8.6 violation, it is the panel's *first* door, the question is where now the strip is gone; (2) make the lane's playlist rows drop targets, so the drag stops needing the panel; (3) accept it, which costs the "no exceptions left" claim. |
 | 9 | **`RELEASING.md` denies the existence of the self-updater** and is the operator's checklist. Also: the pipeline diagram omits the flatpak/`.msi`/`.dmg` jobs, release records stop at v0.3.0, and step 10's `git rev-parse vX.Y.Z` returns the tag object rather than the commit Flathub needs — it must be `^{commit}`. | `docs/RELEASING.md:100` | **fixed 2026-08-24.** All six drifts corrected against the files rather than from memory, and every claim in the file re-derived from `release.yml`, `git` and `gh`. The updater paragraph now says what is true and what the SHA-256 check is and is not worth. Records added for v0.4.0, v0.4.1 and v0.5.0, including that v0.2.0 and v0.3.0 are still unpublished drafts. Step 10 is now `^{commit}` **and** a check — `packaging/flatpak/check-manifest-pin.py`, run by CI's packaging job with tags fetched, proven to catch the tag-object hash and print the command that fixes it. The pin itself was two releases stale and is now at v0.5.0. The release-notes generator stopped promising that a `.flatpak` bundle updates itself. |
 | 10 | **`install.sh` builds its root-written manifest at a predictable `/tmp` path** with `$$` as the only entropy, and `uninstall.sh` feeds each line to `rm -f` as root. Kernel hardening reduces it to a denial of service, hence low. `dmg.sh:33` already uses `mktemp`. | `packaging/linux/install.sh:94` | **fixed 2026-08-24.** `mktemp "${TMPDIR:-/tmp}/baz-install.XXXXXX"` with a `trap` on EXIT/INT/TERM, so a failed install stops leaving its working file behind as well. The `.new.$$` and `.tmp.$$` names elsewhere in the script are untouched: they are written inside the install prefix, which is root-owned under `--system` and the user's own otherwise — not the world-writable directory this finding was about. Verified with CI's own install/uninstall round-trip run locally: installs, rewrites `Exec=`, validates, uninstalls clean, second uninstall still refuses, and no scratch file survives. |
@@ -1631,11 +1631,170 @@ accessibility and colour beyond the mirror tests; MPRIS conformance; and UI/UX.
   do before the page is written, and those are cheaper to build alongside the
   screenshots than to retrofit.
 
+## Findings of the 2026-09-02 interface pass, not built
+
+The owner asked for the interface to be judged against the established
+heuristics and improved. Nine items shipped as `WORK.md` items 86–94. These are
+the rest of what the same pass found, each with a proposal and what it would
+cost, so that none of them has to be re-found.
+
+**Every one was found by rendering the real binary** at 1600 × 900 through
+`docs/screenshots/capture.sh` in the isolated harness, against the owner's own
+library, and measuring pixels. Three of the shipped nine had a doc comment or a
+passing test asserting they were already right, which is the 2026-08-23 audit's
+own theme reaching the area that audit put out of scope.
+
+### Two findings measured and then withdrawn, so nobody re-opens them
+
+Recorded because they look like defects and are not, and the measurement is
+cheaper to keep than to repeat.
+
+- **The strip's problem note is not a colour-only reading.** *"3 folders are
+  not reachable"* is drawn in the alert ink, and in greyscale it peaks at 139
+  against the neighbouring *"11 tracks skipped"* at 134 — a five-value
+  difference, which is nothing. But the standing rule is that no reading may
+  *rest* on telling two hues apart, and this one does not rest on hue at all:
+  it is a sentence that says what is wrong. The alert ink buys it almost no
+  emphasis, which is worth knowing, and the bell beside it already carries the
+  attention dot. **No change proposed.**
+
+- **The record page's track list is not too wide.** It measured 840 px against
+  `theme::LIST_MEASURE` 880, so the cap is doing its job. The eye-travel from
+  a title to its duration is the ordinary cost of a table with a right-aligned
+  numeric column, which is what this is. **No change proposed.**
+
+### Search results repeat their album on every row
+
+Eleven results for `arvo` each carried
+`Arvo Pärt · Missa Sillabica; Seven Magnificat Antiphons` as their second line
+— the same string eleven times down the dropover, at the same weight as the
+titles it is there to distinguish. Each row also draws all three of `Play`,
+`Add next` and `Add to end` at rest, so a full dropover is thirty-three grey
+words competing with the eleven that are the content.
+
+**Proposal.** Suppress the second line where it repeats the row above it, the
+way a discography suppresses a repeated artist — the first row of a run states
+the album, the rest indent under it. The three acts want the same treatment the
+wall's hover options got: present for the selected row, and reachable for every
+row by the arrow grammar the header already teaches. Both are `views::search`
+alone. Medium, and it wants a frame before and after.
+
+### A wholly unreachable record says so eleven times
+
+The album page states `· drive not connected` on every one of eleven rows when
+the whole record is on a drive that is not mounted. The per-row word is
+correct and argued — dimming alone would be a reading resting on two inks —
+but eleven identical notes is the record's condition stated eleven times, in
+the row lane, where a partial outage is the only case that needs it.
+
+**Proposal.** When *every* track of an edition is unreachable, state it once
+where the record's condition already lives — beside `Play album`, which is the
+control that will fail — and let the rows drop the word. A partly-unreachable
+record keeps exactly what it has today, which is the case the per-row word was
+written for. Small, and the branch is one predicate over the edition's rows.
+
+### The record page has two scroll regions side by side
+
+The aside scrolls under the sleeve and the track list scrolls beside it, each
+with its own bar, and the wheel's meaning depends on which side the pointer is
+over. It is a real question a listener has to answer before they can scroll.
+
+**Proposal.** Decide it rather than tune it, and the decision is doc 07's: the
+page has one subject, so it should have one scroller, with the aside held and
+the list moving under it — which is what `page.rs`'s own headroom arithmetic
+(the comment at the composition, *"holding the commitment costs 52 px"*)
+already computes for the commitment and the acts. Extending the held region to
+the whole aside is the change; the cost is that a long `DETAILS` block on a
+short window has nowhere to go, which is why it was not simply done here.
+Medium, and it wants the two window heights the composition audits use.
+
+### The design system has drifted from what the product draws
+
+`.interface-design/system.md` §8 states *"No monospace anywhere in baz. `MONO`
+is deleted. So is `SERIF`."* The product ships `IBMPlexSerif-Italic.ttf` in
+`FACES` and draws every record title in it — `font.rs` calls it *"the one
+placard in the product"* and `views::page` has a test named
+`the_record_sets_its_hero_in_the_serif_and_the_list_does_not`. The serif came
+back deliberately and the system was not told.
+
+**Proposal.** The system document is the reference every composition law is
+argued against, so a stale sentence in it is worse than a stale one anywhere
+else. Re-run its §8 against the shipped `FACES` and its §13 laws against the
+frames now committed, and give it the same treatment `RELEASING.md` got on
+2026-08-24 — every claim re-derived from the file rather than from memory.
+Small per claim, and the list of claims is what makes it worth scheduling.
+
+### `capture.sh` overwrites the committed store screenshots by default
+
+Its `OUT`, `BIN` and `FIXTURE` are read from the environment, and `toolbox run`
+does not forward a shell's environment — which the script's own header says.
+So the documented invocation writes over `docs/screenshots/*.png`, the images
+Flathub and the README point at, and a reviewer's exploratory run is
+indistinguishable from an intended one. It happened on 2026-09-02 and was
+caught by `git status`.
+
+**Proposal.** `OUT` defaults to a scratch directory and writing into
+`docs/screenshots` becomes explicit — `PUBLISH=1`, or an `--publish` flag —
+so the destructive form is the one somebody typed on purpose. Ten minutes, and
+it removes a footgun from the one script whose whole job is to be re-run.
+
+### `app.rs` is 13 106 lines of code behind a 7 553-line `impl App`
+
+The shell is ADR-0006's layer 2 and is meant to be large; this is past that.
+`impl App` runs 2 281–9 834 with `route` alone at ~970 lines and `view` at
+~660, and the file *also* defines `Shelf` and 2 148 lines of its
+implementation — a type whose name collides with the unrelated `crate::shelf`
+module, so *which* shelf a reader means is a question the codebase asks on
+every page.
+
+Audit finding 12 named the consequence rather than the size: nothing could
+construct an `App`, so the shell was guarded by 23 substring scans of its own
+source. `App::headless` now exists and two scans have been converted; the
+remaining ~40 in `views/` need a rendered tree, which is a different problem.
+
+**Proposal, and it is deliberately not "split app.rs".** Rust lets one `impl`
+block's methods live in sibling modules of the same crate, so this is
+mechanical and reviewable in pieces, but a split that only moves lines buys
+navigation and nothing else. The order worth doing it in:
+
+1. **`Shelf` and its impl leave first**, into `crate::collection` — the type
+   is the library's loaded state, it has nothing to do with the iced
+   application, and its name has been fighting `crate::shelf` since both
+   existed. That is ~2 400 lines out and one genuine ambiguity gone.
+2. **The `update` half splits by sub-machine**, following the seams `route`
+   already delegates along — `update_playlists`, `update_vibe`, `update_queue`,
+   `update_menu`, `update_transport` are each already a function and each is
+   already a module's worth of state.
+3. **`view` follows last**, and only if 1 and 2 leave it standing alone.
+
+Each step is its own commit with the full gate, and none of them may change a
+message, a field or a behaviour — the diff a reviewer reads is `git diff -M`
+finding pure moves. Large, and worth it only if it is done in that order:
+step 1 alone removes the ambiguity a reader actually trips on.
+
 ## Interface
 
 - **A serious UX pass with expert guidance** — the current look is deliberate
   but scaffolding-grade (ADR-0006 exists to make replacing it cheap). Vetted
   community design skills to be shortlisted and owner-approved first.
+
+  **Partly answered 2026-09-02, and the finding is about method rather than
+  taste.** The pass the owner asked for that day was run against the
+  established heuristics and against this project's own laws, on rendered
+  frames rather than on source, and it found nine defects — `WORK.md` items
+  86–94. Not one was a matter of taste: ten equaliser bands drawn without
+  their names, every fitted line in the product measured 23 % narrow, a wall
+  that moved 56 px sideways depending on how full it was, a picker for sixteen
+  rooms that showed none of them. **Three had a doc comment or a passing test
+  asserting they were already correct.**
+
+  So what an outside reviewer would add is still worth having, and it is not
+  what this entry assumed. The gap was never that nobody had an opinion about
+  the composition — the laws in `.interface-design/system.md` §13 are stronger
+  than most shipped software has. It was that **nothing was looking at the
+  pixels**, and the audits that did look looked at the source. Whatever this
+  entry becomes, the standing part is the harness: render, measure, compare
+  against the declared number.
 - ~~**Light theme variant**~~ — **closed.** Reading Room now ships beside
   Closing Time, with Stone and Plaster completing the four-room polarity
   system; Settings also accepts validated local JSON themes.
