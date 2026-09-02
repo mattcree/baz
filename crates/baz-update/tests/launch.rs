@@ -12,11 +12,41 @@
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt as _;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::sync::{Mutex, PoisonError};
 
-/// Put `baz-boot` in a directory of its own with a stand-in `baz` beside it,
-/// and return that directory.
-fn a_pretend_installation(script: &str) -> tempfile::TempDir {
+/// **One installation is built and run at a time**, and the reason is a kernel
+/// error rather than tidiness.
+///
+/// These two tests each copy `baz-boot` into a directory of their own and then
+/// execute the copy, and they run **concurrently in one process**. `fork`
+/// hands the child every open descriptor; `O_CLOEXEC` closes them at `exec`
+/// and not before. So while one test is between its `fork` and its `exec`, it
+/// is holding the other test's still-open *write* descriptor on the file that
+/// other test is about to run — and Linux answers `exec` on a file open for
+/// writing with `ETXTBSY`. One of the two dies and the other does not, which
+/// is exactly the shape this failed in: `1 passed; 1 failed`.
+///
+/// `docs/BACKLOG.md` recorded this as one of two CI flakes that *"need a
+/// recurrence to be worth chasing"*, and the assertion below already carries a
+/// message somebody widened after the first one. It recurred twice under a
+/// full `cargo test --workspace` on 2026-09-02 and passes every time in
+/// isolation, which is the signature of a race that needs the load of other
+/// suites to lose.
+///
+/// Serialising **copy through to exit** closes the window rather than
+/// narrowing it: no `fork` in this process can happen while any copy's
+/// descriptor is open. A retry on `ETXTBSY` would also work and would leave
+/// the race in place, waiting for a third suite to be added beside these two.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// Stand `baz-boot` in a directory of its own with `script` as the `baz`
+/// beside it, run it with `args`, and give back what it did.
+///
+/// The temporary directory lives until this returns and no longer: nothing
+/// after the process has exited has anything to read from it.
+fn launcher_beside(script: &str, args: &[&str]) -> Output {
+    let _serialised = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
     let dir = tempfile::tempdir().expect("a temporary directory");
     std::fs::copy(env!("CARGO_BIN_EXE_baz-boot"), dir.path().join("baz-boot"))
         .expect("the launcher is built before its own test runs");
@@ -24,7 +54,10 @@ fn a_pretend_installation(script: &str) -> tempfile::TempDir {
     std::fs::write(&player, script).expect("a stand-in baz");
     std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o755))
         .expect("a runnable stand-in");
-    dir
+    Command::new(dir.path().join("baz-boot"))
+        .args(args)
+        .output()
+        .expect("the launcher runs")
 }
 
 /// **Every argument reaches baz, in order.**
@@ -35,11 +68,10 @@ fn a_pretend_installation(script: &str) -> tempfile::TempDir {
 /// invisible by design.
 #[test]
 fn the_launcher_hands_every_argument_to_baz() {
-    let dir = a_pretend_installation("#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
-    let out = Command::new(dir.path().join("baz-boot"))
-        .args(["one", "two three", "--four"])
-        .output()
-        .expect("the launcher runs");
+    let out = launcher_beside(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+        &["one", "two three", "--four"],
+    );
     // Both halves of the report, because the one time this failed the message
     // was `{out:?}` and said nothing a reader could act on.
     assert!(
@@ -61,9 +93,11 @@ fn the_launcher_hands_every_argument_to_baz() {
 /// swallowed a non-zero exit would make every crash look like a clean quit.
 #[test]
 fn the_launcher_leaves_no_process_of_its_own_between_the_desktop_and_baz() {
-    let dir = a_pretend_installation("#!/bin/sh\nexit 3\n");
-    let status = Command::new(dir.path().join("baz-boot"))
-        .status()
-        .expect("the launcher runs");
-    assert_eq!(status.code(), Some(3));
+    let out = launcher_beside("#!/bin/sh\nexit 3\n", &[]);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
