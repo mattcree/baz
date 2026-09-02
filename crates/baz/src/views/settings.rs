@@ -376,6 +376,80 @@ fn debug_section(
     section.push(log).into()
 }
 
+/// The nominal width of one plane in a room's swatch — **12**, three units of
+/// the spacing lattice, so six of them come to [`SWATCH_W`] 72. The planes
+/// themselves fill what the block's edge leaves, which is this less a third of
+/// a pixel each; the *block* is what the lattice holds.
+const PLANE_W: f32 = 3.0 * theme::GAP_XS;
+
+/// The height of a room's swatch — **20**, [`theme::LINE_BODY`], so the strip
+/// is exactly as tall as the name standing beside it and the row is still one
+/// [`theme::TRANSPORT_HIT`].
+const SWATCH_H: f32 = theme::LINE_BODY;
+
+/// A room's whole swatch: its six planes, side by side.
+const SWATCH_W: f32 = 6.0 * PLANE_W;
+
+/// **What a room looks like, in one 72 x 20 block.**
+///
+/// The six planes `theme_file::preview` answers with, in the order it answers
+/// them — `recess`, `wall`, `plinth`, `plinth_lit`, `paper`, `lamp` — which is
+/// the room's own elevation ladder followed by its ink and its accent. That
+/// order is the reason this reads for everybody: the elevation law is made of
+/// *lightness* (ADR-0017 §1.5), so the first five are a tonal ramp before they
+/// are anything else, and the strip still says what kind of room this is with
+/// every hue taken out of it. Nothing here rests on telling two colours apart.
+///
+/// `None` where the document behind a code could not be read — the name still
+/// stands and the row still presses, because a room baz cannot preview is
+/// exactly the room a listener may need to press their way out of.
+fn swatches<'a>(planes: Option<[iced::Color; 6]>) -> Element<'a, Message> {
+    let Some(planes) = planes else {
+        return Space::new().width(Length::Fixed(SWATCH_W)).into();
+    };
+    let mut strip = row![];
+    for plane in planes {
+        // `Fill` rather than [`PLANE_W`]: the six divide what the block's own
+        // edge leaves them, so the block stays the declared 72 x 20 and the
+        // hairline is not overdrawn by its contents — which is what happened
+        // when each plane was drawn at its full nominal size.
+        strip = strip.push(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(move |_theme| iced::widget::container::Style {
+                    background: Some(plane.into()),
+                    ..Default::default()
+                }),
+        );
+    }
+    // No gaps between the planes: they are one ramp, and a gutter through it
+    // would read as six samples rather than as one room.
+    //
+    // **The hairline round it is what makes a light room's ink legible.** In
+    // Sea Glass, Plaster or Reading Room the `paper` plane is dark ink, and a
+    // dark band drawn edge-to-edge against the Settings ground is not a band —
+    // it is a hole, and the strip read as four planes, a gap, and an accent
+    // floating on its own. Bounding the block says where it ends, so the same
+    // band reads as *this room's ink is dark*, which is the single most useful
+    // thing the strip has to say about a light room.
+    let edge = theme::active();
+    container(strip)
+        .width(Length::Fixed(SWATCH_W))
+        .height(Length::Fixed(SWATCH_H))
+        .padding(1.0)
+        .clip(true)
+        .style(move |_theme| iced::widget::container::Style {
+            border: iced::Border {
+                color: edge.hairline(edge.plinth),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
 /// Sixteen coordinated built-ins plus the bounded local JSON extension
 /// surface. It said six until 2026-08-23, two lines above a heading that
 /// already read *Sixteen coordinated rooms*.
@@ -390,16 +464,21 @@ fn appearance_section<'a>(view: &ThemeView<'a>) -> Element<'a, Message> {
         let selected = view.selected == code;
         choices = choices.push(
             button(
-                container(
-                    text(if selected {
-                        format!("{name} · selected")
-                    } else {
-                        name.to_owned()
-                    })
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY),
-                )
-                .height(Length::Fill)
+                row![
+                    swatches(theme_file::preview(code).ok().map(|room| room.colors)),
+                    container(
+                        text(if selected {
+                            format!("{name} · selected")
+                        } else {
+                            name.to_owned()
+                        })
+                        .size(theme::SIZE_BODY)
+                        .line_height(theme::LEADING_BODY),
+                    )
+                    .height(Length::Fill)
+                    .align_y(alignment::Vertical::Center),
+                ]
+                .spacing(theme::GAP_MD)
                 .align_y(alignment::Vertical::Center),
             )
             .height(Length::Fixed(theme::TRANSPORT_HIT))
@@ -410,37 +489,48 @@ fn appearance_section<'a>(view: &ThemeView<'a>) -> Element<'a, Message> {
         );
     }
 
-    let preview: Element<'_, Message> = match theme_file::preview(&view.selected) {
-        Ok(preview) => {
-            let mut swatches = row![].spacing(theme::GAP_XXS);
-            for color in preview.colors {
-                swatches = swatches.push(
-                    container(Space::new())
-                        .width(Length::Fill)
-                        .height(Length::Fixed(theme::TRANSPORT_HIT))
-                        .style(move |_theme| iced::widget::container::Style {
-                            background: Some(color.into()),
-                            ..Default::default()
-                        }),
-                );
-            }
-            column![
+    // **The trailing block is the *custom* room's row**, and only that.
+    //
+    // It used to be every room's: one strip of six swatches for whichever room
+    // was selected, drawn *below all sixteen names*. So the picker was a list
+    // of words — `Ember`, `Fernlight`, `Amethyst`, `Rosewater` — and the only
+    // way to find out what one looked like was to select it, scroll past the
+    // other fifteen, and look; comparing two meant doing that twice and
+    // remembering the first. That is recognition traded for recall in the one
+    // surface of the product where the choice *is* the picture, and a
+    // photographed frame at 1600 x 900 on 2026-09-02 shows the whole visible
+    // page holding sixteen names and no colour at all.
+    //
+    // Every built-in now wears its own six planes, so the list is a set of
+    // rooms rather than a set of names and comparison costs nothing. What is
+    // left for this block is the selection that has no row: a validated local
+    // JSON document, whose name is worth stating because nothing else on the
+    // page says it — and the failure, which is what a listener standing in a
+    // room baz could not read needs to see.
+    let preview: Element<'_, Message> = if theme_file::BUILTINS
+        .iter()
+        .any(|(code, _)| view.selected == *code)
+    {
+        Space::new().into()
+    } else {
+        match theme_file::preview(&view.selected) {
+            Ok(preview) => column![
                 text(format!("Preview · {}", preview.name))
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
                     .color(room.paper_dim),
-                swatches,
+                swatches(Some(preview.colors)),
             ]
             .spacing(theme::GAP_XS)
-            .into()
+            .into(),
+            Err(error) => text(format!(
+                "Selected theme unavailable: {error}. Closing Time will be used."
+            ))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.alert)
+            .into(),
         }
-        Err(error) => text(format!(
-            "Selected theme unavailable: {error}. Closing Time will be used."
-        ))
-        .size(theme::SIZE_META)
-        .line_height(theme::LEADING_META)
-        .color(room.alert)
-        .into(),
     };
 
     let json = text_input("Paste a complete v1 theme JSON document", view.json)
@@ -1965,6 +2055,41 @@ fn stepper(
 
 #[cfg(test)]
 mod tests {
+
+    /// **Every room on the picker wears its own room**, on its own row.
+    ///
+    /// This surface is the one place in baz where the choice *is* the picture,
+    /// and it drew sixteen words. The six planes existed and there was exactly
+    /// one strip of them, for whichever room was already selected, **below all
+    /// sixteen names** — so finding out what `Fernlight` looks like meant
+    /// selecting it and scrolling past the other fifteen, and comparing it
+    /// with `Amethyst` meant doing that twice and holding the first in your
+    /// head. A frame at 1600 x 900 on 2026-09-02 shows the whole visible page
+    /// carrying names and no colour whatever.
+    ///
+    /// `theme_file`'s own
+    /// `settings_offers_every_room_the_resolver_knows_and_can_describe_them`
+    /// already proves the data is there for all sixteen. What this holds is
+    /// where it is drawn: in the row, from the row's own code, so a room
+    /// cannot be offered as a word again.
+    #[test]
+    fn every_room_on_the_picker_carries_its_own_planes() {
+        let code = crate::shipped::code(include_str!("settings.rs"));
+        let section = code
+            .split_once("fn appearance_section")
+            .expect("the picker")
+            .1;
+        let rows = section
+            .split_once("for (code, name) in theme_file::BUILTINS {")
+            .expect("the row over every built-in")
+            .1;
+        let rows = &rows[..rows.find("\n    }\n").expect("the loop ends")];
+        assert!(
+            rows.contains("swatches(theme_file::preview(code)"),
+            "a room's row no longer draws that room's own planes, so the \
+             picker is a list of names again"
+        );
+    }
 
     /// **The four states a measurement pass can be read in**, as a table.
     ///
