@@ -35,6 +35,19 @@ PACKAGES=(
   # with "Could not find directory of OpenSSL installation" on any cold target
   # directory since. Found 2026-08-24.
   openssl-devel
+  # **ALSA's bridge to the host's PipeWire.** Without it the container has no
+  # `default`, `pulse` or `pipewire` PCM at all — `snd_pcm_open` answers *No
+  # such file or directory* and baz launches with `[playback] audio device
+  # unavailable`. The socket is already reachable (`toolbox` shares
+  # `/run/user/1000`); what was missing was the plugin that speaks to it.
+  #
+  # Fourth entry in this file's running list of packages that lived in the
+  # maintainer's container by hand and not in this script, after `xdotool`, the
+  # X client libraries and `openssl-devel` — and found the same way all three
+  # were: the container was rebuilt from this script on 2026-09-02 and the
+  # result could not make a sound, in the environment `AGENTS.md` calls
+  # suitable for interactive GUI *and audio* testing.
+  pipewire-alsa
   # Release/Flatpak manifest checks documented in docs/RELEASING.md.
   python3-pyyaml desktop-file-utils appstream
 )

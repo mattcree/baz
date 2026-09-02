@@ -93,6 +93,7 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     lamp: f32,
     collecting: Collecting,
+    over_weather: bool,
 ) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
@@ -181,7 +182,10 @@ pub(crate) fn view<'a>(
         .sticky(shelf.scroll_offset)
         .and_then(|index| runs.get(index))
         .copied();
-    let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
+    let wall = stack![
+        wall,
+        pinned_header(shelf, hang, pinned, hang.block_width(), over_weather)
+    ];
     // **No column heads.** They were drawn once, outside the scrollable, and
     // the owner had them removed the same day: *"can you remove the headers on
     // the 'table' in the library"*. A row of four small caps over a collection
@@ -545,11 +549,18 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 ///
 /// `run` is `None` when nothing is pinned, and the layer is still built: see
 /// the note at the call site for why it may not come and go.
-fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Element<'_, Message> {
+fn pinned_header(
+    shelf: &Shelf,
+    hang: Grid,
+    run: Option<Run>,
+    block: f32,
+    over_weather: bool,
+) -> Element<'_, Message> {
     pinned_band(
         run.map(|run| header_band(shelf, hang, run, block)),
         hang,
         block,
+        over_weather,
     )
 }
 
@@ -712,6 +723,7 @@ pub(crate) fn pinned_band<'a>(
     band: Option<Element<'a, Message>>,
     hang: Grid,
     block: f32,
+    over_weather: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let pinned = band.is_some();
@@ -737,7 +749,7 @@ pub(crate) fn pinned_band<'a>(
         .align_x(alignment::Horizontal::Center)
         .style(move |_theme| {
             if pinned {
-                theme::shelf_header_band(room)
+                theme::shelf_header_band(room, over_weather)
             } else {
                 iced::widget::container::Style::default()
             }

@@ -1631,6 +1631,43 @@ accessibility and colour beyond the mirror tests; MPRIS conformance; and UI/UX.
   do before the page is written, and those are cheaper to build alongside the
   screenshots than to retrofit.
 
+## The pinned heading's ground, over weather — the half that is still open
+
+**The band is opaque again wherever there is no moving picture** (`WORK.md`
+item 97), which is what the owner was looking at when he reported the colour
+for the second time. What is not settled is the case the 2026-08-23 change was
+made for, and it wants a decision rather than another constant.
+
+**Why no alpha can be right.** Away from Now playing the backdrop is stacked
+under every place (`over_field` is unconditional), so the collection's ground
+is `field + wall at FROST`. The pinned band is drawn inside the place, *over*
+the covers. To hide a cover it must be opaque; to match its neighbours it must
+be 40 % wall over the same picture. **The cover sits between the band and that
+picture**, so one alpha cannot do both, and every value is a trade between a
+ghosted sleeve and a visible rectangle.
+
+Two ways out, both real:
+
+1. **Draw the backdrop into the band's own strip.** The band stacks a clipped
+   copy of `views::now_playing::backdrop` at the same window coordinates, then
+   the same `FROST` wash, then the heading. It composites from the identical
+   two layers its neighbours do, so it cannot be the wrong colour, and it is
+   fully opaque to the covers because the field is. The cost is a second
+   backdrop instance redrawn per frame while a heading is pinned — bounded to
+   a `header_h` strip, but it is the visualiser's own cost paid twice, and it
+   needs the strip to sample the window's coordinates rather than its own.
+
+2. **Stop the covers reaching under the band.** With nothing beneath it the
+   band needs no ground at all and inherits the place's exactly. The scrollable
+   would reserve `header_h` at its top permanently — not on pinning, which is
+   the two-frame oscillation `views::shelf::view` already documents — and the
+   topmost run's in-flow heading would have to come out of the flow to avoid a
+   doubled gap. Cheaper per frame, more structural.
+
+**(1) is the smaller change and (2) is the better shape.** Neither is a
+guess-and-ship, and both change what a pinned heading *is*, which is why this
+is recorded rather than chosen.
+
 ## Findings of the 2026-09-02 interface pass, not built
 
 The owner asked for the interface to be judged against the established

@@ -2934,10 +2934,11 @@ impl Shelf {
         player: &'a PlayerState,
         lamp: f32,
         collecting: crate::playlists::Collecting,
+        over_weather: bool,
     ) -> Element<'a, Message> {
         column![
             views::top_bar::view(self, self.body_width()),
-            views::shelf::view(self, player, lamp, collecting)
+            views::shelf::view(self, player, lamp, collecting, over_weather)
         ]
         .into()
     }

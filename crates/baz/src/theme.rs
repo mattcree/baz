@@ -4427,9 +4427,12 @@ pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -
 /// screenshot can show, which is what makes the pin a *position* rather than a
 /// state.
 #[must_use]
-pub fn shelf_header_band(p: &Palette) -> container::Style {
+pub fn shelf_header_band(p: &Palette, over_weather: bool) -> container::Style {
     container::Style {
-        background: Some(Background::Color(alpha(p.wall, STICKY_BAND))),
+        background: Some(Background::Color(alpha(
+            p.wall,
+            if over_weather { STICKY_BAND } else { 1.0 },
+        ))),
         ..container::Style::default()
     }
 }
@@ -4451,8 +4454,30 @@ pub fn shelf_header_band(p: &Palette) -> container::Style {
 /// picture was frozen and usually near enough to `wall` that the slab hid in
 /// it. Two defects, one of them masking the other.
 ///
-/// With nothing sounding there is no weather, the ground is `wall`, and 92 % of
-/// `wall` over `wall` is `wall` — so the quiet case is unchanged.
+/// **This alpha applies only while there is weather**, and that clause is the
+/// 2026-09-02 correction. The sentence here used to be *"with nothing sounding
+/// there is no weather, the ground is `wall`, and 92 % of `wall` over `wall`
+/// is `wall` — so the quiet case is unchanged"*, and it is wrong about what
+/// the band is drawn over. **The band is never over `wall`. It is over the
+/// cover it exists to hide** — that is its whole job, two doc comments up —
+/// so 8 % of a sleeve came through it.
+///
+/// The owner, for the second time: *"the background of the section titles in
+/// sticky mode is wrong too"*. Photographed at 1600 x 900 with nothing
+/// playing: a grey slab behind `ALEXANDER MALTER`, beginning at the block's
+/// left edge and **stopping exactly where the cover beneath it stops**,
+/// because that grey is the cover.
+///
+/// So the band is opaque wherever there is no moving picture to belong to,
+/// which is what it was before 2026-08-23 and is right in that case; and it
+/// keeps this alpha where there is, which is what that change was for.
+///
+/// **What is still not right, and needs a decision rather than a constant:**
+/// with the weather live, no single alpha can both hide a cover and match a
+/// ground made of `field + wall at FROST`, because the cover sits between the
+/// band and that ground. Two ways out, in `docs/BACKLOG.md`: draw the backdrop
+/// into the band's own strip so it composites from the same two layers its
+/// neighbours do, or stop the covers reaching under the band at all.
 const STICKY_BAND: f32 = 0.92;
 
 /// The primary action (Play album): a lamp **outline**, and the only control
@@ -8981,6 +9006,40 @@ mod tests {
         // line gap, never a slot — and it is named rather than silently on the
         // lattice, because a law with an unnamed exception is a habit.
         const { assert!(GAP_XXS == 2.0 && !on_lattice(GAP_XXS)) }
+    }
+
+    /// **A pinned heading hides what passes under it, or it is not a band.**
+    ///
+    /// The one thing `shelf_header_band` exists for is that the covers of the
+    /// shelf it heads stop being drawn at its edge rather than through it. It
+    /// was translucent at [`STICKY_BAND`] in every case from 2026-08-23, and
+    /// the reasoning for that alpha assumed the band composited over `wall`.
+    /// It composites over the cover. 8 % of a near-white sleeve came through,
+    /// which drew a grey slab behind the heading that began at the block's
+    /// edge and stopped exactly where the cover stopped — the owner's second
+    /// report of this, and photographed at 1600 x 900 with nothing playing:
+    /// `srgb(29,32,33)` inside the band against `srgb(12,13,14)` beside it.
+    /// It is `srgb(12,13,14)` in both places now.
+    ///
+    /// The translucent case is kept and is **conditional on there being a
+    /// moving picture to belong to**, which is what that change was for.
+    #[test]
+    fn a_pinned_heading_is_opaque_wherever_there_is_no_weather_to_belong_to() {
+        let room = &CLOSING_TIME;
+        let alpha_of = |style: container::Style| match style.background {
+            Some(Background::Color(colour)) => colour.a,
+            _ => panic!("the band paints a colour"),
+        };
+        assert!(
+            (alpha_of(shelf_header_band(room, false)) - 1.0).abs() < f32::EPSILON,
+            "the pinned band is translucent over a bare wall again, so the \
+             covers scrolling under it show through the heading"
+        );
+        assert!(
+            (alpha_of(shelf_header_band(room, true)) - STICKY_BAND).abs() < f32::EPSILON,
+            "the band over weather no longer yields to the picture behind it, \
+             which is the rectangle the 2026-08-23 change removed"
+        );
     }
 
     /// **L3 — optical centring: the box centres the ink, not the line box.**

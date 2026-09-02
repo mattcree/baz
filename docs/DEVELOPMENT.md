@@ -16,7 +16,8 @@ The toolbox shares your `$HOME`, your session (Wayland/X11, PipeWire) and your r
 | Component | Why |
 |---|---|
 | `gcc`/`gcc-c++`/`make`/`pkgconf` | C toolchain for -sys crates |
-| `alsa-lib-devel` | cpal / device audio output |
+| `alsa-lib-devel` | cpal / device audio output — **building** it |
+| `pipewire-alsa` | cpal / device audio output — **hearing** it. Without this the container has no `default` PCM and baz launches with *audio device unavailable*; the socket is already shared, the plugin that speaks to it was not installed |
 | `libxkbcommon-devel`, `libxkbcommon-x11` | iced/winit window creation (the X11 one is required even for headless Xvfb runs) |
 | `xorg-x11-server-Xvfb`, `ImageMagick` | headless render verification — screenshot the real UI on a private display and diff it |
 | `flac`, (`ffmpeg` if present) | encoding test fixtures for the audio golden tests |

@@ -2197,6 +2197,43 @@ a guard*) reaching the one area that audit put out of scope: **UI/UX**.
     Steps 2 and 3 — the `update` half by sub-machine, then `view` — are
     unstarted and stay in `BACKLOG.md` with their order and their reason.
 
+96. **Done 2026-09-02 — the playlists list view stands in the Library's own
+    columns.** *(The owner: "you have not properly implemented the list view in
+    playlists…")* Three edges for one column, measured at 1600 × 900: the
+    Library's album title at x **351**, a playlist's name at **325**, a making
+    verb's word at **321**. A Library list row is `cover · GAP_MD · lamp lane ·
+    GAP_MD · title` and neither playlist row reserved the lamp's lane. Both do
+    now, through one `lamp_slot` and `views::shelf::lamp_dot`; the three are
+    351, 349, 349, the difference being glyph side-bearing. **And a sounding
+    list is marked** — `theme::list_row` had a hardcoded `false` for `playing`,
+    so the one row actually running looked like every other.
+
+97. **Done 2026-09-02 — the pinned heading stops showing the cover through
+    itself.** *(The owner, for the second time: "the background of the section
+    titles in sticky mode is wrong too.")* `STICKY_BAND` is 0.92 and the
+    reasoning for it says *"92 % of `wall` over `wall` is `wall` — so the quiet
+    case is unchanged"*. **The band is never over `wall`; it is over the cover
+    it exists to hide**, which its own doc two comments earlier calls its whole
+    job. 8 % of a near-white sleeve came through it: a grey slab behind the
+    heading, beginning at the block's edge and stopping exactly where the cover
+    stopped. Measured with nothing playing: `srgb(29,32,33)` inside the band
+    against `srgb(12,13,14)` beside it; `srgb(12,13,14)` in both now.
+
+    Opaque wherever there is no moving picture to belong to, and the 0.92 kept
+    where there is — the case the 2026-08-23 change was for. **That case is
+    still open** and is in `BACKLOG.md` with the two ways out, because no alpha
+    can both hide a cover and match a ground the cover is standing in front of.
+
+98. **Done 2026-09-02 — `pipewire-alsa` joins the toolbox package list.** The
+    container had no ALSA→PipeWire bridge, so baz launched with *"audio device
+    unavailable"* and no sound was possible in the environment `AGENTS.md`
+    calls *"suitable for both CI-equivalent commands and interactive GUI/audio
+    testing"*. It is the **fourth** package this script's own running list has
+    caught living in the maintainer's container by hand — after `xdotool`, the
+    X client libraries and `openssl-devel` — and it was found the same way the
+    others were: by rebuilding the container from the script and finding the
+    result could not do something.
+
 
 ## Doing
 
