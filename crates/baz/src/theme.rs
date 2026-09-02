@@ -3775,18 +3775,46 @@ pub fn wall_scrollbar() -> scrollable::Scrollbar {
 /// `Scrollbars::new` puts the bar at `bounds.x + bounds.width −
 /// (width + 2 × margin)` — the far right of the scrollable's **outer** bounds,
 /// which ignores `spacing` entirely (`scrollable.rs:1583–1602`). So the
-/// scrollable is given the whole body width, the rail is stacked *under* it
-/// right-aligned, and `spacing` is [`INDEX_LANE_W`]: the content is confined
-/// to the same [`WALL_RESERVE`]-less width it always had, and the 4 px the bar
-/// occupies fall in the rail's own window gutter, where there is no ink.
+/// scrollable is given the whole body width and the rail is stacked *under*
+/// it, right-aligned: the 4 px the bar occupies fall in the rail's own window
+/// gutter, where there is no ink.
 ///
 /// The rail stays *under* the bar in the stack rather than over it because
 /// iced hands the topmost layer the pointer first, and a rail on top would own
 /// the 4 px the bar is drawn in — a bar nobody can grab. Under it, the rail
 /// answers everywhere except those 4 px.
+///
+/// # Why this bar declares no `spacing`
+///
+/// It declared [`INDEX_LANE_W`], and that is how the content used to be
+/// confined to the [`WALL_RESERVE`]-less measure. **iced applies that
+/// reservation only while the bar is on screen** — `scrollable`'s layout
+/// spends `width + 2 × margin + spacing` behind
+/// `if state.is_scrollbar_visible`, and takes an unconditional `0.0` when a
+/// direction declares no spacing at all.
+///
+/// So the wall's columns moved by **56 px — half the reservation — depending
+/// on whether the collection was currently taller than the window.** Measured
+/// on 2026-09-02 from two real frames at 1600 × 900: the Library wall, 374
+/// records deep, hung its block from x 266; the Playlists wall, holding four
+/// tiles and needing no bar, hung the identical 1 190 px block from x 321,
+/// with its last column standing under its own index rail. It reads as two
+/// surfaces disagreeing and it is one surface disagreeing with itself — the
+/// same wall shifts sideways the moment a scan pushes it past a screenful,
+/// and the pinned band, which reserves the lane by hand, would stay put while
+/// the rows underneath it moved.
+///
+/// The reservation is the content's now, unconditionally, spent where the
+/// pinned band already spent it: [`crate::views::shelf::hung_body`].
 #[must_use]
 pub fn shelf_scrollbar() -> scrollable::Scrollbar {
-    wall_scrollbar().spacing(INDEX_LANE_W)
+    // Deliberately not `wall_scrollbar()`: that one declares `spacing(0.0)`,
+    // which is still a `Some` and still puts iced's `width + 2 × margin`
+    // behind the visibility check — 4 px of the same conditional geometry.
+    scrollable::Scrollbar::new()
+        .width(WALL_SCROLLBAR_W)
+        .scroller_width(WALL_SCROLLBAR_W)
+        .margin(SCROLLBAR_MARGIN)
 }
 
 /// What the wall's scrollable takes off its own right edge before the grid

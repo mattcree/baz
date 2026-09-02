@@ -150,25 +150,21 @@ pub(crate) fn view<'a>(
     grid = spacer(grid, shelves.height(), &mut drawn);
 
     let room = theme::active();
-    let wall = scrollable(
-        container(grid)
-            .width(Length::Fill)
-            .align_x(alignment::Horizontal::Center),
-    )
-    .id(scroll_id())
-    .on_scroll(Message::Scrolled)
-    // **The wall's scrollbar** ([`theme::shelf_scrollbar`]): 4 px, in the
-    // room's hairline, reserving [`theme::WALL_RESERVE`] — its own lane *and*
-    // the rail's — inside the scrollable, so no cover is ever drawn under
-    // either and the bar itself is drawn on the window's edge. The rail under
-    // it still says *where you are* and still names the shelf it jumps to;
-    // what the bar adds is the one gesture the rail has no answer to — drag to
-    // the end. The owner's decision, 2026-08-09; the product's
-    // two-vertical-strips entry records it.
-    .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
-    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let wall = scrollable(hung_body(grid))
+        .id(scroll_id())
+        .on_scroll(Message::Scrolled)
+        // **The wall's scrollbar** ([`theme::shelf_scrollbar`]): 4 px, in the
+        // room's hairline, reserving [`theme::WALL_RESERVE`] — its own lane *and*
+        // the rail's — inside the scrollable, so no cover is ever drawn under
+        // either and the bar itself is drawn on the window's edge. The rail under
+        // it still says *where you are* and still names the shelf it jumps to;
+        // what the bar adds is the one gesture the rail has no answer to — drag to
+        // the end. The owner's decision, 2026-08-09; the product's
+        // two-vertical-strips entry records it.
+        .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     // **The pinned layer is always in the tree**, even with nothing pinned,
     // and that is load-bearing rather than tidy. iced 0.13 keys widget state
@@ -237,6 +233,33 @@ pub(crate) fn view<'a>(
     // for why it is under rather than over, and what the 4 px it yields to the
     // bar cost.
     collection_scaffold(body, index_rail(shelf, &shelves))
+}
+
+/// **A wall's in-flow block, centred in the measure the rail leaves it.**
+///
+/// The one place either collection's columns get their x, so the Library and
+/// the Playlists root cannot drift apart — and, more to the point, so neither
+/// can drift away from *itself*.
+///
+/// The reservation used to be iced's, declared as the scrollbar's `spacing`,
+/// and **iced spends it only while the bar is on screen**. A wall with less
+/// than a screenful in it therefore centred its block in the whole body and
+/// hung it 56 px — half the reservation — to the right of where the same wall
+/// hangs it once the collection is deep enough to scroll, with its last column
+/// standing under the index rail. Both frames were photographed on 2026-09-02:
+/// Library at x 266 with 374 records, Playlists at x 321 with four tiles, one
+/// identical 1 190 px block.
+///
+/// [`pinned_band`] has spent the reservation by hand since the sticky heading
+/// was written, for the neighbouring reason its own comment records — so while
+/// this was wrong the pinned heading and the rows passing under it were
+/// centred on two different lines whenever the bar was away.
+pub(crate) fn hung_body<'a>(grid: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(grid.into())
+        .width(Length::Fill)
+        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
+        .align_x(alignment::Horizontal::Center)
+        .into()
 }
 
 /// The common collection frame: a right-hand index rail under a full-width
@@ -1575,8 +1598,8 @@ mod tests {
     /// being pinned is the *composition*, and the composition is the code.
     #[test]
     fn the_rail_hangs_under_the_body_and_the_bar_takes_the_window_edge() {
-        // The bar's lane and the rail's, one number, and it is what the
-        // scrollable reserves (`theme::shelf_scrollbar`'s `spacing`).
+        // The bar's lane and the rail's, one number, and it is what
+        // `hung_body` reserves off the content.
         const { assert!(theme::WALL_RESERVE == theme::INDEX_LANE_W + theme::WALL_SCROLLBAR_W) }
 
         let source = std::fs::read_to_string(
@@ -1599,6 +1622,53 @@ mod tests {
             view.contains("collection_scaffold(body, index_rail(shelf, &shelves))"),
             "the Library no longer uses the shared collection scaffold"
         );
+        // **The reservation is the content's, and it is unconditional.**
+        //
+        // It was the scrollbar's `spacing`, and iced spends a bar's spacing
+        // only while the bar is on screen — so a wall with less than a
+        // screenful in it centred its block in the whole body and hung it 56
+        // px, half the reservation, right of where the same wall hangs it once
+        // the collection is deep enough to scroll. Both walls were
+        // photographed doing exactly that at 1600 x 900 on 2026-09-02: an
+        // identical 1 190 px block at x 266 in the Library and x 321 in
+        // Playlists, whose last column then stood under its own index rail.
+        //
+        // Two literals hold it: `shelf_scrollbar` declares no `spacing` at
+        // all — anything else puts iced's `width + 2 × margin` back behind the
+        // visibility check — and both collections take their x from
+        // `hung_body` rather than centring a container of their own.
+        let theme_source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/theme.rs"),
+        )
+        .expect("the theme's own source");
+        let bar = theme_source
+            .split_once("pub fn shelf_scrollbar()")
+            .expect("the wall's bar")
+            .1;
+        let bar = &bar[..bar.find("\n}\n").expect("a function ends")];
+        assert!(
+            !bar.contains(".spacing("),
+            "the wall's bar declares a spacing again, so iced reserves the \
+             rail's lane only while the bar is visible and the columns move \
+             sideways when a collection grows past one screen"
+        );
+        for (place, source) in [
+            ("Library", source.clone()),
+            (
+                "Playlists",
+                std::fs::read_to_string(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/playlists.rs"),
+                )
+                .expect("the playlists root's source"),
+            ),
+        ] {
+            assert!(
+                crate::shipped::code(&source).contains("hung_body(grid)"),
+                "{place} centres its block itself instead of through \
+                 `hung_body`, which is the one place either wall's columns get \
+                 their x"
+            );
+        }
         // The stack's first child is the rail; the body is pushed over it.
         let stack = source
             .split_once("pub(crate) fn collection_scaffold")

@@ -117,27 +117,27 @@ pub(crate) fn view<'a>(
     grid = spacer(grid, shelves.height(), &mut drawn);
 
     // **No place padding here, and that is load-bearing.** The block is
-    // centred in the scrollable's *content* measure — the outer width less
-    // `theme::WALL_RESERVE`, which `theme::shelf_scrollbar` reserves — because
-    // the pinned band centres in exactly that measure
+    // centred in the outer width less `theme::WALL_RESERVE`, because the
+    // pinned band centres in exactly that measure
     // (`views::shelf::pinned_band`). A `place_pad` on top of it would centre
     // the in-flow rows in a narrower box than the pinned heading and the two
     // would disagree, which is the 56 px jump `impl/sticky-header-alignment/`
     // records. The wall's own top air is `Shelves`' first `grid.hang`.
-    let body = scrollable(
-        container(grid)
-            .width(Length::Fill)
-            .align_x(alignment::Horizontal::Center),
-    )
-    .id(scroll_id())
-    .on_scroll(Message::PlaylistsScrolled)
-    // The body spans the window edge while reserving the rail's lane, just
-    // like Library: the bar remains at the outer edge and tiles can never
-    // slide beneath the index.
-    .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
-    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-    .width(Length::Fill)
-    .height(Length::Fill);
+    //
+    // **The reservation is spent by `hung_body` and not by the scrollbar**,
+    // which is what stopped this place from being that same 56 px jump in its
+    // own right: iced applies a bar's `spacing` only while the bar is on
+    // screen, and this root rarely holds a screenful.
+    let body = scrollable(crate::views::shelf::hung_body(grid))
+        .id(scroll_id())
+        .on_scroll(Message::PlaylistsScrolled)
+        // The body spans the window edge while reserving the rail's lane, just
+        // like Library: the bar remains at the outer edge and tiles can never
+        // slide beneath the index.
+        .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+        .width(Length::Fill)
+        .height(Length::Fill);
     // **The pinned layer is always in the tree** — see `views::shelf::view` for
     // why a `stack` that came and went would rebuild the scrollable's state and
     // make the wall unscrollable. The lead run is never pinned: it has no
