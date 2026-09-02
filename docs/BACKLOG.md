@@ -1752,15 +1752,20 @@ construct an `App`, so the shell was guarded by 23 substring scans of its own
 source. `App::headless` now exists and two scans have been converted; the
 remaining ~40 in `views/` need a rendered tree, which is a different problem.
 
+**Step 1 shipped 2026-09-02** (`WORK.md` item 95): `Shelf` and its 2 888
+lines are `crate::collection`, `app.rs` is 10 486 lines of shipped code, and
+nine frames diff at zero differing pixels against the build before it.
+**Steps 2 and 3 are unstarted** and keep the order below, which is the whole
+value of writing it down.
+
 **Proposal, and it is deliberately not "split app.rs".** Rust lets one `impl`
 block's methods live in sibling modules of the same crate, so this is
 mechanical and reviewable in pieces, but a split that only moves lines buys
 navigation and nothing else. The order worth doing it in:
 
-1. **`Shelf` and its impl leave first**, into `crate::collection` — the type
-   is the library's loaded state, it has nothing to do with the iced
-   application, and its name has been fighting `crate::shelf` since both
-   existed. That is ~2 400 lines out and one genuine ambiguity gone.
+1. ~~**`Shelf` and its impl leave first**, into `crate::collection`~~ —
+   **done**, and it came to 2 888 lines rather than the ~2 400 estimated here,
+   because five helpers and two test clusters went with it.
 2. **The `update` half splits by sub-machine**, following the seams `route`
    already delegates along — `update_playlists`, `update_vibe`, `update_queue`,
    `update_menu`, `update_transport` are each already a function and each is

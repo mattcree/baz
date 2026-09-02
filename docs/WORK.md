@@ -2170,6 +2170,33 @@ a guard*) reaching the one area that audit put out of scope: **UI/UX**.
     descriptor across its own exec. Serialising copy-through-to-exit closes the
     window; eight consecutive full-workspace runs, clean.
 
+95. **Done 2026-09-02 — the collection leaves `app.rs`, and the ambiguity
+    leaves with it.** Step 1 of `BACKLOG.md`'s three-step proposal, and it is
+    first because it is the only step that removes an *ambiguity* rather than a
+    line count: `Shelf` and `crate::shelf` were unrelated, the module being the
+    wall's grid arithmetic and the type being the loaded library with its view
+    models, its scan state and its two tiers of decoded artwork.
+
+    2 888 lines to `crate::collection`, plus five helpers with one caller in
+    `app.rs` and several in the moved code, plus the two test clusters that
+    belong with them. `app.rs`: 13 106 → 10 486 lines of shipped code.
+
+    **Nothing changed on the way across, measured rather than asserted:** nine
+    frames from the real binary at 1600 × 900 diff at **zero** differing pixels
+    against the build before the move.
+
+    Two things fell out of it and both are worth more than the move.
+    `search_waits_for_a_choice_and_adds_to_the_playlist_on_screen` split on a
+    signature that had gained a fourth parameter, found that literal *on its
+    own line in the test*, and read the rest of the test as the function's
+    body — where every asserted string is written directly underneath. It had
+    been asserting nothing for as long as the signature had been stale. And the
+    shell's scans now read the shell, which is two files: `shell_source()`,
+    through `shipped::code` so a signature cannot match the literal naming it.
+
+    Steps 2 and 3 — the `update` half by sub-machine, then `view` — are
+    unstarted and stay in `BACKLOG.md` with their order and their reason.
+
 
 ## Doing
 
