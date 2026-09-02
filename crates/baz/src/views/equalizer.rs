@@ -54,6 +54,18 @@ use crate::theme;
 /// of them plus their labels fit a panel that does not fill the window.
 const FADER_H: f32 = 168.0;
 
+/// The lane a [`strip`]'s label occupies — one above the fader for the gain,
+/// one below it for the name — with the column's own gap.
+const LABEL_LANE_H: f32 = theme::HEADING_LINE_H + theme::GAP_XS;
+
+/// A whole strip: its gain, its fader, its name.
+///
+/// Named because two things that are **not** strips have to stand exactly on
+/// the faders inside it — the response curve behind them and the rule that
+/// separates the pre-amp — and both did that by assuming the strip was the
+/// fader alone. See [`layer`].
+const STRIP_H: f32 = 2.0 * LABEL_LANE_H + FADER_H;
+
 /// The panel's own measure: **the wider of the two things it holds.**
 ///
 /// It used to be the fader row alone, which was right while the row above it
@@ -133,26 +145,51 @@ pub(crate) fn layer(
             // the same fact: the handle is where you ask, the curve is what
             // you get, and a listener comparing two pictures across the panel
             // is doing arithmetic the panel should have done.
-            iced::widget::stack![
+            //
+            // **The bands are the base layer and the curve is pushed under
+            // them**, which is not a preference about draw order — it is the
+            // whole of this panel's geometry. An iced `Stack` takes its size
+            // from its base and lays every other layer inside *that*
+            // rectangle, so while the curve was the base the ten strips were
+            // laid out in a box one label lane shorter than they are, and the
+            // ten band frequencies — `32`, `63`, `125` … the labels the module
+            // doc above promises under every fader — were **never drawn at
+            // all**. Reproduced on 2026-09-02 from a real frame: the lane
+            // under the ten faders holds nothing, while `Pre-amp`, which is
+            // outside the stack, is there.
+            //
+            // The same bug tilted the panel. The row aligns its children at
+            // `End`, so the pre-amp's bottom met the stack's bottom — the
+            // faders' feet, not the strips' — which stood the pre-amp's whole
+            // column one label lane above the ten it belongs to: its handle
+            // 13 px high of theirs and its `+0` 16 px above the row of them.
+            // An equaliser whose eleventh fader does not share the other ten's
+            // zero line is a picture that lies.
+            //
+            // `push_under` is iced's own primitive for a layer that must not
+            // decide the size, and with the bands deciding it the curve and
+            // the rule are the two things that now have to be told where the
+            // faders are: both carry [`LABEL_LANE_H`] top and bottom out of
+            // [`STRIP_H`], which leaves each of them exactly [`FADER_H`]
+            // standing exactly where the handles do.
+            iced::widget::stack![bands].push_under(
                 container(crate::response::Response::new(
                     baz_core::equalizer::Bands::from_centidb(eq.bands_centidb),
                     limit,
                     FADER_H,
                     room,
                 ))
-                // Down by exactly the gain label above it, so the curve's
-                // own bounds are the faders' bounds and the two mappings are
-                // fed the same rectangle.
+                .height(Length::Fixed(STRIP_H))
                 .padding(iced::Padding {
-                    top: theme::HEADING_LINE_H + theme::GAP_XS,
+                    top: LABEL_LANE_H,
+                    bottom: LABEL_LANE_H,
                     ..iced::Padding::default()
                 }),
-                bands,
-            ],
+            ),
             // The pre-amp is not a band, and the rule says so.
             container(rule::vertical(1).style(move |_theme| theme::hairline(room, room.plinth)))
-                .height(Length::Fixed(FADER_H))
-                .padding(theme::pad(0.0, theme::GAP_SM)),
+                .height(Length::Fixed(STRIP_H))
+                .padding(theme::pad(LABEL_LANE_H, theme::GAP_SM)),
             strip("Pre-amp", preamp, limit, room, |db| {
                 Message::EqualizerPreampSet(centidb(db))
             }),
@@ -583,6 +620,50 @@ mod tests {
             "the controls row needs about {needed:.0} px and the panel is \
              {PANEL_W:.0} — the last control on the row will wrap onto a \
              second line rather than saying so"
+        );
+    }
+
+    /// **The strips decide how tall the fader row is, and the two things
+    /// drawn against them are told where the faders are.**
+    ///
+    /// This is a scan, and it is a scan of a *mechanism* rather than of a
+    /// coincidence, which is the only kind worth writing: an iced `Stack`
+    /// takes its size from its base layer and bounds every other layer by it
+    /// (`iced_widget::stack`'s own first paragraph), so a base that is not the
+    /// strips is a box shorter than they are and the label lane under the ten
+    /// faders is laid out into nothing. That shipped. The ten band frequencies
+    /// were absent from a real 1600 x 900 frame on 2026-09-02 while this
+    /// module's doc comment said they were under every fader and
+    /// [`super::a_band_label_is_short_enough_to_stand_under_its_fader`] passed
+    /// — because it measures the *string*, and a string is not a drawing.
+    ///
+    /// A rendered tree would say this better and iced gives none. What a
+    /// reader can still be held to is the two literals below: the base is
+    /// `stack![bands]` with the curve arriving by `push_under` — write
+    /// `stack![curve, bands]` again and the first assertion goes — and the two
+    /// non-strips are cut out of [`STRIP_H`] rather than standing at
+    /// [`FADER_H`]. Changing either changes the geometry, so changing either
+    /// has to change this test too.
+    #[test]
+    fn the_faders_decide_the_rows_height_and_the_curve_is_pushed_under_them() {
+        let src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/equalizer.rs"),
+        )
+        .expect("this file");
+        let code = crate::shipped::code(&src);
+        assert!(
+            code.contains("stack![bands].push_under("),
+            "the band strips are no longer the stack's base layer, so the lane \
+             holding their frequencies is laid out in a box shorter than they \
+             are and the ten names are not drawn"
+        );
+        assert_eq!(
+            code.matches("Length::Fixed(STRIP_H)").count(),
+            2,
+            "the response curve and the pre-amp's rule both stand across the \
+             whole strip and take their {LABEL_LANE_H} px lanes out of it; one \
+             of them is back to standing at the fader's own height, which \
+             leaves it a label lane out of true with the handles it describes"
         );
     }
 
