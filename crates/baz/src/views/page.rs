@@ -735,7 +735,30 @@ fn tiered_act(
         .align_y(alignment::Vertical::Center),
     )
     .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
+    // **The lead-in is on the right, and that is the whole of law L5 here.**
+    //
+    // This was `pad(0, GAP_MD)`, so an act's word began 12 px inboard of the
+    // lane the rest of the aside hangs from — while [`act`]'s own doc said the
+    // opposite, that they *"hang from the aside's own lane like everything
+    // else in it (law L5)"*. Measured off a real frame at 1600 x 900 on
+    // 2026-09-02: `Play album`'s box at x 293, `DETAILS` at 294, and `Add to
+    // playlist…` at **305**. One word, one edge outside the surface's declared
+    // list, on the record's page.
+    //
+    // L5 names that failure exactly — the extra edges in both lists came from
+    // *a row's own horizontal padding, applied inside a surface that had
+    // already stated its lane* — and this is the same padding one layer up.
+    //
+    // It is moved rather than deleted because it is doing a second job: the
+    // playlist page draws its acts in pairs, and `GAP_SM` alone between two
+    // bare words is too little air between two press targets. On the right it
+    // still buys that — 12 plus the row's 8 is 20 px between neighbouring
+    // labels — and the first act in a column or a row now starts where the
+    // lane does. The hit box is asymmetric by 12 px and no smaller.
+    .padding(iced::Padding {
+        right: theme::GAP_MD,
+        ..iced::Padding::default()
+    })
     .style(move |_theme, status| theme::transport(room, room.wall, status))
     .on_press_maybe(enabled.then_some(message))
     .into()
@@ -1329,6 +1352,38 @@ mod tests {
         assert!(
             (block - 80.0).abs() < f32::EPSILON,
             "32 + 4 + 24 + 4 + 16 = 80, the block both pages wear: {block}"
+        );
+    }
+
+    /// **An act hangs from the aside's lane, not 12 px inboard of it.**
+    ///
+    /// Law L5 permits the record's page four x-edges and this is not one of
+    /// them. `act`'s own doc has claimed compliance since the two pages were
+    /// merged — *"they hang from the aside's own lane like everything else in
+    /// it (law L5)"* — while the button underneath carried `pad(0, GAP_MD)`
+    /// and put the word 12 px in. Measured off a frame at 1600 x 900 on
+    /// 2026-09-02: `Play album`'s box at x 293, `DETAILS` at 294, `Add to
+    /// playlist…` at 305.
+    ///
+    /// The padding stays on the right, where it is still the air between two
+    /// acts drawn as a pair. What must not come back is a left edge of its
+    /// own.
+    #[test]
+    fn a_quiet_act_starts_where_the_asides_lane_starts() {
+        let code = crate::shipped::code(include_str!("page.rs"));
+        let act = code.split_once("fn tiered_act(").expect("the tiered act").1;
+        let act = &act[..act.find("\n}\n").expect("a function ends")];
+        assert!(
+            !act.contains("theme::pad(0.0, theme::GAP_MD)"),
+            "an act carries symmetric horizontal padding again, so its word \
+             begins 12 px inboard of the lane every other thing in the aside \
+             hangs from"
+        );
+        assert!(
+            act.contains("right: theme::GAP_MD"),
+            "an act no longer keeps its lead-in on the right, so two acts \
+             drawn as a pair have only the row's 8 px between two press \
+             targets"
         );
     }
 
