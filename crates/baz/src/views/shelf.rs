@@ -12,7 +12,8 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf, scroll_id};
+use crate::app::{Message, scroll_id};
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
 use crate::selection::Content;

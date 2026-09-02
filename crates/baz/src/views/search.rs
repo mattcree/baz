@@ -5,7 +5,8 @@ use iced::widget::{
 };
 use iced::{Element, Length, Size, alignment};
 
-use crate::app::{Message, Shelf, search_id};
+use crate::app::{Message, search_id};
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::search::{Action, OVERSCAN_ROWS, ROW_H, SECTION_H};
 use crate::selection::Content;

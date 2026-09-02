@@ -37,7 +37,7 @@ use crate::search::Direction;
 /// **The tile an arrow moves to**, or `None` when there is nowhere to go.
 ///
 /// `ends` is one-past-the-last index of each shelf, in order — the shape
-/// `crate::app::GroupVm` already holds, because the shelves are contiguous
+/// `crate::collection::GroupVm` already holds, because the shelves are contiguous
 /// and carrying both ends of each would be two numbers that have to agree.
 ///
 /// `None` is a real answer and not an error: it is the top row pressing Up

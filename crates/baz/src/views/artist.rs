@@ -43,7 +43,7 @@
 //! decided, which is exactly how fragile a second answer to *how wide is the
 //! grid* is.
 //!
-//! So there is one answer now and this page is given it: [`crate::app::Shelf::grid`],
+//! So there is one answer now and this page is given it: [`crate::collection::Shelf::grid`],
 //! the grid the wall itself hangs on. Every page that hangs works reads that
 //! one grid, so **a record is the same size in all three by construction** —
 //! `every_place_that_hangs_works_hangs_them_on_one_grid` is the assertion, and
@@ -73,7 +73,8 @@
 use iced::widget::{button, column, container, image as iced_image, row, scrollable, text};
 use iced::{ContentFit, Element, Length};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::selection::Content;
 use crate::shelf::Grid;

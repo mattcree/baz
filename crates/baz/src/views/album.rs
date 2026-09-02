@@ -73,7 +73,8 @@ use std::time::Duration;
 use iced::widget::{button, column, container, image as iced_image, mouse_area, row, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
 use crate::selection::Content;

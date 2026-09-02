@@ -49,7 +49,8 @@
 use iced::widget::{Space, column, row, text, text_input};
 use iced::{Element, Length};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::views::compose::{Stage, chip, wrap_chips};
 use crate::{theme, views};
 

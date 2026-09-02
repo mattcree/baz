@@ -26,7 +26,8 @@ use baz_core::index::GroupKey;
 use iced::widget::{Space, column, container, row, rule, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 
 use crate::theme;
 

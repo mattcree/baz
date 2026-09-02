@@ -111,7 +111,8 @@ use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use iced::widget::{Space, button, column, container, image as iced_image, row, rule, text};
 use iced::{Color, Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::{font, icon, theme, vm};
 
 /// The bundled Regular face, for measuring a string before Iced sets it.
@@ -1495,7 +1496,7 @@ mod tests {
     /// the same record, a press apart, 50 px different.
     ///
     /// So the rule is that a view file may not resolve a grid at all. The
-    /// shell resolves [`crate::app::Shelf::grid`] and every place that hangs
+    /// shell resolves [`crate::collection::Shelf::grid`] and every place that hangs
     /// works is given it, which makes the sizes equal by construction rather
     /// than by two functions agreeing.
     ///

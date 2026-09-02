@@ -8,7 +8,8 @@
 use iced::widget::{button, column, container, mouse_area, stack, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::implicit::ImplicitList;
 use crate::player::PlayerState;
 use crate::selection::Content;

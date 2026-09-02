@@ -1467,7 +1467,7 @@ impl Playlists {
     }
 
     /// Whether the open page still answers to `id` — the shell's per-frame
-    /// question, mirroring [`crate::app::Shelf::album`].
+    /// question, mirroring [`crate::collection::Shelf::album`].
     #[must_use]
     pub(crate) fn page(&self, id: u64) -> Option<&OpenPlaylist> {
         self.open.as_ref().filter(|open| open.id == id)

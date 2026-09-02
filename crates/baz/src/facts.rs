@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::app::Shelf;
+use crate::collection::Shelf;
 use crate::player::{PlayerState, SignalPath};
 
 const MONTHS: [&str; 12] = [

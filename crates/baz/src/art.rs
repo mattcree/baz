@@ -280,7 +280,7 @@ pub const HERO_PX: u32 = 1024;
 /// still decoded**: a `Prev` press, or a jump back up the run, finds its hero
 /// in hand rather than watching the sleeve grow into place. Doc 12 §5.2 asks
 /// for the *successor* instead, and it cannot have it yet — see
-/// [`crate::app::Shelf::request_hero`], which records why and what would give
+/// [`crate::collection::Shelf::request_hero`], which records why and what would give
 /// it one.
 pub const HERO_CACHE_ENTRIES: usize = 2;
 

@@ -32,7 +32,8 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::icon;
 use crate::player::PlayerState;
 use crate::playlists::{Cell, PanelRow, PlaylistOrder, Playlists, Wall};

@@ -30,7 +30,7 @@
 //! underneath, with **no scrim** (refused outright) and wheel events passing
 //! through beside it — the wall keeps scrolling while the panel stands. The
 //! wall is not re-laid by a pixel: the panel is a layer, not a column, so
-//! [`crate::app::Shelf::grid_width`]'s "no press re-hangs the collection"
+//! [`crate::collection::Shelf::grid_width`]'s "no press re-hangs the collection"
 //! survives, which is the property the render harness diffs for
 //! (`docs/design/impl/playlists/`).
 //!
@@ -53,7 +53,8 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::icon;
 use crate::player::PlayerState;
 use crate::playlists::{PanelRow, Playlists, playlist_id};

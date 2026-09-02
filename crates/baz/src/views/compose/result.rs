@@ -18,7 +18,8 @@
 use iced::widget::{Space, column, container, row, text};
 use iced::{Element, Length};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::playlists::Playlists;
 use crate::views::compose::{Layout, Stage, heading};
 use crate::{theme, views};

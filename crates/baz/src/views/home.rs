@@ -93,7 +93,8 @@
 use iced::widget::{Space, button, column, container, image as iced_image, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::player::{Phase, PlayerState};
 use crate::selection::Content;
 use crate::shelf::Grid;

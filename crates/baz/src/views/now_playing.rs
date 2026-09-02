@@ -10,7 +10,8 @@
 use iced::widget::{Space, button, column, container, image as iced_image, row, stack, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::field;
 use crate::player::PlayerState;
 use crate::theme;
@@ -173,7 +174,7 @@ pub(crate) fn record_edge(width: f32, height: f32, run: bool, source: f32) -> f3
 /// # The third term, and the constant it replaced
 ///
 /// `source` is `min(w, h)` of the decode this surface is actually drawing —
-/// [`crate::app::Hero::px`] once the hero has landed, the thumbnail's own edge
+/// [`crate::collection::Hero::px`] once the hero has landed, the thumbnail's own edge
 /// before it, and **infinite** for a record with no art at all, because the
 /// deterministic gradient placeholder has no resolution and *larger than its
 /// source* is not a predicate that applies to it.
@@ -791,7 +792,7 @@ fn rear_insert(_shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_
 /// The visible consequence of (2) is that a record whose hero is still
 /// decoding shows a small sleeve that grows once. That is the honest reading
 /// and it is bounded to a frame or two by
-/// [`Shelf::request_hero`](crate::app::Shelf::request_hero), which asks for
+/// [`Shelf::request_hero`](crate::collection::Shelf::request_hero), which asks for
 /// the hero the moment the engine names a record rather than when this place
 /// is opened.
 fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
@@ -799,7 +800,7 @@ fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
     // **The committed hero, which is not always the sounding record's.** While
     // a new record's decode is in flight there is no answer for it yet, so the
     // shell holds the picture it has and this draws that — see
-    // [`crate::app::Shelf::settle_art`] rule 2. The placard above has already
+    // [`crate::collection::Shelf::settle_art`] rule 2. The placard above has already
     // changed; the cover follows when there is a cover to follow with, which is
     // a few tens of milliseconds and is the whole reason the dissolve can be a
     // dissolve rather than a fade to nothing.

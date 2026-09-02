@@ -56,7 +56,8 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::lane::{Destination, Subject, Touched};
 use crate::motion::{Control, Ink};
 use crate::place::Place;

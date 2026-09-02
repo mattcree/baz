@@ -13,7 +13,8 @@
 use iced::widget::{Space, image as iced_image, scrollable};
 use iced::{Element, Length};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::theme;
 use crate::views::page;
 

@@ -48,6 +48,7 @@ use std::time::Instant;
 
 mod app;
 mod art;
+mod collection;
 mod config;
 mod contour;
 mod desktop;

@@ -65,7 +65,8 @@ use std::borrow::Cow;
 use iced::widget::{Space, button, container, mouse_area, row, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::playlists::{Collecting, OpenPlaylist, PageRow};
 use crate::selection::Content;

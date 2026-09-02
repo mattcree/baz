@@ -40,7 +40,8 @@ use std::path::Path;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::playlists::{CreationMode, Playlists};
 use crate::vm::QueueItemVm;
 use crate::{theme, views};

@@ -3,7 +3,8 @@
 use iced::widget::{Space, button, container, row, text};
 use iced::{Element, Length, alignment};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::player::PlayerState;
 use crate::views::{page, place_name, playlist_page};
 use crate::{theme, vm};

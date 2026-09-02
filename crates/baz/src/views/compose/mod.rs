@@ -50,7 +50,8 @@
 use iced::widget::{Space, column, container, row, scrollable};
 use iced::{Element, Length, Size};
 
-use crate::app::{Message, Shelf};
+use crate::app::Message;
+use crate::collection::Shelf;
 use crate::playlists::Playlists;
 use crate::{theme, views};
 
