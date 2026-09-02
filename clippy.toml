@@ -1,3 +1,6 @@
 # Proper nouns clippy::doc_markdown should not demand backticks for.
 # ".." keeps clippy's built-in default list (OpenGL, GitHub, ...).
-doc-valid-idents = ["AppStream", "SQLite", "ReplayGain", "PipeWire", "ID3v2", ".."]
+# `HarfBuzz` is the shaper the design system's own type measurements were
+# taken through (`.interface-design/system.md` §8), so it is named wherever a
+# measurement is justified against them.
+doc-valid-idents = ["AppStream", "SQLite", "ReplayGain", "PipeWire", "ID3v2", "HarfBuzz", ".."]

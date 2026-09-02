@@ -8571,7 +8571,16 @@ mod tests {
             // that *names* a size to assert which rung a title lands on is not
             // a view setting type, and a check that could not tell the
             // difference would punish a module for testing itself.
-            let source = crate::shipped::head(&source).to_owned();
+            //
+            // **And prose is not code**, which is the half this was missing:
+            // [`crate::shipped::code`] rather than `head`. A doc comment
+            // naming `theme::SIZE_META` to say what a number means — which is
+            // what `views::px_scale`'s does, quoting the design system's
+            // published digit advance — is not a view setting type without its
+            // leading, and it failed this test on 2026-09-02. `code` is the
+            // helper built for exactly that in the 2026-08-23 audit's finding
+            // 12; this scan was one of the forty it had not reached.
+            let source = crate::shipped::code(&source);
             for (at, _) in source.match_indices("theme::SIZE_") {
                 let window = &source[at..source.len().min(at + 80)];
                 if window.contains("theme::LEADING_") || window.contains(".text_size(") {

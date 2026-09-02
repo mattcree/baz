@@ -186,35 +186,85 @@ pub(crate) fn fitted_line(line: &Fitted<'_>) -> Element<'static, Message> {
         .align_x(align)
         .clip(true)
     };
-    let prefix = set(
-        fitted,
-        if truncated {
-            Length::Fixed(line.measure - theme::ELLIPSIS_SLOT_W)
-        } else {
-            // Its own words. `Fill` here is what made every line lane-wide.
-            Length::Shrink
-        },
-        alignment::Horizontal::Left,
-    );
+    // **The prefix is its own words in both states**, and the ellipsis follows
+    // it rather than waiting at the far side of the lane.
+    //
+    // It was `Fixed(measure - ELLIPSIS_SLOT_W)` when cut, which put the dots
+    // wherever the lane ended instead of where the words did. That was
+    // invisible while [`px_scale`] was wrong — the prefix overflowed its fixed
+    // box and reached the slot — and the moment the measurement was right the
+    // whole product grew a gap: *upbeat energetic dan   …*, a cut, three
+    // spaces of nothing, and then the sign. A gap is what a reader takes for a
+    // *space in the title*, so the sign stopped meaning "this continues" and
+    // started meaning "this is called that".
+    //
+    // Nothing is lost by shrinking: [`fit`] already guarantees the prefix
+    // fits `measure - ELLIPSIS_SLOT_W`, so prefix + slot is bounded by
+    // `measure` by construction rather than by a fixed box holding it there.
+    let prefix = set(fitted, Length::Shrink, alignment::Horizontal::Left);
+    // **The slot stays fixed and clipped**, which is the whole reason this
+    // function exists rather than iced's own `…`: a `Wrapping::None` text at a
+    // *constrained* width can still be broken by iced 0.14, and a broken
+    // ellipsis lands on an invisible second line — the failure sign vanishing
+    // in exactly the case it is for. A slot of its own cannot be broken out
+    // of. It is left-aligned now so the dots sit against the words; the
+    // remaining slack inside the slot draws nothing.
     let ending: Element<'static, Message> = if truncated {
         set(
             "…".to_owned(),
             Length::Fixed(theme::ELLIPSIS_SLOT_W),
-            alignment::Horizontal::Right,
+            alignment::Horizontal::Left,
         )
         .into()
     } else {
         Space::new().width(Length::Fixed(0.0)).into()
     };
     container(row![prefix, ending])
-        .width(if truncated {
-            Length::Fixed(line.measure)
-        } else {
-            Length::Shrink
-        })
+        .width(Length::Shrink)
         .height(Length::Fixed(line.line_height))
         .clip(true)
         .into()
+}
+
+/// **`size` in em pixels, converted to the scale `ab_glyph` actually means.**
+///
+/// This is the one line that made every fitted measurement in the product 23 %
+/// too small, and it took a rendered frame to find. `ab_glyph` inherited
+/// rusttype's `Scale`: a `PxScale` of *n* means *the face's **height** —
+/// ascent to descent plus line gap — is n pixels*, **not** *the em square is n
+/// pixels*. iced's `text.size(n)` means the second. The bundled Plex faces
+/// carry `unitsPerEm` 1000 against a height of 1300, so `PxScale::from(size)`
+/// asked for an em of `size × 1000/1300` and every advance came back at
+/// **0.769 of its drawn width**.
+///
+/// What that cost is the whole reason [`fitted_line`] exists. Measured
+/// against a real frame at 1600 × 900: the wall drew *Now That I've Found You:
+/// A Collecti* — cut mid-glyph, no ellipsis, over the tile's own edge —
+/// because `fit` measured that title at 175.28 px and let it stand in a 210 px
+/// lane it needed 228 to occupy. `fitted_line`'s own doc comment names that
+/// album as the failure it was written to prevent, and the returns lane's
+/// *upbeat energetic danc… * — a mid-glyph cut **and** an ellipsis, with the
+/// gap between them — is the same arithmetic one step further on.
+///
+/// **The check that would have caught it is arithmetic the design system
+/// already published**: `.interface-design/system.md` §8 states that every
+/// Plex digit advances exactly 600/1000 em in all three weights, so eight of
+/// them at [`theme::SIZE_META`] are 57.60 px and nothing else. This returned
+/// 44.31. §8.1's `STAMP_W` table — measured through HarfBuzz rather than
+/// through here — records 50.21 px for `10:00:00` where this said 38.62.
+/// `44.31/57.60` and `38.62/50.21` are both exactly 1000/1300, which is what
+/// turned a suspicion into a cause.
+/// `a_digit_advances_the_six_tenths_of_an_em_the_system_states` pins the first
+/// of those, so the conversion cannot quietly go back.
+///
+/// A face that declares no `unitsPerEm` cannot be converted and is measured
+/// as it was; the bundled faces all declare 1000, which `font`'s own face
+/// tests assert.
+fn px_scale(face: &impl Font, size: f32) -> PxScale {
+    face.units_per_em().map_or_else(
+        || PxScale::from(size),
+        |per_em| PxScale::from(size * face.height_unscaled() / per_em),
+    )
 }
 
 /// The longest prefix of `content` that fits `measure` less the ellipsis'
@@ -227,7 +277,7 @@ pub(crate) fn fit(content: &str, face: &impl Font, size: f32, measure: f32) -> (
     if text_width(face, size, content) <= measure {
         return (content.to_owned(), false);
     }
-    let scaled = face.as_scaled(PxScale::from(size));
+    let scaled = face.as_scaled(px_scale(face, size));
     let prefix_w = measure - theme::ELLIPSIS_SLOT_W;
     let mut fitted = String::new();
     let mut width = 0.0;
@@ -247,8 +297,11 @@ pub(crate) fn fit(content: &str, face: &impl Font, size: f32, measure: f32) -> (
 }
 
 /// The width `text` occupies in `face` at `size`, kerning included.
+///
+/// `size` is the em size iced draws at; [`px_scale`] converts it to what
+/// `ab_glyph` means by a scale, which is a different number.
 pub(crate) fn text_width(face: &impl Font, size: f32, text: &str) -> f32 {
-    let scaled = face.as_scaled(PxScale::from(size));
+    let scaled = face.as_scaled(px_scale(face, size));
     let mut width = 0.0;
     let mut previous = None;
     for character in text.chars() {
@@ -1084,6 +1137,76 @@ fn density_mark(
 
 #[cfg(test)]
 mod tests {
+    use crate::theme;
+
+    /// **The measurement the whole of [`super::fitted_line`] stands on**, held
+    /// to a number the design system states independently of this code.
+    ///
+    /// `.interface-design/system.md` §8: *"IBM Plex Sans ships tabular figures
+    /// by default: every digit `0`–`9` advances exactly **600/1000 em** in
+    /// Regular, Medium and `SemiBold`"* — confirmed there through HarfBuzz with
+    /// the default feature set applied, which is what cosmic-text draws. So
+    /// eight digits at [`theme::SIZE_META`] are `8 × 0.6 × 12` = **57.60 px**,
+    /// in all three weights, and any other answer is this file's arithmetic
+    /// being wrong rather than the face being surprising.
+    ///
+    /// It answered **44.31** until 2026-09-02 — `44.31 / 57.60 = 1000/1300`,
+    /// the bundled faces' `unitsPerEm` over their height, which is exactly the
+    /// conversion [`super::px_scale`] now performs. Digits are the right
+    /// probe precisely because they are the one run in this face whose width
+    /// is a published constant rather than a measurement: nothing about this
+    /// assertion depends on measuring the thing it is checking.
+    ///
+    /// All three weights, because the fitting picks its face from the slot and
+    /// a conversion right in one and wrong in another would still cut titles.
+    #[test]
+    fn a_digit_advances_the_six_tenths_of_an_em_the_system_states() {
+        let digits = "10000000";
+        let expected = 8.0 * 0.6 * theme::SIZE_META;
+        for (weight, face) in [
+            ("regular", &*super::FIT_REGULAR),
+            ("medium", &*super::FIT_MEDIUM),
+        ] {
+            let measured = super::text_width(face, theme::SIZE_META, digits);
+            assert!(
+                (measured - expected).abs() < 0.01,
+                "eight tabular digits in the {weight} face measure {measured} px at \
+                 SIZE_META, and the face's published 600/1000 advance makes them \
+                 {expected}"
+            );
+        }
+    }
+
+    /// **A title too long for its lane is cut with its ellipsis showing**, at
+    /// the wall's own measure, in the wall's own face.
+    ///
+    /// The case is the one a real 1600 × 900 frame produced on 2026-09-02:
+    /// *Now That I've Found You: A Collection* in a 210 px tile lane, drawn as
+    /// `…A Collecti` — clipped mid-glyph at the tile's edge with no ellipsis,
+    /// because [`super::fit`] measured it at 175 px and believed it fitted.
+    /// The measure below is the tile edge that frame drew; what the test pins
+    /// is not that number but that a string the face cannot fit **reports**
+    /// that it did not fit, which is the one bit [`super::fitted_line`] spends
+    /// its reserved slot on.
+    #[test]
+    fn a_title_wider_than_its_lane_says_so_rather_than_running_over_the_edge() {
+        let title = "Now That I've Found You: A Collection";
+        let lane = 210.0;
+        let (fitted, truncated) = super::fit(title, &*super::FIT_MEDIUM, theme::SIZE_BODY, lane);
+        assert!(
+            truncated,
+            "the wall's own long title fitted {lane} px untruncated, which is what \
+             drew it over the tile's edge with no ellipsis"
+        );
+        let prefix = super::text_width(&*super::FIT_MEDIUM, theme::SIZE_BODY, &fitted);
+        assert!(
+            prefix <= lane - theme::ELLIPSIS_SLOT_W,
+            "the kept prefix is {prefix} px and has to share {lane} with the \
+             {} px the ellipsis reserved",
+            theme::ELLIPSIS_SLOT_W
+        );
+    }
+
     /// A joined list is prose, and prose gets a test.
     #[test]
     fn several_things_are_named_the_way_a_sentence_names_them() {
