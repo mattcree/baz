@@ -72,6 +72,15 @@ pub(crate) fn view<'a>(
     }
     let header = place_header_led(order.into(), note);
 
+    // **Which list is sounding**, read the way the playlist panel reads it
+    // (`views::playlist_panel`): the run's provenance, and only while the file
+    // it names still exists, so a rename or a delete under the run withdraws
+    // the mark rather than leaving it on a row that is no longer that list.
+    let sounding = player
+        .queue_provenance()
+        .map(crate::playlists::playlist_id)
+        .filter(|id| playlists.row(*id).is_some());
+
     let wall = playlists.wall();
     let shelves = Shelves::new(hang, &wall.counts);
     let runs = shelves.runs();
@@ -105,12 +114,16 @@ pub(crate) fn view<'a>(
                 shelf,
                 playlists,
                 player,
+                sounding,
                 &wall,
                 hang,
-                run.first + row_index * hang.columns,
-                (run.len)
-                    .saturating_sub(row_index * hang.columns)
-                    .min(hang.columns),
+                {
+                    let from = run.first + row_index * hang.columns;
+                    from..from
+                        + (run.len)
+                            .saturating_sub(row_index * hang.columns)
+                            .min(hang.columns)
+                },
             ));
         }
         drawn += hang.spacer_height(end_row - first_row);
@@ -201,6 +214,7 @@ fn list_row<'a>(
     playlist: &'a PanelRow,
     hang: Grid,
     hovered: bool,
+    playing: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let selected = shelf.selection.is(Content::Playlist(playlist.id));
@@ -252,6 +266,7 @@ fn list_row<'a>(
                     container(sleeve)
                         .width(Length::Fixed(edge))
                         .height(Length::Fixed(edge)),
+                    lamp_slot(playing),
                     container(name).width(Length::Fill).clip(true),
                     meta(held, Length::Fixed(LIST_HELD_W)),
                     meta(runs_for, Length::Fixed(LIST_TIME_W)),
@@ -264,7 +279,7 @@ fn list_row<'a>(
             .align_y(alignment::Vertical::Center),
         )
         .padding(0)
-        .style(move |_theme, status| theme::list_row(room, status, selected, false))
+        .style(move |_theme, status| theme::list_row(room, status, selected, playing))
         .on_press(Message::ContentPressed(Content::Playlist(playlist.id))),
     )
     .on_enter(Message::PlaylistTileEntered(playlist.id))
@@ -296,10 +311,19 @@ fn ghost_row(
                     .height(Length::Fixed(hang.art))
                     .align_x(alignment::Horizontal::Center)
                     .align_y(alignment::Vertical::Center),
-                    text(word)
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.paper_dim),
+                    lamp_slot(false),
+                    // **The word carries the name column's own lead-in.** A
+                    // playlist's name is a door and so wears `word_button`'s
+                    // `GAP_XS`; a making verb is not, and plain text beside a
+                    // padded one put two labels four pixels apart in a column
+                    // that has one edge.
+                    container(
+                        text(word)
+                            .size(theme::SIZE_META)
+                            .line_height(theme::LEADING_META)
+                            .color(room.paper_dim),
+                    )
+                    .padding(theme::pad(0.0, theme::GAP_XS)),
                 ]
                 .spacing(theme::GAP_MD)
                 .align_y(alignment::Vertical::Center),
@@ -315,6 +339,31 @@ fn ghost_row(
     .into()
 }
 
+/// **The lamp's lane in a list row, lit or not** — the Library's own slot
+/// (`views::shelf::list_row`), at the same width and in the same place.
+///
+/// It was missing here, and it is the whole of why the two places did not line
+/// up. Measured off a frame at 1600 x 900 on 2026-09-02, at one density, in one
+/// run: the Library's album title began at x **351**, a playlist's name at
+/// **325** and a making verb's word at **321** — three edges for the column
+/// item 9 says both collections share. The arithmetic is exact: `264 + 44 +
+/// GAP_MD + DOT-lane + GAP_MD + GAP_XS` against the same sum with the dot's
+/// two terms missing.
+///
+/// The slot keeps its place whether it is lit or not, for the reason the
+/// Library's does: a name must not shift sideways when the music arrives at
+/// it.
+fn lamp_slot<'a>(lit: bool) -> Element<'a, Message> {
+    if lit {
+        container(crate::views::shelf::lamp_dot())
+            .width(Length::Fixed(theme::GAP_MD))
+            .align_x(alignment::Horizontal::Center)
+            .into()
+    } else {
+        Space::new().width(Length::Fixed(theme::GAP_MD)).into()
+    }
+}
+
 /// What a playlist holds, right-aligned.
 const LIST_HELD_W: f32 = 88.0;
 /// `h:mm:ss` at its widest.
@@ -324,11 +373,15 @@ fn cells_row<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
     player: &PlayerState,
+    sounding: Option<u64>,
     wall: &Wall<'a>,
     hang: Grid,
-    first: usize,
-    len: usize,
+    // One range rather than a first and a length: they are the same fact, and
+    // saying it twice is what put this over the argument budget when the lamp
+    // arrived.
+    cells: std::ops::Range<usize>,
 ) -> Element<'a, Message> {
+    let (first, len) = (cells.start, cells.len());
     // **One row per list when the collection is hung as a list.** The shape is
     // the whole place's, not the Library's alone: switching to a list and
     // finding Playlists still a wall — or, as it was until this was written,
@@ -355,6 +408,7 @@ fn cells_row<'a>(
                 playlist,
                 hang,
                 playlists.hovered == Some(playlist.id),
+                sounding == Some(playlist.id),
             ),
             None => Space::new().height(Length::Fixed(hang.row_h)).into(),
         };
@@ -607,4 +661,60 @@ fn tile<'a>(
     .on_enter(Message::PlaylistTileEntered(playlist.id))
     .on_exit(Message::PlaylistTileLeft(playlist.id))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    /// **Both collections hang a list row's name on one line.**
+    ///
+    /// Item 9 says the Library and the Playlists root draw through one
+    /// scaffold, and in the list layout they did not. Measured off a frame at
+    /// 1600 x 900 on 2026-09-02, one density, one run: the Library's album
+    /// title began at x **351**, a playlist's name at **325**, and a making
+    /// verb's word at **321** — three edges for one column, and switching
+    /// places moved every name 26 px.
+    ///
+    /// The arithmetic named the cause exactly. A Library row is `cover ·
+    /// GAP_MD · lamp lane · GAP_MD · title`, and neither playlist row reserved
+    /// the lamp's lane: `264 + 44 + 12 + 12 + 12 + 4 = 348` against `264 + 44 +
+    /// 12 + 4 = 324`, with the verb dropping the word-button's own `GAP_XS` on
+    /// top of that. The three are 349, 349 and 351 now, the two left being
+    /// glyph side-bearing.
+    ///
+    /// It is a scan because the widths are iced's to resolve and there is no
+    /// tree to walk. What it holds is that **every row shape in this place
+    /// reserves the lane** — one missing `lamp_slot` is one column out of
+    /// step, which is the defect this test exists for.
+    #[test]
+    fn every_list_row_reserves_the_lamps_lane() {
+        let code = crate::shipped::code(include_str!("playlists.rs"));
+        for (row, signature) in [
+            ("a playlist", "fn list_row<'a>("),
+            ("a making verb", "fn ghost_row("),
+        ] {
+            let body = code
+                .split_once(signature)
+                .unwrap_or_else(|| panic!("{row}'s row exists"))
+                .1;
+            let body = &body[..body.find("\n}\n").expect("a function ends")];
+            assert!(
+                body.contains("lamp_slot("),
+                "{row}'s list row does not reserve the lamp's lane, so its \
+                 name stands {} px left of the Library's title in the same \
+                 column",
+                2.0 * crate::theme::GAP_MD
+            );
+        }
+        // And the lane is the Library's own width, stated in the same token
+        // its `dot` is — a lane of a different size would line the two places
+        // up at one density and not at another.
+        let slot = code.split_once("fn lamp_slot<'a>(").expect("the lane").1;
+        let slot = &slot[..slot.find("\n}\n").expect("a function ends")];
+        assert_eq!(
+            slot.matches("theme::GAP_MD").count(),
+            2,
+            "the lamp's lane is no longer `theme::GAP_MD` in both its lit and \
+             unlit states, which is the width `views::shelf::list_row` reserves"
+        );
+    }
 }

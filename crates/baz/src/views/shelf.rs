@@ -1382,9 +1382,12 @@ pub(crate) fn veil<'a>(
         .into()
 }
 
-/// The playing album's lamp dot: a small amber circle, the amplifier's
-/// power light.
-fn lamp_dot() -> Element<'static, Message> {
+/// The playing lamp dot: a small amber circle, the amplifier's power light.
+///
+/// `pub(crate)` since 2026-09-02: the Playlists root's list rows reserve the
+/// same slot, and a dot drawn from a second function is a second thing that
+/// can drift from this one.
+pub(crate) fn lamp_dot() -> Element<'static, Message> {
     let room = theme::active();
     container(
         Space::new()
