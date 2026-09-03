@@ -271,14 +271,7 @@ fn continue_band<'a>(
     // The record the interrupted track belongs to, found by path — the same
     // reconciliation every other reading of a queue position uses, and what
     // keeps the band true across a rescan that renumbered the run.
-    let (album, track) = shelf.albums.iter().find_map(|album| {
-        album
-            .editions
-            .iter()
-            .flat_map(|edition| edition.tracks.iter())
-            .find(|track| track.path == path)
-            .map(|track| (album, track))
-    })?;
+    let (album, track) = shelf.track_for_path(path)?;
     let edge = theme::CONTINUE_SLEEVE;
     let sleeve: Element<'a, Message> = match shelf.thumb(album.id) {
         Some(handle) => iced_image(handle.clone())

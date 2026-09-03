@@ -39,7 +39,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -516,6 +516,14 @@ pub(crate) struct Shelf {
     /// it holds. Contiguous and in wall order, so a shelf is a range rather
     /// than a per-album lookup.
     pub(crate) groups: Vec<GroupVm>,
+    /// **Every track's path, to the index of its record in `albums`.** A path
+    /// is in exactly one edition of exactly one record, so this is the whole
+    /// answer to "which record is this file", and it is built once per
+    /// rebuild rather than found by walking every edition of every record —
+    /// which is what the queue's rows and Home's continue band did, per row,
+    /// per frame, until 2026-09-03. Invalidated with `albums`: the two are
+    /// only ever written together, in [`Self::rebuild_shelves`].
+    by_path: HashMap<PathBuf, usize>,
     /// Indices into `albums` drawn by the wall, in wall order. App-bar search
     /// covers the current place instead of filtering this collection.
     pub(crate) visible: Vec<usize>,
@@ -879,6 +887,7 @@ impl Shelf {
             history,
             albums: Vec::new(),
             groups: Vec::new(),
+            by_path: HashMap::new(),
             visible: Vec::new(),
             visible_counts: Vec::new(),
             query: String::new(),
@@ -1748,6 +1757,7 @@ impl Shelf {
                 end: self.albums.len(),
             });
         }
+        self.by_path = index_paths(&self.albums);
         // **Home's figures, counted here and nowhere else.** One pass over the
         // tracks that were just rebuilt, on the same schedule the rebuild runs
         // on — which is what keeps the `COLLECTION` footer off the per-frame
@@ -1771,6 +1781,27 @@ impl Shelf {
         if !self.lane_played.is_empty() || self.history.is_some() {
             self.fold_history_onto_records();
         }
+    }
+
+    /// **The record a file belongs to**, by the one fact that names exactly
+    /// one: its path. `None` for a file the wall does not hold — a queue
+    /// entry whose file was removed, a playlist line for a drive that is not
+    /// mounted — which the caller must expect and say something honest about.
+    pub(crate) fn album_for_path(&self, path: &Path) -> Option<&vm::AlbumVm> {
+        self.by_path.get(path).map(|&index| &self.albums[index])
+    }
+
+    /// [`Self::album_for_path`], and the track itself beside its record.
+    /// The walk over the record's own editions is bounded by one record's
+    /// track count, not the library's.
+    pub(crate) fn track_for_path(&self, path: &Path) -> Option<(&vm::AlbumVm, &vm::TrackVm)> {
+        let album = self.album_for_path(path)?;
+        album
+            .editions
+            .iter()
+            .flat_map(|edition| edition.tracks.iter())
+            .find(|track| track.path == path)
+            .map(|track| (album, track))
     }
 
     /// **The ledger, folded onto records** — the whole of the lane's reading
@@ -3054,16 +3085,93 @@ fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
         .collect()
 }
 
+/// Every track path in `albums`, to the index of the record that holds it.
+///
+/// One pass over every track — the same pass the collection counts and the
+/// artist inventory already make on the same schedule. A path that appears
+/// under two records (which the index does not produce, but a view model
+/// could) resolves to the first, so the answer is deterministic.
+fn index_paths(albums: &[vm::AlbumVm]) -> HashMap<PathBuf, usize> {
+    let mut by_path = HashMap::new();
+    for (index, album) in albums.iter().enumerate() {
+        for track in album
+            .editions
+            .iter()
+            .flat_map(|edition| edition.tracks.iter())
+        {
+            by_path.entry(track.path.clone()).or_insert(index);
+        }
+    }
+    by_path
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
     use std::num::NonZeroUsize;
+    use std::path::PathBuf;
 
     use iced::widget::image as iced_image;
     use lru::LruCache;
 
     use super::{Change, Hero, ThumbCache, ThumbJobs};
     use crate::app::hero_target;
+
+    /// **A path resolves to its record in one lookup, and only its record.**
+    /// Two records with two tracks each; every path finds the record that
+    /// holds it, a path nobody holds finds nothing, and a path filed under
+    /// two records (which the index never produces) resolves to the first,
+    /// so the answer is stable rather than order-of-iteration.
+    #[test]
+    fn a_path_resolves_to_the_one_record_that_holds_it() {
+        use crate::vm::{AlbumArtistVm, AlbumVm, EditionVm, ReplayGainCoverage, TrackVm};
+        let track = |path: &str| TrackVm {
+            number: None,
+            disc: None,
+            title: path.to_owned(),
+            artist: None,
+            duration: None,
+            path: PathBuf::from(path),
+            bytes: None,
+        };
+        let record = |name: &str, paths: &[&str]| AlbumVm {
+            id: crate::vm::album_id(baz_core::index::AlbumArtist::Named(name), Some(name)),
+            title: Some(name.to_owned()),
+            artist: AlbumArtistVm::Named(name.to_owned()),
+            track_artists_vary: false,
+            year: None,
+            genre: None,
+            first_seen_ns: None,
+            first_track: PathBuf::from(paths[0]),
+            editions: vec![EditionVm {
+                key: crate::vm::EditionKey(None),
+                detail: None,
+                bitrate: None,
+                bit_depth: None,
+                sample_rate: None,
+                replay_gain: ReplayGainCoverage {
+                    album: 0,
+                    track: 0,
+                    total: paths.len(),
+                },
+                tracks: paths.iter().map(|path| track(path)).collect(),
+            }],
+        };
+        let albums = vec![
+            record("a", &["/m/a/1.flac", "/m/a/2.flac"]),
+            record("b", &["/m/b/1.flac", "/m/a/2.flac"]),
+        ];
+        let by_path = super::index_paths(&albums);
+        assert_eq!(by_path.get(std::path::Path::new("/m/a/1.flac")), Some(&0));
+        assert_eq!(by_path.get(std::path::Path::new("/m/b/1.flac")), Some(&1));
+        assert_eq!(
+            by_path.get(std::path::Path::new("/m/a/2.flac")),
+            Some(&0),
+            "a path under two records resolves to the first"
+        );
+        assert_eq!(by_path.get(std::path::Path::new("/m/c/1.flac")), None);
+        assert_eq!(by_path.len(), 3);
+    }
     use crate::art;
     use crate::place::Place;
 

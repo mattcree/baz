@@ -86,11 +86,13 @@ pub(crate) const ROW_H: f32 = theme::LINE_BODY + theme::LINE_META + 2.0 * theme:
 pub(crate) const SECTION_H: f32 = 32.0;
 pub(crate) const OVERSCAN_ROWS: usize = 3;
 
+/// The height of `count` result rows. Shared with the dropover's view, which
+/// builds its spacers from the same arithmetic the selection walks.
 #[expect(
     clippy::cast_precision_loss,
     reason = "search results are capped at 10,000 rows, far below exact f32 integer range"
 )]
-fn rows(count: usize) -> f32 {
+pub(crate) fn rows(count: usize) -> f32 {
     count as f32 * ROW_H
 }
 

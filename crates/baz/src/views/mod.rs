@@ -307,7 +307,16 @@ pub(crate) fn fit(content: &str, face: &impl Font, size: f32, measure: f32) -> (
 /// `size` is the em size iced draws at; [`px_scale`] converts it to what
 /// `ab_glyph` means by a scale, which is a different number.
 pub(crate) fn text_width(face: &impl Font, size: f32, text: &str) -> f32 {
-    let scaled = face.as_scaled(px_scale(face, size));
+    advance(&face.as_scaled(px_scale(face, size)), text)
+}
+
+/// The kerned advance of `text` through an already-scaled face.
+///
+/// The one measurement under both [`text_width`] — which scales an em size
+/// the way iced draws it — and the jewel case's raster, which scales its own
+/// way because it rasterises the glyphs itself. Two copies of this loop
+/// agreed on 2026-09-03; one copy cannot disagree.
+pub(crate) fn advance<F: Font>(scaled: &impl ScaleFont<F>, text: &str) -> f32 {
     let mut width = 0.0;
     let mut previous = None;
     for character in text.chars() {

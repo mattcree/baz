@@ -184,44 +184,29 @@ pub(crate) fn view<'a>(
 /// resolved to no record, which is why its album link did nothing: the message
 /// was `None`, so there was no link to press.
 ///
-/// So identity, not strings. The title narrows the search — a few hundred
-/// albums to a handful — and the **path** decides, because a path is in
-/// exactly one edition of exactly one record. The old comparison stays as the
-/// first attempt for the ordinary case where the item names its own artist,
-/// which costs one string compare and answers most rows without touching a
-/// track list.
+/// So identity, not strings: the **path** decides, because a path is in
+/// exactly one edition of exactly one record, and [`Shelf::album_for_path`]
+/// answers it in one lookup. This is drawn once per visible row per frame,
+/// and until 2026-09-03 it walked every track of every record to do it —
+/// millions of comparisons a frame on a large wall.
+///
+/// The title-and-artist comparison remains only as the fallback for a path
+/// the wall no longer holds — a stale playlist line for a moved file — and
+/// costs one pass over the records then, never in the ordinary case.
 fn album_of<'a>(
     shelf: &'a Shelf,
     item: &crate::vm::QueueItemVm,
     queue_artist: &str,
 ) -> Option<&'a crate::vm::AlbumVm> {
-    let title = item.album.as_deref();
-    if let Some(filed_under) = item.album_artist.as_deref()
-        && let Some(album) = shelf
-            .albums
-            .iter()
-            .find(|album| album.title.as_deref() == title && album.artist.label() == filed_under)
-    {
+    if let Some(album) = shelf.album_for_path(&item.path) {
         return Some(album);
     }
-    let holds = |album: &crate::vm::AlbumVm| {
-        album
-            .editions
-            .iter()
-            .any(|edition| edition.tracks.iter().any(|track| track.path == item.path))
-    };
+    let title = item.album.as_deref()?;
+    let filed_under = item.album_artist.as_deref().unwrap_or(queue_artist);
     shelf
         .albums
         .iter()
-        .filter(|album| title.is_none() || album.title.as_deref() == title)
-        .find(|album| holds(album))
-        .or_else(|| {
-            // A title that does not match anything on the wall — a renamed
-            // record, a stale playlist entry — still has a path, and the path
-            // is the truth.
-            let _ = queue_artist;
-            shelf.albums.iter().find(|album| holds(album))
-        })
+        .find(|album| album.title.as_deref() == Some(title) && album.artist.label() == filed_under)
 }
 
 /// The title of an unsaved list. An artist's implicit list is deliberately
@@ -238,9 +223,9 @@ pub(crate) fn unsaved_name(origin: Option<&crate::origin::Origin>) -> String {
 
 /// The first four distinct records represented by the queue, in queue order.
 ///
-/// Queue rows already carry the record title and filed-under artist used by
-/// the shelf, so resolving those pairs is both cheaper and more faithful than
-/// walking every path in every edition on every frame. Four ids are the whole
+/// Each row's record is found the way the rows themselves find it — by path,
+/// through [`Shelf::album_for_path`], with the title-and-artist pair as the
+/// fallback for a file the wall no longer holds. Four ids are the whole
 /// supply [`crate::views::playlist_sleeve`] can spend.
 pub(crate) fn unsaved_art(shelf: &Shelf, player: &PlayerState) -> Vec<u64> {
     let Some(queue) = player.queue() else {
@@ -248,12 +233,7 @@ pub(crate) fn unsaved_art(shelf: &Shelf, player: &PlayerState) -> Vec<u64> {
     };
     let mut art = Vec::new();
     for item in &queue.items {
-        let filed_under = item.album_artist.as_deref().unwrap_or(&queue.artist);
-        let Some(album) = shelf
-            .albums
-            .iter()
-            .find(|album| album.title == item.album && album.artist.label() == filed_under)
-        else {
+        let Some(album) = album_of(shelf, item, &queue.artist) else {
             continue;
         };
         if !art.contains(&album.id) {

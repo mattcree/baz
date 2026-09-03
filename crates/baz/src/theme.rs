@@ -1167,20 +1167,6 @@ pub enum Appearance {
     Light,
 }
 
-/// The desktop's preference, read through iced.
-///
-/// iced 0.14 reports this asynchronously after startup. The selectable light
-/// room remains item 17, so startup conservatively chooses Baz's shipped dark
-/// room until that work wires live system-theme changes into room selection.
-#[must_use]
-#[allow(dead_code, reason = "reserved for an eventual follow-system selection")]
-pub fn system_appearance() -> Appearance {
-    // iced 0.14 reports the desktop preference asynchronously through
-    // `iced::system::theme`; the light room is not selectable yet, so the
-    // conservative startup answer remains Closing Time.
-    Appearance::Dark
-}
-
 /// The room to stand in, given what the desktop prefers.
 ///
 /// Pure, so the whole of "follow the OS" is testable without a desktop. Note

@@ -8,21 +8,13 @@ use iced::{Element, Length, Size, alignment};
 use crate::app::{Message, search_id};
 use crate::collection::Shelf;
 use crate::player::PlayerState;
-use crate::search::{Action, OVERSCAN_ROWS, ROW_H, SECTION_H};
+use crate::search::{Action, OVERSCAN_ROWS, ROW_H, SECTION_H, rows};
 use crate::selection::Content;
 use crate::{icon, theme, vm};
 
 pub(crate) const SCOPE: &str = "Search library";
 const DROPOVER_W: f32 = 640.0;
 const DROPOVER_H: f32 = 520.0;
-
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "search results are capped at 10,000 rows, far below exact f32 integer range"
-)]
-fn rows(count: usize) -> f32 {
-    count as f32 * ROW_H
-}
 
 pub(crate) fn scroll_id() -> iced::widget::Id {
     iced::widget::Id::new("baz-search-results")

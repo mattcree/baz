@@ -753,18 +753,7 @@ fn fit_text(font: &impl Font, scale: PxScale, text: &str, width: f32) -> String 
 }
 
 fn text_width(font: &impl Font, scale: PxScale, text: &str) -> f32 {
-    let scaled = font.as_scaled(scale);
-    let mut width = 0.0;
-    let mut previous = None;
-    for character in text.chars() {
-        let glyph = scaled.glyph_id(character);
-        if let Some(was) = previous {
-            width += scaled.kern(was, glyph);
-        }
-        width += scaled.h_advance(glyph);
-        previous = Some(glyph);
-    }
-    width
+    crate::views::advance(&font.as_scaled(scale), text)
 }
 
 #[expect(
