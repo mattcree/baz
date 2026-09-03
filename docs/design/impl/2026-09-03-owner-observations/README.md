@@ -14,5 +14,7 @@ harness, his own library, *The Fall Of Math* sounding.
 | `05-playlists-list-after` | the Playlists rows, name first, making verbs one rank under |
 | `06-marks-before` | every mark at 2×, as drawn: the lane's four at 32 px and filled beside the bar's and the transport's 20 px strokes |
 | `07-lane-marks-after` | the lane's marks at the set's 20 (item 110); the drawings themselves are the open question |
+| `08-artist-list-after` | the artist's page under the list layout: `All songs` as a row, the records as the Library's rows (item 112) |
+| `09-home-list-as-rows` | Home under the list layout, the correction to item 108: rows, not tiles at the wall's size |
 
 The pinned-heading frames are their own directory, `../2026-09-03-pinned-heading/`.

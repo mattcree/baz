@@ -354,7 +354,7 @@ fn shelf_row<'a>(
 /// its title and by the row's own lit ink, never by hue alone: the wall's rule
 /// (`docs/design/impl`, and the owner is colour blind) is that every reading
 /// survives in shape or position.
-fn list_row<'a>(
+pub(crate) fn list_row<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     hang: Grid,
@@ -486,6 +486,52 @@ fn list_row<'a>(
     .on_enter(Message::TileEntered(album.id))
     .on_exit(Message::TileLeft(album.id))
     .into()
+}
+
+/// **A set of records, hung as the grid says** — tiles in rows of the grid's
+/// columns on the wall, one [`list_row`] per record as a list.
+///
+/// The one place a page other than the Library hangs records, so the shape
+/// control means the same thing on every surface that shows them: the
+/// artist's page and Home's `RECENTLY ADDED` both draw through this. The
+/// owner, 2026-09-03: *"the artist page is also not working properly in list
+/// view. home does not seem to switch to list view at all"* — both were
+/// calling [`tile`] with whatever grid they were handed, which as a list is
+/// one 44 px column, and drawing thumbnails with cut captions.
+pub(crate) fn hang_records<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    hang: Grid,
+    albums: &[&'a vm::AlbumVm],
+    collecting: Collecting,
+) -> Element<'a, Message> {
+    match hang.layout {
+        crate::shelf::Layout::List => {
+            let mut rows = column![].width(Length::Fixed(hang.block_width()));
+            for album in albums {
+                rows = rows.push(list_row(shelf, player, hang, album, 0.0));
+            }
+            rows.into()
+        }
+        crate::shelf::Layout::Wall => {
+            let mut rows = column![].spacing(hang.gutter);
+            let mut current = row![].spacing(hang.gutter);
+            let mut in_row = 0usize;
+            for album in albums {
+                current = current.push(tile(shelf, player, hang, album, 0.0, collecting));
+                in_row += 1;
+                if in_row == hang.columns {
+                    rows = rows.push(current);
+                    current = row![].spacing(hang.gutter);
+                    in_row = 0;
+                }
+            }
+            if in_row > 0 {
+                rows = rows.push(current);
+            }
+            rows.into()
+        }
+    }
 }
 
 /// **How long a record runs**, for the list's last column.

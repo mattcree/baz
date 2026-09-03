@@ -2348,7 +2348,7 @@ impl PlayerState {
         if matches!(reason, ConversionReason::Crossfade) {
             return Some(SignalNote {
                 label: "Mixing".to_owned(),
-                detail: "A crossfade is configured, so between records the samples are the sum \
+                detail: "A crossfade is configured, so between tracks the samples are the sum \
                          of two files. Everywhere else they are the file's own."
                     .to_owned(),
             });

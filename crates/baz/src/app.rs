@@ -8879,9 +8879,10 @@ impl App {
                 // page's width: a record is drawn at the same size wherever
                 // it is drawn, and the density step reaches every place that
                 // hangs works rather than only the Library (ADR-0028's
-                // fourth-step amendment §2). The *wall's* — Home hangs tiles
-                // whatever shape the Library is in (`Shelf::wall_grid`).
-                state.wall_grid(),
+                // fourth-step amendment §2). And the same *shape*: as a list,
+                // Home's records are the Library's rows (the owner, 2026-09-03:
+                // "home does not seem to switch to list view at all").
+                state.grid(),
                 collecting,
             ),
             (Screen::Shelf(state), Place::NowPlaying) => {

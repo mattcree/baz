@@ -250,24 +250,9 @@ fn tiles<'a>(
     albums: &[&'a vm::AlbumVm],
     collecting: crate::playlists::Collecting,
 ) -> Element<'a, Message> {
-    let mut rows = column![].spacing(hang.gutter);
-    let mut current = row![].spacing(hang.gutter);
-    let mut in_row = 0usize;
-    for album in albums {
-        current = current.push(crate::views::shelf::tile(
-            shelf, player, hang, album, 0.0, collecting,
-        ));
-        in_row += 1;
-        if in_row == hang.columns {
-            rows = rows.push(current);
-            current = row![].spacing(hang.gutter);
-            in_row = 0;
-        }
-    }
-    if in_row > 0 {
-        rows = rows.push(current);
-    }
-    rows.into()
+    // Tiles on the wall, rows as a list — the shape control is the whole
+    // product's, and this page hangs records like any other.
+    crate::views::shelf::hang_records(shelf, player, hang, albums, collecting)
 }
 
 /// The facts band's one sentence. Missing terms are omitted individually.

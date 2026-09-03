@@ -2372,6 +2372,12 @@ the full gate. What the pass found and deliberately did **not** build is in
     for. Both take `Shelf::wall_grid()`; the one-grid scan test accepts it by
     name and says why. Frames in `docs/design/impl/2026-09-03-owner-observations/`.
 
+    **Corrected the same day by item 112**: the owner's point was not that
+    Home's tiles were the wrong size but that Home should *become a list*
+    — so Home is back on the collection's grid and hangs its records as
+    rows under the list layout; only the *count* of recent records still
+    comes from the wall's columns.
+
 109. **Done 2026-09-03 — the list rows rank what they say.** *(The owner:
     "in general these list views look just undesigned.")* A Library row set
     its title, its artist, its year and its length at one size in one grey,
@@ -2400,6 +2406,42 @@ the full gate. What the pass found and deliberately did **not** build is in
     track walked every track of every edition. All three go through the path
     index; the queue's rows and their sleeve requests now resolve a record by
     one function, so they cannot name two different ones.
+
+112. **Done 2026-09-03 — the list shape is the whole product's.** *(The
+    owner: "the artist page is also not working properly in list view. home
+    does not seem to switch to list view at all...")* The artist's page and
+    Home's `RECENTLY ADDED` both called `views::shelf::tile` with whatever
+    grid they were handed, and as a list that is one 44 px column of
+    thumbnails with cut captions. One function, `views::shelf::hang_records`,
+    hangs any set of records as the grid says — tiles in rows on the wall,
+    the Library's rows as a list — and both pages draw through it; the
+    implicit `All songs` list gains a row form beside its tile
+    (`views::list_tile::row`). The recent count stays the wall's column
+    count in either shape. Frames 08 and 09 in the observations directory.
+
+113. **Done 2026-09-03 — the lane keeps what it heard live across a
+    regroup.** *(The owner: "I play a song from an album and then it goes
+    to the top of the recent list at the side. then I go to the library and
+    select a different grouping … and suddenly the recent album disappears
+    from the list at the side.")* The history snapshot is read once at
+    launch; a play made since reaches the lane by event. A regroup rebuilds
+    the fold from the snapshot, which dropped the live entries. They are
+    folded back in, newest stamp winning, for records still on the wall; and
+    the event's own lookup goes through the path index instead of walking
+    every edition.
+
+114. **Done 2026-09-03 — a crossfade crosses every seam.** *(The owner:
+    "does crossfade even work? I have it enabled and it doesn't seem to do
+    anything … surely it should take effect between all tracks.")* It
+    worked exactly as ADR-0044 §2 decided — between records, never inside
+    one — which is why an album gave him nothing to hear. His call: the
+    setting means every seam, a record's own included; `vm::fade_seams`
+    answers `true` at every seam but the last, the ADR carries the
+    amendment and what it costs (a live record's continuous seams fade
+    too), and the three sentences that said *between records* say so. The
+    engine is untouched and its overlap tests stand. *"Probably this needs
+    to be toggled on somewhere near controls"* is recorded in `BACKLOG.md`:
+    the transport has no mark for it in the sheet, and that is a drawing.
 
 ## Doing
 

@@ -587,8 +587,7 @@ fn all_songs_tile<'a>(
 ///
 /// The tie-break is the returns lane's own total-order rule, for the reason it
 /// has there: two launches over the same library must draw the same row.
-pub(crate) fn newest(shelf: &Shelf, hang: Grid) -> Vec<&vm::AlbumVm> {
-    let columns = hang.columns;
+pub(crate) fn newest(shelf: &Shelf, columns: usize) -> Vec<&vm::AlbumVm> {
     let mut newest: Vec<&vm::AlbumVm> = shelf
         .albums
         .iter()
@@ -612,18 +611,18 @@ fn recently_added<'a>(
     hang: Grid,
     collecting: crate::playlists::Collecting,
 ) -> Option<Element<'a, Message>> {
-    let newest = newest(shelf, hang);
+    // **One wall row's worth, whatever the shape.** The count is the wall's
+    // column count at this density even when the collection is hung as a
+    // list — a list grid has one column, and one recent record is not a
+    // row of them — and the records are then hung as the grid says: tiles
+    // on the wall, the Library's rows as a list.
+    let newest = newest(shelf, shelf.wall_grid().columns);
     if newest.is_empty() {
         return None;
     }
-    let mut tiles = row![].spacing(hang.gutter);
-    for album in newest {
-        tiles = tiles.push(crate::views::shelf::tile(
-            shelf, player, hang, album, 0.0, collecting,
-        ));
-    }
+    let records = crate::views::shelf::hang_records(shelf, player, hang, &newest, collecting);
     Some(
-        column![crate::views::section_rule("Recently added"), tiles]
+        column![crate::views::section_rule("Recently added"), records]
             .spacing(theme::GAP_LG)
             .into(),
     )

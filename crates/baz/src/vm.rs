@@ -1248,52 +1248,33 @@ fn album_items(album: &AlbumVm, chosen: Option<EditionKey>) -> Vec<QueueItemVm> 
 /// than at the call site is what keeps "the track you were on" true across a
 /// rescan: it is found by *path*, the same reconciliation every other reading
 /// of a queue position uses.
-/// **Where a crossfade between records is allowed**, for a queue of paths
-/// (ADR-0044 §2).
+/// **Where a crossfade is allowed**, for a queue of paths (ADR-0044 §2, as
+/// amended 2026-09-03).
 ///
 /// `fade_seams(...)[i]` answers whether the seam *out of* `paths[i]` may be
-/// faded, which is the `fade_into_next` the engine is sent. The engine cannot
-/// work this out for itself: it plays a list of paths, and *album* is a
-/// library fact `baz-core` has never had and should not grow. This is the
-/// front end paying that debt with the one thing it holds and the engine does
-/// not — the wall.
+/// faded, which is the `fade_into_next` the engine is sent. The front end
+/// says, because the engine plays a list of paths and knows nothing of what
+/// they are.
 ///
-/// **The rule is adjacency inside one edition.** Two entries are a record's
-/// own seam when they are consecutive tracks of the same edition, and that is
-/// the case gapless exists for: an album played front to back has `false` at
-/// every internal seam, and everything else — a playlist, an assembled run,
-/// all songs, two different records that happen to sit next to each other —
-/// has `true`. Which makes the setting mean *between records*.
-///
-/// **A path the wall does not know is `false`.** It cannot be shown to be
-/// between records, and an unknown is not a reason to cut into a seam that
-/// might be a record's own.
+/// **Every seam, since 2026-09-03.** The rule was adjacency inside one
+/// edition — an album played front to back kept `false` at every internal
+/// seam, so the setting meant *between records* and a gapless record stayed
+/// gapless. The owner, with the setting on and an album playing: *"does
+/// crossfade even work? … surely it should take effect between all tracks."*
+/// His call: a crossfade the listener switched on crosses every seam, a
+/// record's own included, and the price — a live record's continuous seams
+/// are faded too — is his to pay by switching it off. The wall is no longer
+/// consulted; `albums` stays in the signature so the ADR's mechanism (the
+/// front end answers, per seam) is still where the answer comes from if a
+/// finer rule returns.
 ///
 /// The final entry is `false`: there is nothing after it to fade into.
 #[must_use]
 pub fn fade_seams(albums: &[AlbumVm], paths: &[std::path::PathBuf]) -> Vec<bool> {
-    // Identity is (album, edition, position-in-edition), which is what makes
-    // "consecutive tracks of one record" answerable by arithmetic.
-    let mut at: std::collections::HashMap<&Path, (usize, usize, usize)> =
-        std::collections::HashMap::new();
-    for (album_index, album) in albums.iter().enumerate() {
-        for (edition_index, edition) in album.editions.iter().enumerate() {
-            for (track_index, track) in edition.tracks.iter().enumerate() {
-                at.entry(track.path.as_path())
-                    .or_insert((album_index, edition_index, track_index));
-            }
-        }
-    }
-    let mut seams = vec![false; paths.len()];
-    for index in 0..paths.len().saturating_sub(1) {
-        let here = at.get(paths[index].as_path());
-        let next = at.get(paths[index + 1].as_path());
-        let (Some(here), Some(next)) = (here, next) else {
-            continue; // unknown to the wall: leave the seam alone
-        };
-        let same_edition = here.0 == next.0 && here.1 == next.1;
-        let consecutive = same_edition && next.2 == here.2 + 1;
-        seams[index] = !consecutive;
+    let _ = albums;
+    let mut seams = vec![true; paths.len()];
+    if let Some(last) = seams.last_mut() {
+        *last = false;
     }
     seams
 }
@@ -2858,14 +2839,17 @@ mod tests {
         );
     }
 
-    /// **A record's own seams are not fadeable; the seam between records is**
-    /// (ADR-0044 §2).
+    /// **Every seam is fadeable, and the last entry has nothing to fade
+    /// into** (ADR-0044 §2 as amended 2026-09-03).
     ///
-    /// This is the rule the whole feature rests on, and the engine cannot
-    /// check it — it plays a list of paths and has never known what an album
-    /// is. So it is checked here, where the wall is.
+    /// The rule used to keep a record's own seams closed; the owner asked
+    /// for the crossfade he switched on to cross every seam. The engine
+    /// cannot check any rule here — it plays a list of paths — so the rule
+    /// is checked where it is made: an album front to back, the same tracks
+    /// out of order, and a path the wall never heard of all fade at every
+    /// seam but the last.
     #[test]
-    fn a_records_own_seams_are_never_faded() {
+    fn every_seam_is_faded_but_the_last() {
         let album = two_edition_album();
         let edition = &album.editions[0];
         assert!(
@@ -2873,34 +2857,23 @@ mod tests {
             "the fixture needs two consecutive tracks"
         );
         let inside: Vec<_> = edition.tracks.iter().map(|t| t.path.clone()).collect();
-
-        // An album played front to back: every internal seam is a record's own.
-        let seams = super::fade_seams(std::slice::from_ref(&album), &inside);
-        assert_eq!(seams.len(), inside.len());
-        for (index, fadeable) in seams.iter().enumerate().take(inside.len() - 1) {
-            assert!(!fadeable, "seam {index} is inside a record and was faded");
-        }
-        assert!(
-            !seams[inside.len() - 1],
-            "the last entry has nothing to fade into"
-        );
-
-        // The same two tracks in the other order are no longer consecutive, so
-        // the seam between them is not a record's own seam.
         let reversed: Vec<_> = inside.iter().rev().cloned().collect();
-        let seams = super::fade_seams(std::slice::from_ref(&album), &reversed);
-        assert!(
-            seams[0],
-            "two tracks of one record out of order are not a gapless seam"
-        );
-
-        // A path the wall never heard of is left alone in the safe direction.
         let unknown = vec![
             std::path::PathBuf::from("/m/elsewhere/x.flac"),
             inside[0].clone(),
         ];
-        let seams = super::fade_seams(std::slice::from_ref(&album), &unknown);
-        assert!(!seams[0], "an unknown path should not open a seam");
+        for run in [&inside, &reversed, &unknown] {
+            let seams = super::fade_seams(std::slice::from_ref(&album), run);
+            assert_eq!(seams.len(), run.len());
+            for (index, fadeable) in seams.iter().enumerate().take(run.len() - 1) {
+                assert!(fadeable, "seam {index} was not faded");
+            }
+            assert!(
+                !seams[run.len() - 1],
+                "the last entry has nothing to fade into"
+            );
+        }
+        assert!(super::fade_seams(&[], &[]).is_empty());
     }
 
     /// The marking rule: the engine's position is believed when the path at it

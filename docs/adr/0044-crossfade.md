@@ -192,3 +192,25 @@ off.
 defect: a held tail is still owed to the listener when the queue runs out, when
 a rate change ends the session, and when the incoming track fails to decode.
 All three release it unmixed rather than swallowing the end of the music.
+
+## Amendment, 2026-09-03 — every seam
+
+The owner, with a crossfade configured and a record playing: *"does crossfade
+even work? I have it enabled and it doesn't seem to do anything … surely it
+should take effect between all tracks."* It was working exactly as §2
+decided — between records, never inside one — which is why an album played
+front to back gave him nothing to hear.
+
+**His call, and it stands: a crossfade the listener switched on crosses every
+seam.** `vm::fade_seams` answers `true` at every seam but the last; the wall
+is no longer consulted. §2's mechanism is unchanged — the front end still
+says, per seam, and the engine still knows nothing of records — so a finer
+rule (a record's own seams closed, or only its continuous ones) can return
+through the same flag without touching `baz-core`. What is paid: a live
+record's continuous seams are faded too while the setting is on, and
+switching it off is the way to keep them. The setting's own sentence in
+Settings → Playback now says so.
+
+He also asked for the control *"somewhere near controls"*. The bottom bar's
+transport has no mark for it in the sprite sheet yet; that is recorded in
+`BACKLOG.md` beside the other drawing decisions rather than guessed.

@@ -795,8 +795,8 @@ impl Config {
         );
         let _ = writeln!(
             out,
-            "# crossfade between records in milliseconds, 0 is off \
-             (never inside a record; max {MAX_CROSSFADE_MS})\n\
+            "# crossfade between tracks in milliseconds, 0 is off \
+             (every seam, a record's own included; max {MAX_CROSSFADE_MS})\n\
              {CROSSFADE_MS} = {}",
             self.crossfade_ms,
         );

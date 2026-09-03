@@ -1886,6 +1886,45 @@ words, triaged here first (the standing rule for a run of short UI asks):
    44.1 kHz`, the record page's own summary line — between the names and
    the figures, which fills the 600 px of nothing a two-column table
    leaves at 1600 wide and is the fact a collector's list is for.
+6. *"the artist page is also not working properly in list view. home does
+   not seem to switch to list view at all..."* — **Built** (item 112): the
+   shape is the whole product's; Home and the artist page hang their
+   records as rows under the list layout.
+7. *"I play a song from an album and then it goes to the top of the recent
+   list at the side. then I go to the library and select a different
+   grouping i.e. Genre or Added, and suddenly the recent album disappears
+   from the list at the side..."* — **Built** (item 113): a regroup
+   rebuilt the lane from the launch snapshot and dropped what it had heard
+   since; the live entries are folded back in.
+8. *"does crossfade even work? I have it enabled and it doesn't seem to do
+   anything"* — to be verified on the engine with a measured boundary, not
+   by ear: the offline sink can show whether the outgoing track's tail and
+   the incoming head overlap at all when `fade_into_next` is set.
+   Then: *"surely it should take effect between all tracks"* and *"probably
+   this needs to be toggled on somewhere near controls"* — the shipped rule
+   fades only between records (ADR-0044 §2), and the setting lives in
+   Settings → Playback. **Built** (item 114): every seam, his call, with the
+   cost stated in the ADR's amendment. **Open: the toggle near the
+   transport.** The bottom bar's controls are the sprite sheet's marks and
+   the sheet has no crossfade mark; a toggle there is a drawing first —
+   two overlapping ramps is the convention — and belongs with the icon
+   decision in observation 1. Until then the four lengths are one row in
+   Settings → Playback.
+9. *"also my scroll speed seems to be somewhat limited"* — **measured, not
+   yet tuned.** A mouse notch reaches iced as one *line*, and iced's
+   `scrollable` turns a line into **60 px**, a constant in
+   `iced_widget-0.14.2/src/scrollable.rs:873` with no setter on the widget.
+   At Compact the wall's row pitch is about 300 px, so a row is five
+   notches; Chromium scrolls 100 px a notch on X11 and GTK about 90 on a
+   window this tall, so the wall is roughly two thirds of what the desktop
+   around it does. Two ways out, neither free: patch the constant through a
+   `[patch.crates-io]` fork of `iced_widget` (a dependency decision, and a
+   fork to carry), or let the shell top the wall up — it already listens to
+   every wheel event for the density accelerator, and `listen_with` says
+   whether the scrollable took it, so a notch the wall consumed could be
+   followed by a `scroll_by` of the difference to a chosen step. The second
+   keeps the dependency as it is and is the one to try; it wants the feel
+   checked on a real mouse, which a frame cannot show.
 
 ## Findings of the 2026-09-03 quality pass, not built
 

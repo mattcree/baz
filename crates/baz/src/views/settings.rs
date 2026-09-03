@@ -663,12 +663,12 @@ fn crossfade_section(current: u32) -> Element<'static, Message> {
         ));
     }
     let note = if current == 0 {
-        "Off — each record ends where it ends.".to_owned()
+        "Off — each track ends where it ends.".to_owned()
     } else {
         format!(
-            "Overlapping by {:.0} s between records. It does not fade between \
-             the tracks of a record, and while it is on the signal path reports \
-             a mix rather than bit-perfect.",
+            "Overlapping by {:.0} s between every track, a record's own \
+             included, and while it is on the signal path reports a mix \
+             rather than bit-perfect.",
             f64::from(current) / 1000.0
         )
     };

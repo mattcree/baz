@@ -43,6 +43,9 @@ pub(crate) fn view<'a>(
     if list.is_empty() {
         return None;
     }
+    if hang.layout == crate::shelf::Layout::List {
+        return Some(row(shelf, hang, list, actions));
+    }
     let room = theme::active();
     let selected = shelf.selection.is(actions.content);
     let edge = hang.art;
@@ -124,4 +127,75 @@ pub(crate) fn view<'a>(
             .on_exit(actions.exit)
             .into(),
     )
+}
+
+/// **The same list as a row**, for the collection hung as a list — the
+/// Library row's anatomy ([`crate::views::shelf::list_row`]) applied to an
+/// implicit list: the collage small at the left, the lamp's lane, the name as
+/// a door, and what it holds in the artist's rank. Press selects, as every
+/// row does; the name opens, where the list has somewhere to open to.
+fn row<'a>(
+    shelf: &'a Shelf,
+    hang: Grid,
+    list: &ImplicitList,
+    actions: Actions,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let selected = shelf.selection.is(actions.content);
+    let edge = hang.art;
+    let sleeve = container(crate::views::playlist_sleeve(
+        shelf,
+        &list.art,
+        list.name(),
+        edge,
+    ))
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(edge))
+    .style(move |_theme| theme::sleeve(room, 0.0));
+    let name = text(list.name().to_owned())
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .color(room.paper)
+        .wrapping(text::Wrapping::None);
+    let name: Element<'a, Message> = match actions.open {
+        Some(open) => button(name)
+            .padding(theme::pad(0.0, theme::GAP_XS))
+            .style(move |_theme, status| theme::word_button(room, room.wall, status))
+            .on_press(open)
+            .into(),
+        None => container(name)
+            .padding(theme::pad(0.0, theme::GAP_XS))
+            .into(),
+    };
+    let counts = container(
+        text(list.counts())
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Length::Fill)
+    .clip(true);
+    let cells = iced::widget::row![
+        sleeve,
+        iced::widget::Space::new().width(Length::Fixed(theme::GAP_MD)),
+        container(name).clip(true),
+        counts,
+    ]
+    .spacing(theme::GAP_MD)
+    .align_y(alignment::Vertical::Center);
+    mouse_area(
+        button(
+            container(cells)
+                .width(Length::Fill)
+                .height(Length::Fixed(hang.row_h))
+                .align_y(alignment::Vertical::Center),
+        )
+        .padding(0)
+        .style(move |_theme, status| theme::list_row(room, status, selected, false))
+        .on_press(Message::ContentPressed(actions.content)),
+    )
+    .on_enter(actions.enter)
+    .on_exit(actions.exit)
+    .into()
 }

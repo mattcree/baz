@@ -1728,15 +1728,11 @@ impl Shelf {
         }
     }
 
-    /// **The wall's grid whatever shape the collection is hung in.** Home
-    /// hangs its records as tiles — `All songs`, `RECENTLY ADDED` — and took
-    /// [`Self::grid`] so a record is drawn at the same size wherever it is
-    /// drawn; but under the list layout that grid is one 44 px column, and
-    /// Home's tiles shrank to thumbnails with their captions cut and its row
-    /// of recent records collapsed to a sliver (the owner, 2026-09-03: *"the
-    /// list view of Home is not good"*). The list is a shape for the
-    /// *collection*; Home has no list, so it takes the wall's geometry at the
-    /// current density, which is still the same size a tile is on the wall.
+    /// **The wall's grid whatever shape the collection is hung in** — for
+    /// the one number that must not follow the shape: how many records
+    /// Home's `RECENTLY ADDED` shows. A list grid has one column, and one
+    /// recent record is not a row of them; the wall's column count at this
+    /// density is, in either shape.
     pub(crate) fn wall_grid(&self) -> shelf::Grid {
         shelf::Grid::new(self.grid_size.width, self.density)
     }
@@ -1826,6 +1822,16 @@ impl Shelf {
     /// is paying it *per frame*, which is why the result lives in
     /// [`Self::lane_played`] and is thereafter maintained by events.
     fn fold_history_onto_records(&mut self) {
+        // **What the lane heard since launch outlives the fold.** The snapshot
+        // is read once at open; a play made since is in the ledger file and
+        // not in it, and the lane learned it from the event instead. A regroup
+        // rebuilds the fold from the snapshot, so until 2026-09-03 it dropped
+        // the record the listener had just put on — the owner: *"I play a song
+        // from an album and then it goes to the top of the recent list at the
+        // side. then I go to the library and select a different grouping …
+        // and suddenly the recent album disappears."* The live entries are
+        // folded back in, newest of the two winning.
+        let heard = std::mem::take(&mut self.lane_played);
         self.lane_played = match self.history.as_ref() {
             Some(history) => crate::lane::by_record(
                 self.albums.iter().flat_map(|album| {
@@ -1848,6 +1854,17 @@ impl Shelf {
             ),
             None => HashMap::new(),
         };
+        for (id, at) in heard {
+            // Only a record still on the wall: a rescan may have removed it.
+            if self
+                .by_path
+                .values()
+                .any(|&index| self.albums[index].id == id)
+            {
+                let stamp = self.lane_played.entry(id).or_insert(at);
+                *stamp = (*stamp).max(at);
+            }
+        }
         self.rebuild_lane_recent();
     }
 
@@ -1888,12 +1905,7 @@ impl Shelf {
     /// file read the contract refuses. The two agree to within the length of
     /// the play.
     pub(crate) fn record_played(&mut self, path: &std::path::Path, at: u64) {
-        let Some(album) = self.albums.iter().find(|album| {
-            album
-                .editions
-                .iter()
-                .any(|edition| edition.tracks.iter().any(|track| track.path == path))
-        }) else {
+        let Some(album) = self.album_for_path(path) else {
             return;
         };
         let id = album.id;
@@ -2831,7 +2843,7 @@ impl Shelf {
         // `grid()` is one column, and `newest` counted one record where the
         // page hangs five — four sleeves nobody had asked for.
         ids.extend(
-            crate::views::home::newest(self, self.wall_grid())
+            crate::views::home::newest(self, self.wall_grid().columns)
                 .iter()
                 .map(|album| album.id),
         );
