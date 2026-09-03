@@ -24,6 +24,117 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Changed
+
+- **The room picker shows you the rooms.** Settings → Appearance drew sixteen
+  theme names and one strip of colour, for whichever room was already chosen.
+  Every room now carries its own strip of planes beside its name, so comparing
+  two of them is a glance rather than two selections and a memory.
+
+- **The Library's list shape lost its column heads and gained a door.** A row
+  of small caps over a shelf of records explained what the covers, names and
+  times already said. The album title is now a button through to the record,
+  in the same paint the artist heading and the record page's breadcrumb use;
+  pressing the row still selects, and pressing it again still plays.
+
+- **Playlists honours the list shape too**, drawing the Library's row anatomy
+  against a list rather than a record: the sleeve small at the left, the name
+  as a door, what it holds and how long it runs, in the same columns as the
+  Library's rows. The one list that is sounding is marked the way a sounding
+  record is.
+
+- **Now playing with nothing in it says how to put something in it**, rather
+  than two words centred in an empty room with no door out.
+
+- **The equaliser names its ten bands.** `32` through `16k` were promised
+  under the faders and never drawn, in any build.
+
+### Fixed
+
+- **An output that stops taking audio now fails the track, not baz.** A stream
+  the operating system had already reported as broken went on being fed, and
+  the progress bar advanced over silence with nothing said. The engine now
+  hears the device give up, stops, and reports it the way any other playback
+  failure is reported.
+
+- **Stopping or changing tracks cannot hang waiting for a decoder that will
+  not answer.** The wait for the previous track's producer is bounded.
+
+- **`config.toml` cannot be emptied by a crash or replaced by a misread.**
+  Settings are written to a sibling file and swapped into place, and a file
+  that fails to parse is left where it is rather than overwritten with
+  defaults.
+
+- **Two theme faults.** One theme file could crash baz at launch, and ten of
+  the built-in rooms were reported as broken by the validator that was meant
+  to protect them.
+
+- **Composing a vibe playlist no longer freezes the window.** The text model
+  ran on the interface thread on Create, on *Another version*, and on every
+  length step; it runs off it now.
+
+- **A dropped visualisation frame no longer looks like silence.** A reader
+  that lost the race to the audio thread was handed a frame of zeros and drew
+  a notch of black across the display; it now keeps the frame it had.
+
+- **Every fitted line in the product was measured 23 per cent narrow**, so
+  titles were cut where they did not need cutting and ran where they should
+  have stopped. Text is measured in the em square the renderer draws in.
+
+- **The wall no longer moves sideways between Library and Playlists** when the
+  collection is wider than the window; both hang their block from the same
+  edge.
+
+- **The pinned section heading no longer shows the cover through itself.**
+  Its band was translucent over the very sleeves it exists to hide; it is
+  opaque wherever there is no moving picture behind it.
+
+- **A group with no name gets a heading's height and not a rule** across the
+  whole wall.
+
+- **The artist and album labels on a playlist row can be pressed.** They were
+  buttons that could never fire.
+
+- **The record page's quiet acts hang from the aside's edge**, as the page's
+  own law already said; `Add to playlist…` sat 12 px inboard of `Play album`.
+
+- **The staged Windows/macOS installer stops claiming a provenance it has not
+  got.** What `baz-boot` says about the file it is about to run is now only
+  what it has verified.
+
+- **A memory-safety advisory in the realtime ring buffer** (`rtrb`,
+  RUSTSEC-2026-0274) is taken. baz's rings carry nothing whose drop can
+  unwind, so it was not reachable, and a green advisory check is how the next
+  real one gets noticed.
+
+### Development
+
+- **Something constructs an `App`.** `App::headless` builds the shell without
+  a window, so tests that used to read `app.rs` as text and search it for
+  substrings can exercise it instead. Forty such scans that remained were
+  moved off comment lines, so a doc comment naming a thing no longer counts as
+  the thing being drawn.
+
+- **`crate::collection` is its own module.** The Library and Playlists
+  scaffold left `app.rs` — 2 888 lines — and the `Shelf` name no longer
+  collides with the unrelated `crate::shelf`. Nine frames diff at zero
+  differing pixels against the build before it.
+
+- **`docs/screenshots/capture.sh` no longer overwrites the store's pictures
+  by default.** It writes to a scratch directory unless `PUBLISH=1`.
+
+- **`scripts/toolbox-setup.sh` builds a container that can run baz**, not
+  only build it: the X client libraries, `xdotool`, `openssl-devel` and
+  `pipewire-alsa` are named, all four found by rebuilding the container from
+  the script and seeing what it could not do.
+
+- **`RELEASING.md` says what the pipeline does**, re-derived from the
+  workflows rather than from memory, and its step 10 became a check in CI.
+
+- **The 2026-08-23 audit and the 2026-09-02 interface pass are recorded** in
+  `docs/BACKLOG.md` and `docs/WORK.md`, with the frames each finding was made
+  in under `docs/design/impl/`.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
