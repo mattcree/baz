@@ -2235,7 +2235,124 @@ a guard*) reaching the one area that audit put out of scope: **UI/UX**.
     result could not do something.
 
 
+### Phase K — the 2026-09-03 quality pass
+
+The owner asked for the project to be made *"tight in terms of the quality and
+execution … absolutely world class"*, and for the assessment to be methodical.
+It was run as four independent read-only audits — baz-core against
+`ENGINEERING.md`, the interface crate's health, the test suite's honesty, and
+every document's claims against the files they point at — over a baseline of
+the full gate, then executed in ranked order, one commit per item, each with
+the full gate. What the pass found and deliberately did **not** build is in
+`BACKLOG.md` under *Findings of the 2026-09-03 quality pass, not built*.
+
+99. **Done 2026-09-03 — the changelog catches up with the 33 commits since
+    v0.5.0.** `[Unreleased]` had been empty since the tag while an output
+    failure the engine could not hear, a config file a crash could empty, a
+    theme launch crash, an advisory and nine photographed interface defects
+    landed under it. Written from each commit, in the file's own voice, with a
+    `Development` heading for what only a contributor would notice.
+
+100. **Done 2026-09-03 — five faults on the audio path.** The equaliser
+    re-designed its sections into a `Vec` from `Session::pump`, an allocation
+    on the realtime path under a doc that said there was none; the sections
+    are a fixed array with a live count. A container's declared sample rate
+    reached the fader unbounded (`rate * 20` overflows `u32` above 214 MHz);
+    `AudioSource::open` refuses zero and above 768 kHz by name, the hostile
+    suite carries the 4 GHz WAV, and the fader multiplies saturating.
+    `frames_to_ms` overflowed on the `u64::MAX` MP4 atom the hostile suite
+    already had, on the producer thread outside its panic guard; `ms_to_frames`
+    overflowed on a large `Seek` inside the guard and blamed the decoder. Both
+    are `u128` and saturate. And `computed_for` called a public trait under
+    its mutex; the handle is cloned out first.
+
+101. **Done 2026-09-03 — the standard the charter states is the standard
+    clippy enforces.** `expect_used` joins `unwrap_used`, with
+    `allow-expect-in-tests`; the fourteen library `expect`s left carry
+    `#[expect(clippy::expect_used, reason = ..)]`, and one — the menu's
+    press handler re-proving `is_some()` by panicking — is gone. Twenty-six
+    `#[allow]` escapes in baz-core became `#[expect(.., reason)]`, so an
+    escape cannot outlive its cause. `history/format.rs`'s copy of the path
+    codec imports `playlist/format.rs`'s; the three ring budgets declared in
+    both backends are one rule in `playback/mod.rs`.
+
+102. **Done 2026-09-03 — the queue and Home stop walking the whole library
+    for every row, every frame.** `views::queue::album_of` scanned every
+    track of every edition of every record per visible row per frame, and
+    Home's continue band made the same walk. `Shelf` carries a path-to-record
+    index built on the rebuild pass the counts already make; both are one
+    lookup, with the title-and-artist comparison kept only as the fallback
+    for a file the wall no longer holds. Also: `views::search::rows` was a
+    copy of `search::rows`; `jewel_case::text_width` was `views::text_width`
+    written twice (one `advance` now, over whichever scale the caller means);
+    `theme::system_appearance` was a constant behind a dead-code escape.
+
+103. **Done 2026-09-03 — the reference-encoder tests run somewhere.** No CI
+    runner and not the `baz-dev` container had ffmpeg, so fifty-five
+    reference tests printed `SKIP` and passed everywhere. `ffmpeg-free` joins
+    the setup script and the devcontainer (which also regains the six
+    packages it had drifted from); CI installs ffmpeg and flac on all three
+    runners and proves they answer. Running them found `.oga`, `.aiff` and
+    `.aif` advertised with no fixture in the breadth test that exists to
+    catch exactly that; one optional HE-AAC encode that took every
+    fixture-based test down when Fedora's `fdk-aac-free` refused it; and
+    seven fixture families still written to their final names, which the
+    2026-08-17 race fix had stopped short of. Four flakes-in-waiting from the
+    audit are closed — the exclusive reopen's way back down skips with the
+    card's name instead of failing on a busy card, two 10 ms wall-clock bounds
+    are relative to the reopen they distinguish from, a `first_seen` test
+    waits for the clock instead of 5 ms — and `OutputMode::from_env` is a
+    pure `from_values` with its refusal branch tested. `fuzz/seeds/` commits
+    one input per shape per target, the weekly job reads them, and
+    `playback_decode` — whose findings are Symphonia's by decision — is
+    annotated rather than gating so the five targets baz owns keep a red that
+    means something.
+
+104. **Done 2026-09-03 — every claim in the charter re-derived from the
+    files it points at.** Thirteen sentences in `ENGINEERING.md` were not what
+    the machinery does (an eight-step three-OS matrix with one step matrixed;
+    benchmark comparison, `proptest` and Miri that exist nowhere; "bans
+    duplicate versions" over `warn`; "forbid in every crate" over one; golden
+    "output hashes" over sample comparison; "a lens, not a target" over an
+    80 % gate). `INSTALL.md` said nothing had been tagged, above the `.msi` it
+    documents. `FEATURES.md` named a feature, a design doc and an ADR that do
+    not exist. `CONTRIBUTING.md` pointed at a plan whose own header points
+    elsewhere. `DEVELOPMENT.md` cited iced 0.13 lines from a 0.14 workspace.
+    `.interface-design/system.md` said `SERIF` was deleted while every record
+    title is set in it, and was wrong about the face count, the bundle size,
+    two alphas, one width, one deleted token and three that never existed.
+    Each corrected from the file that holds the fact.
+
+105. **Done 2026-09-03 — the store's pictures show the library the owner
+    has, mounted.** All ten frames re-taken through `capture.sh` with the NAS
+    shares mounted, each looked at before committing. The composer frame took
+    a second run: the script's `New smart playlist` press was 55 px right of
+    the tile since item 92 moved the wall, and photographed Favourites. The
+    coordinate is re-derived from a frame, as the script's own header
+    requires.
+
+106. **Done 2026-09-03 — `app.rs` step 2, first slice: the transport family
+    is `app/transport.rs`.** `update_transport`, `update_needle`,
+    `update_volume`, `update_replay_gain`, their four `send_*` seams,
+    `persist_volume`, `VOLUME_WHEEL_SETTLE` and `command_for` — 224 lines,
+    verified verbatim against the previous revision by extracting the same
+    five spans from `HEAD` and finding each unchanged in the new file; the
+    `pub(super)` on each method and the module path on one doc link are the
+    whole diff. `app.rs`: 13 048 → 12 806 lines. Frames were not re-taken
+    for this step: a textual move of non-view code, proven byte-identical,
+    is a stronger statement than pixels about a change that touches no
+    drawing. The remaining sub-machines keep the order in `BACKLOG.md`.
+
 ## Doing
+
+- **The 2026-09-03 quality pass is landed** — items 99–106, each its own
+  commit with the full gate. What it found and did not build is in
+  `BACKLOG.md` under *Findings of the 2026-09-03 quality pass, not built*,
+  ranked: the rest of `app.rs` step 2, forty-five source scans still reading
+  their own test module, two byte-facing readers in the interface crate with
+  no fuzz target, and the untested widget units. Two CI changes in it —
+  encoders on the runners, the seeded and split fuzz job — are verified
+  locally and by YAML parse only; the first push is where they are proven.
 
 - **The 2026-09-02 pass is landed and its remainder is proposed, not started.**
   Items 86–94 are on `main`, each with the frame that found it and a guard that

@@ -1807,8 +1807,16 @@ remaining ~40 in `views/` need a rendered tree, which is a different problem.
 **Step 1 shipped 2026-09-02** (`WORK.md` item 95): `Shelf` and its 2 888
 lines are `crate::collection`, `app.rs` is 10 486 lines of shipped code, and
 nine frames diff at zero differing pixels against the build before it.
-**Steps 2 and 3 are unstarted** and keep the order below, which is the whole
-value of writing it down.
+**Step 2 began 2026-09-03** (item 106) with the transport family — the four
+`update_*` that resolve to one engine command each, their `send_*` seams,
+`persist_volume` and `command_for`, 224 lines to `app/transport.rs`, verbatim.
+The audit that preceded it mapped every sub-dispatcher by the fields it
+touches, and that map is the order for the rest: `update_motion`,
+`update_drag`, `update_queue` and `update_lane` are each narrow enough to go
+next as one commit each; `update_playlists` and `update_vibe` (664 lines
+together) need `screen`, `player` and `playlists` and are the second tier;
+`route` (966 lines) and `view` (677) touch nearly every field and can only be
+split by message family, which is step 3's question. **Step 3 is unstarted.**
 
 **Proposal, and it is deliberately not "split app.rs".** Rust lets one `impl`
 block's methods live in sibling modules of the same crate, so this is
@@ -1828,6 +1836,111 @@ Each step is its own commit with the full gate, and none of them may change a
 message, a field or a behaviour — the diff a reviewer reads is `git diff -M`
 finding pure moves. Large, and worth it only if it is done in that order:
 step 1 alone removes the ambiguity a reader actually trips on.
+
+## Findings of the 2026-09-03 quality pass, not built
+
+The owner asked for the project to be made tight and world class. Four
+read-only audits — baz-core against `ENGINEERING.md`, the interface crate,
+the test suite, and every document's claims against the files — found what
+`WORK.md` items 99–106 built. This is the rest, ranked, each with what it
+would cost, so that none of it has to be re-found.
+
+### `app.rs` step 2, the remaining sub-machines
+
+Above, under *`app.rs` is 13 106 lines*: the order is written there. Each
+slice is a pure move with the full gate; `update_motion` and `update_drag`
+first because they touch three fields between them. Small per slice.
+
+### Forty-five source scans still read their own test module
+
+`shipped::code` exists so a scan asking what a module *draws* cannot match a
+doc comment naming the thing; seventy scans use it. Forty-five still read the
+raw file, whose haystack includes the test module doing the asking, so any of
+them can pass on its own assertion string. They are in `app.rs`,
+`collection.rs`, `config.rs`, `focus.rs`, `implicit.rs`, `origin.rs`,
+`playlists.rs`, `theme.rs`, `window_frame.rs` and nine `views/` files.
+Routing each through `shipped::code` is a one-line edit per scan; twelve of
+the `app.rs` ones assert message-routing facts a headless `update()` could
+assert on state instead, now that `App::headless` exists, and those are the
+ones worth converting rather than filtering. Medium; mechanical for the
+filter, real work for the conversions.
+
+### Two byte-facing readers in the interface crate have no fuzz target
+
+`theme_file.rs` reads user-supplied JSON and `config.rs` reads TOML; both
+parse bytes a listener can hand baz, and neither has a target under `fuzz/`.
+`ENGINEERING.md` now says so. A target each is an afternoon; the theme one is
+the more valuable, because a theme file is the thing a listener downloads.
+
+### Untested units in the interface crate
+
+`contour.rs` (734 lines — the drawn-line widget's drag and release geometry),
+`pointer.rs` (hit-testing), `headroom.rs`, and `baz-update`'s `boot.rs`
+(exercised only through the built binary) have no unit tests. `contour`'s
+geometry would need extracting from the widget impl to test without a
+renderer, which is the same shape as `queue_window`'s virtual-window split
+and worth doing the same way. Medium.
+
+### The jewel case and the wall truncate a title by two different rules
+
+`views::fit` reserves `ELLIPSIS_SLOT_W` and stops the prefix there;
+`jewel_case::fit_text` re-measures `"{prefix}…"` per character. Same visual
+promise, two truncation points; the measurement loop under them is one
+function now, the rule is not. Deciding it is a design question — the raster
+draws at its own scale for its own reasons — and wants a frame of a long
+title on both surfaces. Small once decided.
+
+### The ring write loop is written twice
+
+`device::offer` and `playback::engine::push_with_backpressure` are the same
+`slots`/`write_chunk`/`commit_all` body with different abort conditions. The
+constants they shared are one rule now; the loop is not, because merging two
+realtime loops with different exits wants the audible tests run on hardware,
+which this pass did not do. Small, on a machine with a card.
+
+### Benchmarks exist and nothing compares them
+
+`crates/baz-core/benches/` holds scan and search benches; CI never runs them.
+`ENGINEERING.md` says so now. A comparison job wants a stable runner or a
+tolerance wide enough to be honest about a shared one; the cheaper first step
+is running them on the schedule and keeping the numbers as an artifact.
+
+### The engine's event channel to the front end is unbounded
+
+`mpsc::channel()` at both engine constructors; `Progress` is emitted on a
+cadence and `PlayRecorded` from the ledger's thread. A front end that stops
+draining grows without bound. That is a front-end contract rather than an
+engine defect — baz's own front end drains on every frame — but a
+`sync_channel` that coalesces `Progress` when full would make the contract
+unnecessary. Medium, and it changes the protocol's blocking behaviour, so it
+wants its own ADR note.
+
+### Dormant code pinned by a live test
+
+`queue_window.rs` (371 lines) and `App::undo_queue_edit` are retained under
+`dead_code` escapes for a queue editor that may return, and a source-scan test
+pins the dead function. Whether the editor returns is the owner's call; until
+it is made, the test is guarding a thing that does not run. Trivial either
+way, once decided.
+
+### Three smaller notes
+
+- `tests/engine.rs`'s resampled-track elapsed test sleeps 80 ms and asserts
+  the pause landed inside a window; it is gated behind the fixed-rate opt-in,
+  and a parked position would make it exact. Small.
+- `HistoryLedger::flush` blocks on `recv()` with no deadline; documented as
+  never called from the engine thread, but a GUI-thread call on a stalled
+  `fsync` would freeze the window. Small.
+- `index.rs`'s `path_to_blob` has `unix` and `windows` arms and no third; a
+  new target family fails with "not found" rather than a sentence. Trivial.
+
+### Two things this pass could not verify
+
+The CI changes — ffmpeg and flac on three runners, the seeded fuzz job — are
+verified by local equivalents and a YAML parse, not by a run; the Windows
+`choco` line in particular is unproven until the first push. And the HE-AAC
+fixture can be produced by no distribution ffmpeg, so its one test runs only
+on a machine with a full `libfdk_aac`; it skips loudly everywhere else.
 
 ## Interface
 
