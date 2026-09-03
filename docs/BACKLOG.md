@@ -1631,7 +1631,13 @@ accessibility and colour beyond the mirror tests; MPRIS conformance; and UI/UX.
   do before the page is written, and those are cheaper to build alongside the
   screenshots than to retrofit.
 
-## The pinned heading's ground, over weather — the half that is still open
+## The pinned heading's ground, over weather — closed 2026-09-03
+
+**Decided and built as `WORK.md` item 107**, on the owner's third report: way
+(1) below, because it keeps the in-flow hand-over continuous where way (2)
+turns it into a jump of one band height. The band draws the ground's own
+layers at the window's rectangle, clipped to its strip; the measurement is in
+`docs/design/impl/2026-09-03-pinned-heading/`. Kept for the reasoning.
 
 **The band is opaque again wherever there is no moving picture** (`WORK.md`
 item 97), which is what the owner was looking at when he reported the colour
@@ -1836,6 +1842,31 @@ Each step is its own commit with the full gate, and none of them may change a
 message, a field or a behaviour — the diff a reviewer reads is `git diff -M`
 finding pure moves. Large, and worth it only if it is done in that order:
 step 1 alone removes the ambiguity a reader actually trips on.
+
+## The owner's observations of 2026-09-03, with the app open
+
+Rattled off while looking at the build the quality pass produced, in his
+words, triaged here first (the standing rule for a run of short UI asks):
+
+1. *"the icons etc just look corny... they detract. there is also a lack of
+   consistency around this in terms of size etc."* — the icon set and its
+   sizing across the app bar, the sidebar, the transport and the row acts.
+   **Needs a direction, not a fix**: which marks stay, at what optical size,
+   and whether the set is redrawn or replaced. Proposal to follow with frames
+   of every icon at its drawn size beside each other.
+2. *"information hierarchy is quite poor throughout."* — a pass over every
+   surface's type scale, ink and spacing against §8 and §13 of the design
+   system, with frames. Large; the composition audits are the method.
+3. *"the background colour of the section headers in sticky mode is also
+   still not the same as the background"* — **the third telling.** Decided
+   and built today (`WORK.md` item 107): the covers stop reaching under the
+   band, so the band needs no ground and inherits the place's exactly.
+4. *"the list view of Home is not good."* — Home's `RECENTLY ADDED` /
+   continue band and the `All songs` block in the list layout. Wants frames
+   before a proposal.
+5. *"in general these list views look just undesigned."* — the Library and
+   Playlists list layouts (item 96 aligned their columns; the owner's point
+   is the composition, not the alignment). Same method as 2.
 
 ## Findings of the 2026-09-03 quality pass, not built
 

@@ -2343,6 +2343,24 @@ the full gate. What the pass found and deliberately did **not** build is in
     is a stronger statement than pixels about a change that touches no
     drawing. The remaining sub-machines keep the order in `BACKLOG.md`.
 
+107. **Done 2026-09-03 — the pinned heading is the same colour as the ground,
+    with a record sounding.** *(The owner, for the third time: "the background
+    colour of the section headers in sticky mode is also still not the same
+    as the background.")* The band must hide the covers under it and match
+    its neighbours, whose ground with a record sounding is the wall at `FROST`
+    over that record's wash and weather — and the cover stands between the
+    band and that picture, so no colour at any alpha can do both; 100 % was a
+    slab and 92 % let 8 % of the cover through. Of the two ways out
+    `BACKLOG.md` recorded, the one that keeps the hand-over continuous: the
+    band draws a **copy of the ground** under the heading — bare wall, wash,
+    veiled weather, frost — from the same derivation the window's backdrop
+    uses, at the window's rectangle, clipped to the strip. Measured in the
+    Amethyst room with *The Fall Of Math* sounding: before, `srgb(14,12,17)`
+    across the band against `srgb(21,22,16)` beside it; after, within one
+    level of the ground at every x, and that level is the wash's own slope.
+    Frames in `docs/design/impl/2026-09-03-pinned-heading/`. The theme test
+    now pins that the band paints nothing over a ground it was handed.
+
 ## Doing
 
 - **The 2026-09-03 quality pass is landed** — items 99–106, each its own

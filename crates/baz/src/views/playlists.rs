@@ -50,7 +50,7 @@ pub(crate) fn view<'a>(
     player: &PlayerState,
     hang: Grid,
     scroll_offset: f32,
-    over_weather: bool,
+    ground: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     // **The note is the pending deletion and nothing else.** A tally stood
@@ -165,7 +165,7 @@ pub(crate) fn view<'a>(
         .map(|run| band(&wall, run.group, hang));
     let body: Element<'a, Message> = stack![
         body,
-        crate::views::shelf::pinned_band(pinned, hang, hang.block_width(), over_weather)
+        crate::views::shelf::pinned_band(pinned, hang, hang.block_width(), ground)
     ]
     .into();
 

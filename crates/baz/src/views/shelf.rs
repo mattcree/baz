@@ -93,7 +93,7 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     lamp: f32,
     collecting: Collecting,
-    over_weather: bool,
+    ground: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
@@ -184,7 +184,7 @@ pub(crate) fn view<'a>(
         .copied();
     let wall = stack![
         wall,
-        pinned_header(shelf, hang, pinned, hang.block_width(), over_weather)
+        pinned_header(shelf, hang, pinned, hang.block_width(), ground)
     ];
     // **No column heads.** They were drawn once, outside the scrollable, and
     // the owner had them removed the same day: *"can you remove the headers on
@@ -539,9 +539,12 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 ///   it, so what replaces the pinned header is the next one arriving in the
 ///   flow and never a cover.
 ///
-/// The band is opaque [`theme::shelf_header_band`] — wall on wall — across the
-/// full width rather than the block's, because the covers passing beneath it
-/// are the full width of the wall. There is no rule, no shadow and no lift: a
+/// The band is opaque across the full width rather than the block's, because
+/// the covers passing beneath it are the full width of the wall: the bare wall
+/// ([`theme::shelf_header_band`]) when nothing is sounding, and otherwise a
+/// copy of the place's own ground ([`crate::views::now_playing::band_ground`])
+/// — so it is the same colour as its neighbours in every case, which took
+/// three reports to get right. There is no rule, no shadow and no lift: a
 /// pinned header differs from an unpinned one in nothing a screenshot can
 /// show, which is what makes this a position rather than a state, and is why
 /// it needs no transition (a standing rule of the product — *no motion — hard cuts by
@@ -549,18 +552,18 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 ///
 /// `run` is `None` when nothing is pinned, and the layer is still built: see
 /// the note at the call site for why it may not come and go.
-fn pinned_header(
-    shelf: &Shelf,
+fn pinned_header<'a>(
+    shelf: &'a Shelf,
     hang: Grid,
     run: Option<Run>,
     block: f32,
-    over_weather: bool,
-) -> Element<'_, Message> {
+    ground: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
     pinned_band(
         run.map(|run| header_band(shelf, hang, run, block)),
         hang,
         block,
-        over_weather,
+        ground,
     )
 }
 
@@ -723,33 +726,45 @@ pub(crate) fn pinned_band<'a>(
     band: Option<Element<'a, Message>>,
     hang: Grid,
     block: f32,
-    over_weather: bool,
+    ground: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let pinned = band.is_some();
-    let body: Element<'a, Message> = band.unwrap_or_else(|| {
+    let grounded = ground.is_some();
+    let heading: Element<'a, Message> = band.unwrap_or_else(|| {
         Space::new()
             .width(Length::Fixed(block))
             .height(Length::Fixed(0.0))
             .into()
     });
+    // The wall's scrollable centers the in-flow grid after reserving the
+    // right-hand rail + scrollbar lane. This layer spans the outer wall so
+    // its opaque field can cover sleeves, but centering its block in that
+    // *outer* width moved the sticky word right by half the 112 px
+    // reservation. Spend the identical reservation as right padding:
+    // full-width paint outside, the scrollable's content measure inside.
+    let placed = container(heading)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
+        .align_x(alignment::Horizontal::Center);
+    // **With a record sounding the ground is a picture**, and the band draws
+    // a copy of it under the heading — the window's slice, clipped to the
+    // strip — rather than a colour that can only ever approximate it.
+    let body: Element<'a, Message> = match ground {
+        Some(ground) if pinned => stack![ground, placed].into(),
+        _ => placed.into(),
+    };
     container(body)
         .width(Length::Fill)
         // Only the band, never the wall: a layer as tall as the viewport would
         // be a transparent sheet over every cover, and iced hands the topmost
         // layer of a `stack` the pointer first.
         .height(Length::Fixed(if pinned { hang.header_h() } else { 0.0 }))
-        // The wall's scrollable centers the in-flow grid after reserving the
-        // right-hand rail + scrollbar lane. This layer spans the outer wall
-        // so its opaque field can cover sleeves, but centering its block in
-        // that *outer* width moved the sticky word right by half the 112 px
-        // reservation. Spend the identical reservation as right padding:
-        // full-width paint outside, the scrollable's content measure inside.
-        .padding(iced::Padding::default().right(theme::WALL_RESERVE))
-        .align_x(alignment::Horizontal::Center)
+        .clip(true)
         .style(move |_theme| {
             if pinned {
-                theme::shelf_header_band(room, over_weather)
+                theme::shelf_header_band(room, grounded)
             } else {
                 iced::widget::container::Style::default()
             }

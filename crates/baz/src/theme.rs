@@ -4402,7 +4402,8 @@ pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -
 }
 
 /// The band a **pinned** shelf header is drawn in: the wall's own colour, and
-/// nothing else.
+/// nothing else — or nothing at all, when the band has been handed the ground
+/// to stand on.
 ///
 /// It is opaque, and that is its whole job — the covers of the shelf it heads
 /// scroll *under* it and have to stop being drawn at the band's edge rather
@@ -4412,59 +4413,24 @@ pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -
 /// lightness; a pinned header differs from an unpinned one in nothing a
 /// screenshot can show, which is what makes the pin a *position* rather than a
 /// state.
+///
+/// **`grounded` is *the band already has its ground*.** With a record
+/// sounding the place's ground is not the wall but the wall at
+/// `views::now_playing::FROST` over that record's wash and weather, and the
+/// owner reported a band of any single colour as the wrong colour three times
+/// — at 100 % it was a slab, at 92 % (2026-08-23 to 2026-09-03) it let 8 % of
+/// the cover under it through. No alpha can hide a cover *and* match a ground
+/// the cover stands in front of. So the band now draws a copy of the ground
+/// itself under the heading ([`crate::views::now_playing::band_ground`]), and
+/// this style paints nothing over it; with nothing sounding the ground *is*
+/// the wall, and this paints it.
 #[must_use]
-pub fn shelf_header_band(p: &Palette, over_weather: bool) -> container::Style {
+pub fn shelf_header_band(p: &Palette, grounded: bool) -> container::Style {
     container::Style {
-        background: Some(Background::Color(alpha(
-            p.wall,
-            if over_weather { STICKY_BAND } else { 1.0 },
-        ))),
+        background: (!grounded).then_some(Background::Color(p.wall)),
         ..container::Style::default()
     }
 }
-
-/// **How opaque a pinned header's ground is** — dense enough to take the rows
-/// sliding under it, short of opaque so it belongs to the same surface as
-/// everything around it.
-///
-/// It was a flat `wall` until 2026-08-23, and that was right while the wall was
-/// the only thing behind it. Since the backdrop became weather it is not: away
-/// from Now playing the collection sits on `wall` at
-/// `views::now_playing::FROST` — 40 % — over a moving picture, and a band at
-/// 100 % is a rectangle of a visibly different colour laid across it. The
-/// owner: *"the background colour of the section titles when in sticky mode is
-/// the wrong colour."*
-///
-/// **It only became visible when the weather started moving.** The tap that
-/// fills the backdrop's frame was gated on Now playing, so everywhere else the
-/// picture was frozen and usually near enough to `wall` that the slab hid in
-/// it. Two defects, one of them masking the other.
-///
-/// **This alpha applies only while there is weather**, and that clause is the
-/// 2026-09-02 correction. The sentence here used to be *"with nothing sounding
-/// there is no weather, the ground is `wall`, and 92 % of `wall` over `wall`
-/// is `wall` — so the quiet case is unchanged"*, and it is wrong about what
-/// the band is drawn over. **The band is never over `wall`. It is over the
-/// cover it exists to hide** — that is its whole job, two doc comments up —
-/// so 8 % of a sleeve came through it.
-///
-/// The owner, for the second time: *"the background of the section titles in
-/// sticky mode is wrong too"*. Photographed at 1600 x 900 with nothing
-/// playing: a grey slab behind `ALEXANDER MALTER`, beginning at the block's
-/// left edge and **stopping exactly where the cover beneath it stops**,
-/// because that grey is the cover.
-///
-/// So the band is opaque wherever there is no moving picture to belong to,
-/// which is what it was before 2026-08-23 and is right in that case; and it
-/// keeps this alpha where there is, which is what that change was for.
-///
-/// **What is still not right, and needs a decision rather than a constant:**
-/// with the weather live, no single alpha can both hide a cover and match a
-/// ground made of `field + wall at FROST`, because the cover sits between the
-/// band and that ground. Two ways out, in `docs/BACKLOG.md`: draw the backdrop
-/// into the band's own strip so it composites from the same two layers its
-/// neighbours do, or stop the covers reaching under the band at all.
-const STICKY_BAND: f32 = 0.92;
 
 /// The primary action (Play album): a lamp **outline**, and the only control
 /// in baz drawn in the accent.
@@ -8996,35 +8962,30 @@ mod tests {
 
     /// **A pinned heading hides what passes under it, or it is not a band.**
     ///
-    /// The one thing `shelf_header_band` exists for is that the covers of the
-    /// shelf it heads stop being drawn at its edge rather than through it. It
-    /// was translucent at [`STICKY_BAND`] in every case from 2026-08-23, and
-    /// the reasoning for that alpha assumed the band composited over `wall`.
-    /// It composites over the cover. 8 % of a near-white sleeve came through,
-    /// which drew a grey slab behind the heading that began at the block's
-    /// edge and stopped exactly where the cover stopped — the owner's second
-    /// report of this, and photographed at 1600 x 900 with nothing playing:
+    /// With nothing sounding the ground is the bare wall and the band paints
+    /// it, opaque: at 92 % (2026-08-23 to 2026-09-02) 8 % of a near-white
+    /// sleeve came through as a grey slab that stopped exactly where the
+    /// cover stopped — the owner's second report, photographed at
     /// `srgb(29,32,33)` inside the band against `srgb(12,13,14)` beside it.
-    /// It is `srgb(12,13,14)` in both places now.
     ///
-    /// The translucent case is kept and is **conditional on there being a
-    /// moving picture to belong to**, which is what that change was for.
+    /// With a record sounding the band is handed a copy of the ground and
+    /// must paint **nothing** over it: any colour here, at any alpha, is the
+    /// slab the owner reported a third time on 2026-09-03.
     #[test]
-    fn a_pinned_heading_is_opaque_wherever_there_is_no_weather_to_belong_to() {
+    fn a_pinned_heading_is_opaque_wall_or_paints_nothing_over_its_ground() {
         let room = &CLOSING_TIME;
-        let alpha_of = |style: container::Style| match style.background {
-            Some(Background::Color(colour)) => colour.a,
-            _ => panic!("the band paints a colour"),
-        };
+        match shelf_header_band(room, false).background {
+            Some(Background::Color(colour)) => assert!(
+                (colour.a - 1.0).abs() < f32::EPSILON && colour == room.wall,
+                "the pinned band over a bare wall is translucent again, so the \
+                 covers scrolling under it show through the heading"
+            ),
+            _ => panic!("the band over a bare wall paints the wall"),
+        }
         assert!(
-            (alpha_of(shelf_header_band(room, false)) - 1.0).abs() < f32::EPSILON,
-            "the pinned band is translucent over a bare wall again, so the \
-             covers scrolling under it show through the heading"
-        );
-        assert!(
-            (alpha_of(shelf_header_band(room, true)) - STICKY_BAND).abs() < f32::EPSILON,
-            "the band over weather no longer yields to the picture behind it, \
-             which is the rectangle the 2026-08-23 change removed"
+            shelf_header_band(room, true).background.is_none(),
+            "the band was handed its ground and painted over it, which is the \
+             rectangle of a different colour the owner reported three times"
         );
     }
 

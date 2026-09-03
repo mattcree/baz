@@ -45,7 +45,7 @@
 use iced::advanced::renderer::Renderer as _;
 use iced::advanced::widget::{Widget, tree};
 use iced::advanced::{Layout, layout, mouse, renderer};
-use iced::{Color, Element, Length, Rectangle, Size, Theme};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 
 /// How many soft blobs the field is drawn as.
 ///
@@ -103,6 +103,20 @@ pub(crate) struct Glass {
     levels: [f32; BLOBS],
     /// The record's three inks, walked across the field.
     inks: [Color; 3],
+    /// **Where the picture is, when it is not this widget's own box.** The
+    /// window's rectangle, for a copy of the backdrop drawn inside a clipped
+    /// strip: the blobs hang from the window's middle and the wash runs at
+    /// the window's angle, so a strip that drew them at its own size would
+    /// show the wrong slice. Layout bounds are window coordinates already, so
+    /// drawing at the window's rectangle and letting the strip clip is the
+    /// whole of it.
+    frame: Option<Rectangle>,
+    /// The record's wash, drawn under the blobs when this is the copy — the
+    /// real backdrop draws it as its own layer.
+    wash: Option<iced::gradient::Linear>,
+    /// Whether there are blobs to draw at all; the copy of a backdrop with
+    /// no live tap draws its wash and nothing else, as the real one does.
+    blobs: bool,
 }
 
 impl Glass {
@@ -118,6 +132,26 @@ impl Glass {
         Self {
             levels: reduce(bands),
             inks,
+            frame: None,
+            wash: None,
+            blobs: true,
+        }
+    }
+
+    /// **The same ground, drawn as a slice of the window** — see `frame` on
+    /// the struct. `wash` goes under the blobs; `blobs` is whether any are
+    /// drawn.
+    pub(crate) fn framed(
+        self,
+        window: Size,
+        wash: Option<iced::gradient::Linear>,
+        blobs: bool,
+    ) -> Self {
+        Self {
+            frame: Some(Rectangle::new(Point::ORIGIN, window)),
+            wash,
+            blobs,
+            ..self
         }
     }
 }
@@ -171,8 +205,20 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Glass {
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        let bounds = layout.bounds();
+        let bounds = self.frame.unwrap_or_else(|| layout.bounds());
         if bounds.width < 1.0 || bounds.height < 1.0 {
+            return;
+        }
+        if let Some(wash) = self.wash {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    ..renderer::Quad::default()
+                },
+                iced::Background::Gradient(wash.into()),
+            );
+        }
+        if !self.blobs {
             return;
         }
         #[expect(clippy::cast_precision_loss, reason = "a blob count of seven")]

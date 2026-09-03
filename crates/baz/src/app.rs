@@ -8727,6 +8727,31 @@ impl App {
         }
     }
 
+    /// The ground a pinned shelf heading stands on, from the same inputs the
+    /// window's backdrop is drawn from — see
+    /// [`views::now_playing::band_ground`]. `None` with nothing sounding.
+    fn band_ground<'a>(&self, state: &Shelf) -> Option<Element<'a, Message>> {
+        let audio = self
+            .visualization
+            .mode
+            .active()
+            .then(|| self.playback.visualization())
+            .flatten();
+        views::now_playing::band_ground(
+            state,
+            &self.player,
+            &views::now_playing::Visual {
+                rotation: self.case_rotation,
+                foreground: self.visualization.foreground,
+                mode: self.visualization.mode,
+                audio: audio.as_ref(),
+                history: &self.visualization_history,
+                favourite: None,
+            },
+            self.window,
+        )
+    }
+
     /// The whole window: the current place, and the persistent bottom bar
     /// under it. Composition only — every surface is drawn by
     /// [`crate::views`].
@@ -8761,23 +8786,15 @@ impl App {
         let ink = self.ink();
         let lamp = self.warmth.value();
         let collecting = self.playlists.collecting();
-        // **Is there a moving picture behind the collection?**
-        //
-        // The backdrop is stacked under every place (`over_field` below is
-        // unconditional), so the wall's ground is that picture under
-        // `views::now_playing::FROST`. What changes is whether the picture is
-        // *moving*: with a live audio tap it is weather, and with none it is
-        // the frozen soft ground, which sits near enough to `wall` to be
-        // indistinguishable from it.
-        //
-        // The one reader is the pinned heading's band, and it is the whole of
-        // why it needs to know: a band that must hide the covers passing under
-        // it can be opaque `wall` where the ground is `wall`, and cannot be
-        // where the ground is a picture. See `theme::STICKY_BAND` for the case
-        // that is still open.
-        // The same expression `Self::sync_visualization_tap` gates the tap on,
-        // deliberately: the picture moves exactly when the tap is paid for.
-        let weather = self.player.now_playing().is_some() && self.visualization.mode.active();
+        // **The ground a pinned heading stands on.** The backdrop is stacked
+        // under every place (`over_field` below is unconditional), so with a
+        // record sounding the wall's ground is that record's wash and weather
+        // under `views::now_playing::FROST`, and the band that hides the covers
+        // passing under a pinned heading is handed a copy of exactly that
+        // ground to draw first — `views::now_playing::band_ground`. With
+        // nothing sounding it is `None` and the band paints the bare wall.
+        // Built at each site that draws a wall, since an `Element` is not
+        // shared and only one arm runs.
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             // **The two pre-library screens return early**, before the lane,
             // the app bar and the bottom bar are composed. Neither is a place:
@@ -8797,7 +8814,7 @@ impl App {
                 );
             }
             (Screen::Shelf(state), Place::Library) => {
-                state.view(&self.player, lamp, collecting, weather)
+                state.view(&self.player, lamp, collecting, self.band_ground(state))
             }
             (Screen::Shelf(state), Place::Playlists) => views::playlists::view(
                 state,
@@ -8805,7 +8822,7 @@ impl App {
                 &self.player,
                 state.grid(),
                 self.playlists_scroll,
-                weather,
+                self.band_ground(state),
             ),
             (Screen::Shelf(state), Place::NewPlaylist) => views::new_playlist::view(
                 state,
@@ -8832,7 +8849,7 @@ impl App {
                 // The wall is the honest answer — better than a page about
                 // nothing — and it is drawn rather than navigated to, because a
                 // view function may not change state.
-                None => state.view(&self.player, lamp, collecting, weather),
+                None => state.view(&self.player, lamp, collecting, self.band_ground(state)),
             },
             (Screen::Shelf(state), Place::Artist(id)) => {
                 // The artist vanished under a rescan while their page was
@@ -8842,7 +8859,7 @@ impl App {
                 if views::artist::label(state, id).is_some() {
                     views::artist::view(state, &self.player, id, state.grid(), collecting)
                 } else {
-                    state.view(&self.player, lamp, collecting, weather)
+                    state.view(&self.player, lamp, collecting, self.band_ground(state))
                 }
             }
             (Screen::Shelf(state), Place::Queue) => views::queue::view(
@@ -8878,7 +8895,7 @@ impl App {
                     &self.player,
                     state.grid(),
                     self.playlists_scroll,
-                    weather,
+                    self.band_ground(state),
                 ),
             },
             // **Home** and **Now playing** — the two places the owner added

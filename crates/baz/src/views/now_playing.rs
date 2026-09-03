@@ -353,18 +353,20 @@ pub(crate) fn view<'a>(
     let t = work
         .as_ref()
         .map_or(1.0, |work| work.dissolve_at(edge, width, height, false));
+    let room = theme::active();
     let field = match &work {
-        Some(work) => field_layer(
+        Some(work) => field_layer(field::dissolve(
             work.from
                 .as_ref()
                 .and_then(|&(_, _, field)| field)
                 .filter(|_| t < 1.0),
             work.field,
             t,
-        ),
+            room,
+        )),
         // With no object there is no dissolve to ride, so the wash is simply
         // the record's own field, settled.
-        None => field_layer(None, hues, 1.0),
+        None => field_layer(field::dissolve(None, hues, 1.0, room)),
     };
     let insert = rear_insert(shelf, now);
     let object: Element<'a, Message> = match &work {
@@ -434,9 +436,45 @@ pub(crate) fn backdrop<'a>(
     window: iced::Size,
     veiled: bool,
 ) -> Element<'a, Message> {
-    let Some(now) = player.now_playing() else {
-        return frosted(field_layer(None, None, 1.0), veiled);
+    let Some(ground) = ground(shelf, player, &visual, window) else {
+        return frosted(field_layer(None), veiled);
     };
+    let field = field_layer(ground.wash);
+    let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
+        crate::visualizer::background(
+            visual.mode,
+            audio,
+            visual.history,
+            window.width,
+            window.height,
+            ground.hues,
+            veiled,
+        )
+    } else {
+        Space::new().width(Length::Fill).height(Length::Fill).into()
+    };
+    frosted(stack![field, spectrum].into(), veiled)
+}
+
+/// **What the backdrop is made of this frame**, before it is stacked: the
+/// record's wash at its dissolve position, and the hues the spectrum is inked
+/// in. One derivation, so the backdrop and the copy of it a pinned heading
+/// draws ([`band_ground`]) cannot be two different pictures.
+struct Ground {
+    wash: Option<iced::gradient::Linear>,
+    hues: Option<crate::field::Field>,
+}
+
+/// `None` when nothing is sounding — then there is no wash, no weather, and
+/// the ground under every place is the bare wall.
+fn ground(
+    shelf: &Shelf,
+    player: &PlayerState,
+    visual: &Visual<'_>,
+    window: iced::Size,
+) -> Option<Ground> {
+    let now = player.now_playing()?;
+    let room = theme::active();
     let hues = now
         .album_id
         .and_then(|id| shelf.hero(id))
@@ -449,31 +487,60 @@ pub(crate) fn backdrop<'a>(
         let edge = marquee_edge(window.width, window.height, f32::INFINITY);
         work.dissolve_at(edge, window.width, window.height, false)
     });
-    let field = match &work {
-        Some(work) => field_layer(
+    let wash = match &work {
+        Some(work) => crate::field::dissolve(
             work.from
                 .as_ref()
                 .and_then(|&(_, _, field)| field)
                 .filter(|_| t < 1.0),
             work.field,
             t,
+            room,
         ),
-        None => field_layer(None, hues, 1.0),
+        None => crate::field::dissolve(None, hues, 1.0, room),
     };
-    let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
-        crate::visualizer::background(
-            visual.mode,
-            audio,
-            visual.history,
-            window.width,
-            window.height,
-            hues,
-            veiled,
-        )
-    } else {
-        Space::new().width(Length::Fill).height(Length::Fill).into()
-    };
-    frosted(stack![field, spectrum].into(), veiled)
+    Some(Ground { wash, hues })
+}
+
+/// **The ground a pinned shelf heading stands on, when the ground is a
+/// picture.**
+///
+/// A pinned heading is drawn *over* the covers scrolling under it, and has to
+/// hide them; its neighbours to the left and right are the place's own
+/// ground, which with a record sounding is the wall at [`FROST`] over that
+/// record's wash and its weather. No single colour can both hide a cover and
+/// match that, because the cover stands between the band and the picture —
+/// the owner reported the mismatch three times. So the band composites from
+/// the identical layers its neighbours do: the bare wall, the wash, the
+/// veiled weather and the frost, drawn at the **window's** rectangle and
+/// clipped to the band's strip ([`crate::glass::Glass::framed`]). It cannot
+/// be the wrong colour, and it is opaque to the covers because the wall is.
+///
+/// `None` when nothing is sounding: the ground is the bare wall, and the band
+/// paints that itself ([`theme::shelf_header_band`]).
+pub(crate) fn band_ground<'a>(
+    shelf: &Shelf,
+    player: &PlayerState,
+    visual: &Visual<'_>,
+    window: iced::Size,
+) -> Option<Element<'a, Message>> {
+    let ground = ground(shelf, player, visual, window)?;
+    let room = theme::active();
+    let wall = container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(room.wall)),
+            ..container::Style::default()
+        });
+    let bands = visual.audio.map(crate::visualizer::frequency_bands);
+    let blobs = visual.audio.is_some() && visual.mode != crate::visualizer::Mode::Off;
+    let weather = crate::glass::Glass::new(
+        bands.as_ref().map_or(&[][..], |bands| &bands[..]),
+        crate::visualizer::inks(ground.hues, room),
+    )
+    .framed(window, ground.wash, blobs);
+    Some(frosted(stack![wall, weather].into(), true))
 }
 
 /// **How opaque the frost is** over a backdrop nobody is looking at.
@@ -1000,13 +1067,8 @@ fn plain_cover(work: &Work, t: f32, edge: f32, album_id: u64) -> Element<'static
 /// and it would be *more* visible there: a wash over the whole body changing in
 /// one frame is a light being switched, and the record it belongs to would
 /// still be arriving.
-fn field_layer(
-    from: Option<field::Field>,
-    to: Option<field::Field>,
-    t: f32,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    let Some(gradient) = field::dissolve(from, to, t, room) else {
+fn field_layer(wash: Option<iced::gradient::Linear>) -> Element<'static, Message> {
+    let Some(gradient) = wash else {
         return Space::new().width(Length::Fill).height(Length::Fill).into();
     };
     container(Space::new().width(Length::Fill).height(Length::Fill))

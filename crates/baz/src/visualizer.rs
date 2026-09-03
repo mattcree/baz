@@ -51,7 +51,7 @@ const INK_RANGE: f32 = 0.62;
 /// to use, and inventing one would be the field module's cardinal sin — and
 /// the wrong answer for everything else, which is why it is a fallback now
 /// rather than the rule.
-fn inks(field: Option<crate::field::Field>, room: &theme::Palette) -> [iced::Color; 3] {
+pub(crate) fn inks(field: Option<crate::field::Field>, room: &theme::Palette) -> [iced::Color; 3] {
     field.map_or([room.lamp; 3], |field| field.inks(room))
 }
 
@@ -764,7 +764,7 @@ fn amplitude_height(amplitude: f32) -> f32 {
     clippy::cast_possible_wrap,
     reason = "sample rates are audio-sized integers and both loop bounds are fixed below 256"
 )]
-fn frequency_bands(audio: &VisualizationFrame) -> [f32; BANDS] {
+pub(crate) fn frequency_bands(audio: &VisualizationFrame) -> [f32; BANDS] {
     if audio.sample_rate == 0 {
         return [0.0; BANDS];
     }
