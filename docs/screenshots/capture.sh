@@ -598,7 +598,10 @@ sleep 6
 
 click 105 185                           # Playlists
 sleep 1.5
-click 764 316                           # `New smart playlist` — centre of its tile
+click 614 316                           # `New smart playlist` — centre of its tile
+# (x re-derived 2026-09-03 from a frame: the Playlists wall hangs from the
+# Library's edge since WORK.md item 92, 55 px left of where it stood, and
+# 764 had come to land on the Favourites tile beside it.)
 sleep 3
 if [[ -z $REAL ]]; then
   click 1120 626                        # `Listen to my music` — the one step first
