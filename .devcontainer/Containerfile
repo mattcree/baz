@@ -2,17 +2,23 @@
 # source of truth for the package list; keep them in sync).
 FROM registry.fedoraproject.org/fedora:42
 
+# The same list as PACKAGES in scripts/toolbox-setup.sh, in the same order;
+# that script's comments say why each line is there.
 RUN dnf install -y \
       gcc gcc-c++ make git pkgconf-pkg-config \
-      alsa-lib-devel flac \
+      alsa-lib-devel flac ffmpeg-free \
       libxkbcommon-devel libxkbcommon-x11 \
-      xorg-x11-server-Xvfb ImageMagick \
+      xorg-x11-server-Xvfb ImageMagick xdotool \
+      libXcursor libXi libXrandr libXinerama \
+      openssl-devel \
+      pipewire-alsa \
       python3-pyyaml desktop-file-utils appstream \
     && dnf clean all
 
-# Rust via rustup (pinned by rust-toolchain.toml once the workspace exists)
+# Rust via rustup. `rust-toolchain.toml` at the workspace root pins the
+# channel; rustup honours it on first use, so no default is chosen here.
 RUN useradd -m dev
 USER dev
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --default-toolchain stable --profile default
+      | sh -s -- -y --default-toolchain none --profile minimal
 ENV PATH="/home/dev/.cargo/bin:${PATH}"

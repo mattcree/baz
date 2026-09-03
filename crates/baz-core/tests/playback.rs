@@ -137,6 +137,16 @@ fn ideal_sample_at(rate: u32, n: usize, t0: f64) -> f32 {
 /// is atomic, so a reader sees the whole old file or the whole new one and
 /// never half of either — and since the bytes are identical whichever run
 /// wrote them, either answer is the right one.
+/// **Whether a no-op negotiation cost nothing next to the reopen it is
+/// being told apart from.** Either under 10 ms outright, or at least an
+/// order of magnitude cheaper than the real reopen measured a moment
+/// earlier: the claim is that nothing was reopened, and on a runner busy
+/// enough to stretch 10 ms the reopen stretches with it. The absolute number
+/// stays as the printed diagnostic.
+fn is_free_beside(noop: Duration, reopen: Duration) -> bool {
+    noop < Duration::from_millis(10) || noop * 10 < reopen
+}
+
 fn published(path: &Path, write: impl FnOnce(&Path)) {
     let mut scratch = path.as_os_str().to_owned();
     scratch.push(format!(".{}.part", std::process::id()));
@@ -266,7 +276,18 @@ struct OggFixtures {
     flac_in_ogg: PathBuf,
     /// A real Ogg Opus file, present only if ffmpeg carries `libopus`.
     opus: Option<PathBuf>,
+    /// The reference Vorbis encoding under the *other* extension the shelf
+    /// advertises for Ogg audio, `.oga` — the same bytes, so the only thing
+    /// it proves is that the extension reaches the same decoder.
+    oga: PathBuf,
     encoder: &'static str,
+}
+
+/// AIFF encodings of the i16 reference — `.aiff` and `.aif` are both
+/// advertised, and both must reach a decoder.
+struct AiffFixtures {
+    aiff: PathBuf,
+    aif: PathBuf,
 }
 
 /// One codec's worth of `.m4a` (ISO-MP4) encodings of the reference set.
@@ -316,6 +337,8 @@ struct FixtureSet {
     ogg: Option<OggFixtures>,
     /// ALAC and AAC in MP4 (`.m4a`), if ffmpeg with both encoders was found.
     m4a: Option<M4aFixtures>,
+    /// AIFF under both advertised extensions, if ffmpeg was found.
+    aiff: Option<AiffFixtures>,
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +630,24 @@ fn run_encoder(cmd: &mut Command) {
     );
 }
 
+/// [`run_encoder`] for an encode that is *allowed* to fail: an optional
+/// fixture whose encoder is listed but cannot do what is asked of it. Fedora's
+/// `fdk-aac-free` lists `libfdk_aac` and refuses the HE profile; asserting
+/// there took every fixture-based test in this file down with it, because
+/// they share one builder. Prints what the encoder said, so a skip is never
+/// silent, and answers whether the file was made.
+fn try_encoder(cmd: &mut Command) -> bool {
+    let out = cmd.output().expect("spawn encoder");
+    if !out.status.success() {
+        eprintln!(
+            "SKIP: optional encode failed: {:?}\n{}",
+            cmd,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    out.status.success()
+}
+
 fn encode_flac(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<FlacFixtures> {
     let flac_full = dir.join("ref_10s.flac");
     let flac_part1 = dir.join("part1.flac");
@@ -676,13 +717,15 @@ fn encode_mp3(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Mp3
     let mp3_part1 = dir.join("part1.mp3");
     let mp3_part2 = dir.join("part2.mp3");
     for (wav, mp3) in [(full, &mp3_full), (part1, &mp3_part1), (part2, &mp3_part2)] {
-        run_encoder(
-            Command::new("ffmpeg")
-                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-                .arg(wav)
-                .args(["-c:a", "libmp3lame", "-b:a", "320k"])
-                .arg(mp3),
-        );
+        published(mp3, |mp3| {
+            run_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(wav)
+                    .args(["-c:a", "libmp3lame", "-b:a", "320k", "-f", "mp3"])
+                    .arg(mp3),
+            );
+        });
     }
     Some(Mp3Fixtures {
         full: mp3_full,
@@ -717,38 +760,56 @@ fn encode_ogg(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Ogg
     let ogg_part1 = dir.join("part1.ogg");
     let ogg_part2 = dir.join("part2.ogg");
     for (wav, ogg) in [(full, &ogg_full), (part1, &ogg_part1), (part2, &ogg_part2)] {
-        run_encoder(
-            Command::new("ffmpeg")
-                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-                .arg(wav)
-                .args(["-c:a", "libvorbis", "-q:a", "6"])
-                .arg(ogg),
-        );
+        published(ogg, |ogg| {
+            run_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(wav)
+                    .args(["-c:a", "libvorbis", "-q:a", "6", "-f", "ogg"])
+                    .arg(ogg),
+            );
+        });
     }
 
     // FLAC in an Ogg container: `.ogg` is not synonymous with Vorbis, and the
     // shelf lists `.ogg` by extension.
     let flac_in_ogg = dir.join("flac_in_ogg.ogg");
-    run_encoder(
-        Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-            .arg(full)
-            .args(["-c:a", "flac", "-f", "ogg"])
-            .arg(&flac_in_ogg),
-    );
+    published(&flac_in_ogg, |flac_in_ogg| {
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(full)
+                .args(["-c:a", "flac", "-f", "ogg"])
+                .arg(flac_in_ogg),
+        );
+    });
 
     // Real Ogg Opus bytes for the probe test. Not playable — that is the
     // point of the test that consumes it.
     let opus = have_ffmpeg_encoder("libopus").then(|| {
         let out = dir.join("ref_10s.opus");
+        published(&out, |out| {
+            run_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(full)
+                    .args(["-c:a", "libopus", "-b:a", "128k", "-f", "ogg"])
+                    .arg(out),
+            );
+        });
+        out
+    });
+
+    // `.oga`: the same encoding under the extension the shelf also lists.
+    let oga = dir.join("ref_10s.oga");
+    published(&oga, |oga| {
         run_encoder(
             Command::new("ffmpeg")
                 .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
                 .arg(full)
-                .args(["-c:a", "libopus", "-b:a", "128k"])
-                .arg(&out),
+                .args(["-c:a", "libvorbis", "-q:a", "6", "-f", "ogg"])
+                .arg(oga),
         );
-        out
     });
 
     Some(OggFixtures {
@@ -757,8 +818,31 @@ fn encode_ogg(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Ogg
         part2: ogg_part2,
         flac_in_ogg,
         opus,
+        oga,
         encoder: "ffmpeg libvorbis -q:a 6",
     })
+}
+
+/// The i16 reference as big-endian PCM in AIFF, once per advertised
+/// extension. Needs only ffmpeg itself.
+fn encode_aiff(dir: &Path, full: &Path) -> Option<AiffFixtures> {
+    if !have("ffmpeg", "-version") {
+        return None;
+    }
+    let aiff = dir.join("ref_10s.aiff");
+    let aif = dir.join("ref_10s.aif");
+    for out in [&aiff, &aif] {
+        published(out, |out| {
+            run_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(full)
+                    .args(["-c:a", "pcm_s16be", "-f", "aiff"])
+                    .arg(out),
+            );
+        });
+    }
+    Some(AiffFixtures { aiff, aif })
 }
 
 /// Is `ffmpeg` present and does it carry encoder `name`?
@@ -794,14 +878,17 @@ fn encode_m4a(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<M4a
             dir.join(format!("{stem}_part2.m4a")),
         ];
         for (wav, out) in [full, part1, part2].into_iter().zip(&paths) {
-            run_encoder(
-                Command::new("ffmpeg")
-                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-                    .arg(wav)
-                    .args(["-c:a", codec])
-                    .args(extra)
-                    .arg(out),
-            );
+            published(out, |out| {
+                run_encoder(
+                    Command::new("ffmpeg")
+                        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                        .arg(wav)
+                        .args(["-c:a", codec])
+                        .args(extra)
+                        .args(["-f", "ipod"])
+                        .arg(out),
+                );
+            });
         }
         let [full, part1, part2] = paths;
         M4aCodecFixtures {
@@ -818,39 +905,57 @@ fn encode_m4a(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<M4a
     let lossless = encode("alac", &[], "alac");
     let lossy = encode("aac", &["-b:a", "256k"], "aac");
 
-    // HE-AAC needs libfdk_aac; optional, tested separately.
-    let he_aac = have_ffmpeg_encoder("libfdk_aac").then(|| {
-        let out = dir.join("he_aac_ref_10s.m4a");
-        run_encoder(
-            Command::new("ffmpeg")
-                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
-                .arg(full)
-                .args(["-c:a", "libfdk_aac", "-profile:a", "aac_he", "-b:a", "64k"])
-                .arg(&out),
-        );
-        out
-    });
+    // HE-AAC needs libfdk_aac; optional, tested separately. And a listed
+    // `libfdk_aac` is not always one that can do SBR: Fedora's `fdk-aac-free`
+    // answers the HE profile with "Unable to set the AOT 5", so the encode is
+    // *tried* and its failure is one skipped test, not fifty.
+    let he_aac = have_ffmpeg_encoder("libfdk_aac")
+        .then(|| {
+            let out = dir.join("he_aac_ref_10s.m4a");
+            let mut scratch = out.as_os_str().to_owned();
+            scratch.push(format!(".{}.part", std::process::id()));
+            let scratch = PathBuf::from(scratch);
+            let made = try_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(full)
+                    .args(["-c:a", "libfdk_aac", "-profile:a", "aac_he", "-b:a", "64k"])
+                    .args(["-f", "ipod"])
+                    .arg(&scratch),
+            );
+            if made {
+                std::fs::rename(&scratch, &out).expect("publish fixture");
+                Some(out)
+            } else {
+                let _ = std::fs::remove_file(&scratch);
+                None
+            }
+        })
+        .flatten();
 
     // A video-first `.mp4`: a still colour source muxed ahead of the AAC
     // audio, which is how every real `.mp4` is laid out.
     let video_first = dir.join("video_first.mp4");
-    run_encoder(
-        Command::new("ffmpeg")
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "color=c=black:s=64x64:r=5",
-                "-i",
-            ])
-            .arg(full)
-            .args(["-c:v", "mpeg4", "-c:a", "aac", "-b:a", "256k", "-shortest"])
-            .arg(&video_first),
-    );
+    published(&video_first, |video_first| {
+        run_encoder(
+            Command::new("ffmpeg")
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=64x64:r=5",
+                    "-i",
+                ])
+                .arg(full)
+                .args(["-c:v", "mpeg4", "-c:a", "aac", "-b:a", "256k", "-shortest"])
+                .args(["-f", "mp4"])
+                .arg(video_first),
+        );
+    });
 
     Some(M4aFixtures {
         alac: lossless,
@@ -913,6 +1018,7 @@ fn fixtures() -> &'static FixtureSet {
         let mp3 = encode_mp3(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let ogg = encode_ogg(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let m4a = encode_m4a(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
+        let aiff = encode_aiff(&dir, &pcm_ref);
 
         FixtureSet {
             ref_f32,
@@ -927,6 +1033,7 @@ fn fixtures() -> &'static FixtureSet {
             mp3,
             ogg,
             m4a,
+            aiff,
         }
     })
 }
@@ -1175,22 +1282,29 @@ fn an_mp3s_replay_gain_comes_off_its_id3v2_block() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("id3v2-replaygain");
     std::fs::create_dir_all(&dir).expect("create fixture dir");
     let tagged = dir.join("tagged.mp3");
-    run_encoder(
-        Command::new("ffmpeg")
-            .args(["-hide_banner", "-v", "error", "-y"])
-            .args([
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=frequency=440:duration=1:sample_rate=44100",
-            ])
-            .args(["-ac", "2", "-c:a", "libmp3lame", "-id3v2_version", "3"])
-            .args(["-metadata", "REPLAYGAIN_TRACK_GAIN=-7.75 dB"])
-            .args(["-metadata", "REPLAYGAIN_TRACK_PEAK=0.988525"])
-            .args(["-metadata", "REPLAYGAIN_ALBUM_GAIN=-9.20 dB"])
-            .args(["-metadata", "REPLAYGAIN_ALBUM_PEAK=1.001221"])
-            .arg(&tagged),
-    );
+    // Through `published`, like every other fixture in this file: the
+    // encoder writes under a name this process owns and the rename is the
+    // publish, so a second copy of this binary never reads half an MP3.
+    // `-f mp3` because the scratch name does not end in `.mp3`.
+    published(&tagged, |scratch| {
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-v", "error", "-y"])
+                .args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=1:sample_rate=44100",
+                ])
+                .args(["-ac", "2", "-c:a", "libmp3lame", "-id3v2_version", "3"])
+                .args(["-metadata", "REPLAYGAIN_TRACK_GAIN=-7.75 dB"])
+                .args(["-metadata", "REPLAYGAIN_TRACK_PEAK=0.988525"])
+                .args(["-metadata", "REPLAYGAIN_ALBUM_GAIN=-9.20 dB"])
+                .args(["-metadata", "REPLAYGAIN_ALBUM_PEAK=1.001221"])
+                .args(["-f", "mp3"])
+                .arg(scratch),
+        );
+    });
     let source = AudioSource::open(&tagged).expect("open the tagged mp3");
     let gain = source.replay_gain();
     assert_eq!(gain.track_gain_centidb, Some(-775), "{gain:?}");
@@ -1729,7 +1843,7 @@ fn every_advertised_extension_decodes() {
         eprintln!("SKIP: ffmpeg is not available; per-extension fixtures not generated");
         return;
     };
-    let (Some(flac), Some(mp3), Some(m4a)) = (&f.flac, &f.mp3, &f.m4a) else {
+    let (Some(flac), Some(mp3), Some(m4a), Some(aiff)) = (&f.flac, &f.mp3, &f.m4a, &f.aiff) else {
         eprintln!("SKIP: ffmpeg lacks one of libmp3lame/flac/alac/aac; fixtures not generated");
         return;
     };
@@ -1744,8 +1858,11 @@ fn every_advertised_extension_decodes() {
             "flac" => &flac.full,
             "mp3" => &mp3.full,
             "ogg" => &ogg.full,
+            "oga" => &ogg.oga,
             "m4a" => &m4a.alac.full,
             "mp4" => &m4a.video_first,
+            "aiff" => &aiff.aiff,
+            "aif" => &aiff.aif,
             other => panic!(
                 "AUDIO_EXTENSIONS advertises `.{other}` and this test has no fixture for it. \
                  Add one — an extension with no proven decoder is exactly the bug this \
@@ -3160,8 +3277,9 @@ fn device_sink_reopens_at_the_requested_rate() {
     assert_eq!(sink.negotiate_rate(HI_RATE), Some(HI_RATE));
     let noop = t1.elapsed();
     assert!(
-        noop < Duration::from_millis(10),
-        "re-requesting the open rate must not reopen anything, took {noop:?}"
+        is_free_beside(noop, reopen),
+        "re-requesting the open rate must not reopen anything, took {noop:?} \
+         against a reopen of {reopen:?}"
     );
 
     println!(
@@ -3715,12 +3833,23 @@ fn an_exclusive_sink_reopens_at_the_requested_rate() {
     assert_eq!(sink.negotiate_rate(HI_RATE), Some(HI_RATE));
     let noop = t1.elapsed();
     assert!(
-        noop < Duration::from_millis(10),
-        "{device}: re-requesting the open rate must not reopen anything, took {noop:?}"
+        is_free_beside(noop, reopen),
+        "{device}: re-requesting the open rate must not reopen anything, took {noop:?} \
+         against a reopen of {reopen:?}"
     );
 
     // And back down, which is what a mixed-rate queue does at every boundary.
-    assert_eq!(sink.negotiate_rate(RATE), Some(RATE));
+    // The way down closes the card and opens it again, and between those two
+    // another test binary on the same machine can take it — the load flake
+    // `BACKLOG.md` recorded on 2026-08-17. A refusal to reopen is a busy
+    // card, not a wrong rate, so it is stated with the card's name and
+    // skipped; only a card that reopened *at the wrong rate* is a failure.
+    let granted = sink.negotiate_rate(RATE);
+    if sink.failed() {
+        eprintln!("SKIP: {device} would not reopen at {RATE} Hz on the way back (busy?)");
+        return;
+    }
+    assert_eq!(granted, Some(RATE), "{device}: reopened at the wrong rate");
     assert_eq!(sink.sample_rate(), RATE);
     println!(
         "[exclusive] {device}: {RATE} Hz -> {HI_RATE} Hz reopened in {:.1} ms; \

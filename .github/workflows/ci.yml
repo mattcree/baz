@@ -67,6 +67,27 @@ jobs:
       - name: Install ALSA headers (cpal via --all-features)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # **The reference encoders, or the reference tests do not run.** The
+      # golden-file suites (crates/baz-core/tests/playback.rs, formats.rs)
+      # encode their fixtures with ffmpeg and flac and print `SKIP` — and
+      # pass — where those are absent. Until 2026-09-03 no runner had them, so
+      # every gapless, lossless and per-extension claim in ENGINEERING.md was
+      # asserted on developer machines only, and three advertised extensions
+      # had no fixture at all without anything going red. The suites still
+      # skip individual encodes a given ffmpeg cannot do (HE-AAC needs a full
+      # libfdk_aac, which no distribution build carries); they no longer skip
+      # wholesale.
+      - name: Install reference encoders (ffmpeg, flac)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ffmpeg flac
+      - name: Install reference encoders (ffmpeg, flac)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg flac
+      - name: Install reference encoders (ffmpeg, flac)
+        if: runner.os == 'Windows'
+        run: choco install -y --no-progress ffmpeg flac
+      - name: Reference encoders present
+        run: ffmpeg -version | head -1 && flac --version
       - uses: Swatinem/rust-cache@v2
       # --no-fail-fast: cargo stops at the first failing test binary, so a
       # crashing suite can hide failures in every suite that sorts after it
@@ -375,22 +396,51 @@ jobs:
       #
       # **Every target runs, even after one fails.** A `run:` block is
       # `bash -e`, so the first non-zero `cargo fuzz run` used to abort the
-      # step and the targets after it were never exercised at all. That
-      # mattered the moment one target became reliably red: `playback_decode`
-      # reports panics inside Symphonia's own parsers (ADR-0040 §4 — a
-      # contained panic is still a panic to libFuzzer, whose hook aborts before
-      # `catch_unwind` runs), and hiding the other five behind it would cost
-      # far more than it saves. The step still fails, with the list.
+      # step and the targets after it were never exercised at all.
+      #
+      # **Every target starts from `fuzz/seeds/<target>/`**, a committed
+      # corpus of one real input per shape the target parses (a played line,
+      # an `#EXTM3U` file, each `cmd`, a tagged WAV and one file per codec).
+      # Without it each five-minute run began from an empty corpus, and
+      # `playback_decode` in particular spent its budget discovering that a
+      # RIFF header exists. The working corpus is the runner's own scratch
+      # directory; the seeds are read, never written.
+      #
+      # **`playback_decode` is reported, not gated.** It reaches Symphonia's
+      # parsers, and a panic inside them is upstream's by decision (ADR-0040
+      # §4: a contained panic is still a panic to libFuzzer, whose hook aborts
+      # before `catch_unwind` runs). A job that is red for a written-down
+      # upstream condition is a job nobody reads, and the five targets that
+      # are baz's own to keep green would lose their audience. Its findings
+      # are annotated and its artifacts uploaded; baz's own five fail the job.
       - run: |
           failed=""
+          upstream=""
           for target in $(cargo fuzz list); do
             echo "::group::fuzz $target"
-            cargo fuzz run "$target" -- \
-              -max_total_time=300 -rss_limit_mb=2048 -malloc_limit_mb=6144 \
-              || failed="$failed $target"
+            mkdir -p "fuzz/corpus/$target"
+            if cargo fuzz run "$target" "fuzz/corpus/$target" "fuzz/seeds/$target" -- \
+              -max_total_time=300 -rss_limit_mb=2048 -malloc_limit_mb=6144; then
+              :
+            elif [ "$target" = playback_decode ]; then
+              upstream="$upstream $target"
+            else
+              failed="$failed $target"
+            fi
             echo "::endgroup::"
           done
+          if [ -n "$upstream" ]; then
+            echo "::warning::fuzz findings inside upstream parsers (not gating):$upstream"
+          fi
           if [ -n "$failed" ]; then
             echo "fuzz targets with findings:$failed"
             exit 1
           fi
+      # The crashing inputs libFuzzer wrote, gating or not, so a finding can
+      # be reproduced from the run that made it rather than re-found.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore

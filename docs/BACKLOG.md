@@ -1130,7 +1130,7 @@ accessibility and colour beyond the mirror tests; MPRIS conformance; and UI/UX.
   of the arithmetic this entry was written against.
 
 - **A rare flake in `the_play_recorded_event_follows_the_line_into_the_file`**
-  (`crates/baz-core/tests/history.rs:125`), **Windows only, observed once** —
+  (`crates/baz-core/tests/history.rs:420`), **Windows only, observed once** —
   2026-08-09, CI run 31331470261 on `bcbba7f`. It timed out waiting for an
   event after the full `EVENT_TIMEOUT` of **20 s**, which is long enough that
   a merely slow runner is an uncomfortable explanation. Re-running the same

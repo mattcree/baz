@@ -4033,7 +4033,19 @@ fn a_track_added_later_carries_a_later_first_seen() {
         .add_tracks([track("/m/a/b/01.flac", "A", "First", "One", 1)])
         .expect("first");
     let first = library.albums()[0].first_seen_ns.expect("stamped");
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    // Wait until the clock the stamp is read from has visibly moved, rather
+    // than for a fixed 5 ms that a coarse system clock — a VM on a 15.6 ms
+    // tick, say — need not honour. The assertion below is strict.
+    let now_ns = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| {
+                i64::try_from(since.as_nanos()).unwrap_or(i64::MAX)
+            })
+    };
+    while now_ns() <= first {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
     library
         .add_tracks([track("/m/c/d/01.flac", "C", "Second", "One", 1)])
         .expect("second");

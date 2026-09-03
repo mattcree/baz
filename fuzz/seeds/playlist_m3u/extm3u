@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:245,Talk Talk - Myrrhman
+/music/Talk Talk/Laughing Stock/01 - Myrrhman.flac
+#EXTINF:-1,Unknown
+relative/path.mp3

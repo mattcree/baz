@@ -6,8 +6,14 @@ set -euo pipefail
 
 PACKAGES=(
   gcc gcc-c++ make git pkgconf-pkg-config
-  # Audio output (cpal/ALSA) and fixture encoding for the golden-file tests
-  alsa-lib-devel flac
+  # Audio output (cpal/ALSA) and fixture encoding for the golden-file tests.
+  # `ffmpeg-free` is Fedora's own build: LAME, Vorbis, Opus, native AAC and
+  # ALAC — every encoder `crates/baz-core/tests/playback.rs` asks for except
+  # HE-AAC, which `fdk-aac-free` lists and cannot do, and which that suite
+  # skips on its own. Without ffmpeg the fifty-odd reference-encoder tests
+  # print `SKIP` and pass, and a container built from this script before
+  # 2026-09-03 never ran one of them. Fifth entry in the running list.
+  alsa-lib-devel flac ffmpeg-free
   # iced/winit needs these to open a window; the X11 one is required even
   # for headless Xvfb runs (winit panics without it).
   libxkbcommon-devel libxkbcommon-x11

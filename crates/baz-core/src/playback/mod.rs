@@ -270,13 +270,26 @@ impl OutputMode {
     /// ignoring it would mean playing in shared mode while the listener
     /// believed otherwise, which is the failure this whole design is against.
     pub fn from_env() -> Result<Self, PlaybackError> {
-        let raw = std::env::var(OUTPUT_MODE_ENV).unwrap_or_default();
+        Self::from_values(
+            std::env::var(OUTPUT_MODE_ENV).ok().as_deref(),
+            std::env::var(OUTPUT_DEVICE_ENV).ok().as_deref(),
+        )
+    }
+
+    /// [`Self::from_env`] over the two values themselves, so the rule —
+    /// and its refusal — can be tested without touching the process
+    /// environment (this crate forbids the `unsafe` that would take).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::from_env`].
+    pub fn from_values(mode: Option<&str>, device: Option<&str>) -> Result<Self, PlaybackError> {
+        let raw = mode.unwrap_or_default();
         let requested = raw.trim().to_ascii_lowercase();
         match requested.as_str() {
             "" | "shared" => Ok(Self::Shared),
             "exclusive" => Ok(Self::Exclusive {
-                device: std::env::var(OUTPUT_DEVICE_ENV)
-                    .ok()
+                device: device
                     .map(|d| d.trim().to_string())
                     .filter(|d| !d.is_empty()),
             }),
@@ -514,5 +527,44 @@ impl From<rubato::ResamplerConstructionError> for PlaybackError {
 impl From<rubato::ResampleError> for PlaybackError {
     fn from(e: rubato::ResampleError) -> Self {
         Self::Resample(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod output_mode_tests {
+    use super::{OutputMode, PlaybackError};
+
+    /// **The listener's word is taken as written, and a word that is neither
+    /// is refused.** Absent and `shared` are shared; `exclusive` in any case
+    /// or padding is exclusive, with the device trimmed and an empty device
+    /// meaning "choose"; anything else is the error branch that exists so
+    /// baz never plays in shared mode while the listener believes otherwise.
+    #[test]
+    fn the_output_mode_is_read_as_written_and_refused_otherwise() {
+        assert!(matches!(
+            OutputMode::from_values(None, None),
+            Ok(OutputMode::Shared)
+        ));
+        assert!(matches!(
+            OutputMode::from_values(Some("shared"), Some("hw:0,0")),
+            Ok(OutputMode::Shared)
+        ));
+        assert!(matches!(
+            OutputMode::from_values(Some("  Exclusive "), Some(" hw:CARD,0 ")),
+            Ok(OutputMode::Exclusive { device: Some(d) }) if d == "hw:CARD,0"
+        ));
+        assert!(matches!(
+            OutputMode::from_values(Some("exclusive"), Some("   ")),
+            Ok(OutputMode::Exclusive { device: None })
+        ));
+        assert!(matches!(
+            OutputMode::from_values(Some("exclusive"), None),
+            Ok(OutputMode::Exclusive { device: None })
+        ));
+        let refused = OutputMode::from_values(Some("bitperfect"), None);
+        assert!(
+            matches!(refused, Err(PlaybackError::Device(ref why)) if why.contains("bitperfect")),
+            "{refused:?}"
+        );
     }
 }
