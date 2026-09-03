@@ -1561,8 +1561,14 @@ mod tests {
                     _ => {}
                 }
             }
+            // `wall_grid()` is the wall's grid *whatever shape the collection
+            // is hung in*: Home hangs tiles, and under the list layout
+            // `grid()` is one 44 px column that shrank them to thumbnails
+            // (the owner, 2026-09-03: "the list view of Home is not good").
+            // Either name is the wall's own geometry at the current density;
+            // what this test forbids is a page resolving a grid of its own.
             assert!(
-                tail[..end].contains("state.grid()"),
+                tail[..end].contains("state.grid()") || tail[..end].contains("state.wall_grid()"),
                 "{call} is not handed the wall's own grid"
             );
         }

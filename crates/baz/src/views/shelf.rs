@@ -391,11 +391,17 @@ fn list_row<'a>(
         Space::new().width(Length::Fixed(theme::GAP_MD)).into()
     };
 
-    let title_ink = if playing || selected || hovered {
-        room.paper
-    } else {
-        room.paper_dim
-    };
+    // **Three inks for three ranks**, the wall's own caption in a row: the
+    // title in `paper` at `SIZE_BODY`, the artist in `paper_dim` at
+    // `SIZE_META`, the figures in `paper_faint`. It was one size and one ink
+    // across the row — the owner, 2026-09-03: *"these list views look just
+    // undesigned"* — and a row where the title, the artist and the year are
+    // the same grey at the same size is a row with nothing to read first.
+    // The tile's label already ranks them exactly this way; a list is the
+    // wall with one column, so it ranks them the same.
+    let _ = (playing, selected, hovered);
+    let title_ink = room.paper;
+    let artist_ink = room.paper_dim;
     let meta_ink = room.paper_faint;
 
     let cell = |content: String, width: Length, ink: iced::Color, right: bool| {
@@ -430,8 +436,8 @@ fn list_row<'a>(
     // look like this one.
     let title: Element<'a, Message> = button(
         text(album.title.clone().unwrap_or_else(|| "Untitled".to_owned()))
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
             .color(title_ink)
             .wrapping(text::Wrapping::None),
     )
@@ -447,7 +453,7 @@ fn list_row<'a>(
         cell(
             album.artist.label().to_owned(),
             Length::FillPortion(LIST_ARTIST_PORTION),
-            meta_ink,
+            artist_ink,
             false,
         ),
         cell(

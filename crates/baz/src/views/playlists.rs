@@ -222,16 +222,15 @@ fn list_row<'a>(
     let edge = hang.art;
     let sleeve =
         crate::views::playlist_sleeve_of(shelf, playlist.id, &playlist.art, &playlist.name, edge);
-    let ink = if selected || hovered {
-        room.paper
-    } else {
-        room.paper_dim
-    };
+    // The name is the row's read and wears the Library row's title rank —
+    // `SIZE_BODY` in `paper` — whatever the pointer does; the row's ground
+    // carries hover and selection (`theme::list_row`), the ink does not.
+    let _ = (selected, hovered);
     let name: Element<'a, Message> = button(
         text(playlist.name.clone())
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(ink)
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .color(room.paper)
             .wrapping(text::Wrapping::None),
     )
     .padding(theme::pad(0.0, theme::GAP_XS))
@@ -318,10 +317,12 @@ fn ghost_row(
                     // `GAP_XS`; a making verb is not, and plain text beside a
                     // padded one put two labels four pixels apart in a column
                     // that has one edge.
+                    // A making verb sits one rank under a list's name: the
+                    // name's size, the artist's ink.
                     container(
                         text(word)
-                            .size(theme::SIZE_META)
-                            .line_height(theme::LEADING_META)
+                            .size(theme::SIZE_BODY)
+                            .line_height(theme::LEADING_BODY)
                             .color(room.paper_dim),
                     )
                     .padding(theme::pad(0.0, theme::GAP_XS)),

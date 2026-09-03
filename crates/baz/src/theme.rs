@@ -1846,21 +1846,24 @@ pub fn sidebar_can_expand(window_w: f32) -> bool {
 /// card ([`dest_row`]) spans the tile and the word together.
 pub const SIDEBAR_GLYPH_BOX: f32 = SIDEBAR_SLEEVE;
 
-/// The glyph drawn inside a destination tile: **32** — [`STEPPER_HIT`], the
-/// stepper's control size.
+/// The glyph drawn inside a destination tile: [`ICON_PX`] **20**, the one
+/// size every mark in the product is drawn at.
 ///
 /// It used to fill the box at the transport's 40 ([`TRANSPORT_HIT`]) and hang
 /// from the tile's lead, which read as left-justified in the square. Under
 /// the owner's *"make the icons a little bit smaller, as long as the outer
-/// box for them is the same size as a thumbnail"* the mark draws smaller and
-/// **centres** in the 48 tile, a [`GAP_SM`] of air on both sides — the same
-/// headroom the glyph had since it was [`ICON_PX`] 20 in a 28 box, now
-/// symmetrical, so the four destinations' marks and the search well's
-/// magnifier stand on one centre.
-pub const SIDEBAR_GLYPH_PX: f32 = STEPPER_HIT;
+/// box for them is the same size as a thumbnail"* it went to 32 and
+/// **centred** in the 48 tile. Then, 2026-09-03: *"there is also a lack of
+/// consistency around this in terms of size"* — and there was: the four
+/// destinations were the only marks in the product not drawn at
+/// [`ICON_PX`], and at 32 they were the sprite sheet's fine strokes
+/// magnified into something heavier than every mark beside them. The box
+/// stays the thumbnail's 48; the mark is the set's own size, on the same
+/// centre as the search well's magnifier, which is 20 too.
+pub const SIDEBAR_GLYPH_PX: f32 = ICON_PX;
 
 /// The air between a destination tile's edge and the glyph centred in it:
-/// ([`SIDEBAR_GLYPH_BOX`] 48 − [`SIDEBAR_GLYPH_PX`] 32) / 2 = **8**.
+/// ([`SIDEBAR_GLYPH_BOX`] 48 − [`SIDEBAR_GLYPH_PX`] 20) / 2 = **14**.
 ///
 /// Declared because the `Now playing` lamp has to be inset by it. The dot
 /// tucks against the **mark's** top-right corner, not the tile's, and it was
@@ -3329,7 +3332,7 @@ pub const APP_BAR_MARKS_W: f32 = 5.0 * STEPPER_HIT;
 /// undeclared tenant is a region whose width nobody has written down.
 /// It remains a statement, not a control, and uses the committed 64 px raster
 /// at a crisp 32 logical px.
-pub const APP_MARK_PX: f32 = SIDEBAR_GLYPH_PX;
+pub const APP_MARK_PX: f32 = STEPPER_HIT;
 
 /// Zone 1's slot is the mark and nothing else.
 ///
@@ -6839,14 +6842,14 @@ mod tests {
             assert!(SIDEBAR_ROW_PITCH == 52.0);
             assert!(SIDEBAR_ROW_GAP < SIDEBAR_ROW_H);
         }
-        // The destination tile is the sleeve's own footprint, its glyph one
-        // `GAP_SM` smaller on **both** sides (centred, not hung from the lead)
-        // at the stepper's control size, and the head's row pitch is the tile
+        // The destination tile is the sleeve's own footprint, its glyph
+        // centred in it (not hung from the lead) at the one size every mark
+        // in the product is drawn at, and the head's row pitch is the tile
         // itself (a destination adds no air of its own).
         const {
             assert!(SIDEBAR_GLYPH_BOX == SIDEBAR_SLEEVE);
-            assert!(SIDEBAR_GLYPH_PX == STEPPER_HIT);
-            assert!(SIDEBAR_GLYPH_BOX == SIDEBAR_GLYPH_PX + 2.0 * GAP_SM);
+            assert!(SIDEBAR_GLYPH_PX == ICON_PX);
+            assert!(SIDEBAR_GLYPH_BOX == SIDEBAR_GLYPH_PX + 2.0 * SIDEBAR_GLYPH_INSET);
             assert!(SIDEBAR_DEST_H == SIDEBAR_GLYPH_BOX);
             assert!(SIDEBAR_HEAD_GLYPH_X == SIDEBAR_PAD + SIDEBAR_GLYPH_BOX / 2.0);
             assert!(SIDEBAR_HEAD_TEXT_X == SIDEBAR_PAD + SIDEBAR_GLYPH_BOX + GAP_SM);
@@ -6864,9 +6867,15 @@ mod tests {
         // this is a constraint on the bar stated where the thing it is
         // constrained to is defined. The bar yielded a `GAP_MD` lead that was
         // putting the mark's ink inside law L1's gutter anyway.
+        // "Align" is the centre line, which the first assertion is. The mark
+        // and the destination glyphs were also the same *size* until
+        // 2026-09-03, when the glyphs went to the set's own 20 for
+        // consistency with every other mark; the mark keeps its 32, because it
+        // is a statement rather than a control and the committed 64 px raster
+        // is crisp at exactly that.
         const {
             assert!(APP_BAR_EDGE + APP_MARK_PX / 2.0 == SIDEBAR_HEAD_GLYPH_X);
-            assert!(APP_MARK_PX == SIDEBAR_GLYPH_PX);
+            assert!(APP_MARK_PX == STEPPER_HIT);
             assert!(APP_BAR_NAME_W == APP_MARK_PX);
         }
         // Every one of them on the 4 px lattice (law L2).

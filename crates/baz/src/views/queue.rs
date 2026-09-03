@@ -198,6 +198,25 @@ fn album_of<'a>(
     item: &crate::vm::QueueItemVm,
     queue_artist: &str,
 ) -> Option<&'a crate::vm::AlbumVm> {
+    record_of_ref(shelf, item, queue_artist)
+}
+
+/// [`album_of`]'s id, for the art nominations in `app.rs` — the same
+/// resolution the rows draw with, so a row and its sleeve request cannot name
+/// two different records.
+pub(crate) fn record_of(
+    shelf: &Shelf,
+    item: &crate::vm::QueueItemVm,
+    queue_artist: &str,
+) -> Option<u64> {
+    record_of_ref(shelf, item, queue_artist).map(|album| album.id)
+}
+
+fn record_of_ref<'a>(
+    shelf: &'a Shelf,
+    item: &crate::vm::QueueItemVm,
+    queue_artist: &str,
+) -> Option<&'a crate::vm::AlbumVm> {
     if let Some(album) = shelf.album_for_path(&item.path) {
         return Some(album);
     }

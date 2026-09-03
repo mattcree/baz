@@ -1849,24 +1849,43 @@ Rattled off while looking at the build the quality pass produced, in his
 words, triaged here first (the standing rule for a run of short UI asks):
 
 1. *"the icons etc just look corny... they detract. there is also a lack of
-   consistency around this in terms of size etc."* — the icon set and its
-   sizing across the app bar, the sidebar, the transport and the row acts.
-   **Needs a direction, not a fix**: which marks stay, at what optical size,
-   and whether the set is redrawn or replaced. Proposal to follow with frames
-   of every icon at its drawn size beside each other.
-2. *"information hierarchy is quite poor throughout."* — a pass over every
-   surface's type scale, ink and spacing against §8 and §13 of the design
-   system, with frames. Large; the composition audits are the method.
+   consistency around this in terms of size etc."* — **The size half is
+   built** (`WORK.md` item 110): every mark in the product draws at
+   `ICON_PX` 20 now; the lane's four were at 32. **The drawings are the
+   open half.** The contact sheet in
+   `docs/design/impl/2026-09-03-owner-observations/` puts every mark at
+   its drawn size beside the others, and the ones that read as pictograms
+   rather than marks are the lane's own: a solid house, three book spines,
+   three bars, a disc with a dot. The rest of the sheet is one stroke rule
+   and reads as one set. **Proposal:** redraw those four in the sheet's
+   idiom — open shapes on the set's stroke, no solid fills — or drop the
+   lane's marks altogether and let the four words stand, which is what the
+   collapsed lane already cannot do and is the argument against. Either is
+   a drawing decision the owner should look at as a frame, so it is
+   recorded and not guessed.
+2. *"information hierarchy is quite poor throughout."* — **begun where it
+   was worst** (item 109, the list rows); the rest wants the composition
+   audits' method over every surface: the type scale, ink and spacing of
+   each against §8 and §13, with frames. The next candidates from the
+   frames taken today: the record page's `DETAILS` block sets its labels
+   and values at one size; the bottom bar's three lines are two sizes apart
+   where the lane's same three are one; Home's `COLLECTION` figures are the
+   largest type on the page and the least important. Large.
 3. *"the background colour of the section headers in sticky mode is also
    still not the same as the background"* — **the third telling.** Decided
-   and built today (`WORK.md` item 107): the covers stop reaching under the
-   band, so the band needs no ground and inherits the place's exactly.
-4. *"the list view of Home is not good."* — Home's `RECENTLY ADDED` /
-   continue band and the `All songs` block in the list layout. Wants frames
-   before a proposal.
-5. *"in general these list views look just undesigned."* — the Library and
-   Playlists list layouts (item 96 aligned their columns; the owner's point
-   is the composition, not the alignment). Same method as 2.
+   and built (`WORK.md` item 107): the band draws the ground's own layers
+   under the heading, so it is the ground's colour by construction.
+4. *"the list view of Home is not good."* — **Built** (item 108): it was a
+   defect, not a design — Home's tiles were taking the list's 44 px grid.
+5. *"in general these list views look just undesigned."* — **Ranked**
+   (item 109) within the owner's own columns. Two alternatives worth a
+   frame each, neither built because both change his 2026-08-22 mockup:
+   **stack the artist under the title** as the wall's caption and the
+   lane's rows already do, which collapses the artist column and lets the
+   title take the measure; and **a format column** — `FLAC · 16-bit ·
+   44.1 kHz`, the record page's own summary line — between the names and
+   the figures, which fills the 600 px of nothing a two-column table
+   leaves at 1600 wide and is the fact a collector's list is for.
 
 ## Findings of the 2026-09-03 quality pass, not built
 

@@ -5886,20 +5886,7 @@ impl App {
                         self.body_height(),
                     );
                     for item in &queue.items[window.first..window.end] {
-                        let filed_under = item
-                            .album_artist
-                            .as_deref()
-                            .unwrap_or(queue.artist.as_str());
-                        wanted.extend(item.album.as_deref().and_then(|title| {
-                            state
-                                .albums
-                                .iter()
-                                .find(|album| {
-                                    album.title.as_deref() == Some(title)
-                                        && album.artist.label() == filed_under
-                                })
-                                .map(|album| album.id)
-                        }));
+                        wanted.extend(views::queue::record_of(state, item, &queue.artist));
                     }
                 }
             }
@@ -5915,21 +5902,7 @@ impl App {
                         self.body_height(),
                     );
                     for item in &queue.items[window.first..window.end] {
-                        let filed_under = item
-                            .album_artist
-                            .as_deref()
-                            .unwrap_or(queue.artist.as_str());
-                        let id = item.album.as_deref().and_then(|title| {
-                            state
-                                .albums
-                                .iter()
-                                .find(|album| {
-                                    album.title.as_deref() == Some(title)
-                                        && album.artist.label() == filed_under
-                                })
-                                .map(|album| album.id)
-                        });
-                        wanted.extend(id);
+                        wanted.extend(views::queue::record_of(state, item, &queue.artist));
                     }
                 }
             }
@@ -6667,13 +6640,7 @@ impl App {
         if self.place == Place::Home {
             ids.extend(state.home_art());
             if let Some((path, _)) = crate::views::home::standing(&self.player, &self.resume)
-                && let Some(album) = state.albums.iter().find(|album| {
-                    album
-                        .editions
-                        .iter()
-                        .flat_map(|edition| &edition.tracks)
-                        .any(|track| track.path == path)
-                })
+                && let Some(album) = state.album_for_path(path)
             {
                 ids.push(album.id);
             }
@@ -8912,8 +8879,9 @@ impl App {
                 // page's width: a record is drawn at the same size wherever
                 // it is drawn, and the density step reaches every place that
                 // hangs works rather than only the Library (ADR-0028's
-                // fourth-step amendment §2).
-                state.grid(),
+                // fourth-step amendment §2). The *wall's* — Home hangs tiles
+                // whatever shape the Library is in (`Shelf::wall_grid`).
+                state.wall_grid(),
                 collecting,
             ),
             (Screen::Shelf(state), Place::NowPlaying) => {

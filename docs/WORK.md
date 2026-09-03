@@ -2361,6 +2361,46 @@ the full gate. What the pass found and deliberately did **not** build is in
     Frames in `docs/design/impl/2026-09-03-pinned-heading/`. The theme test
     now pins that the band paints nothing over a ground it was handed.
 
+108. **Done 2026-09-03 — Home takes the wall's grid whatever shape the
+    collection is hung in.** *(The owner: "the list view of Home is not
+    good.")* Home draws tiles and was handed `Shelf::grid()`, which under the
+    list layout is one 44 px column: `All songs` shrank to a thumbnail with
+    its caption cut to `All song` / `374 reco`, and `RECENTLY ADDED` collapsed
+    to a 44 × 12 sliver with no sleeves and no names. And `home_art` counted
+    its nominations from the same grid, so once the tiles were back at size
+    four of the five recent records drew as gradients — art nobody had asked
+    for. Both take `Shelf::wall_grid()`; the one-grid scan test accepts it by
+    name and says why. Frames in `docs/design/impl/2026-09-03-owner-observations/`.
+
+109. **Done 2026-09-03 — the list rows rank what they say.** *(The owner:
+    "in general these list views look just undesigned.")* A Library row set
+    its title, its artist, its year and its length at one size in one grey,
+    so nothing was read first; a Playlists row did the same with its name.
+    The rows now wear the wall's own caption ranks: the title or name at
+    `SIZE_BODY` in `paper`, the artist at `SIZE_META` in `paper_dim`, the
+    figures in `paper_faint`; a making verb sits one rank under a name. The
+    columns are the owner's own mockup and are unchanged; two alternatives
+    are in `BACKLOG.md`.
+
+110. **Done 2026-09-03 — one mark size across the product.** *(The owner:
+    "the icons etc just look corny... there is also a lack of consistency
+    around this in terms of size.")* The four destination marks in the lane
+    were the only marks not drawn at `ICON_PX` 20: at 32 they were the
+    sheet's fine strokes magnified into something heavier than every mark
+    beside them, on the same screen as the app bar's 20. They draw at 20 in
+    the same 48 tile, on the same centre as the search well's magnifier; the
+    app mark keeps its 32, being a statement rather than a control. Whether
+    the marks themselves — a house, book spines, three bars, a disc — are the
+    right drawings is the design question still open in `BACKLOG.md`.
+
+111. **Done 2026-09-03 — the art nominations stop scanning the library by
+    title.** Three more sites of the class item 102 removed: the Favourites
+    and Queue pages resolved every visible row's record by a title-and-artist
+    scan over every record when nominating sleeves, and Home's standing
+    track walked every track of every edition. All three go through the path
+    index; the queue's rows and their sleeve requests now resolve a record by
+    one function, so they cannot name two different ones.
+
 ## Doing
 
 - **The 2026-09-03 quality pass is landed** — items 99–106, each its own

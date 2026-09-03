@@ -1728,6 +1728,19 @@ impl Shelf {
         }
     }
 
+    /// **The wall's grid whatever shape the collection is hung in.** Home
+    /// hangs its records as tiles — `All songs`, `RECENTLY ADDED` — and took
+    /// [`Self::grid`] so a record is drawn at the same size wherever it is
+    /// drawn; but under the list layout that grid is one 44 px column, and
+    /// Home's tiles shrank to thumbnails with their captions cut and its row
+    /// of recent records collapsed to a sliver (the owner, 2026-09-03: *"the
+    /// list view of Home is not good"*). The list is a shape for the
+    /// *collection*; Home has no list, so it takes the wall's geometry at the
+    /// current density, which is still the same size a tile is on the wall.
+    pub(crate) fn wall_grid(&self) -> shelf::Grid {
+        shelf::Grid::new(self.grid_size.width, self.density)
+    }
+
     /// How the wall is broken into shelves, for the current filter and grid.
     ///
     /// Rebuilt per call rather than cached: it is one pass over a few dozen
@@ -2814,8 +2827,11 @@ impl Shelf {
     /// the lane's exact mixed viewport.
     pub(crate) fn home_art(&self) -> Vec<u64> {
         let mut ids = self.everything().art;
+        // The wall's grid, as Home draws with: under the list layout
+        // `grid()` is one column, and `newest` counted one record where the
+        // page hangs five — four sleeves nobody had asked for.
         ids.extend(
-            crate::views::home::newest(self, self.grid())
+            crate::views::home::newest(self, self.wall_grid())
                 .iter()
                 .map(|album| album.id),
         );

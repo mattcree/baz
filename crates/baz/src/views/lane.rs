@@ -302,8 +302,8 @@ fn destination_row(
         } else {
             theme::GLYPH_OPACITY
         });
-    // **The tile holds the glyph centred** — [`theme::SIDEBAR_GLYPH_PX`] 32 in
-    // the 48 square, a [`theme::GAP_SM`] of air all round. Open and collapsed
+    // **The tile holds the glyph centred** — [`theme::SIDEBAR_GLYPH_PX`] 20 in
+    // the 48 square, [`theme::SIDEBAR_GLYPH_INSET`] of air all round. Open and collapsed
     // the tile starts on the same vertical; the collapse removes the word,
     // never the tile.
     let boxed = |content: Element<'static, Message>, x| {
@@ -1219,7 +1219,13 @@ mod tests {
         // arithmetic on tokens rather than numbers written into the view.
         const {
             assert!(theme::SIDEBAR_GLYPH_BOX > theme::SIDEBAR_GLYPH_PX);
-            assert!((theme::SIDEBAR_GLYPH_BOX - theme::SIDEBAR_GLYPH_PX) / 2.0 == theme::GAP_SM);
+            assert!(
+                (theme::SIDEBAR_GLYPH_BOX - theme::SIDEBAR_GLYPH_PX) / 2.0
+                    == theme::SIDEBAR_GLYPH_INSET
+            );
+            // One mark size across the product: the destinations draw the
+            // same 20 the app bar, the transport and the search well do.
+            assert!(theme::SIDEBAR_GLYPH_PX == theme::ICON_PX);
         }
 
         let source = source();
