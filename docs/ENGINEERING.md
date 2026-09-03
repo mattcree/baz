@@ -14,36 +14,35 @@
 - **Toolchain**: pinned stable via `rust-toolchain.toml`; MSRV declared and CI-checked.
 - **Formatting**: `rustfmt` (default config), enforced in CI. No debates.
 - **Linting**: `clippy` with `-D warnings`; `pedantic` and `nursery` audited and enabled per-lint (allowlist documented in `Cargo.toml`), not blanket-enabled.
-- **Unsafe**: `#![forbid(unsafe_code)]` in every crate except the platform audio backends (`wasapi`/CoreAudio/ALSA FFI) and any realtime primitives. Each `unsafe` block carries a `// SAFETY:` comment stating the invariant. Unsafe-bearing crates get Miri (where runnable) and extra review.
-- **Errors**: `thiserror` for library errors, no `unwrap`/`expect` in library code (clippy-enforced); panics are a bug except in tests.
-- **Public API**: rustdoc on everything public; `#[deny(missing_docs)]` on `baz-core`; broken intra-doc links fail CI.
-- **Dependencies**: minimal and reviewed. `cargo-deny` enforces a license allowlist, bans duplicate major versions where avoidable, and fails on RUSTSEC advisories. A new dependency is a reviewed decision, not a reflex.
+- **Unsafe**: `unsafe_code = "deny"` workspace-wide, and `#![forbid(unsafe_code)]` in `baz-core`, where the audio path lives; the ALSA exclusive backend is safe Rust over the `alsa` crate. The two `unsafe` sites in the workspace are not audio at all — `env::set_var` before any thread exists in `baz`'s `main`, and `malloc_trim` in `baz-vibe` — and each is a named `#[expect]` with a `// SAFETY:` comment stating the invariant. No Miri job exists; if a third site appears, one should.
+- **Errors**: `thiserror` for library errors; no `unwrap`/`expect` in library code — `clippy::unwrap_used` and `clippy::expect_used` are enabled and CI denies warnings, and the handful of `expect`s whose invariant is real carry `#[expect(clippy::expect_used, reason = ..)]` naming it. Tests are exempt. Panics are a bug except in tests.
+- **Public API**: rustdoc on everything public; `missing_docs` warns workspace-wide and CI turns every warning into an error; broken intra-doc links fail CI.
+- **Dependencies**: minimal and reviewed. `cargo-deny` enforces a license allowlist and fails on RUSTSEC advisories (three standing, argued exemptions are listed in `deny.toml`); duplicate versions are reported at warning level, not gated, because the GUI toolkit's graph carries them. A new dependency is a reviewed decision, not a reflex.
 
 ## Testing
 
 - **Unit + integration tests** for all of `baz-core`; the GUI layer keeps logic thin enough that core tests carry the weight.
-- **Golden-file audio tests**: decode known inputs and compare output hashes against reference decoders (e.g. `flac -d`, ffmpeg) — bit-exactness is asserted, not assumed.
-- **Gapless boundary tests**: synthesized signals (continuous sine split across two files) played through the engine; assert sample-level continuity — no gap, no overlap, no discontinuity — including across sample-rate changes.
-- **Loudness/ReplayGain**: validated against reference implementations (EBU R128 test vectors).
-- **Property-based tests** (`proptest`) for parsers, tag handling, and library queries.
-- **Fuzzing** (`cargo-fuzz`): every parser that touches file bytes (tags, cues, playlists, decoder wrappers) has a fuzz target; fuzzing runs on a CI schedule, not just ad hoc. Media parsers process hostile input; we treat them accordingly.
-- **Benchmarks** (`criterion`): the hot paths — search latency, scan throughput, decode throughput — with results tracked over time; PRs touching them get a comparison, and regressions need a stated reason.
-- **Coverage** (`cargo-llvm-cov`): measured and reported on every PR. Coverage is a lens, not a target — but unexplained drops block merge.
+- **Reference-encoder audio tests**: synthesized ground truth (a known sine) is encoded by the reference encoders — `flac`, and ffmpeg's LAME, Vorbis, Opus, AAC and ALAC — and baz's decode is compared sample by sample against the signal that went in. Bit-exactness is asserted for the lossless codecs; the lossy tolerances are derived from the encoder's own measured error against the ideal signal and written down beside the test. CI installs the encoders on all three runners; a fixture a given ffmpeg cannot produce (HE-AAC without a full `libfdk_aac`) skips its one test, loudly.
+- **Gapless boundary tests**: synthesized signals (continuous sine split across two files) played through the engine; assert sample-level continuity — no gap, no overlap, no discontinuity — per codec. A boundary that also changes sample rate is covered by the rate-change tests, which assert wall-clock-true elapsed time rather than sample continuity.
+- **Loudness/ReplayGain**: validated against the EBU Tech 3341 compliance signals, generated from the specification's own description at the specification's own tolerance.
+- **Fuzzing** (`cargo-fuzz`): every byte-facing parser in `baz-core` — play-history lines, M3U playlists, ReplayGain tags, filename inference, the command protocol, and the decoder wrapper — has a fuzz target with a committed seed corpus; the six run weekly on a schedule and on demand. The interface's theme-JSON and `config.toml` readers do not yet have targets. Media parsers process hostile input; the inputs fuzzing has found live in `tests/hostile_media.rs`, which every gate runs.
+- **Benchmarks** (`criterion`): scan throughput and search latency have benches in `baz-core`. They are run by hand; CI does not yet compare them, so a regression needs a developer to notice.
+- **Coverage** (`cargo-llvm-cov`): an 80 % line floor gates `baz-core` on every push; the workspace-wide figure is reported as an artifact, not gated, because GUI code needs a display to execute.
 
 ## CI pipeline
 
-Every PR runs, on a **Linux + macOS + Windows matrix**:
+Every push and PR runs:
 
 1. `rustfmt --check`
-2. `clippy -D warnings` (all targets, all features)
-3. `cargo test` (unit + integration)
+2. `clippy -D warnings` (all targets, all features), plus a `--no-default-features` check that the player-only build still compiles
+3. `cargo test` (unit + integration), on a **Linux + macOS + Windows matrix**, with the reference encoders installed
 4. `cargo doc` with warnings denied
-5. `cargo-deny check` (licenses, advisories, bans)
+5. `cargo-deny check` (licenses, advisories)
 6. MSRV build check
-7. Coverage report
-8. Criterion benchmark comparison when core paths are touched
+7. Coverage, with the `baz-core` floor gated
+8. Packaging metadata checks (desktop file, AppStream, Flatpak manifest pin)
 
-Scheduled jobs: fuzzing corpus runs, `cargo-audit`, dependency-update checks. Releases (later) are built, signed, and reproducible-where-possible from CI only — no artifacts from developer machines.
+Steps 1, 2 and 4–8 run on Linux only; the test matrix is where the three platforms are exercised. The weekly schedule runs the six fuzz targets. Releases are built from CI only, with this whole suite as a hard dependency — no artifacts from developer machines.
 
 **The pipeline is installed before the first feature lands.** A green, meaningful CI on an empty workspace is milestone zero.
 

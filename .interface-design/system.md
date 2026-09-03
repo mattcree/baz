@@ -176,18 +176,20 @@ values, rounded to the nearest byte.
 | `PAPER_DIM` | `#ABA8A1` | secondary text | figures that tick |
 | `PAPER_FAINT` | `#888680` | tertiary text, **the selected tile's rule** | primary labels |
 | `PAPER_MUTED` | `#6C6A66` | set but not sounding | text a user must read |
-| `PAPER_RING` | `PAPER` @ 45 % | keyboard focus, `text_input` only | anything else |
+| `PAPER_RING` | `PAPER` @ `ring_alpha`, **per room** | keyboard focus, `text_input` only | anything else |
 | `SELECT_WASH` | `PAPER` @ 18 % | `text_input` selection | backgrounds |
 | `LAMP` | `#E3A14E` | **the accent** — §5 | see §5 |
 | `LAMP_BRIGHT` | `#F1B362` | the accent, hovered | a resting state |
 | `LAMP_DEEP` | `#C7883D` | the accent, held | a resting state |
-| `LAMP_GLOW` | `LAMP` @ 45 %, blur **24** | the playing sleeve's halo | fills, borders, text |
+| `LAMP_GLOW` | `LAMP` @ **30 %**, blur **24** | the playing sleeve's halo | fills, borders, text |
 | `LAMP_WASH` | `LAMP` @ 10 % / 20 % | Play album, hovered / pressed | any resting state |
 | `ALERT` | `#D9776B` | problems, stated quietly | anything merely unusual |
 | `SUCCESS` | `#86A97C` | *nothing yet — keep the slot* | decoration |
 
-**Deleted:** `SHADOW` (§2), `RADIUS_TILE` (§6), `LAMP_INK` (§5 — nothing sits
-*on* the accent any more).
+**Deleted:** `SHADOW` (§2), `RADIUS_TILE` (§6). `LAMP_INK` was to go with
+them (§5 — nothing sits *on* the accent any more) and did not: `Palette::lamp_ink`
+is live, and the user-theme JSON format (`theme_file.rs`) reads and writes it,
+so removing it now is a format change. It has no consumer in the product.
 
 **One board at four levels of light.** `PAPER_DIM`, `PAPER_FAINT` and
 `PAPER_MUTED` are the same r:g:b ratios as `PAPER`, scaled — so the ink family
@@ -259,7 +261,8 @@ lamp rectangle as an argued exception; under a room this quiet that slab became
 the loudest thing on screen and was *not* the artwork, so the exception is
 revoked in favour of a rule with no exceptions. Play album is `LAMP` outlined
 with a `LAMP` triangle and a `PAPER` label, over `LAMP_WASH` at 10 % hovered
-and 20 % pressed. `LAMP_INK` therefore has no remaining use and is deleted.
+and 20 % pressed. `LAMP_INK` therefore has no remaining use in the product;
+it survives only as a field of the theme-file format (see the palette table).
 
 It may **not** appear on: input focus, text selection, the scanning note, tile
 hover or selection, the queue popover's header or active affordance, the
@@ -541,7 +544,12 @@ only thing an accessibility tree could attach to (§4 of the ADR).
 
 ## 8. Type — proportional everywhere
 
-**No monospace anywhere in baz.** `MONO` is deleted. So is `SERIF`.
+**No monospace anywhere in baz.** `MONO` is deleted. `SERIF` was deleted
+with it and **came back on 2026-08-09 as exactly one face for exactly one
+placard**: IBM Plex Serif Italic sets the record's title on its page and the
+sounding track's title on Now playing — *"the one placard in the product"*
+(`theme.rs`) — and nothing else may set it. `font.rs`'s `SERIF_ITALIC` is the
+face; `views::page` pins that the list beneath the hero does not use it.
 
 **The measurement that made it possible.** IBM Plex Sans ships **tabular
 figures by default**: every digit `0`–`9` advances exactly **600/1000 em** in
@@ -551,9 +559,9 @@ is what cosmic-text will actually draw. `0:00:00` and `9:59:59` measure
 **43.008 px** each at `SIZE_META`; the delta is 0.0000 px. Alignment is not
 approximated, it is exact.
 
-Bundle: **three faces** (Sans Regular / Medium / SemiBold), 605 592 bytes —
-down 395 928 bytes from the five that ship today. OFL-1.1, verbatim upstream,
-hashes in `crates/baz/assets/fonts/README.md`.
+Bundle: **four faces** (Sans Regular / Medium / SemiBold, and Serif Italic),
+832 996 bytes — the three Sans faces are 605 592 of that, the serif 227 404.
+OFL-1.1, verbatim upstream, hashes in `crates/baz/assets/fonts/README.md`.
 
 **The line box is the token; the leading is derived.** This table used to give
 the leading and let the box fall out, and the six boxes came to 15.95, 16.20,
@@ -572,9 +580,11 @@ most 1.8 px on one token (§13, L2).
 | `SIZE_BODY` | 13 | **20** | 1.538 | Regular / Medium | label line 1, track titles, button labels |
 | `SIZE_EMPHASIS` | 15 | **20** | 1.333 | Regular / Medium | section headings, empty-state lines, inspector artist |
 | `SIZE_TITLE` | 19 | **24** | 1.263 | SemiBold | the album's title |
-| `SIZE_HERO` | 28 | **32** | 1.143 | SemiBold | the first-run question |
+| `SIZE_HERO` | 28 | **32** | 1.143 | SemiBold / Serif Italic | the first-run question; the record page's title |
+| `SIZE_DISPLAY` | 40 | **44** | 1.100 | Serif Italic | Now playing's title, the middle rung of its ladder |
+| `SIZE_MARQUEE` | 64 | **68** | 1.063 | Serif Italic | Now playing's title, the top rung — a ceiling it steps down from as the title lengthens |
 
-`LABEL_LINE_H` = `LINE_BODY` = 20; `LABEL_H` = 2 × that = **40 = `HANG`** — a
+A wall label is two `LINE_BODY` lanes: `LABEL_H` = 2 × 20 = **40 = `HANG`** — a
 wall label is exactly one hang tall, and the tile's row pitch is therefore
 `art + 96`. Two independent one-line lanes, not one two-line box, so a long
 title clips at one line instead of pushing the artist line out of the slot
@@ -585,7 +595,7 @@ onto one 16 px lane, so the bar's left zone is stacked out of two heights instea
 of five; and a text well's vertical padding is one number, `(32 − 20 − 2) / 2`,
 because both wells baz draws take the same 20 px box (§13, L7).
 
-Emphasis comes from **weight, ink and size only** — iced 0.13 exposes no
+Emphasis comes from **weight, ink and size only** — iced 0.14 exposes no
 letter-spacing, no small caps and no OpenType features, so nothing in this
 system may depend on them.
 
@@ -599,10 +609,10 @@ what the same string costs today.
 | `STAMP_W` | 52 | 50.21 | 57.60 | **52** | `10:00:00` |
 | `SIGNAL_W` | 120 | 92.38 | 108.00 | **96** | `192 → 176.4 kHz` |
 | `LEVEL_W` | 62 | 43.34 | 52.80 | **48** | `-18.1 dB` |
-| `PREVIEW_W` | 58 | 39.42 | 46.20 | **48** | `0:00:00` + padding |
+| `PREVIEW_W` | 58 | 39.42 | 46.20 | *never created* | `0:00:00` + padding |
 | `SETTING_VALUE_W` | 68 | 56.89 | 64.80 | **60** | `+20.00 dB` |
-| `TRACK_NO_W` | 24 | 21.60 | 21.60 | **24** | `999` |
-| `POSITION_W` | — | 53.46 | 64.80 | **56** | `199 / 240` |
+| `TRACK_NO_W` | 24 | 21.60 | 21.60 | **32** | `999`, with 10.4 px to spare |
+| `POSITION_W` | — | 53.46 | 64.80 | *never created* | `199 / 240` |
 
 `STAMP_W` keeps its number and gains a capability: at 52 px the *mono* face
 could not hold `10:00:00` (57.60 px — the current build clips a ten-hour
@@ -671,7 +681,7 @@ card, which you turn over by scrolling. Devon never sees it; Marta never has to
 ask for it. Drawn in `07-inspector-full.png`.
 
 ### Track / queue row
-`TRACK_NO_W` 24 right-aligned number in `SIZE_META` `PAPER_FAINT` (the lamp dot
+`TRACK_NO_W` 32 right-aligned number in `SIZE_META` `PAPER_FAINT` (the lamp dot
 replaces it when playing, in a column that never changes width) · title
 `SIZE_BODY` · duration `SIZE_META` `PAPER_FAINT`, **right-aligned**. Row pad
 `pad(GAP_XS, GAP_XS)`, `RADIUS_SEGMENT` 3. Playing: `PLINTH_LIT` +
@@ -729,7 +739,7 @@ lamp's hue 200 ms linear. No spring, no bounce, no overshoot.
 
 | Change | Per-frame | Other |
 |---|---|---|
-| three faces instead of five | none | −395 928 bytes of binary |
+| four faces instead of five (three Sans, one Serif Italic) | none | −168 524 bytes of binary |
 | fluid cell width | none — arithmetic per layout pass, not per tile | `shelf.rs` constants become functions of width |
 | `THUMB_PX` 256 → 320 | none | LRU **600 → 384 entries** at the same 150 MiB (400 KiB/entry, 36 % fewer, ~8× the live widget count) |
 | no shadow on tiles | one fewer quad per tile | none |

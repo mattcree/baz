@@ -5,14 +5,17 @@
 > landed in `CHANGELOG.md`; what the owner asked for and where it got to is
 > `BACKLOG.md`'s *What the owner asked for*. **What to do next is
 > [`WORK.md`](WORK.md)** — start there.
-> Updated 2026-08-10.
+> **This file is a record, last updated 2026-08-10, of the plan that carried
+> the project to its first release.** It is not maintained. `v0.1.0` was
+> tagged on 2026-08-14 and `v0.5.0` on 2026-08-23; the counts below are as
+> they stood when it was written.
 >
-> **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
-> plays it gaplessly and bit-perfectly, searches by song and by record, edits
-> its queue, keeps playlists as files you own, and undoes what it did. It has
-> a resident sidebar, a Home, a Now playing place, and one press to sound from
-> the wall. 33 ADRs, 13 design studies, 1047 tests, CI green on three
-> platforms. **Nothing has been released.**
+> **Status as of 2026-08-10**: Phases 0–3 ✅. baz scans several folders, shows
+> the collection, plays it gaplessly and bit-perfectly, searches by song and
+> by record, edits its queue, keeps playlists as files you own, and undoes
+> what it did. It has a resident sidebar, a Home, a Now playing place, and one
+> press to sound from the wall. 33 ADRs, 13 design studies, 1047 tests, CI
+> green on three platforms. Nothing had been released.
 
 ## Where the work actually stands
 

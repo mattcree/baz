@@ -20,5 +20,8 @@ Thanks for considering it. Two documents are required reading:
 
 ## Where to start
 
-`docs/NEXT-STEPS.md` tracks the current phase. Issues tagged `good-first` will
-exist once there is a public tracker.
+`docs/WORK.md` is the live queue — its *Next* section is the order work is
+done in, and each item names the brief and the decisions behind it.
+`docs/NEXT-STEPS.md` is the plan that got the project to its first release,
+kept as a record. Issues tagged `good-first` will exist once there is a public
+tracker.

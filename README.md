@@ -200,8 +200,9 @@ interface is a thin client over it, so nothing on screen can make a sample
 late. baz is developed with substantial AI assistance, openly — and trust is
 placed in gates anyone can inspect rather than in provenance: rustfmt, clippy
 with warnings denied, the whole test suite on three operating systems, licence
-and advisory checks, and scheduled fuzzing of every byte-facing parser. Audio
-correctness is asserted against external references, never against baz's own
+and advisory checks, and scheduled fuzzing of every byte-facing parser in the
+engine. Audio correctness is asserted against external references — the
+reference encoders, installed on every test runner — never against baz's own
 output. A human owns every merge.
 
 [`docs/FEATURES.md`](docs/FEATURES.md) has the detail,

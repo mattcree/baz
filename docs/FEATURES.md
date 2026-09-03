@@ -71,10 +71,12 @@ touches the music.
 
 **Playlists by feel.** baz can listen to your library itself — locally, with no
 network — and build a list that follows a shape you draw: start quiet, climb,
-hold, come down. The analysis runs on your machine, the models ship with the
-optional `vibe` build, and hovering a row in the result shows where that track
-landed on your line. `docs/design/17-contour.md` is the design; ADR-0034 is the
-decision.
+hold, come down. The analysis runs on your machine, the models ship in the
+normal build (the `vibe-analysis` feature, on by default; `--no-default-features`
+is the player-only build), and hovering a row in the result shows where that
+track landed on your line. `docs/design/21-vibe-the-design.md` is the design
+and `22-vibe-implementation-plan.md` the plan it shipped by; no ADR has been
+written for it yet.
 
 ## The desktop
 
@@ -206,7 +208,7 @@ carry co-author trailers. Trust is deliberately **not** placed in provenance —
 it is placed in gates anyone can inspect. Every change passes rustfmt, clippy
 with warnings denied, the whole test suite on three operating systems,
 cargo-deny licence and advisory checks, and scheduled fuzzing of every
-byte-facing parser; the audio-correctness tests are asserted against external
+byte-facing parser in the engine; the audio-correctness tests are asserted against external
 references — reference decoders, synthesized ground truth, the EBU's own
 compliance signals — and never against baz's own output. A human owns every
 merge. The charter is [`ENGINEERING.md`](ENGINEERING.md).

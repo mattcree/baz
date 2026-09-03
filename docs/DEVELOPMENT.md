@@ -20,13 +20,17 @@ The toolbox shares your `$HOME`, your session (Wayland/X11, PipeWire) and your r
 | `pipewire-alsa` | cpal / device audio output — **hearing** it. Without this the container has no `default` PCM and baz launches with *audio device unavailable*; the socket is already shared, the plugin that speaks to it was not installed |
 | `libxkbcommon-devel`, `libxkbcommon-x11` | iced/winit window creation (the X11 one is required even for headless Xvfb runs) |
 | `xorg-x11-server-Xvfb`, `ImageMagick` | headless render verification — screenshot the real UI on a private display and diff it |
-| `flac`, (`ffmpeg` if present) | encoding test fixtures for the audio golden tests |
+| `flac`, `ffmpeg-free` | encoding the reference fixtures for the audio tests — without both, those tests print `SKIP` and pass |
+| `xdotool` | drives the headless display: an agent presses baz's own controls rather than asserting about a still |
+| `libXcursor`, `libXi`, `libXrandr`, `libXinerama` | the X client libraries winit dlopens to open a window |
+| `openssl-devel` | build-time only: `ort`'s model downloader links native-tls under `--all-features` |
+| `python3-pyyaml`, `desktop-file-utils`, `appstream` | the release and Flatpak manifest checks in `docs/RELEASING.md` |
 
 baz itself needs **no GUI system libraries** to build on Linux: iced is pure
 Rust (ADR-0005) and SQLite is bundled. Everything above serves the toolchain or
 the test harness, not the binary.
 
-Rust itself is **not** installed in the container — it comes from your rustup install in `$HOME` (pinning via `rust-toolchain.toml` once the workspace exists in Phase 2).
+Rust itself is **not** installed in the container — it comes from your rustup install in `$HOME`, and `rust-toolchain.toml` at the workspace root pins the channel.
 
 ## Alternatives
 
@@ -125,7 +129,7 @@ resize step delivers three messages, not one** — `WindowResized` with its
 estimated grid, `Scrolled` when the scrollable measures its real bounds, and
 `Scrolled` again when the grid that changed underneath it changed the content's
 height (iced republishes a viewport whose `content_bounds` moved,
-`iced_widget-0.13.4/src/scrollable.rs:1249`). Two of the three ask
+`iced_widget-0.14.2/src/scrollable.rs:1618`). Two of the three ask
 `request_visible_thumbs` for exactly what the first asked for, which is why
 that function keeps a range guard.
 

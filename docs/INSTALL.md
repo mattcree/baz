@@ -13,11 +13,6 @@
 > all three operating systems — but no human has sat in front of baz on Windows
 > or macOS. They are honest builds, not a supported experience. Reports
 > welcome; surprises likely.
->
-> **v0.1.0 is the first release, and it has not been tagged yet.** Until it is,
-> the [releases page](https://github.com/mattcree/baz/releases) is empty and
-> **building from source is the only way in** — it works on every platform and
-> it is described below.
 
 ## Which file to take
 
@@ -114,10 +109,9 @@ flatpak-builder --user --install --force-clean build-dir \
   packaging/flatpak/io.github.mattcree.baz.yml
 ```
 
-**Until the first tag exists, that command cannot work as written**: the
-manifest's `git` source names `tag: v0.1.0` and a placeholder commit, and
-nothing has been tagged. Swap in a `dir` source pointing at your checkout —
-`packaging/flatpak/README.md` §"Building it" has the two lines — and it builds.
+The manifest's `git` source names the latest release tag and its commit, and
+CI checks that the two agree. To build your own checkout instead, swap in a
+`dir` source — `packaging/flatpak/README.md` §"Building it" has the two lines.
 That has been done and it works; the build takes about fifteen minutes from
 cold and wants roughly 10 GB of scratch space, which is more than a `/tmp` on
 tmpfs is likely to have. Put `build-dir` and flatpak-builder's `--state-dir`
@@ -274,8 +268,8 @@ minimal container.
 
 ## From source
 
-This is the only way to run baz today, and it is not hard — one system package
-on Linux, and nothing at all on macOS or Windows.
+Not hard — one system package on Linux, and nothing at all on macOS or
+Windows.
 
 ```sh
 git clone https://github.com/mattcree/baz
@@ -342,7 +336,7 @@ the only copy.
 iced 0.14 with both renderers compiled in — `wgpu` (Vulkan, Metal, DX12 or GL)
 and `tiny-skia` (CPU) — and iced's fallback compositor tries the GPU first and
 the software path second when no usable adapter answers
-(`iced_renderer-0.13.0/src/fallback.rs:214–262`). There is nothing to switch on.
+(`iced_renderer-0.14.0/src/fallback.rs:685–699`). There is nothing to switch on.
 
 There is no setting for it, on purpose: the automatic fallback already covers
 the case a setting would exist for, and a renderer picker is exactly the kind

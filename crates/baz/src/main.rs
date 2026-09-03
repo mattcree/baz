@@ -164,8 +164,8 @@ mod window_frame;
 /// the present mode is settable through the API there and delete this.
 #[expect(
     unsafe_code,
-    reason = "no API for the present mode in iced 0.13; single-threaded, \
-              first statement of main, before any thread exists"
+    reason = "no public API for the present mode in iced's window settings, 0.13 or 0.14; \
+              single-threaded, first statement of main, before any thread exists"
 )]
 fn prefer_no_vsync() {
     if std::env::var_os("ICED_PRESENT_MODE").is_none() {
