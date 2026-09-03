@@ -1925,6 +1925,12 @@ words, triaged here first (the standing rule for a run of short UI asks):
    followed by a `scroll_by` of the difference to a chosen step. The second
    keeps the dependency as it is and is the one to try; it wants the feel
    checked on a real mouse, which a frame cannot show.
+10. *"the list toggle and tile size are not interacting properly. I think the
+    toggle between list and tiles should be independent from the size"* —
+    the app bar's five marks are one radio: pressing a size while the
+    collection is a list returns it to the wall. **Built** (item 115): a
+    size press keeps the shape, the active size is lit in either shape, and
+    the list mark toggles the shape on its own.
 
 ## Findings of the 2026-09-03 quality pass, not built
 

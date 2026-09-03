@@ -4671,20 +4671,14 @@ impl App {
             _ => return None,
         };
         self.density = self.density.step(delta);
-        // **The ladder is also the way back.** Pressing a size detent while the
-        // collection is hung as a list means *this size, on the wall* — the
-        // marks say how big, and asking how big is asking about works. Without
-        // this a listener who switched to a list could change the row pitch and
-        // never find their way out of it, because the shape mark goes lit and
-        // inert once it is the fact.
-        if self.layout == shelf::Layout::List {
-            let wall = shelf::Layout::Wall;
-            self.layout = wall;
-            persist(move |config| config.layout = wall);
-            if let Screen::Shelf(state) = &mut self.screen {
-                state.layout = wall;
-            }
-        }
+        // **A size press keeps the shape.** Until 2026-09-03 a size detent
+        // pressed while the collection was a list meant *this size, on the
+        // wall*, so the ladder was also the way back from the list — the
+        // owner: *"the list toggle and tile size are not interacting properly.
+        // I think the toggle between list and tiles should be independent from
+        // the size."* They are: the ladder says how big in either shape (a
+        // list's row pitch follows it), and the shape mark toggles the shape
+        // on its own, so nothing needs a way back.
         Some(match &mut self.screen {
             Screen::Shelf(state) => state.set_density(self.density),
             Screen::Setup(_) | Screen::Blocked(_) => Task::none(),

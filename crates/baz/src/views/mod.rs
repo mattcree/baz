@@ -1011,30 +1011,40 @@ pub(crate) fn density_marks(
     // section rule in two others, so it carried a `DetentAxis` to say which.
     // A bar is horizontal in every place there is, so the parameter went with
     // the placements that needed it.
-    // **Two axes, one run of marks** — how big, then what shape.
+    // **Two axes, two controls, one run of marks** — how big, then what
+    // shape, and neither touches the other (the owner, 2026-09-03: *"the
+    // toggle between list and tiles should be independent from the size"*).
     //
     // The list mark sits after the density ladder rather than inside it: the
     // four steps are one control with four detents, and a fifth detent that
     // changed the *shape* would read as a looser or tighter hang. Its glyph is
     // a cover with columns beside it for the same reason (`icon::LAYOUT_LIST`).
     //
-    // Pressing it hangs the collection as a list; pressing any density mark
-    // sets that density **and returns to the wall**, so the ladder is also the
-    // way back and there is no state a listener can get stuck in.
+    // The ladder says how big in either shape — a list's row pitch follows
+    // the step — and its active detent is lit in either shape. The list mark
+    // is a toggle: lit while the collection is a list, and pressing it either
+    // way changes only the shape.
     let mut marks =
         row(crate::shelf::Density::ALL.map(|step| density_mark(step, current, layout, ink)));
     marks = marks.push(layout_mark(layout, ink));
     marks.into()
 }
 
-/// The shape detent beside [`density_marks`]' four size detents.
+/// The shape toggle beside [`density_marks`]' four size detents.
 ///
-/// Lit when the collection is hung as a list, and then inert — the active mark
-/// is the fact, and the way back is any density mark, exactly as the ladder's
-/// own detents behave.
+/// Lit while the collection is hung as a list, and pressable in both states:
+/// it is a toggle rather than a detent, because the shape has two values and
+/// the other one is always the way back. Unlike the ladder's detents it is
+/// never inert — a lit toggle that could not be pressed would strand the
+/// listener in the list, which is what the ladder used to be the escape from.
 fn layout_mark(layout: crate::shelf::Layout, ink: crate::motion::Ink) -> Element<'static, Message> {
     let room = theme::active();
     let active = layout == crate::shelf::Layout::List;
+    let other = if active {
+        crate::shelf::Layout::Wall
+    } else {
+        crate::shelf::Layout::List
+    };
     let mark = container(
         iced_image(crate::icon::handle(crate::icon::Glyph::LayoutList))
             .width(Length::Fixed(theme::ICON_PX))
@@ -1051,23 +1061,16 @@ fn layout_mark(layout: crate::shelf::Layout, ink: crate::motion::Ink) -> Element
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
-    let boxed: Element<'static, Message> = if active {
-        container(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .into()
-    } else {
-        iced::widget::button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.recess, status))
-            .on_press(Message::LayoutSet(crate::shelf::Layout::List))
-            .into()
-    };
+    let boxed: Element<'static, Message> = iced::widget::button(mark)
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::LayoutSet(other))
+        .into();
     iced::widget::tooltip(
         boxed,
-        text("List")
+        text(if active { "Tiles" } else { "List" })
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
         iced::widget::tooltip::Position::Bottom,
@@ -1090,10 +1093,11 @@ fn density_mark(
     use crate::shelf::Density;
 
     let room = theme::active();
-    // On a list the ladder is still the size control, but none of its detents
-    // is *the* fact any more — the shape mark is. So every step stays pressable
-    // and pressing one is also the way back to the wall.
-    let active = step == current && layout == crate::shelf::Layout::Wall;
+    // The ladder says how big in either shape, so its active detent is the
+    // fact on the wall and on a list alike; `layout` no longer changes what a
+    // press means.
+    let _ = layout;
+    let active = step == current;
     let glyph = match step {
         Density::Spacious => crate::icon::Glyph::DensitySpacious,
         Density::Balanced => crate::icon::Glyph::DensityBalanced,

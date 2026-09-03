@@ -2443,6 +2443,16 @@ the full gate. What the pass found and deliberately did **not** build is in
     to be toggled on somewhere near controls"* is recorded in `BACKLOG.md`:
     the transport has no mark for it in the sheet, and that is a drawing.
 
+115. **Done 2026-09-03 — size and shape are two controls.** *(The owner:
+    "the list toggle and tile size are not interacting properly. I think the
+    toggle between list and tiles should be independent from the size.")*
+    The app bar's five marks were one radio: a size detent pressed while the
+    collection was a list returned it to the wall, by design, so the ladder
+    was the way back from a list mark that went inert once lit. Now the
+    ladder says how big in either shape and lights its active detent in
+    either, and the list mark is a toggle pressable both ways (`List` /
+    `Tiles`). Nothing needs a way back because nothing is a trap.
+
 ## Doing
 
 - **The 2026-09-03 quality pass is landed** — items 99–106, each its own
