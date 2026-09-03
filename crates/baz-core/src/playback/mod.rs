@@ -301,6 +301,17 @@ pub use device::shared_output_devices;
 /// ring-buffer slot, and [`Sink`] write is stereo-interleaved f32.
 pub const CHANNELS: usize = 2;
 
+/// The highest sample rate a container may declare and be played.
+///
+/// 768 kHz is the top of what any shipping DAC advertises, twice the highest
+/// rate a commercial release is mastered at; nothing a listener owns is above
+/// it. The bound exists because the rate is read from the file and then
+/// multiplied — by the fader's slew length, by a millisecond count, by the
+/// resampler — and the arithmetic is written for real rates, not for the
+/// `u32` the header field can hold. See
+/// [`PlaybackError::UnsupportedSampleRate`].
+pub const MAX_SAMPLE_RATE: u32 = 768_000;
+
 /// Errors from the playback engine.
 ///
 /// Worker-thread failures are joined and surfaced through the same type; the
@@ -342,6 +353,17 @@ pub enum PlaybackError {
     /// The codec parameters omit the sample rate.
     #[error("stream does not declare a sample rate")]
     UnknownSampleRate,
+
+    /// The container declares a sample rate baz will not run at: zero, or
+    /// above [`MAX_SAMPLE_RATE`]. A rate is read straight out of the file's
+    /// header and every downstream sum — fader slew, resampler ratio,
+    /// millisecond arithmetic — is sized by it, so an absurd one is refused
+    /// at the door rather than trusted everywhere after it.
+    #[error("stream declares a sample rate of {rate} Hz, outside 1..={MAX_SAMPLE_RATE}")]
+    UnsupportedSampleRate {
+        /// What the header said.
+        rate: u32,
+    },
 
     /// The codec parameters omit the channel layout.
     #[error("stream does not declare a channel layout")]

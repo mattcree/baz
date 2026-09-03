@@ -170,7 +170,43 @@ fn every_hostile_input() -> Vec<(&'static str, &'static [u8])> {
         ("aac, band index past the end", AAC_BAND_INDEX_PAST_END),
         ("mp4 ftyp, length overflow", MP4_FTYP_LENGTH_OVERFLOW),
         ("aiff comm, zero sample rate", AIFF_COMM_ZERO_SAMPLE_RATE),
+        ("wav fmt, 4 GHz sample rate", WAV_FMT_FOUR_GIGAHERTZ_RATE),
     ]
+}
+
+/// A canonical 44-byte WAV header whose `fmt` chunk declares a sample rate
+/// of `0xFFFF_FFFF` — every field a `u32` can hold. Not a symphonia panic:
+/// baz's own. The rate was stored verbatim and the fader's slew length is
+/// `rate * 20 / 1000`, which overflows a `u32` above 214 748 364 Hz — on the
+/// pump, whose contract is no panic. Refused at open now, and this row keeps
+/// it refused.
+const WAV_FMT_FOUR_GIGAHERTZ_RATE: &[u8] = &[
+    0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
+    0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfc, 0xff, 0xff, 0xff,
+    0x04, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// **An absurd declared rate is refused, by name, at open.** The same header
+/// with a real rate opens; the one above is turned away with the rate it
+/// claimed, so a log line says what was wrong with the file.
+#[test]
+fn a_four_gigahertz_wav_is_refused_at_open() {
+    let refused = AudioSource::open_bytes(WAV_FMT_FOUR_GIGAHERTZ_RATE.to_vec()).err();
+    assert!(
+        matches!(
+            refused,
+            Some(PlaybackError::UnsupportedSampleRate { rate: 0xFFFF_FFFF })
+        ),
+        "expected UnsupportedSampleRate, got {refused:?}"
+    );
+    let mut sane = WAV_FMT_FOUR_GIGAHERTZ_RATE.to_vec();
+    sane[24..28].copy_from_slice(&44_100_u32.to_le_bytes());
+    sane[28..32].copy_from_slice(&(44_100_u32 * 4).to_le_bytes());
+    let opened = AudioSource::open_bytes(sane).err();
+    assert!(
+        !matches!(opened, Some(PlaybackError::UnsupportedSampleRate { .. })),
+        "a 44.1 kHz header must not be refused for its rate: {opened:?}"
+    );
 }
 
 /// Drive a source the way the engine does: open it, then pull blocks until it

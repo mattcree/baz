@@ -415,7 +415,7 @@ impl Fader {
         // Full scale per RAMP_MS: one integer-derived divisor, computed once
         // per block rather than per sample.
         #[allow(clippy::cast_precision_loss)] // frame counts are far below 2^24 here
-        let frames = (rate * RAMP_MS / 1000).max(1) as f32;
+        let frames = (rate.saturating_mul(RAMP_MS) / 1000).max(1) as f32;
         1.0 / frames
     }
 

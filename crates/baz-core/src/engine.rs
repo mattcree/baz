@@ -2243,12 +2243,18 @@ impl<S: Sink> Control<S> {
     /// behind it is an immutable snapshot a front end swapped in, so a panic
     /// in another thread cannot have left it half-written, and refusing to read
     /// it would silence ReplayGain rather than protect anything.
+    ///
+    /// The lock is held only long enough to clone the handle out: `computed`
+    /// is a front end's own code behind a public trait, and calling it under
+    /// the guard would let a slow implementation — a database read, say —
+    /// hold up every `set_computed_gains` on the other side of the seam.
     fn computed_for(&self, path: &Path) -> ReplayGainTags {
-        self.computed_gains
+        let gains = self
+            .computed_gains
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map_or_else(ReplayGainTags::default, |gains| gains.computed(path))
+            .clone();
+        gains.map_or_else(ReplayGainTags::default, |gains| gains.computed(path))
     }
 
     /// The gain the sample stream should end up carrying: the taper's

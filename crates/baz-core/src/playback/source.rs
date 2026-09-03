@@ -439,6 +439,9 @@ impl AudioSource {
         let track_id = track.id;
         let params = &track.codec_params;
         let sample_rate = params.sample_rate.ok_or(PlaybackError::UnknownSampleRate)?;
+        if sample_rate == 0 || sample_rate > super::MAX_SAMPLE_RATE {
+            return Err(PlaybackError::UnsupportedSampleRate { rate: sample_rate });
+        }
         // WAV/FLAC/MP3 declare the layout in the container header. MP4 does
         // not for AAC or ALAC: the layout lives in the codec's own setup data
         // (the AudioSpecificConfig / ALAC magic cookie), which only the
@@ -908,19 +911,31 @@ fn absorb_replay_gain(reader: &mut ReplayGainReader, revision: &MetadataRevision
 }
 
 /// Whole-millisecond playing time of `frames` at `rate` Hz, rounded to
-/// nearest. Integer arithmetic throughout: `u64` holds `frames * 1000` for
-/// any track length that fits in a filesystem (10⁹ frames — six hours at
-/// 48 kHz — is 10¹², eight orders of magnitude below `u64::MAX`).
+/// nearest.
+///
+/// Integer arithmetic throughout, in `u128`: `frames` is the container's own
+/// frame count, and a container may declare anything its field can hold —
+/// `tests/hostile_media.rs` carries an MP4 atom saying `u64::MAX`. Any real
+/// track length (10⁹ frames — six hours at 48 kHz) is eight orders of
+/// magnitude below `u64::MAX`, so the widening costs nothing real and the
+/// crafted case saturates instead of panicking on the producer thread.
 pub(crate) fn frames_to_ms(frames: u64, rate: u32) -> u64 {
-    let rate = u64::from(rate.max(1));
-    (frames * 1000 + rate / 2) / rate
+    let rate = u128::from(rate.max(1));
+    let ms = (u128::from(frames) * 1000 + rate / 2) / rate;
+    u64::try_from(ms).unwrap_or(u64::MAX)
 }
 
 /// The inverse of [`frames_to_ms`], truncating: a seek asks for "at or after
 /// this instant", so landing on the frame *before* the requested millisecond
 /// would overshoot backwards past it.
+///
+/// `ms` arrives from [`crate::protocol::Command::Seek`], which any front end
+/// may fill with any `u64`; the product saturates rather than overflows, so
+/// an absurd position is a seek past the end and not a panic reported as the
+/// decoder's.
 pub(crate) fn ms_to_frames(ms: u64, rate: u32) -> u64 {
-    ms * u64::from(rate) / 1000
+    let frames = u128::from(ms) * u128::from(rate) / 1000;
+    u64::try_from(frames).unwrap_or(u64::MAX)
 }
 
 /// Milliseconds as fractional seconds, for the format readers' `Time` input.
@@ -988,6 +1003,23 @@ mod tests {
         // Rounds to nearest rather than always down: 22 frames at 44.1 kHz
         // is 0.4989 ms, 23 frames is 0.5215 ms.
         assert_eq!(frames_to_ms(22, 44_100), 0);
+    }
+
+    /// **A container-declared count cannot overflow the clock arithmetic.**
+    /// The frame count is the file's word and the position is the front
+    /// end's; neither is bounded by anything baz controls, so both products
+    /// saturate. Before this, `u64::MAX` frames panicked the producer thread
+    /// outside its panic guard, and a large seek was caught by the guard and
+    /// reported as the decoder's fault.
+    #[test]
+    fn clock_arithmetic_saturates_on_absurd_input() {
+        // Divided by a real rate the product fits again; what matters is
+        // that the multiplication in between did not wrap.
+        let exact = (u128::from(u64::MAX) * 1000 + 22_050) / 44_100;
+        assert_eq!(u128::from(frames_to_ms(u64::MAX, 44_100)), exact);
+        assert_eq!(frames_to_ms(u64::MAX, 1), u64::MAX);
+        assert_eq!(ms_to_frames(u64::MAX, 192_000), u64::MAX);
+        assert_eq!(ms_to_frames(u64::MAX, 1), u64::MAX / 1000);
         assert_eq!(frames_to_ms(23, 44_100), 1);
         // A seek truncates so it never lands before the requested instant.
         assert_eq!(ms_to_frames(1, 44_100), 44);

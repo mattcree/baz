@@ -359,7 +359,14 @@ pub struct Equalizer {
     preamp_db: f32,
     /// The rate the sections were designed for; `0` before the first design.
     rate: u32,
-    sections: Vec<Biquad>,
+    /// One slot per band, fixed at construction. The first `live` slots are
+    /// the sections in use; the rest are inert. A fixed array rather than a
+    /// `Vec` because [`Self::apply`] runs on the pump and may re-design at a
+    /// rate change — and a re-design that pushed into a `Vec` would be an
+    /// allocation on the realtime path, which `docs/ENGINEERING.md` forbids.
+    sections: [Biquad; CENTRES.len()],
+    /// How many of `sections` are designed and running.
+    live: usize,
     preamp: f64,
 }
 
@@ -370,7 +377,8 @@ impl Default for Equalizer {
             bands: Bands::flat(),
             preamp_db: 0.0,
             rate: 0,
-            sections: Vec::new(),
+            sections: [Biquad::default(); CENTRES.len()],
+            live: 0,
             preamp: 1.0,
         }
     }
@@ -440,7 +448,7 @@ impl Equalizer {
 
     /// Re-derive every section from the bands at the current rate.
     fn design(&mut self) {
-        self.sections.clear();
+        self.live = 0;
         if self.rate == 0 {
             return;
         }
@@ -460,10 +468,19 @@ impl Equalizer {
             if centre >= ceiling * 0.95 {
                 continue;
             }
-            self.sections
-                .push(Biquad::peaking(centre, f64::from(band.db()), rate, Q));
+            self.sections[self.live] = Biquad::peaking(centre, f64::from(band.db()), rate, Q);
+            self.live += 1;
         }
         self.reset_state();
+    }
+
+    /// The sections in use, in cascade order.
+    fn live_sections(&self) -> &[Biquad] {
+        &self.sections[..self.live]
+    }
+
+    fn live_sections_mut(&mut self) -> &mut [Biquad] {
+        &mut self.sections[..self.live]
     }
 
     /// Forget the filters' memory of the signal.
@@ -473,7 +490,7 @@ impl Equalizer {
     /// before it, and after a change those samples went through a different
     /// filter. Carrying the state across would ring.
     fn reset_state(&mut self) {
-        for section in &mut self.sections {
+        for section in self.live_sections_mut() {
             section.state = [[0.0; 2]; MAX_CHANNELS];
         }
     }
@@ -492,7 +509,7 @@ impl Equalizer {
         for (index, sample) in block.iter_mut().enumerate() {
             let channel = index % channels;
             let mut value = f64::from(*sample) * self.preamp;
-            for section in &mut self.sections {
+            for section in &mut self.sections[..self.live] {
                 value = section.step(channel, value);
             }
             // **Clamped, and only here.** Everything above ran in `f64` with
@@ -522,7 +539,7 @@ impl Equalizer {
         let mut designed = self.clone();
         designed.ensure_rate(rate);
         let magnitude: f64 = designed
-            .sections
+            .live_sections()
             .iter()
             .map(|section| section.magnitude(f64::from(hz), f64::from(rate)))
             .product();
@@ -583,7 +600,7 @@ pub fn response_curve(bands: Bands, preamp_db: f32, from_hz: f32, to_hz: f32, ou
         let at = index as f64;
         let hz = 10.0_f64.powf(span.mul_add(at, low));
         let magnitude: f64 = designed
-            .sections
+            .live_sections()
             .iter()
             .map(|section| section.magnitude(hz, f64::from(DRAWING_RATE)))
             .product();
@@ -881,12 +898,12 @@ mod tests {
         eq.set_bands(Bands::from_db(db));
         eq.ensure_rate(22_050);
         assert!(
-            eq.sections.is_empty(),
+            eq.live_sections().is_empty(),
             "a 16 kHz band was designed at a 22.05 kHz rate"
         );
         // The same band at a rate that carries it is built.
         eq.ensure_rate(48_000);
-        assert_eq!(eq.sections.len(), 1);
+        assert_eq!(eq.live_sections().len(), 1);
     }
 
     /// **Stereo channels do not leak into each other.** One channel silent and
