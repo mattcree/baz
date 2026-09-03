@@ -22,6 +22,11 @@
 //! reproducible on any machine with ffmpeg and honest on any machine
 //! without it.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
 use std::process::Command;

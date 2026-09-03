@@ -1944,6 +1944,10 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
 /// CI's `packaging` job renders the ladder from the master and compares. It is
 /// therefore an `expect` rather than a fallback: a silent blank in the window's
 /// own chrome would be worse than a build that cannot start.
+#[expect(
+    clippy::expect_used,
+    reason = "a compiled-in asset that CI's packaging job renders and compares; see the doc above"
+)]
 static APP_MARK: LazyLock<image::Handle> = LazyLock::new(|| {
     /// The canonical red-circle application asset. The hicolor ladder is
     /// rendered from its SVG sibling by `packaging/icons/render.sh`.

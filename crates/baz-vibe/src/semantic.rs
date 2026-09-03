@@ -82,6 +82,10 @@ pub(crate) fn embed_text(prompt: &str) -> Result<Vec<f32>, String> {
     if held.is_none() {
         *held = Some(Model::load()?);
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "inserted two lines above under the same guard"
+    )]
     held.as_mut().expect("model inserted above").text(prompt)
 }
 
@@ -149,6 +153,10 @@ pub(crate) fn embed_audio(decoded: &DecodedAudio) -> Result<Vec<f32>, String> {
         if model.is_none() {
             *model = Some(Model::load()?);
         }
+        #[expect(
+            clippy::expect_used,
+            reason = "inserted two lines above under the same borrow"
+        )]
         model.as_mut().expect("model inserted above").audio(decoded)
     })
 }
@@ -209,6 +217,7 @@ impl Model {
         if self.text.is_none() {
             self.text = Some(Self::session(&self.directory, "text_model_quantized.onnx")?);
         }
+        #[expect(clippy::expect_used, reason = "opened just above when it was `None`")]
         let text = self.text.as_mut().expect("text tower opened above");
         let output = text
             .run(ort::inputs! {
@@ -237,6 +246,7 @@ impl Model {
                 "audio_model_quantized.onnx",
             )?);
         }
+        #[expect(clippy::expect_used, reason = "opened just above when it was `None`")]
         let audio = self.audio.as_mut().expect("audio tower opened above");
         let mut vectors = Vec::new();
         for start in sampled_starts(mono.len()) {

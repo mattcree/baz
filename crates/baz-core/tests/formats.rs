@@ -11,6 +11,11 @@
 //! each case says so and skips rather than passing quietly — a test that
 //! cannot find an encoder has not proved anything.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

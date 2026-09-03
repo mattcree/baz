@@ -10,6 +10,10 @@
 //! Unix only, because the test stands a shell script where baz goes.
 
 #![cfg(unix)]
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::process::{Command, Output};

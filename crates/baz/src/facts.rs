@@ -177,6 +177,7 @@ fn ago(seconds: u64) -> String {
 
 fn month_year(unix_s: u64) -> String {
     let (_, month, year) = civil_date(unix_s / 86_400);
+    #[expect(clippy::expect_used, reason = "`civil_date` returns a month in 1..=12")]
     let month = usize::try_from(month).expect("civil month fits usize");
     format!("{} {year}", MONTHS[month - 1])
 }
@@ -195,8 +196,14 @@ fn civil_date(days: u64) -> (u32, u32, i64) {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = mp + if mp < 10 { 3 } else { -9 };
     year += i64::from(month <= 2);
-    let day = u32::try_from(day).expect("civil day is in 1..=31");
-    let month = u32::try_from(month).expect("civil month is in 1..=12");
+    #[expect(
+        clippy::expect_used,
+        reason = "Hinnant's civil-from-days algorithm bounds both by construction"
+    )]
+    let (day, month) = (
+        u32::try_from(day).expect("civil day is in 1..=31"),
+        u32::try_from(month).expect("civil month is in 1..=12"),
+    );
     (day, month, year)
 }
 

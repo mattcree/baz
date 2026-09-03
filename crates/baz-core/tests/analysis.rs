@@ -12,6 +12,11 @@
 //! audio correctness: tests are written to the specification, never to the
 //! implementation's output.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};

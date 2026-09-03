@@ -213,10 +213,12 @@ fn parse_extinf(line: &[u8]) -> Option<ExtInf> {
 /// The duration field: `Some(Some(n))` for a length, `Some(None)` for the
 /// format's `-1` ("unknown"), `None` for something that is not a number at
 /// all — the caller then keeps the whole line verbatim.
-// The nesting *is* the meaning: the outer level is "was this a number",
-// the inner is `ExtInf::seconds` exactly as it will be stored. A dedicated
-// enum would restate `Option<u64>` under new names.
-#[allow(clippy::option_option)]
+#[expect(
+    clippy::option_option,
+    reason = "the nesting is the meaning: the outer level is `was this a number`, the inner is \
+              `ExtInf::seconds` exactly as it will be stored; an enum would restate Option<u64> \
+              under new names"
+)]
 fn parse_seconds(field: &str) -> Option<Option<u64>> {
     let field = field.trim();
     if field.is_empty() {
@@ -241,9 +243,11 @@ fn parse_seconds(field: &str) -> Option<Option<u64>> {
     if value >= 18_446_744_073_709_551_616.0 {
         return Some(Some(u64::MAX));
     }
-    // Fractional lengths are read rounded down; the sign and range are
-    // checked just above.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "fractional lengths are read rounded down; the sign and range are checked just above"
+    )]
     Some(Some(value as u64))
 }
 
@@ -315,8 +319,11 @@ pub(crate) fn path_bytes(path: &Path) -> Cow<'_, [u8]> {
 }
 
 /// The inverse of [`path_bytes`]: a line's bytes as a path, verbatim.
+///
+/// Shared with [`crate::history`]'s line format, which encodes paths the same
+/// way for the same reasons; one codec, not two that agree today.
 #[cfg(unix)]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
 }
@@ -325,7 +332,7 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 /// file read on Windows degrade to the replacement character, documented in
 /// [`crate::playlist`].
 #[cfg(not(unix))]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 

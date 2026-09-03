@@ -414,7 +414,10 @@ impl Fader {
     fn step(rate: u32) -> f32 {
         // Full scale per RAMP_MS: one integer-derived divisor, computed once
         // per block rather than per sample.
-        #[allow(clippy::cast_precision_loss)] // frame counts are far below 2^24 here
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "frame counts are far below 2^24 here"
+        )]
         let frames = (rate.saturating_mul(RAMP_MS) / 1000).max(1) as f32;
         1.0 / frames
     }
@@ -453,12 +456,15 @@ impl Fader {
             // Frames of slew left before the target is reached. Splitting the
             // block here is what keeps the per-sample work branch-free.
             let needed = delta.abs() / step;
-            #[allow(clippy::cast_precision_loss)] // block frame counts are tiny
+            #[expect(clippy::cast_precision_loss, reason = "block frame counts are tiny")]
             let ramp_frames = if needed >= frames as f32 {
                 frames
             } else {
-                // `needed` is finite, non-negative and below `frames` here.
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "`needed` is finite, non-negative and below `frames` here"
+                )]
                 let whole = needed.ceil() as usize;
                 whole
             };

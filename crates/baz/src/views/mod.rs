@@ -116,10 +116,15 @@ use crate::collection::Shelf;
 use crate::{font, icon, theme, vm};
 
 /// The bundled Regular face, for measuring a string before Iced sets it.
+#[expect(
+    clippy::expect_used,
+    reason = "a compiled-in asset; `font::fits` parses every bundled face in the test suite"
+)]
 pub(crate) static FIT_REGULAR: LazyLock<FontRef<'static>> = LazyLock::new(|| {
     FontRef::try_from_slice(font::SANS_REGULAR).expect("the bundled regular face is valid")
 });
 /// The bundled Medium face, likewise.
+#[expect(clippy::expect_used, reason = "as above")]
 pub(crate) static FIT_MEDIUM: LazyLock<FontRef<'static>> = LazyLock::new(|| {
     FontRef::try_from_slice(font::SANS_MEDIUM).expect("the bundled medium face is valid")
 });

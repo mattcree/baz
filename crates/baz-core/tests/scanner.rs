@@ -11,6 +11,11 @@
 //! Externally produced fixture files (per `docs/ENGINEERING.md`, "tests to
 //! specification") come in a later PR alongside the golden-file audio tests.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};

@@ -405,6 +405,10 @@ impl Candidate {
     ///
     /// Panics if the blobs are not the stored float encoding.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "a measurement-bin constructor whose panic is documented above; the product path decodes fallibly"
+    )]
     pub fn from_parts(
         path: PathBuf,
         album: u64,

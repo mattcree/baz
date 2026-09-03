@@ -128,7 +128,7 @@
 //! *line* (`alsa` 0.9.1 is already in the tree through cpal). ADR-0012 records
 //! what each would involve.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use alsa::card;
 use alsa::ctl::{Ctl, DeviceIter};
@@ -137,7 +137,7 @@ use alsa::pcm::{Access, Format, HwParams, PCM};
 use alsa::{Direction, Round, ValueOr};
 
 use super::sink::Sink;
-use super::{CHANNELS, PlaybackError};
+use super::{CHANNELS, DRAIN_BUDGET, DRAIN_POLL, PlaybackError, WRITE_STALL_BUDGET};
 
 /// Frames converted per `snd_pcm_writei`. Preallocated once at open and never
 /// grown — a boxed slice rather than a `Vec` so "the write path does not
@@ -150,26 +150,9 @@ use super::{CHANNELS, PlaybackError};
 /// buffer is 32 KiB.
 const SCRATCH_FRAMES: usize = 4096;
 
-/// How long [`Sink::write`] will keep offering frames to a device that is
-/// accepting none before giving up on the stream.
-///
-/// The module's standing rule, inherited from `device.rs`: nothing waits
-/// forever on hardware that may never come back. Five seconds is far past any
-/// legitimate backpressure (the whole kernel buffer is ~186 ms) and short
-/// enough that a wedged device fails the stream instead of the engine.
-const WRITE_STALL_BUDGET: Duration = Duration::from_secs(5);
-
 /// How long one `snd_pcm_wait` blocks for space before the loop rechecks its
 /// own budget and the failure flag.
 const WAIT_MS: u32 = 200;
-
-/// Bound on [`Sink::drain_buffered`], matching `device.rs`: ten times the
-/// buffer this backend asks for, so a healthy device always finishes and a
-/// stalled one cannot wedge a rate change.
-const DRAIN_BUDGET: Duration = Duration::from_millis(2_000);
-
-/// Poll interval while draining.
-const DRAIN_POLL: Duration = Duration::from_millis(1);
 
 /// Mixer elements preferred for the hardware volume, most specific first.
 ///
@@ -725,7 +708,10 @@ impl Scratch {
 /// to the most negative code and a full-scale positive one to the most
 /// positive, with no wrap.
 #[inline]
-#[allow(clippy::cast_possible_truncation)] // clamped into range immediately above
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "clamped into range immediately above"
+)]
 fn to_integer(sample: f32, bits: u32) -> i64 {
     let scale = f64::from(1u32 << (bits - 1));
     let max = scale - 1.0;
@@ -734,7 +720,10 @@ fn to_integer(sample: f32, bits: u32) -> i64 {
 }
 
 /// Fill `dst` with `src` scaled to `bits`-bit integers in an `i32` container.
-#[allow(clippy::cast_possible_truncation)] // `to_integer` clamps into i32 range
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "`to_integer` clamps into i32 range"
+)]
 fn fill_i32(dst: &mut [i32], src: &[f32], bits: u32) {
     for (out, sample) in dst.iter_mut().zip(src) {
         *out = to_integer(*sample, bits) as i32;
@@ -742,7 +731,10 @@ fn fill_i32(dst: &mut [i32], src: &[f32], bits: u32) {
 }
 
 /// Fill `dst` with `src` scaled to 16-bit integers.
-#[allow(clippy::cast_possible_truncation)] // `to_integer` clamps into i16 range
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "`to_integer` clamps into i16 range"
+)]
 fn fill_i16(dst: &mut [i16], src: &[f32]) {
     for (out, sample) in dst.iter_mut().zip(src) {
         *out = to_integer(*sample, 16) as i16;
@@ -1013,7 +1005,10 @@ impl Sink for ExclusiveSink {
         if gain <= 0.0 {
             return None; // only software gain reaches exactly zero
         }
-        #[allow(clippy::cast_possible_truncation)] // millibels are small integers
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "millibels are small integers"
+        )]
         let millibels = (2_000.0 * f64::from(gain).log10()).round() as i64;
         if millibels < volume.min_db.0 {
             return None; // past the bottom of the hardware's travel
@@ -1064,7 +1059,7 @@ mod tests {
     #[test]
     fn s32_is_exact_for_every_24_bit_code() {
         for code in -(1i32 << 23)..(1i32 << 23) {
-            #[allow(clippy::cast_precision_loss)] // 24-bit codes are exact in f32
+            #[expect(clippy::cast_precision_loss, reason = "24-bit codes are exact in f32")]
             let decoded = code as f32 / 8_388_608.0;
             assert_eq!(
                 to_integer(decoded, 32),
@@ -1079,7 +1074,7 @@ mod tests {
     #[test]
     fn s24_is_the_identity_for_24_bit_codes() {
         for code in [-(1i32 << 23), -1, 0, 1, (1 << 23) - 1, 12_345] {
-            #[allow(clippy::cast_precision_loss)] // 24-bit codes are exact in f32
+            #[expect(clippy::cast_precision_loss, reason = "24-bit codes are exact in f32")]
             let decoded = code as f32 / 8_388_608.0;
             assert_eq!(to_integer(decoded, 24), i64::from(code));
         }

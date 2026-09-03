@@ -29,6 +29,11 @@
 //! measured by coefficients baz derived, and the derivation is exactly the
 //! thing that could be wrong.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use baz_core::loudness::{Loudness, LoudnessMeter, album_lufs};
 
 /// The tolerance EBU Tech 3341 states for an integrated-loudness measurement,

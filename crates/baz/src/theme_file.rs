@@ -221,6 +221,10 @@ pub fn write_export(path: &Path, selection: &str) -> Result<PathBuf, String> {
     Ok(path.to_owned())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serialising a `'static` struct of plain fields cannot fail; a test round-trips it"
+)]
 pub fn template() -> String {
     serde_json::to_string_pretty(&document_from_palette("my-theme", &theme::CLOSING_TIME))
         .expect("the built-in theme document serializes")

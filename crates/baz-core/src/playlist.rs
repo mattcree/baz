@@ -75,7 +75,7 @@ use std::path::{Path, PathBuf};
 
 use crate::library::FileStamp;
 
-mod format;
+pub(crate) mod format;
 
 /// The directory under baz's data dir that holds the playlist files —
 /// `<data_dir>/baz/playlists/`, beside `library.db` and `history.tsv`.

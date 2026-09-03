@@ -817,9 +817,10 @@ impl Instruments {
     }
 
     fn snapshot(&self) -> Conversions {
-        // Nanosecond totals are far below f64's exact-integer range for any
-        // plausible session.
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "nanosecond totals are far below f64's exact-integer range for any plausible session"
+        )]
         let resample_ms = self.resample_ns.load(Ordering::Relaxed) as f64 / 1.0e6;
         Conversions {
             resampled_tracks: self.resampled_tracks.load(Ordering::Relaxed),
@@ -2339,7 +2340,10 @@ impl<S: Sink> Control<S> {
     /// zero centidecibels. Their product is therefore exactly `1.0` exactly
     /// when both are — `x * 1.0 == x` for every finite `x`, so neither input
     /// perturbs the other.
-    #[allow(clippy::float_cmp)]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the product is exactly 1.0 exactly when both factors are, as argued above"
+    )]
     fn settle_volume(&mut self, announce: bool) {
         let volume_gain = self.effective_gain();
         let replay_gain = self.rg_applied.amplitude();
@@ -4770,9 +4774,12 @@ mod tests {
         };
         let mut writer = hound::WavWriter::create(&path, spec).expect("create fixture wav");
         for n in 0..frames {
-            #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "frame indices are far below 2^52"
+            )]
             let t = n as f64 / f64::from(rate);
-            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            #[expect(clippy::cast_possible_truncation, reason = "f64 sine -> f32 sample")]
             let s = (0.5 * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as f32;
             writer.write_sample(s).expect("write sample");
             writer.write_sample(s).expect("write sample");
@@ -5705,7 +5712,10 @@ mod tests {
     /// than assume it survived. Without this, following the source rate would
     /// silently reset the volume to unity mid-album.
     #[test]
-    #[allow(clippy::float_cmp)] // the gain must be re-offered exactly, not nearly
+    #[expect(
+        clippy::float_cmp,
+        reason = "the gain must be re-offered exactly, not nearly"
+    )]
     fn a_rate_change_re_establishes_the_device_volume() {
         let dir = tempfile::tempdir().expect("temp dir");
         let queue = vec![

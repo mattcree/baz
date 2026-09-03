@@ -577,14 +577,11 @@ impl Widget<Message, Theme, iced::Renderer> for Area<'_> {
         }
         if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event
             && *button == self.button
-            && self.target.is_some()
+            && let Some(target) = self.target
             && let Some(at) = cursor.position()
             && layout.bounds().contains(at)
         {
-            shell.publish(Message::OpenMenu(
-                self.target.expect("the press has a menu target"),
-                at,
-            ));
+            shell.publish(Message::OpenMenu(target, at));
             shell.capture_event();
         }
     }

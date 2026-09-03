@@ -41,6 +41,11 @@
 //! question only a real 100k library answers, and this bench does not
 //! pretend to.
 
+#![expect(
+    clippy::expect_used,
+    reason = "a benchmark: a fixture that cannot be built is a failed run, not a recoverable state"
+)]
+
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 

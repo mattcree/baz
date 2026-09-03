@@ -6,6 +6,11 @@
 //! sample-for-sample against it, never against recorded engine output
 //! (`docs/ENGINEERING.md`).
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};

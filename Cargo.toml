@@ -161,6 +161,7 @@ module_name_repetitions = "allow"   # baz_core::protocol::Command is fine
 must_use_candidate = "allow"        # too noisy; #[must_use] applied deliberately
 missing_errors_doc = "warn"
 unwrap_used = "warn"                # library code must not unwrap (tests may)
+expect_used = "warn"                # nor expect: a stated invariant is #[expect]ed by name, with its reason
 
 [profile.release]
 lto = "thin"

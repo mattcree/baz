@@ -481,8 +481,10 @@ pub fn bucket(elapsed_secs: u64) -> Recency {
     } else if days < MONTH_DAYS {
         Recency::ThisMonth
     } else if days < YEAR_DAYS {
-        // `days / MONTH_DAYS` is 1..=12 in this range, so the cast is exact.
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "`days / MONTH_DAYS` is 1..=12 in this range, so the cast is exact"
+        )]
         Recency::MonthsAgo((days / MONTH_DAYS) as u32)
     } else {
         Recency::YearsAgo(u32::try_from(days / YEAR_DAYS).unwrap_or(u32::MAX))

@@ -718,6 +718,10 @@ fn resampled(points: &[ContourPoint], count: usize) -> Vec<ContourPoint> {
             });
         }
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "the `points.len() < 2` early return above guarantees a last point"
+    )]
     drawn.push(*points.last().expect("two points at least"));
     drawn
 }

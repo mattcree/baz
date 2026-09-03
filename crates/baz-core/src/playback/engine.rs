@@ -175,9 +175,10 @@ fn ns_to_ms(ns: u64) -> f64 {
     if ns == NS_UNSET {
         f64::NAN
     } else {
-        // Durations here are milliseconds-to-seconds scale; f64 precision
-        // loss is far below measurement noise.
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "durations here are milliseconds-to-seconds scale; f64 precision loss is far below measurement noise"
+        )]
         let ms = ns as f64 / 1.0e6;
         ms
     }

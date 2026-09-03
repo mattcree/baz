@@ -13,6 +13,11 @@
 //! would hide the long tail that decides whether a progress reading can be
 //! trusted.
 
+#![expect(
+    clippy::expect_used,
+    reason = "a measurement tool: a poisoned mutex is a crashed worker, and the run is void"
+)]
+
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

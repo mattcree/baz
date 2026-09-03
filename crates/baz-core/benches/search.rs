@@ -19,6 +19,11 @@
 //! query matches roughly a third of the library, and its cost is the honest
 //! upper bound on what ranking added — ADR-0021 records the before/after.
 
+#![expect(
+    clippy::expect_used,
+    reason = "a benchmark: a fixture that cannot be built is a failed run, not a recoverable state"
+)]
+
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::time::Duration;

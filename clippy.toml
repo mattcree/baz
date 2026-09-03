@@ -4,3 +4,8 @@
 # taken through (`.interface-design/system.md` §8), so it is named wherever a
 # measurement is justified against them.
 doc-valid-idents = ["AppStream", "SQLite", "ReplayGain", "PipeWire", "ID3v2", "HarfBuzz", ".."]
+
+# `unwrap_used` / `expect_used` are library-code rules (docs/ENGINEERING.md).
+# A test asserting an invariant is the one place a panic is the right answer.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

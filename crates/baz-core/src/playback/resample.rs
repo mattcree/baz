@@ -72,10 +72,12 @@ pub fn resample_interleaved(input: &[f32], from: u32, to: u32) -> Result<Vec<f32
     }
     let in_frames = input.len() / CHANNELS;
     let ratio = f64::from(to) / f64::from(from);
-    // Rounded positive frame count; magnitudes are far below 2^52 so the
-    // f64 round-trip is exact.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "rounded positive frame count; magnitudes are far below 2^52 so the f64 round-trip is exact"
+    )]
     let expected = (in_frames as f64 * ratio).round() as usize;
 
     // Pad so the sinc onset/tail transients land entirely in trimmable,
@@ -165,7 +167,10 @@ mod tests {
     /// output is time-aligned with input frame 0 and `output_delay()` must
     /// NOT have been compensated. See module docs and ADR-0004.
     #[test]
-    #[allow(clippy::cast_precision_loss)] // test frame indices are far below 2^52
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "test frame indices are far below 2^52"
+    )]
     fn impulse_lands_time_aligned() {
         let (from, to) = (48_000u32, 44_100u32);
         let frames = 48_000usize;

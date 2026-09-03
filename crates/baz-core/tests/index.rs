@@ -2,6 +2,11 @@
 //! real database file, incremental adds mid-scan, search semantics, and
 //! album grouping — all through the public `Library` API.
 
+#![expect(
+    clippy::expect_used,
+    reason = "an integration test: a helper's expect is an assertion, the same as one inside #[test]"
+)]
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

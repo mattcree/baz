@@ -301,6 +301,27 @@ pub use device::shared_output_devices;
 /// ring-buffer slot, and [`Sink`] write is stereo-interleaved f32.
 pub const CHANNELS: usize = 2;
 
+/// How long a [`sink::Sink::write`] keeps offering frames to a device
+/// accepting none before it gives up and fails the stream.
+///
+/// One number for both backends on purpose: `device.rs` and `exclusive.rs`
+/// implement one rule from [`sink`] — *a stalled device that will never drain
+/// must not wedge the engine* — and two budgets would be two rules. Far past
+/// any legitimate backpressure, since the whole device ring is milliseconds,
+/// and short enough that a listener reads it as a fault rather than a hang.
+pub(crate) const WRITE_STALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long [`sink::Sink::drain_buffered`] waits for the device to empty what
+/// it holds before giving up. Ten times the ~186 ms either backend buffers,
+/// so a healthy device always finishes and a stalled one cannot wedge a rate
+/// change.
+pub(crate) const DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_millis(2_000);
+
+/// Poll interval while draining: a twentieth of a callback period, so
+/// fine-grained relative to what is being waited for, and ~200 wake-ups for
+/// a full ring.
+pub(crate) const DRAIN_POLL: std::time::Duration = std::time::Duration::from_millis(1);
+
 /// The highest sample rate a container may declare and be played.
 ///
 /// 768 kHz is the top of what any shipping DAC advertises, twice the highest

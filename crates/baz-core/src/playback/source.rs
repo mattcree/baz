@@ -822,9 +822,12 @@ impl AudioSource {
                 .map_or(u64::MAX, |cap| cap.saturating_sub(self.frames_seen));
             self.frames_seen += frames;
             // A packet is far smaller than usize.
-            #[allow(clippy::cast_possible_truncation)] // packet-local counts fit usize
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "packet-local counts fit usize"
+            )]
             let take = (frames - skip).min(remaining.saturating_sub(skip)) as usize;
-            #[allow(clippy::cast_possible_truncation)] // ditto
+            #[expect(clippy::cast_possible_truncation, reason = "ditto")]
             let skip = skip as usize;
             if take == 0 {
                 continue; // wholly-skipped packet
@@ -940,8 +943,10 @@ pub(crate) fn ms_to_frames(ms: u64, rate: u32) -> u64 {
 
 /// Milliseconds as fractional seconds, for the format readers' `Time` input.
 fn ms_to_secs(ms: u64) -> f64 {
-    // Track positions are far below f64's exact-integer range.
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "track positions are far below f64's exact-integer range"
+    )]
     let secs = ms as f64 / 1000.0;
     secs
 }

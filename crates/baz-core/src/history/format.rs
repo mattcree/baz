@@ -7,11 +7,11 @@
 //! panic on hostile input — a ledger is a file the user may have edited by
 //! hand, and a hand-edited line is an ordinary thing to meet, not a fault.
 
-use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::history::PlayRecord;
+use crate::playlist::format::{path_bytes, path_from_bytes};
 use crate::protocol::PlayOutcome;
 
 /// The field separator: one tab, so that `awk -F'\t'` addresses fields by
@@ -386,7 +386,7 @@ fn escape_str(text: &str, out: &mut String) {
 /// The inverse of [`escape_path`]. `None` for an escape that does not exist,
 /// which is a line this ledger did not write.
 pub(crate) fn unescape_path(field: &str) -> Option<PathBuf> {
-    Some(path_from_bytes(unescape_bytes(field)?))
+    Some(path_from_bytes(&unescape_bytes(field)?))
 }
 
 /// The inverse of [`escape_str`], for the one field that is text rather than a
@@ -418,47 +418,16 @@ fn unescape_bytes(field: &str) -> Option<Vec<u8>> {
             'x' => {
                 let hi = chars.next()?.to_digit(16)?;
                 let lo = chars.next()?.to_digit(16)?;
-                // Both digits are one nibble, so the product is a byte.
-                #[allow(clippy::cast_possible_truncation)]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "both digits are one nibble, so the product is a byte"
+                )]
                 bytes.push((hi * 16 + lo) as u8);
             }
             _ => return None,
         }
     }
     Some(bytes)
-}
-
-/// A path's bytes, on a platform whose paths *are* bytes.
-#[cfg(unix)]
-fn path_bytes(path: &Path) -> Cow<'_, [u8]> {
-    use std::os::unix::ffi::OsStrExt;
-    Cow::Borrowed(path.as_os_str().as_bytes())
-}
-
-/// A path's bytes elsewhere.
-///
-/// Windows paths are UTF-16, and the only sequences that do not convert are
-/// unpaired surrogates — which no filesystem API produces from a real name and
-/// which the [`crate::protocol`] already refuses to put on the wire. Such a
-/// path is recorded with the replacement character rather than refused, which
-/// is documented in [`crate::history`] and is the same trade the protocol
-/// makes.
-#[cfg(not(unix))]
-fn path_bytes(path: &Path) -> Cow<'_, [u8]> {
-    Cow::Owned(path.to_string_lossy().into_owned().into_bytes())
-}
-
-/// The inverse of [`path_bytes`].
-#[cfg(unix)]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-    PathBuf::from(std::ffi::OsString::from_vec(bytes))
-}
-
-/// The inverse of [`path_bytes`], elsewhere.
-#[cfg(not(unix))]
-fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[cfg(test)]

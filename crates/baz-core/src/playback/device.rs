@@ -176,18 +176,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rtrb::{Producer, RingBuffer};
 
 use super::sink::Sink;
-use super::{CHANNELS, PlaybackError};
-
-/// How long [`Sink::drain_buffered`] will wait for the callback to empty the
-/// ring before giving up. Generously past the ~186 ms the app's ring holds, so
-/// a healthy device always finishes; short enough that a stalled one cannot
-/// wedge the engine (the module docs' rule for anything that waits on a
-/// callback).
-const DRAIN_BUDGET: Duration = Duration::from_millis(2_000);
-/// Poll interval while draining. One millisecond is a twentieth of a callback
-/// period on this host: fine-grained relative to what is being waited for, and
-/// ~200 wake-ups for a full ring.
-const DRAIN_POLL: Duration = Duration::from_millis(1);
+use super::{CHANNELS, DRAIN_BUDGET, DRAIN_POLL, PlaybackError, WRITE_STALL_BUDGET};
 
 /// The one sample format the engine emits, and the format every stream is
 /// opened with.
@@ -710,17 +699,6 @@ fn offer(
         }
     }
 }
-
-/// How long [`Sink::write`] keeps offering frames to a device accepting none
-/// before it gives up and fails the stream.
-///
-/// The same five seconds `exclusive.rs` uses, and deliberately the same
-/// number: the two backends implement one rule from [`crate::playback::sink`]
-/// — *a stalled device that will never drain must not wedge the engine* — and
-/// two budgets would be two rules. Far past any legitimate backpressure, since
-/// the whole device ring is milliseconds, and short enough that a listener
-/// reads it as a fault rather than a hang.
-const WRITE_STALL_BUDGET: Duration = Duration::from_secs(5);
 
 impl Sink for DeviceSink {
     /// Whether this stream has been given up on — either cpal reported an
